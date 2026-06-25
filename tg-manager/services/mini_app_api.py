@@ -4331,6 +4331,54 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("presence_packs_list uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def presence_pack_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        description = (body.get("description") or "").strip()
+        target_url = (body.get("target_url") or "").strip()
+        target_label = (body.get("target_label") or "").strip()
+        bot_id = body.get("bot_id") or None
+        if not name:
+            return _err("name required")
+        if bot_id:
+            try:
+                bot_id = int(bot_id)
+            except (TypeError, ValueError):
+                bot_id = None
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO presence_packs(owner_id, name, description, target_url, target_label, bot_id)
+                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                uid, name, description or None, target_url or None, target_label or None, bot_id,
+            )
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception as exc:
+            log.exception("presence_pack_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def presence_pack_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("presence_pack_delete uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Global Presence ───────────────────────────────────────────────────────
 
     async def global_presence_plans(request: web.Request) -> web.Response:
@@ -4465,6 +4513,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception as exc:
             log.exception("ecosystem_detail uid=%d eco=%d", uid, eco_id)
+            return _err(str(exc), 500)
+
+    async def ecosystem_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        description = (body.get("description") or "").strip()
+        ecosystem_type = (body.get("ecosystem_type") or "custom").strip()
+        region = (body.get("region") or "").strip()
+        if not name:
+            return _err("name required")
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO ecosystems(owner_id, name, description, ecosystem_type, region)
+                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                uid, name, description or None, ecosystem_type, region or None,
+            )
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception as exc:
+            log.exception("ecosystem_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def ecosystem_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eco_id = int(request.match_info["eco_id"])
+        except (KeyError, ValueError):
+            return _err("bad eco_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("ecosystem_delete uid=%d eco=%d", uid, eco_id)
             return _err(str(exc), 500)
 
     # ── Channel Factory ───────────────────────────────────────────────────────
@@ -5238,6 +5328,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("auto_funnel_detail uid=%d fid=%d", uid, fid)
             return _err(str(exc), 500)
 
+    async def auto_funnel_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        bot_id = body.get("bot_id")
+        target_segment = (body.get("target_segment") or "all").strip()
+        first_message = (body.get("first_message") or "").strip()
+        if not name:
+            return _err("name required")
+        if not bot_id:
+            return _err("bot_id required")
+        try:
+            bot_id = int(bot_id)
+        except (TypeError, ValueError):
+            return _err("invalid bot_id")
+        bot_row = await pool.fetchrow(
+            "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, uid,
+        )
+        if not bot_row:
+            return _err("bot not found", 404)
+        try:
+            row = await pool.fetchrow(
+                "INSERT INTO auto_funnels(owner_id, name, bot_id, target_segment) VALUES($1,$2,$3,$4) RETURNING id",
+                uid, name, bot_id, target_segment,
+            )
+            fid = row["id"]
+            if first_message:
+                await pool.execute(
+                    "INSERT INTO auto_funnel_steps(funnel_id, step_num, delay_hours, message_text) VALUES($1,1,0,$2)",
+                    fid, first_message,
+                )
+            return _json_resp({"ok": True, "id": fid})
+        except Exception as exc:
+            log.exception("auto_funnel_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def auto_funnel_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("bad funnel_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("auto_funnel_delete uid=%d fid=%d", uid, fid)
+            return _err(str(exc), 500)
+
     # ── SSE ──────────────────────────────────────────────────────────────────
 
     async def events(request: web.Request) -> web.StreamResponse:
@@ -5490,6 +5639,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
     # Asset Templates
     app.router.add_get("/api/miniapp/asset_templates", asset_templates_list)
+    app.router.add_post("/api/miniapp/asset_template", create_template)
     app.router.add_get("/api/miniapp/asset_template/{tpl_id}", asset_template_detail)
     app.router.add_delete("/api/miniapp/asset_template/{tpl_id}", asset_template_delete)
     # Infra Health Center
@@ -5498,6 +5648,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/swarm", swarm_metrics)
     # Presence Packs
     app.router.add_get("/api/miniapp/presence_packs", presence_packs_list)
+    app.router.add_post("/api/miniapp/presence_pack", presence_pack_create)
+    app.router.add_delete("/api/miniapp/presence_pack/{pack_id}", presence_pack_delete)
     # Global Presence
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
@@ -5506,6 +5658,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Ecosystems
     app.router.add_get("/api/miniapp/ecosystems", ecosystems_list)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}", ecosystem_detail)
+    app.router.add_post("/api/miniapp/ecosystem", ecosystem_create)
+    app.router.add_delete("/api/miniapp/ecosystem/{eco_id}", ecosystem_delete)
     # Channel Factory
     app.router.add_post("/api/miniapp/channel_factory/submit", channel_factory_submit)
     app.router.add_get("/api/miniapp/channel_factory/recent", channel_factory_recent)
@@ -5546,8 +5700,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/audience_dna", audience_dna_list)
     # Auto Funnels
     app.router.add_get("/api/miniapp/auto_funnels", auto_funnels_list)
+    app.router.add_post("/api/miniapp/auto_funnel", auto_funnel_create)
     app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/toggle", auto_funnel_toggle)
     app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_detail)
+    app.router.add_delete("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_delete)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 

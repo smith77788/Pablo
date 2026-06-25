@@ -464,7 +464,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ ASSET TEMPLATES ══════════════════════ -->
 <div class="screen" id="s-assettemplates">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📐 Asset Templates</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📐 Asset Templates</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openAssetTplModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px;display:flex;gap:6px;overflow-x:auto">
       <button class="btn btn-s" onclick="filterAssetTpl('',this)" id="at-all" style="flex:0 0 auto">Все</button>
@@ -499,7 +503,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ PRESENCE PACKS ══════════════════════ -->
 <div class="screen" id="s-presencepacks">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📦 Presence Packs</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📦 Presence Packs</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="sec">Пакеты присутствия</div>
     <div class="lst" id="ppList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -532,7 +540,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ ECOSYSTEMS ══════════════════════ -->
 <div class="screen" id="s-ecosystems">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌐 Экосистемы</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌐 Экосистемы</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openEcosystemModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="sec">Мои экосистемы</div>
     <div class="lst" id="ecoList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -768,6 +780,83 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Modal: Asset Template Create -->
+<div class="mbg" id="mo-asset-tpl" onclick="if(event.target===this)closeModal('mo-asset-tpl')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-asset-tpl')">✕</div>
+    <div class="modal-title">📐 Новый шаблон</div>
+    <div class="field"><label>Название</label><input id="at-name" type="text" placeholder="Шаблон приветствия" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field-err" id="at-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-asset-tpl')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitAssetTplCreate()" style="flex:2">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Auto-funnel Create -->
+<div class="mbg" id="mo-autofunnel" onclick="if(event.target===this)closeModal('mo-autofunnel')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-autofunnel')">✕</div>
+    <div class="modal-title">🔀 Новая авто-воронка</div>
+    <div class="field"><label>Бот</label><select id="af-bot" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Название</label><input id="af-name" type="text" placeholder="Onboarding воронка" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Сегмент аудитории</label><select id="af-seg" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="all">Все подписчики</option>
+      <option value="new_7d">Новые (7 дней)</option>
+      <option value="new_30d">Новые (30 дней)</option>
+      <option value="inactive_30d">Неактивные (30 дней)</option>
+    </select></div>
+    <div class="field"><label>Первое сообщение</label><textarea id="af-msg" rows="3" placeholder="Привет! Это первое сообщение воронки..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field-err" id="af-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-autofunnel')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitAutofunnelCreate()" style="flex:2">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Presence Pack Create -->
+<div class="mbg" id="mo-presence-pack" onclick="if(event.target===this)closeModal('mo-presence-pack')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-presence-pack')">✕</div>
+    <div class="modal-title">📦 Новый Presence Pack</div>
+    <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Мой Pack" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Описание</label><input id="pp-desc" type="text" placeholder="Краткое описание..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Целевой URL / @username</label><input id="pp-url" type="text" placeholder="@mybot или https://t.me/..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Метка цели</label><input id="pp-label" type="text" placeholder="Мой бот" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field-err" id="pp-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-presence-pack')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitPresencePackCreate()" style="flex:2">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Ecosystem Create -->
+<div class="mbg" id="mo-ecosystem" onclick="if(event.target===this)closeModal('mo-ecosystem')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-ecosystem')">✕</div>
+    <div class="modal-title">🌐 Новая экосистема</div>
+    <div class="field"><label>Название</label><input id="eco-name" type="text" placeholder="Моя экосистема" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Описание</label><input id="eco-desc" type="text" placeholder="Краткое описание..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Тип</label><select id="eco-type" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="custom">Пользовательская</option>
+      <option value="media">Медиа</option>
+      <option value="commerce">Коммерция</option>
+      <option value="community">Сообщество</option>
+      <option value="education">Образование</option>
+    </select></div>
+    <div class="field"><label>Регион (необязательно)</label><input id="eco-region" type="text" placeholder="RU, EU, GLOBAL..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field-err" id="eco-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-ecosystem')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitEcosystemCreate()" style="flex:2">Создать</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Clone Adapt -->
 <div class="mbg" id="mo-clone" onclick="if(event.target===this)closeModal('mo-clone')">
   <div class="modal">
@@ -907,7 +996,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ AUTO FUNNELS ══════════════════════ -->
 <div class="screen" id="s-autofunnels">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔀 Авто-воронки</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔀 Авто-воронки</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openAutofunnelModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="sec">Цепочки сообщений</div>
     <div class="lst" id="afList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2801,7 +2894,7 @@ async function openBotFunnels(botId, botName) {
   try {
     const d = await api('/api/miniapp/bot/'+botId+'/funnels');
     const fns = d.funnels||[];
-    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Создайте воронку через бота в Telegram')); return; }
+    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Нажмите + Создать')); return; }
     txt('bfList', fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
       <div class="ava ava-orange">🔄</div>
       <div class="li-body">
@@ -6489,7 +6582,7 @@ async function loadAssetTpl(type) {
   try {
     const url = '/api/miniapp/asset_templates'+(type?`?type=${encodeURIComponent(type)}`:'');
     const rows = await api(url);
-    if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Создайте через бота')); return; }
+    if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Нажмите + Создать')); return; }
     const typeIco={bot:'🤖',channel:'📢',group:'👥',post:'📝'};
     txt('atList', rows.map(r=>`
       <div class="row">
@@ -6514,6 +6607,26 @@ async function deleteAssetTpl(id, btn) {
     toast('🗑 Шаблон удалён');
     loadAssetTpl(_atFilter);
   } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+function openAssetTplModal() {
+  document.getElementById('at-name').value='';
+  document.getElementById('at-text').value='';
+  document.getElementById('at-err').textContent='';
+  showModal('mo-asset-tpl');
+}
+async function submitAssetTplCreate() {
+  const name = document.getElementById('at-name').value.trim();
+  const text = document.getElementById('at-text').value.trim();
+  const errEl = document.getElementById('at-err');
+  if (!name) { errEl.textContent='Введите название'; return; }
+  if (!text) { errEl.textContent='Введите текст шаблона'; return; }
+  errEl.textContent='';
+  try {
+    await api('/api/miniapp/asset_template',{method:'POST',body:JSON.stringify({name,text})});
+    toast('✅ Шаблон создан');
+    closeModal('mo-asset-tpl');
+    loadAssetTpl(_atFilter);
+  } catch(e) { errEl.textContent=e.message; }
 }
 
 // ── Infra Health Center ─────────────────────────────────
@@ -6597,7 +6710,7 @@ async function openPresencePacks() {
   txt('ppList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/presence_packs');
-    if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Создайте через бота')); return; }
+    if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(168,85,247,.16)">📦</div>
@@ -6606,6 +6719,9 @@ async function openPresencePacks() {
           ${r.description?`<div class="row-val">${esc(r.description)}</div>`:''}
           ${r.target_label?`<div class="row-val" style="color:var(--accent)">🎯 ${esc(r.target_label)}</div>`:''}
           ${r.target_url?`<div class="row-val" style="color:var(--hint)">${esc(r.target_url)}</div>`:''}
+        </div>
+        <div class="row-right">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="deletePresencePack(${r.id},this)">✕</button>
         </div>
       </div>
     `).join(''));
@@ -6720,7 +6836,7 @@ async function openEcosystems() {
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/ecosystems');
-    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Создайте через бота')); return; }
+    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Нажмите + Создать')); return; }
     txt('ecoList', rows.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${esc(r.name)}')">
         <div class="row-ico" style="background:rgba(34,197,94,.16)">${(ECO_TYPES[r.ecosystem_type]||'🌐').charAt(0)}</div>
@@ -6730,7 +6846,10 @@ async function openEcosystems() {
           <div class="row-val">Участников: ${r.member_count||0} · Здоровье: ${((r.health_score||1)*100).toFixed(0)}%</div>
           ${r.region?`<div class="row-val" style="color:var(--hint)">📍 ${esc(r.region)}</div>`:''}
         </div>
-        <div class="row-right chev">›</div>
+        <div class="row-right" style="display:flex;gap:6px;align-items:center">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="event.stopPropagation();deleteEcosystem(${r.id},this)">✕</button>
+          <span class="chev">›</span>
+        </div>
       </div>
     `).join(''));
     document.getElementById('m-eco-val').textContent = rows.length+' экосистем';
@@ -7460,7 +7579,7 @@ async function openAutoFunnels() {
   txt('afList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/auto_funnels');
-    if (!rows.length) { txt('afList', empty('🔀','Воронок нет','Создайте авто-воронку через бота')); return; }
+    if (!rows.length) { txt('afList', empty('🔀','Воронок нет','Нажмите + Создать')); return; }
     const segLabels = {all:'Все', new_7d:'Новые 7д', new_30d:'Новые 30д', inactive_30d:'Неактивные 30д'};
     txt('afList', rows.map(r => `
       <div class="row tap" onclick="openFunnelSteps(${r.id},'${esc(r.name)}')">
@@ -7472,6 +7591,7 @@ async function openAutoFunnels() {
         </div>
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();toggleFunnel(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="event.stopPropagation();deleteAutoFunnel(${r.id},this)">✕</button>
           <span class="chev">›</span>
         </div>
       </div>
@@ -7513,7 +7633,7 @@ async function openFunnelSteps(fid, fname) {
       <div class="sec" style="margin-top:8px">Шаги воронки (${steps.length})</div>
     `;
     if (!steps.length) {
-      html += empty('📭','Шагов нет','Добавьте шаги через бота');
+      html += empty('📭','Шагов нет','Добавьте шаги через Telegram-бота');
     } else {
       html += '<div class="lst" style="margin:0 16px">';
       steps.forEach(s => {
@@ -7532,6 +7652,114 @@ async function openFunnelSteps(fid, fname) {
     }
     txt('afsteps-body', html);
   } catch(e) { txt('afsteps-body', empty('⚠️','Ошибка',e.message)); }
+}
+async function openAutofunnelModal() {
+  document.getElementById('af-name').value='';
+  document.getElementById('af-msg').value='';
+  document.getElementById('af-err').textContent='';
+  document.getElementById('af-seg').value='all';
+  const sel = document.getElementById('af-bot');
+  sel.innerHTML='<option value="">Загрузка...</option>';
+  showModal('mo-autofunnel');
+  try {
+    const bots = await api('/api/miniapp/bots');
+    const list = bots.bots||bots||[];
+    sel.innerHTML=list.length?list.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} ${esc(b.first_name||'')}</option>`).join(''):'<option value="">Нет ботов</option>';
+  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+}
+async function submitAutofunnelCreate() {
+  const name = document.getElementById('af-name').value.trim();
+  const bot_id = document.getElementById('af-bot').value;
+  const target_segment = document.getElementById('af-seg').value;
+  const first_message = document.getElementById('af-msg').value.trim();
+  const errEl = document.getElementById('af-err');
+  if (!name) { errEl.textContent='Введите название'; return; }
+  if (!bot_id) { errEl.textContent='Выберите бота'; return; }
+  errEl.textContent='';
+  try {
+    await api('/api/miniapp/auto_funnel',{method:'POST',body:JSON.stringify({name,bot_id:+bot_id,target_segment,first_message:first_message||undefined})});
+    toast('✅ Авто-воронка создана');
+    closeModal('mo-autofunnel');
+    openAutoFunnels();
+  } catch(e) { errEl.textContent=e.message; }
+}
+async function deleteAutoFunnel(fid, btn) {
+  if (!confirm('Удалить авто-воронку?')) return;
+  btn.disabled=true;
+  try {
+    await api(`/api/miniapp/auto_funnel/${fid}`,{method:'DELETE'});
+    toast('🗑 Воронка удалена');
+    openAutoFunnels();
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+
+// ── Presence Packs ─────────────────────────────────────
+function openPresencePackModal() {
+  ['pp-name','pp-desc','pp-url','pp-label'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('pp-err').textContent='';
+  showModal('mo-presence-pack');
+}
+async function submitPresencePackCreate() {
+  const name = document.getElementById('pp-name').value.trim();
+  const errEl = document.getElementById('pp-err');
+  if (!name) { errEl.textContent='Введите название'; return; }
+  errEl.textContent='';
+  const body = {
+    name,
+    description: document.getElementById('pp-desc').value.trim()||undefined,
+    target_url: document.getElementById('pp-url').value.trim()||undefined,
+    target_label: document.getElementById('pp-label').value.trim()||undefined,
+  };
+  try {
+    await api('/api/miniapp/presence_pack',{method:'POST',body:JSON.stringify(body)});
+    toast('✅ Presence Pack создан');
+    closeModal('mo-presence-pack');
+    openPresencePacks();
+  } catch(e) { errEl.textContent=e.message; }
+}
+async function deletePresencePack(id, btn) {
+  if (!confirm('Удалить Presence Pack?')) return;
+  btn.disabled=true;
+  try {
+    await api(`/api/miniapp/presence_pack/${id}`,{method:'DELETE'});
+    toast('🗑 Pack удалён');
+    openPresencePacks();
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+
+// ── Ecosystems ─────────────────────────────────────────
+function openEcosystemModal() {
+  ['eco-name','eco-desc','eco-region'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('eco-type').value='custom';
+  document.getElementById('eco-err').textContent='';
+  showModal('mo-ecosystem');
+}
+async function submitEcosystemCreate() {
+  const name = document.getElementById('eco-name').value.trim();
+  const errEl = document.getElementById('eco-err');
+  if (!name) { errEl.textContent='Введите название'; return; }
+  errEl.textContent='';
+  const body = {
+    name,
+    description: document.getElementById('eco-desc').value.trim()||undefined,
+    ecosystem_type: document.getElementById('eco-type').value,
+    region: document.getElementById('eco-region').value.trim()||undefined,
+  };
+  try {
+    await api('/api/miniapp/ecosystem',{method:'POST',body:JSON.stringify(body)});
+    toast('✅ Экосистема создана');
+    closeModal('mo-ecosystem');
+    openEcosystems();
+  } catch(e) { errEl.textContent=e.message; }
+}
+async function deleteEcosystem(id, btn) {
+  if (!confirm('Удалить экосистему?')) return;
+  btn.disabled=true;
+  try {
+    await api(`/api/miniapp/ecosystem/${id}`,{method:'DELETE'});
+    toast('🗑 Экосистема удалена');
+    openEcosystems();
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
 }
 
 // ── Utils ──────────────────────────────────────────────
