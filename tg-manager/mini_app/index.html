@@ -7259,8 +7259,9 @@ async function submitBotAdd() {
   if (!token) { errEl.textContent = 'Введите токен'; return; }
   btn.disabled = true; btn.textContent = 'Проверяем...';
   try {
-    const r = await api('/api/miniapp/bot/add', {method:'POST', body:{token}});
-    toast('✅ Бот @' + (r.username||r.first_name||'') + ' добавлен!');
+    const r = await api('/api/miniapp/bot/add', {method:'POST', body:JSON.stringify({token})});
+    const name = r.username ? '@'+r.username : r.first_name || '';
+    toast(r.already_exists ? '✅ Бот '+name+' уже в вашем аккаунте' : '✅ Бот '+name+' добавлен!');
     closeModal('mo-bot-add');
     loadBots();
   } catch(e) { errEl.textContent = e.message; }
@@ -7286,7 +7287,7 @@ async function submitNodeCreate() {
   if (!name) { errEl.textContent = 'Введите название'; return; }
   btn.disabled = true; btn.textContent = 'Сохраняем...';
   try {
-    await api('/api/miniapp/node', {method:'POST', body:{tg_chat_id: parseInt(tg_chat_id), name, node_type}});
+    await api('/api/miniapp/node', {method:'POST', body:JSON.stringify({tg_chat_id: parseInt(tg_chat_id), name, node_type})});
     toast('✅ Нода добавлена');
     closeModal('mo-node');
     openNodes();
@@ -7329,7 +7330,7 @@ async function submitCrmContactCreate() {
   if (tags_raw) body.tags = tags_raw.split(',').map(t=>t.trim()).filter(Boolean);
   btn.disabled = true; btn.textContent = 'Сохраняем...';
   try {
-    await api('/api/miniapp/crm/contact', {method:'POST', body});
+    await api('/api/miniapp/crm/contact', {method:'POST', body:JSON.stringify(body)});
     toast('✅ Контакт добавлен');
     closeModal('mo-crm-contact');
     openCRM();
@@ -7368,7 +7369,7 @@ async function submitSelfPromoCreate() {
   if (!content) { errEl.textContent = 'Введите текст сообщения'; return; }
   btn.disabled = true; btn.textContent = 'Сохраняем...';
   try {
-    await api('/api/miniapp/self_promo/template', {method:'POST', body:{style, title, content, cta_text, cta_url}});
+    await api('/api/miniapp/self_promo/template', {method:'POST', body:JSON.stringify({style, title, content, cta_text, cta_url})});
     toast('✅ Шаблон создан');
     closeModal('mo-self-promo');
     openSelfPromo();
