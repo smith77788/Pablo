@@ -2908,6 +2908,112 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("revoke_api_key uid=%d key=%d", uid, key_id)
             return _err(str(exc), 500)
 
+    async def create_api_key(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        name = (body.get("name") or "Mini App Key").strip()[:64]
+        import secrets, hashlib
+        raw_key = secrets.token_urlsafe(32)
+        prefix = raw_key[:8]
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO api_keys(user_id, key_hash, key_prefix, name)
+                   VALUES($1,$2,$3,$4) RETURNING id""",
+                uid, key_hash, prefix, name,
+            )
+            return _json_resp({"ok": True, "id": row["id"], "key": raw_key, "prefix": prefix, "name": name})
+        except Exception as exc:
+            log.exception("create_api_key uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Multigeo (per-language bot profile) ───────────────────────────────────
+
+    async def multigeo_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("bot not found", 404)
+        import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        langs = ["", "ru", "en", "de", "fr", "es", "it", "uk", "pt", "zh", "ar"]
+        result = []
+        try:
+            async with _aiohttp.ClientSession() as session:
+                for lc in langs:
+                    try:
+                        name = await _bapi.get_my_name(session, row["token"], lc)
+                        desc = await _bapi.get_my_description(session, row["token"], lc)
+                        short = await _bapi.get_my_short_description(session, row["token"], lc)
+                        if name or desc or short:
+                            result.append({"lang": lc or "default", "name": name, "description": desc, "short_description": short})
+                    except Exception:
+                        pass
+        except Exception as exc:
+            return _err(str(exc), 500)
+        return _json_resp({"profiles": result})
+
+    async def multigeo_set(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        lang = (body.get("lang") or "").strip()
+        name = (body.get("name") or "").strip()[:64]
+        description = (body.get("description") or "").strip()[:512]
+        short_description = (body.get("short_description") or "").strip()[:120]
+        if lang == "default":
+            lang = ""
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("bot not found", 404)
+        import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        errors = []
+        try:
+            async with _aiohttp.ClientSession() as session:
+                if name:
+                    ok = await _bapi.set_name(session, row["token"], name, lang)
+                    if not ok:
+                        errors.append("name")
+                if description:
+                    ok = await _bapi.set_description(session, row["token"], description, lang)
+                    if not ok:
+                        errors.append("description")
+                if short_description:
+                    ok = await _bapi.set_short_description(session, row["token"], short_description, lang)
+                    if not ok:
+                        errors.append("short_description")
+        except Exception as exc:
+            return _err(str(exc), 500)
+        if errors:
+            return _json_resp({"ok": False, "errors": errors})
+        return _json_resp({"ok": True})
+
     # ── Strike history ─────────────────────────────────────────────────────────
 
     async def strike_history(request: web.Request) -> web.Response:
@@ -5541,7 +5647,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/bot/{bot_id}/relay/toggle", relay_toggle)
     # API Keys
     app.router.add_get("/api/miniapp/api_keys", api_keys_list)
+    app.router.add_post("/api/miniapp/api_key", create_api_key)
     app.router.add_delete("/api/miniapp/api_key/{key_id}", revoke_api_key)
+    app.router.add_get("/api/miniapp/bot/{bot_id}/multigeo", multigeo_get)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo", multigeo_set)
     # Strike history
     app.router.add_get("/api/miniapp/strike/history", strike_history)
     # Audience Parser

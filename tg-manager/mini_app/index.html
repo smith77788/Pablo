@@ -629,15 +629,47 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ MULTIGEO ══════════════════════ -->
 <div class="screen" id="s-multigeo">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Мультигео</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌍 Мультигео</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openMultigeoSetModal()">✏️ Изменить</button></div>
+  </div>
   <div class="sub-sb">
-    <div class="lst" style="margin:12px 16px">
-      <div class="row"><div class="row-body">
-        <div class="row-name">🌍 Мультиязычные профили ботов</div>
-        <div class="row-val">Задайте имя, описание и short description бота на разных языках через Telegram-бота BotMother.</div>
-        <div class="row-val" style="margin-top:6px">Поддерживаемые языки: 🇷🇺 ru · 🇬🇧 en · 🇩🇪 de · 🇫🇷 fr · 🇪🇸 es · 🇮🇹 it и другие.</div>
-        <div class="row-val" style="margin-top:6px;color:var(--hint)">Используйте команду /multigeo в боте для управления.</div>
-      </div></div>
+    <div class="sec">Выберите бота</div>
+    <div class="lst" style="margin:0 16px 8px;padding:8px">
+      <select id="mg-bot-sel" onchange="loadMultigeo()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="">Загрузка ботов...</option>
+      </select>
+    </div>
+    <div class="sec" style="margin-top:4px">Профили по языкам</div>
+    <div class="lst" id="mgProfiles"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: Multigeo Set -->
+<div class="mbg" id="mo-multigeo" onclick="if(event.target===this)closeModal('mo-multigeo')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-multigeo')">✕</div>
+    <div class="modal-title">🌍 Настроить профиль бота</div>
+    <div class="field"><label>Язык</label><select id="mg-lang" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="">🌐 По умолчанию (все языки)</option>
+      <option value="ru">🇷🇺 Русский</option>
+      <option value="en">🇬🇧 English</option>
+      <option value="de">🇩🇪 Deutsch</option>
+      <option value="fr">🇫🇷 Français</option>
+      <option value="es">🇪🇸 Español</option>
+      <option value="it">🇮🇹 Italiano</option>
+      <option value="uk">🇺🇦 Українська</option>
+      <option value="pt">🇧🇷 Português</option>
+      <option value="zh">🇨🇳 中文</option>
+    </select></div>
+    <div class="field"><label>Имя бота (макс. 64 символа)</label><input id="mg-name" type="text" maxlength="64" placeholder="Имя на выбранном языке" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Описание (макс. 512 символов)</label><textarea id="mg-desc" rows="3" maxlength="512" placeholder="Описание бота на выбранном языке" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field"><label>Краткое описание (макс. 120 символов)</label><input id="mg-short" type="text" maxlength="120" placeholder="Краткое описание" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field-err" id="mg-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-multigeo')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitMultigeoSet()" style="flex:2">💾 Сохранить</button>
     </div>
   </div>
 </div>
@@ -1906,14 +1938,34 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔑 API Ключи</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openApiKeyModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
       API ключи для интеграции BotMother с вашими сервисами.<br>
-      Для создания нового ключа используйте Telegram-бота (команда /api).
+      Ключ отображается только один раз при создании — сохраните его.
     </div>
     <div class="sec">Активные ключи</div>
     <div class="lst" id="apiKeyList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: API Key Create -->
+<div class="mbg" id="mo-apikey" onclick="if(event.target===this)closeModal('mo-apikey')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-apikey')">✕</div>
+    <div class="modal-title">🔑 Новый API ключ</div>
+    <div class="field"><label>Название ключа</label><input id="ak-name" type="text" maxlength="64" placeholder="Мой сервис" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div id="ak-result" style="display:none;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:10px;padding:12px;margin:10px 0">
+      <div style="font-size:13px;color:#aaa;margin-bottom:6px">⚠️ Скопируйте ключ сейчас — он больше не будет показан!</div>
+      <div id="ak-key-display" style="font-family:monospace;font-size:13px;word-break:break-all;color:#22c55e;user-select:all"></div>
+      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="copyApiKey()">📋 Скопировать</button>
+    </div>
+    <div class="field-err" id="ak-err"></div>
+    <div style="display:flex;gap:8px" id="ak-btns">
+      <button class="btn btn-d" onclick="closeModal('mo-apikey')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitApiKeyCreate()" style="flex:2" id="ak-submit">Создать</button>
+    </div>
   </div>
 </div>
 
@@ -1924,10 +1976,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">⚔️ Strike — История</div>
   </div>
   <div class="sub-sb">
-    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
-      История операций Strike (массовые жалобы, накрутки).<br>
-      Для запуска новой операции используйте Telegram-бота.
-    </div>
+    <div id="strikeStats" style="display:flex;gap:10px;padding:6px 0 10px;overflow-x:auto"></div>
+    <div class="sec">Последние операции</div>
     <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -2622,9 +2672,11 @@ function back() {
 function showTabbar(v) { document.getElementById('tabbar').style.display = v?'flex':'none'; }
 
 function loadTab(tab) {
-  if (tab==='bots') loadBots();
+  if (tab==='home') loadHome();
+  else if (tab==='bots') loadBots();
   else if (tab==='accounts') loadAccounts();
   else if (tab==='broadcasts') loadBroadcasts();
+  else if (tab==='more') loadHome();
 }
 
 // ── Home ───────────────────────────────────────────────
@@ -6095,7 +6147,7 @@ async function openApiKeys() {
     const d = await api('/api/miniapp/api_keys');
     const keys = d.keys||[];
     txt('m-apikey-cnt', keys.filter(k=>k.is_active).length+' активных');
-    if (!keys.length) { txt('apiKeyList', empty('🔑','Нет ключей','Создайте ключ через Telegram-бота')); return; }
+    if (!keys.length) { txt('apiKeyList', empty('🔑','Нет ключей','Нажмите + Создать')); return; }
     txt('apiKeyList', keys.map(k=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(245,158,11,.16)">🔑</div>
@@ -6117,15 +6169,57 @@ async function revokeApiKey(keyId) {
     openApiKeys();
   } catch(e) { toast('⚠️ '+e.message); }
 }
+function openApiKeyModal() {
+  document.getElementById('ak-name').value='';
+  document.getElementById('ak-err').textContent='';
+  document.getElementById('ak-result').style.display='none';
+  document.getElementById('ak-btns').style.display='flex';
+  document.getElementById('ak-submit').disabled=false;
+  document.getElementById('ak-submit').textContent='Создать';
+  showModal('mo-apikey');
+}
+let _lastApiKey='';
+async function submitApiKeyCreate() {
+  const name = document.getElementById('ak-name').value.trim()||'Mini App Key';
+  const errEl = document.getElementById('ak-err');
+  const btn = document.getElementById('ak-submit');
+  btn.disabled=true; btn.textContent='⏳ Создание...';
+  errEl.textContent='';
+  try {
+    const r = await api('/api/miniapp/api_key',{method:'POST',body:JSON.stringify({name})});
+    _lastApiKey = r.key;
+    document.getElementById('ak-key-display').textContent = r.key;
+    document.getElementById('ak-result').style.display='block';
+    document.getElementById('ak-btns').innerHTML='<button class="btn btn-p" onclick="closeModal(\'mo-apikey\');openApiKeys()" style="flex:1;width:100%">✅ Готово</button>';
+    toast('✅ API ключ создан');
+    openApiKeys();
+  } catch(e) { errEl.textContent=e.message; btn.disabled=false; btn.textContent='Создать'; }
+}
+function copyApiKey() {
+  if (_lastApiKey) {
+    navigator.clipboard?.writeText(_lastApiKey).then(()=>toast('📋 Скопировано!'));
+  }
+}
 
 // ── Strike History ──────────────────────────────────────
 async function openStrike() {
   push('s-strike');
   txt('strikeList','<div class="spin-wrap"><div class="spin"></div></div>');
+  document.getElementById('strikeStats').innerHTML='';
   try {
     const d = await api('/api/miniapp/strike/history');
     const ops = d.operations||[];
-    if (!ops.length) { txt('strikeList', empty('⚔️','Нет операций','Strike не запускался')); return; }
+    const done = ops.filter(o=>o.status==='completed').length;
+    const running = ops.filter(o=>o.status==='running'||o.status==='pending').length;
+    const total = ops.reduce((s,o)=>s+(o.total||0),0);
+    const processed = ops.reduce((s,o)=>s+(o.processed||0),0);
+    document.getElementById('strikeStats').innerHTML=`
+      <div class="kpi-card"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${done}</div><div class="kpi-lbl">Завершено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#f59e0b">${running}</div><div class="kpi-lbl">В работе</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(processed)}/${num(total)}</div><div class="kpi-lbl">Обработано</div></div>
+    `;
+    if (!ops.length) { txt('strikeList', empty('⚔️','Нет операций Strike','Запустите Strike из Telegram-бота')); return; }
     txt('strikeList', ops.map(op=>{
       const [cls,lbl]=stb(op.status);
       const pct = op.total?Math.round(op.processed/op.total*100):0;
@@ -7062,8 +7156,78 @@ async function openCompliance() {
 }
 
 // ── Multigeo ────────────────────────────────────────────
-function openMultigeo() {
+async function openMultigeo() {
   push('s-multigeo');
+  const sel = document.getElementById('mg-bot-sel');
+  txt('mgProfiles','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/bots');
+    const bots = d.bots||[];
+    if (!bots.length) {
+      sel.innerHTML='<option value="">Нет ботов</option>';
+      txt('mgProfiles', empty('🤖','Нет ботов','Добавьте бота в разделе Боты'));
+      return;
+    }
+    sel.innerHTML=bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} ${esc(b.first_name||'')}</option>`).join('');
+    await loadMultigeo();
+  } catch(e) {
+    txt('mgProfiles', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function loadMultigeo() {
+  const botId = document.getElementById('mg-bot-sel').value;
+  if (!botId) return;
+  txt('mgProfiles','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/bot/${botId}/multigeo`);
+    const profiles = d.profiles||[];
+    const langNames = {default:'🌐 По умолчанию',ru:'🇷🇺 Русский',en:'🇬🇧 English',de:'🇩🇪 Deutsch',fr:'🇫🇷 Français',es:'🇪🇸 Español',it:'🇮🇹 Italiano',uk:'🇺🇦 Українська',pt:'🇧🇷 Português',zh:'🇨🇳 中文'};
+    if (!profiles.length) { txt('mgProfiles', empty('🌍','Профилей нет','Нажмите ✏️ Изменить чтобы добавить')); return; }
+    txt('mgProfiles', profiles.map(p=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">🌍</div>
+        <div class="row-body">
+          <div class="row-name">${langNames[p.lang]||p.lang}</div>
+          ${p.name?`<div class="row-val">📛 ${esc(p.name)}</div>`:''}
+          ${p.description?`<div class="row-val">📝 ${esc(p.description.slice(0,80))}${p.description.length>80?'…':''}</div>`:''}
+          ${p.short_description?`<div class="row-val">💬 ${esc(p.short_description)}</div>`:''}
+        </div>
+        <div class="row-right">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="openMultigeoSetModal('${p.lang}','${esc(p.name||'')}','${esc(p.description||'')}','${esc(p.short_description||'')}')">✏️</button>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('mgProfiles', empty('⚠️','Ошибка загрузки',e.message));
+  }
+}
+function openMultigeoSetModal(lang='', name='', desc='', short='') {
+  document.getElementById('mg-lang').value = lang==='default'?'':lang;
+  document.getElementById('mg-name').value = name;
+  document.getElementById('mg-desc').value = desc;
+  document.getElementById('mg-short').value = short;
+  document.getElementById('mg-err').textContent='';
+  showModal('mo-multigeo');
+}
+async function submitMultigeoSet() {
+  const botId = document.getElementById('mg-bot-sel').value;
+  const errEl = document.getElementById('mg-err');
+  if (!botId) { errEl.textContent='Выберите бота'; return; }
+  const body = {
+    lang: document.getElementById('mg-lang').value||'default',
+    name: document.getElementById('mg-name').value.trim(),
+    description: document.getElementById('mg-desc').value.trim(),
+    short_description: document.getElementById('mg-short').value.trim(),
+  };
+  if (!body.name && !body.description && !body.short_description) { errEl.textContent='Заполните хотя бы одно поле'; return; }
+  errEl.textContent='';
+  try {
+    const r = await api(`/api/miniapp/bot/${botId}/multigeo`,{method:'POST',body:JSON.stringify(body)});
+    if (!r.ok) { errEl.textContent='Ошибки: '+r.errors?.join(', '); return; }
+    toast('✅ Профиль обновлён');
+    closeModal('mo-multigeo');
+    loadMultigeo();
+  } catch(e) { errEl.textContent=e.message; }
 }
 
 // ── Content Cloner ─────────────────────────────────────
