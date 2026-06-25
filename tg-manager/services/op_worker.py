@@ -6911,7 +6911,7 @@ async def _exec_gift_scan(
             break
         account_id = row["id"]
         try:
-            gifts = await _gi.scan_account_gifts(pool, account_id, owner_id)
+            gifts = await _gi.GiftInventoryService.scan_account_gifts(pool, account_id, owner_id)
             all_gifts.extend(gifts)
             accounts_ok += 1
         except Exception as exc:
@@ -6924,7 +6924,7 @@ async def _exec_gift_scan(
     saved = 0
     if all_gifts:
         try:
-            saved = await _gi.sync_inventory_to_db(pool, owner_id, all_gifts)
+            saved = await _gi.GiftInventoryService.sync_inventory_to_db(pool, owner_id, all_gifts)
         except Exception as exc:
             log.warning("_exec_gift_scan sync error: %s", exc)
 

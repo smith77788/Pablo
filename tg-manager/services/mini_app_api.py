@@ -644,12 +644,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             status_filter = None
         if status_filter:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, total_items, done_items, error_msg, created_at, started_at, finished_at
+                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
                    FROM operation_queue WHERE owner_id=$1 AND status=$2
                    ORDER BY created_at DESC LIMIT 30""", uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, total_items, done_items, error_msg, created_at, started_at, finished_at
+                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
                    FROM operation_queue WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 30""", uid)
         return _json_resp({"operations": rows})
