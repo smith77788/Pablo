@@ -1434,11 +1434,37 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">⭐ Stars Hub</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openStarsExpModal()">+ A/B тест</button></div>
   </div>
   <div class="sub-sb">
     <div id="starsStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
     <div class="sec">A/B Эксперименты</div>
     <div class="lst" id="starsExps"></div>
+  </div>
+</div>
+
+<!-- Modal: Stars Experiment -->
+<div class="mbg" id="mo-starsexp" onclick="if(event.target===this)closeModal('mo-starsexp')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-starsexp')">✕</div>
+    <div class="modal-title">⭐ Новый A/B тест Stars</div>
+    <div class="field"><label>Бот</label><select id="se-bot" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Название теста</label><input id="se-name" type="text" placeholder="Тест цены на контент" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Тип контента</label><select id="se-ctype" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="message">💬 Сообщение</option>
+      <option value="media">📷 Медиа</option>
+      <option value="subscription">🔔 Подписка</option>
+      <option value="gift">🎁 Подарок</option>
+    </select></div>
+    <div style="display:flex;gap:12px">
+      <div class="field" style="flex:1"><label>Цена A (Stars)</label><input id="se-pa" type="number" min="1" value="50" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field" style="flex:1"><label>Цена B (Stars)</label><input id="se-pb" type="number" min="1" value="100" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    </div>
+    <div class="field-err" id="se-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-starsexp')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitStarsExp()" style="flex:2">Создать</button>
+    </div>
   </div>
 </div>
 
@@ -5082,16 +5108,20 @@ async function openStars() {
     `);
     txt('m-stars-val',`⭐${d.total_revenue||0} · ${d.active_exps||0} активных`);
     const exps = d.experiments||[];
-    if (!exps.length) { txt('starsExps', empty('⭐','Нет экспериментов','Создайте A/B тест в боте')); return; }
+    if (!exps.length) { txt('starsExps', empty('⭐','Нет экспериментов','Нажмите + A/B тест')); return; }
     txt('starsExps', exps.map(e=>{
       const crA = e.impressions_a>0?((e.conversions_a/e.impressions_a)*100).toFixed(1)+'%':'—';
       const crB = e.impressions_b>0?((e.conversions_b/e.impressions_b)*100).toFixed(1)+'%':'—';
       const winner = e.winner?` · 🏆 ${e.winner.toUpperCase()}`:'';
+      const isActive = e.status === 'active';
       return `<div class="row">
         <div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div>
         <div class="row-body">
           <div class="row-name">${esc(e.name)}${winner}</div>
           <div class="row-val">${STARS_STATUS[e.status]||e.status} · A:⭐${e.price_a} CR${crA} · B:⭐${e.price_b} CR${crB}</div>
+        </div>
+        <div class="row-right">
+          <button class="btn ${isActive?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleStarsExp(${e.id})">${isActive?'⏸':'▶️'}</button>
         </div>
       </div>`;
     }).join(''));
@@ -5099,6 +5129,46 @@ async function openStars() {
     txt('starsStats','');
     txt('starsExps', empty('⚠️','Ошибка',e.message));
   }
+}
+
+async function openStarsExpModal() {
+  const el = document.getElementById('se-bot');
+  el.innerHTML = '<option value="">Загрузка...</option>';
+  try {
+    const d = await api('/api/miniapp/bots');
+    const bots = d.bots || d || [];
+    el.innerHTML = bots.length
+      ? bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||b.first_name)}</option>`).join('')
+      : '<option value="">Нет ботов</option>';
+  } catch(e) { el.innerHTML = '<option value="">Ошибка</option>'; }
+  showModal('mo-starsexp');
+}
+async function submitStarsExp() {
+  const errEl = document.getElementById('se-err');
+  errEl.textContent = '';
+  const bot_id = document.getElementById('se-bot').value;
+  const name = document.getElementById('se-name').value.trim();
+  const content_type = document.getElementById('se-ctype').value;
+  const price_a = parseInt(document.getElementById('se-pa').value)||50;
+  const price_b = parseInt(document.getElementById('se-pb').value)||100;
+  if (!bot_id) { errEl.textContent='Выберите бота'; return; }
+  if (!name) { errEl.textContent='Введите название'; return; }
+  if (price_a < 1 || price_b < 1) { errEl.textContent='Цены должны быть > 0'; return; }
+  try {
+    await api('/api/miniapp/stars/experiment',{method:'POST',body:JSON.stringify({
+      bot_id:parseInt(bot_id), name, content_type, price_a, price_b
+    })});
+    closeModal('mo-starsexp');
+    toast('✅ A/B тест создан');
+    openStars();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+}
+async function toggleStarsExp(id) {
+  try {
+    const r = await api(`/api/miniapp/stars/experiment/${id}/toggle`,{method:'PUT'});
+    toast(r.status==='active'?'▶️ Активен':'⏸ Пауза');
+    openStars();
+  } catch(e) { toast('Ошибка: '+e.message); }
 }
 
 // ── Ghost Engine ────────────────────────────────────────

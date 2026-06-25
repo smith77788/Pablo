@@ -1802,6 +1802,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("stars_overview uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def stars_experiment_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        bot_id = data.get("bot_id")
+        name = str(data.get("name", "")).strip()
+        content_type = data.get("content_type", "message")
+        price_a = int(data.get("price_a", 50))
+        price_b = int(data.get("price_b", 100))
+        if not bot_id or not name:
+            return _err("bot_id и name обязательны", 400)
+        if content_type not in ("message", "media", "subscription", "gift"):
+            content_type = "message"
+        if price_a < 1 or price_b < 1:
+            return _err("Цены должны быть > 0", 400)
+        try:
+            bot = await pool.fetchrow(
+                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", int(bot_id), uid
+            )
+            if not bot:
+                return _err("Бот не найден", 404)
+            eid = await pool.fetchval(
+                """INSERT INTO stars_experiments
+                   (bot_id, owner_id, name, content_type, price_a, price_b, status)
+                   VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING id""",
+                int(bot_id), uid, name, content_type, price_a, price_b,
+            )
+            return _json_resp({"id": eid, "ok": True})
+        except Exception as exc:
+            log.exception("stars_experiment_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def stars_experiment_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eid = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("bad exp_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id, status FROM stars_experiments WHERE id=$1 AND owner_id=$2", eid, uid
+            )
+            if not row:
+                return _err("Не найдено", 404)
+            new_status = "paused" if row["status"] == "active" else "active"
+            await pool.execute(
+                "UPDATE stars_experiments SET status=$1 WHERE id=$2", new_status, eid
+            )
+            return _json_resp({"status": new_status})
+        except Exception as exc:
+            log.exception("stars_experiment_toggle uid=%d exp=%d", uid, eid)
+            return _err(str(exc), 500)
+
     # ── Ghost Engine ───────────────────────────────────────────────────────────
 
     async def ghost_profiles(request: web.Request) -> web.Response:
@@ -5175,6 +5234,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/mass_invite", mass_inviter_submit)
     # Stars Hub
     app.router.add_get("/api/miniapp/stars", stars_overview)
+    app.router.add_post("/api/miniapp/stars/experiment", stars_experiment_create)
+    app.router.add_put("/api/miniapp/stars/experiment/{exp_id}/toggle", stars_experiment_toggle)
     # Ghost Engine
     app.router.add_get("/api/miniapp/ghost", ghost_profiles)
     app.router.add_post("/api/miniapp/ghost", ghost_create)
