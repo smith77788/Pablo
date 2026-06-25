@@ -1613,11 +1613,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        mem_id = int(request.match_info["mem_id"])
-        await pool.execute(
-            "DELETE FROM botmother_memory WHERE id=$1 AND owner_id=$2", mem_id, uid
-        )
-        return _json_resp({"ok": True})
+        try:
+            mem_id = int(request.match_info["mem_id"])
+        except (KeyError, ValueError):
+            return _err("bad mem_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM botmother_memory WHERE id=$1 AND owner_id=$2", mem_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("ai_memory_delete uid=%d mem=%d", uid, mem_id)
+            return _err(str(exc), 500)
 
     # ── Nodes Hub (Forum Workspaces) ───────────────────────────────────────────
 
@@ -2742,14 +2749,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             limit = 500
         import json as _json
         label = f"Парсинг {parse_type} из @{source_ref} (до {limit})"
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,'parse_audience','pending',$2,$3,$4) RETURNING id",
-            uid,
-            _json.dumps({"source_ref": source_ref, "parse_type": parse_type, "limit": limit}),
-            limit, label,
-        )
-        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'parse_audience','pending',$2,$3,$4) RETURNING id",
+                uid,
+                _json.dumps({"source_ref": source_ref, "parse_type": parse_type, "limit": limit}),
+                limit, label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("submit_parse_job uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── CRM Deals ─────────────────────────────────────────────────────────────
 
@@ -3831,43 +3842,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("auth")
         asset_type = request.rel_url.query.get("type")
-        if asset_type:
-            rows = await pool.fetch(
-                "SELECT id, asset_type, name, created_at FROM asset_templates "
-                "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT 50",
-                uid, asset_type,
-            )
-        else:
-            rows = await pool.fetch(
-                "SELECT id, asset_type, name, created_at FROM asset_templates "
-                "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
-                uid,
-            )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            if asset_type:
+                rows = await pool.fetch(
+                    "SELECT id, asset_type, name, created_at FROM asset_templates "
+                    "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT 50",
+                    uid, asset_type,
+                )
+            else:
+                rows = await pool.fetch(
+                    "SELECT id, asset_type, name, created_at FROM asset_templates "
+                    "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
+                    uid,
+                )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("asset_templates_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def asset_template_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        tpl_id = int(request.match_info["tpl_id"])
-        tpl = await pool.fetchrow(
-            "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
-        )
-        if not tpl:
-            return _err("not found", 404)
-        return _json_resp(dict(tpl))
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("bad tpl_id", 400)
+        try:
+            tpl = await pool.fetchrow(
+                "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
+            )
+            if not tpl:
+                return _err("not found", 404)
+            return _json_resp(dict(tpl))
+        except Exception as exc:
+            log.exception("asset_template_detail uid=%d tpl=%d", uid, tpl_id)
+            return _err(str(exc), 500)
 
     async def asset_template_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        tpl_id = int(request.match_info["tpl_id"])
-        result = await pool.execute(
-            "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
-        )
-        if result == "DELETE 0":
-            return _err("not found", 404)
-        return _json_resp({"ok": True})
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("bad tpl_id", 400)
+        try:
+            result = await pool.execute(
+                "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
+            )
+            if result == "DELETE 0":
+                return _err("not found", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("asset_template_delete uid=%d tpl=%d", uid, tpl_id)
+            return _err(str(exc), 500)
 
     # ── Infra Health Center ───────────────────────────────────────────────────
 
@@ -4087,7 +4116,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad body", 400)
         title = (body.get("title") or "").strip()
         about = (body.get("about") or "").strip()
         account_id = body.get("account_id")
@@ -4095,30 +4127,38 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("title required")
         if not account_id:
             return _err("account_id required")
-        acc = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
-            int(account_id), uid,
-        )
-        if not acc:
-            return _err("Аккаунт не найден или неактивен", 404)
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-            "VALUES($1,'create_channel','pending',$2,1,$3) RETURNING id",
-            uid, json.dumps({"title": title, "about": about, "account_id": account_id}),
-            f"Создать канал: {title}",
-        )
-        return _json_resp({"ok": True, "op_id": op_id})
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+                int(account_id), uid,
+            )
+            if not acc:
+                return _err("Аккаунт не найден или неактивен", 404)
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+                "VALUES($1,'create_channel','pending',$2,1,$3) RETURNING id",
+                uid, json.dumps({"title": title, "about": about, "account_id": account_id}),
+                f"Создать канал: {title}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("channel_factory_submit uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def channel_factory_recent(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            "SELECT id, title, username, type, added_at FROM managed_channels "
-            "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT 20",
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                "SELECT id, title, username, type, added_at FROM managed_channels "
+                "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT 20",
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("channel_factory_recent uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Group Factory ─────────────────────────────────────────────────────────
 
@@ -4126,7 +4166,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad body", 400)
         title = (body.get("title") or "").strip()
         account_id = body.get("account_id")
         is_supergroup = body.get("is_supergroup", True)
@@ -4134,19 +4177,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("title required")
         if not account_id:
             return _err("account_id required")
-        acc = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
-            int(account_id), uid,
-        )
-        if not acc:
-            return _err("Аккаунт не найден или неактивен", 404)
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-            "VALUES($1,'create_group','pending',$2,1,$3) RETURNING id",
-            uid, json.dumps({"title": title, "account_id": account_id, "is_supergroup": is_supergroup}),
-            f"Создать группу: {title}",
-        )
-        return _json_resp({"ok": True, "op_id": op_id})
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+                int(account_id), uid,
+            )
+            if not acc:
+                return _err("Аккаунт не найден или неактивен", 404)
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+                "VALUES($1,'create_group','pending',$2,1,$3) RETURNING id",
+                uid, json.dumps({"title": title, "account_id": account_id, "is_supergroup": is_supergroup}),
+                f"Создать группу: {title}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("group_factory_submit uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Physics Hub ──────────────────────────────────────────────────────────
 
