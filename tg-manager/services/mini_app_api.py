@@ -798,10 +798,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("bad bot_id", 400)
-        row = await pool.fetchrow(
-            "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            bot_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid,
+            )
+        except Exception as exc:
+            log.exception("bot_note uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not row:
             return _err("Not found", 404)
         return _json_resp({"note": row["note"] or ""})
@@ -819,10 +823,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             note = str(body.get("note", "")).strip()[:2000]
         except Exception:
             return _err("bad body", 400)
-        res = await pool.execute(
-            "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
-            bot_id, uid, note or None,
-        )
+        try:
+            res = await pool.execute(
+                "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid, note or None,
+            )
+        except Exception as exc:
+            log.exception("save_bot_note uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if res == "UPDATE 0":
             return _err("Not found", 404)
         return _json_resp({"ok": True})
@@ -837,16 +845,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("bad bot_id", 400)
-        row = await pool.fetchrow(
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            bot_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid,
+            )
+        except Exception as exc:
+            log.exception("bot_commands uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not row:
             return _err("Not found", 404)
-        from services import bot_api
-        import aiohttp as _ahttp
-        async with _ahttp.ClientSession() as sess:
-            cmds = await bot_api.get_my_commands(sess, row["token"])
+        try:
+            from services import bot_api
+            import aiohttp as _ahttp
+            async with _ahttp.ClientSession() as sess:
+                cmds = await bot_api.get_my_commands(sess, row["token"])
+        except Exception as exc:
+            log.exception("bot_commands get_my_commands uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         return _json_resp({"commands": cmds})
 
     async def set_bot_commands(request: web.Request) -> web.Response:
@@ -869,19 +885,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     return _err("command or description too long", 400)
         except Exception:
             return _err("bad body", 400)
-        row = await pool.fetchrow(
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            bot_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid,
+            )
+        except Exception as exc:
+            log.exception("set_bot_commands uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not row:
             return _err("Not found", 404)
-        from services import bot_api
-        import aiohttp as _ahttp
-        async with _ahttp.ClientSession() as sess:
-            if commands:
-                ok = await bot_api.set_my_commands(sess, row["token"], commands)
-            else:
-                ok = await bot_api.delete_my_commands(sess, row["token"])
+        try:
+            from services import bot_api
+            import aiohttp as _ahttp
+            async with _ahttp.ClientSession() as sess:
+                if commands:
+                    ok = await bot_api.set_my_commands(sess, row["token"], commands)
+                else:
+                    ok = await bot_api.delete_my_commands(sess, row["token"])
+        except Exception as exc:
+            log.exception("set_bot_commands tg_api uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if ok:
             return _json_resp({"ok": True, "count": len(commands)})
         return _err("Telegram API error", 500)
@@ -896,9 +920,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("bad bot_id", 400)
-        owned = await pool.fetchval(
-            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
-        )
+        try:
+            owned = await pool.fetchval(
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+            )
+        except Exception as exc:
+            log.exception("bot_stats uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not owned:
             return _err("Not found", 404)
         from database import db as _db
@@ -917,12 +945,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        total = await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-            "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
-            uid,
-        )
+        try:
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("profile_setter_status uid=%d", uid)
+            return _err(str(exc), 500)
         return _json_resp({"available_accounts": int(total or 0)})
 
     async def profile_setter_submit(request: web.Request) -> web.Response:
@@ -939,23 +971,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("op must be name|avatar|2fa", 400)
         if acc_count < 0:
             return _err("acc_count must be >= 0", 400)
-        total = await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-            "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
-            uid,
-        )
+        try:
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+                "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("profile_setter_submit fetchval uid=%d", uid)
+            return _err(str(exc), 500)
         total = int(total or 0)
         use = min(acc_count, total) if acc_count > 0 else total
         if use == 0:
             return _err("Нет доступных аккаунтов", 400)
-        rows = await pool.fetch(
-            "SELECT id FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-            "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
-            "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
-            uid, use,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT id FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+                "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
+                "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
+                uid, use,
+            )
+        except Exception as exc:
+            log.exception("profile_setter_submit fetch uid=%d", uid)
+            return _err(str(exc), 500)
         account_ids = [r["id"] for r in rows]
         import json as _json
         params: dict = {"op": op, "account_ids": account_ids}
@@ -979,11 +1019,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["hint"] = str(body.get("hint", "")).strip()
         label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
         label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,'bulk_set_profile','pending',$2,$3,$4) RETURNING id",
-            uid, _json.dumps(params), len(account_ids), label,
-        )
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'bulk_set_profile','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps(params), len(account_ids), label,
+            )
+        except Exception as exc:
+            log.exception("profile_setter_submit insert uid=%d", uid)
+            return _err(str(exc), 500)
         return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
 
     # ── Account Cleaner ────────────────────────────────────────────────────────
@@ -992,14 +1036,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await pool.fetch(
-            """SELECT id, phone, first_name,
-                      (SELECT COUNT(*) FROM managed_channels WHERE acc_id=tg_accounts.id) AS asset_count
-               FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL AND session_str <> ''
-               ORDER BY added_at""",
-            uid,
-        )
+        try:
+            rows = await pool.fetch(
+                """SELECT id, phone, first_name,
+                          (SELECT COUNT(*) FROM managed_channels WHERE acc_id=tg_accounts.id) AS asset_count
+                   FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL AND session_str <> ''
+                   ORDER BY added_at""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("cleaner_accounts uid=%d", uid)
+            return _err(str(exc), 500)
         return _json_resp({"accounts": [
             {
                 "id": r["id"],
@@ -1022,20 +1070,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if op not in ("leave_all_chats", "delete_contacts"):
             return _err("op must be leave_all_chats or delete_contacts", 400)
-        row = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
-            account_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+                account_id, uid,
+            )
+        except Exception as exc:
+            log.exception("cleaner_submit fetchrow uid=%d", uid)
+            return _err(str(exc), 500)
         if not row:
             return _err("Аккаунт не найден или нет сессии", 404)
         import json as _json
         label_map = {"leave_all_chats": "Выход из чатов", "delete_contacts": "Удаление контактов"}
         label = f"Cleaner: {label_map[op]} акк #{account_id}"
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
-            uid, op, _json.dumps({"account_id": account_id}), label,
-        )
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
+                uid, op, _json.dumps({"account_id": account_id}), label,
+            )
+        except Exception as exc:
+            log.exception("cleaner_submit insert uid=%d", uid)
+            return _err(str(exc), 500)
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
     # ── Topology Map ──────────────────────────────────────────────────────────
@@ -1086,48 +1142,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             active_accs = await pool.fetchval(
                 "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
             )
+        except Exception:
+            active_accs = 0
+        try:
             flood_24h = await pool.fetchval(
                 """SELECT COUNT(*) FROM account_flood_log fl
                    JOIN tg_accounts ta ON ta.id=fl.account_id
                    WHERE ta.owner_id=$1 AND fl.created_at > NOW()-INTERVAL '24h'""",
                 uid,
             )
+        except Exception:
+            flood_24h = 0
+        try:
             ops_24h = await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '24h'",
                 uid,
             )
+        except Exception:
+            ops_24h = 0
+        try:
             warmup_active = await pool.fetchval(
                 """SELECT COUNT(*) FROM account_warmup_plans wp
                    WHERE wp.owner_id=$1 AND wp.status='active'""",
                 uid,
             )
+        except Exception:
+            warmup_active = 0
+        try:
             pools = await pool.fetch(
                 """SELECT pool, COUNT(*) AS cnt FROM tg_accounts
                    WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL
                    GROUP BY pool ORDER BY cnt DESC LIMIT 10""",
                 uid,
             )
-            # Recent audit
-            audit = await pool.fetch(
+        except Exception:
+            pools = []
+        try:
+            audit_rows = await pool.fetch(
                 """SELECT action, target, result, occurred_at
                    FROM operation_audit WHERE owner_id=$1
                    ORDER BY occurred_at DESC LIMIT 10""",
                 uid,
             )
-            return _json_resp({
-                "active_accounts": active_accs,
-                "flood_24h": flood_24h,
-                "ops_24h": ops_24h,
-                "warmup_active": warmup_active,
-                "pools": [dict(p) for p in pools],
-                "audit": [
-                    {**dict(a), "occurred_at": a["occurred_at"].isoformat() if a["occurred_at"] else None}
-                    for a in audit
-                ],
-            })
-        except Exception as exc:
-            log.exception("infra_analytics_overview uid=%d", uid)
-            return _err(str(exc), 500)
+        except Exception:
+            audit_rows = []
+        return _json_resp({
+            "active_accounts": int(active_accs or 0),
+            "flood_24h": int(flood_24h or 0),
+            "ops_24h": int(ops_24h or 0),
+            "warmup_active": int(warmup_active or 0),
+            "pools": [dict(p) for p in pools],
+            "audit": [
+                {**dict(a), "occurred_at": a["occurred_at"].isoformat() if a["occurred_at"] else None}
+                for a in audit_rows
+            ],
+        })
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
@@ -1272,27 +1341,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        persona_id = int(request.match_info["persona_id"])
-        row = await pool.fetchrow(
-            "SELECT id, is_active FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
-        )
-        if not row:
-            return _err("Не найдено", 404)
-        new_val = not row["is_active"]
-        await pool.execute(
-            "UPDATE persona_profiles SET is_active=$1 WHERE id=$2", new_val, persona_id
-        )
-        return _json_resp({"is_active": new_val})
+        try:
+            persona_id = int(request.match_info["persona_id"])
+        except (KeyError, ValueError):
+            return _err("bad persona_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id, is_active FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
+            )
+            if not row:
+                return _err("Не найдено", 404)
+            new_val = not row["is_active"]
+            await pool.execute(
+                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2", new_val, persona_id
+            )
+            return _json_resp({"is_active": new_val})
+        except Exception as exc:
+            log.exception("persona_toggle uid=%d persona=%d", uid, persona_id)
+            return _err(str(exc), 500)
 
     async def persona_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        persona_id = int(request.match_info["persona_id"])
-        await pool.execute(
-            "DELETE FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
-        )
-        return _json_resp({"ok": True})
+        try:
+            persona_id = int(request.match_info["persona_id"])
+        except (KeyError, ValueError):
+            return _err("bad persona_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("persona_delete uid=%d persona=%d", uid, persona_id)
+            return _err(str(exc), 500)
 
     async def persona_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -1737,27 +1820,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        profile_id = int(request.match_info["profile_id"])
-        row = await pool.fetchrow(
-            "SELECT id, enabled FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
-        )
-        if not row:
-            return _err("Не найдено", 404)
-        new_val = not row["enabled"]
-        await pool.execute(
-            "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2", new_val, profile_id
-        )
-        return _json_resp({"enabled": new_val})
+        try:
+            profile_id = int(request.match_info["profile_id"])
+        except (KeyError, ValueError):
+            return _err("bad profile_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id, enabled FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
+            )
+            if not row:
+                return _err("Не найдено", 404)
+            new_val = not row["enabled"]
+            await pool.execute(
+                "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2", new_val, profile_id
+            )
+            return _json_resp({"enabled": new_val})
+        except Exception as exc:
+            log.exception("ghost_toggle uid=%d profile=%d", uid, profile_id)
+            return _err(str(exc), 500)
 
     async def ghost_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        profile_id = int(request.match_info["profile_id"])
-        await pool.execute(
-            "DELETE FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
-        )
-        return _json_resp({"ok": True})
+        try:
+            profile_id = int(request.match_info["profile_id"])
+        except (KeyError, ValueError):
+            return _err("bad profile_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("ghost_delete uid=%d profile=%d", uid, profile_id)
+            return _err(str(exc), 500)
 
     # ── Bot Webhook ────────────────────────────────────────────────────────────
 
@@ -1765,11 +1862,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        bot_id = int(request.match_info["bot_id"])
-        row = await pool.fetchrow(
-            "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            bot_id, uid,
-        )
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid,
+            )
+        except Exception as exc:
+            log.exception("bot_webhook_info uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -1793,10 +1897,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        bot_id = int(request.match_info["bot_id"])
-        row = await pool.fetchrow(
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
-        )
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+            )
+        except Exception as exc:
+            log.exception("bot_webhook_delete uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -3702,21 +3813,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT mb.bot_id, mb.username, mb.first_name, mb.bot_role, mb.cluster,
-                   mb.swarm_weight, mb.swarm_enabled,
-                   bm.ctr, bm.conversion_rate, bm.retention_d1, bm.retention_d7, bm.score,
-                   bm.updated_at
-            FROM managed_bots mb
-            LEFT JOIN bot_metrics bm ON bm.bot_id = mb.bot_id
-            WHERE mb.added_by=$1
-            ORDER BY COALESCE(bm.score, 0) DESC
-            LIMIT 30
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT mb.bot_id, mb.username, mb.first_name, mb.bot_role, mb.cluster,
+                       mb.swarm_weight, mb.swarm_enabled,
+                       bm.ctr, bm.conversion_rate, bm.retention_d1, bm.retention_d7, bm.score,
+                       bm.updated_at
+                FROM managed_bots mb
+                LEFT JOIN bot_metrics bm ON bm.bot_id = mb.bot_id
+                WHERE mb.added_by=$1
+                ORDER BY COALESCE(bm.score, 0) DESC
+                LIMIT 30
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("swarm_metrics uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Presence Packs ────────────────────────────────────────────────────────
 
@@ -3724,12 +3839,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            "SELECT id, name, description, target_url, target_label, bot_id "
-            "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT 30",
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                "SELECT id, name, description, target_url, target_label, bot_id "
+                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT 30",
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("presence_packs_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Global Presence ───────────────────────────────────────────────────────
 
@@ -3778,16 +3897,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT id, op_type, status, done_items, total_items, created_at, finished_at
-            FROM operation_queue
-            WHERE owner_id=$1 AND op_type LIKE 'mass_%'
-            ORDER BY created_at DESC LIMIT 30
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT id, op_type, status, done_items, total_items, created_at, finished_at
+                FROM operation_queue
+                WHERE owner_id=$1 AND op_type LIKE 'mass_%'
+                ORDER BY created_at DESC LIMIT 30
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("mass_ops_overview uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Ecosystems ────────────────────────────────────────────────────────────
 
@@ -3795,48 +3918,62 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT e.id, e.name, e.ecosystem_type, e.status, e.health_score,
-                   e.risk_level, e.region, e.created_at, e.updated_at,
-                   COUNT(em.id) AS member_count
-            FROM ecosystems e
-            LEFT JOIN ecosystem_members em ON em.ecosystem_id = e.id
-            WHERE e.owner_id=$1
-            GROUP BY e.id, e.name, e.ecosystem_type, e.status, e.health_score,
-                     e.risk_level, e.region, e.created_at, e.updated_at
-            ORDER BY e.updated_at DESC NULLS LAST
-            LIMIT 30
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT e.id, e.name, e.ecosystem_type, e.status, e.health_score,
+                       e.risk_level, e.region, e.created_at, e.updated_at,
+                       COUNT(em.id) AS member_count
+                FROM ecosystems e
+                LEFT JOIN ecosystem_members em ON em.ecosystem_id = e.id
+                WHERE e.owner_id=$1
+                GROUP BY e.id, e.name, e.ecosystem_type, e.status, e.health_score,
+                         e.risk_level, e.region, e.created_at, e.updated_at
+                ORDER BY e.updated_at DESC NULLS LAST
+                LIMIT 30
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("ecosystems_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def ecosystem_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        eco_id = int(request.match_info["eco_id"])
-        eco = await pool.fetchrow(
-            "SELECT * FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
-        )
-        if not eco:
-            return _err("not found", 404)
-        members = await pool.fetch(
-            "SELECT object_type, object_id, role, added_at "
-            "FROM ecosystem_members WHERE ecosystem_id=$1 ORDER BY added_at DESC LIMIT 50",
-            eco_id,
-        )
-        events = await pool.fetch(
-            "SELECT event_type, severity, title, occurred_at "
-            "FROM ecosystem_events WHERE ecosystem_id=$1 ORDER BY occurred_at DESC LIMIT 20",
-            eco_id,
-        )
-        return _json_resp({
-            "eco": dict(eco),
-            "members": [dict(m) for m in members],
-            "events": [dict(ev) for ev in events],
-        })
+        try:
+            eco_id = int(request.match_info["eco_id"])
+        except (KeyError, ValueError):
+            return _err("bad eco_id", 400)
+        try:
+            eco = await pool.fetchrow(
+                "SELECT * FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
+            )
+            if not eco:
+                return _err("not found", 404)
+            members = await pool.fetch(
+                "SELECT object_type, object_id, role, added_at "
+                "FROM ecosystem_members WHERE ecosystem_id=$1 ORDER BY added_at DESC LIMIT 50",
+                eco_id,
+            )
+            try:
+                events = await pool.fetch(
+                    "SELECT event_type, severity, title, occurred_at "
+                    "FROM ecosystem_events WHERE ecosystem_id=$1 ORDER BY occurred_at DESC LIMIT 20",
+                    eco_id,
+                )
+            except Exception:
+                events = []
+            return _json_resp({
+                "eco": dict(eco),
+                "members": [dict(m) for m in members],
+                "events": [dict(ev) for ev in events],
+            })
+        except Exception as exc:
+            log.exception("ecosystem_detail uid=%d eco=%d", uid, eco_id)
+            return _err(str(exc), 500)
 
     # ── Channel Factory ───────────────────────────────────────────────────────
 
@@ -3911,42 +4048,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT ars.account_id, ta.phone, ta.username, ta.first_name,
-                   ars.risk_score, ars.ban_probability, ars.flood_rate_1h,
-                   ars.ops_24h, ars.last_flood_at, ars.computed_at
-            FROM account_risk_scores ars
-            JOIN tg_accounts ta ON ta.id = ars.account_id
-            WHERE ta.owner_id = $1
-            ORDER BY ars.risk_score DESC NULLS LAST
-            LIMIT 30
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT ars.account_id, ta.phone, ta.username, ta.first_name,
+                       ars.risk_score, ars.ban_probability, ars.flood_rate_1h,
+                       ars.ops_24h, ars.last_flood_at, ars.computed_at
+                FROM account_risk_scores ars
+                JOIN tg_accounts ta ON ta.id = ars.account_id
+                WHERE ta.owner_id = $1
+                ORDER BY ars.risk_score DESC NULLS LAST
+                LIMIT 30
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("physics_overview uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def physics_account_telemetry(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        account_id = int(request.match_info["account_id"])
-        owner = await pool.fetchval(
-            "SELECT owner_id FROM tg_accounts WHERE id=$1", account_id
-        )
-        if owner != uid:
-            return _err("forbidden", 403)
-        rows = await pool.fetch(
-            """
-            SELECT op_type, outcome, COUNT(*) AS cnt,
-                   AVG(flood_wait_s) AS avg_flood, AVG(duration_ms) AS avg_dur
-            FROM op_telemetry
-            WHERE account_id=$1 AND created_at > NOW() - INTERVAL '24 hours'
-            GROUP BY op_type, outcome ORDER BY cnt DESC LIMIT 20
-            """,
-            account_id,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            account_id = int(request.match_info["account_id"])
+        except (KeyError, ValueError):
+            return _err("bad account_id", 400)
+        try:
+            owner = await pool.fetchval(
+                "SELECT owner_id FROM tg_accounts WHERE id=$1", account_id
+            )
+            if owner != uid:
+                return _err("forbidden", 403)
+            rows = await pool.fetch(
+                """
+                SELECT op_type, outcome, COUNT(*) AS cnt,
+                       AVG(flood_wait_s) AS avg_flood, AVG(duration_ms) AS avg_dur
+                FROM op_telemetry
+                WHERE account_id=$1 AND created_at > NOW() - INTERVAL '24 hours'
+                GROUP BY op_type, outcome ORDER BY cnt DESC LIMIT 20
+                """,
+                account_id,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("physics_account_telemetry uid=%d acc=%d", uid, account_id)
+            return _err(str(exc), 500)
 
     # ── Graph Hub ─────────────────────────────────────────────────────────────
 
@@ -3954,33 +4102,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        stats = await pool.fetchrow(
-            """
-            SELECT
-                (SELECT COUNT(*) FROM graph_nodes) AS nodes,
-                (SELECT COUNT(*) FROM graph_edges) AS edges,
-                (SELECT COUNT(*) FROM audience_overlaps WHERE overlap_pct > 0.1) AS strong_overlaps
-            """
-        )
-        return _json_resp(dict(stats) if stats else {})
+        try:
+            stats = await pool.fetchrow(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM graph_nodes) AS nodes,
+                    (SELECT COUNT(*) FROM graph_edges) AS edges,
+                    (SELECT COUNT(*) FROM audience_overlaps WHERE overlap_pct > 0.1) AS strong_overlaps
+                """
+            )
+            return _json_resp(dict(stats) if stats else {})
+        except Exception as exc:
+            log.exception("graph_stats uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def graph_overlaps(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT ao.overlap_pct, ao.shared_users, ao.computed_at,
-                   na.title AS title_a, na.username AS username_a,
-                   nb.title AS title_b, nb.username AS username_b
-            FROM audience_overlaps ao
-            JOIN graph_nodes na ON na.id = ao.node_a
-            JOIN graph_nodes nb ON nb.id = ao.node_b
-            WHERE ao.overlap_pct > 0.05
-            ORDER BY ao.overlap_pct DESC LIMIT 20
-            """
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT ao.overlap_pct, ao.shared_users, ao.computed_at,
+                       na.title AS title_a, na.username AS username_a,
+                       nb.title AS title_b, nb.username AS username_b
+                FROM audience_overlaps ao
+                JOIN graph_nodes na ON na.id = ao.node_a
+                JOIN graph_nodes nb ON nb.id = ao.node_b
+                WHERE ao.overlap_pct > 0.05
+                ORDER BY ao.overlap_pct DESC LIMIT 20
+                """
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("graph_overlaps uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Compliance Hub ────────────────────────────────────────────────────────
 
@@ -3988,24 +4144,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        totals = await pool.fetchrow(
-            """
-            SELECT COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE outcome='success') AS ok_cnt,
-                   COUNT(*) FILTER (WHERE outcome IN ('ban','flood_wait')) AS risk_cnt
-            FROM compliance_audit WHERE user_id=$1
-            """,
-            uid,
-        )
-        recent = await pool.fetch(
-            "SELECT op_type, outcome, created_at FROM compliance_audit "
-            "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
-            uid,
-        )
-        return _json_resp({
-            "totals": dict(totals) if totals else {},
-            "recent": [dict(r) for r in recent],
-        })
+        try:
+            totals = await pool.fetchrow(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE outcome='success') AS ok_cnt,
+                       COUNT(*) FILTER (WHERE outcome IN ('ban','flood_wait')) AS risk_cnt
+                FROM compliance_audit WHERE user_id=$1
+                """,
+                uid,
+            )
+            recent = await pool.fetch(
+                "SELECT op_type, outcome, created_at FROM compliance_audit "
+                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
+                uid,
+            )
+            return _json_resp({
+                "totals": dict(totals) if totals else {},
+                "recent": [dict(r) for r in recent],
+            })
+        except Exception as exc:
+            log.exception("compliance_overview uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Content Cloner ───────────────────────────────────────────────────────
 
@@ -4134,39 +4294,57 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count "
-            "FROM self_promo_templates ORDER BY id"
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count "
+                "FROM self_promo_templates ORDER BY id"
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("self_promo_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def self_promo_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        tpl_id = int(request.match_info["tpl_id"])
-        tpl = await pool.fetchrow("SELECT is_active FROM self_promo_templates WHERE id=$1", tpl_id)
-        if not tpl:
-            return _err("not found", 404)
-        new_state = not tpl["is_active"]
-        await pool.execute("UPDATE self_promo_templates SET is_active=$1 WHERE id=$2", new_state, tpl_id)
-        return _json_resp({"active": new_state})
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("bad tpl_id", 400)
+        try:
+            tpl = await pool.fetchrow("SELECT is_active FROM self_promo_templates WHERE id=$1", tpl_id)
+            if not tpl:
+                return _err("not found", 404)
+            new_state = not tpl["is_active"]
+            await pool.execute("UPDATE self_promo_templates SET is_active=$1 WHERE id=$2", new_state, tpl_id)
+            return _json_resp({"active": new_state})
+        except Exception as exc:
+            log.exception("self_promo_toggle uid=%d tpl=%d", uid, tpl_id)
+            return _err(str(exc), 500)
 
     async def self_promo_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        tpl_id = int(request.match_info["tpl_id"])
-        tpl = await pool.fetchrow("SELECT id, title FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
-        if not tpl:
-            return _err("Шаблон не найден или неактивен", 404)
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-            "VALUES($1,'self_promo_blast','pending',$2,1,$3) RETURNING id",
-            uid, json.dumps({"template_id": tpl_id}),
-            f"Self-promo: {tpl['title'] or tpl_id}",
-        )
-        return _json_resp({"ok": True, "op_id": op_id})
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("bad tpl_id", 400)
+        try:
+            tpl = await pool.fetchrow("SELECT id, title FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
+            if not tpl:
+                return _err("Шаблон не найден или неактивен", 404)
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+                "VALUES($1,'self_promo_blast','pending',$2,1,$3) RETURNING id",
+                uid, json.dumps({"template_id": tpl_id}),
+                f"Self-promo: {tpl['title'] or tpl_id}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("self_promo_launch uid=%d tpl=%d", uid, tpl_id)
+            return _err(str(exc), 500)
 
     # ── Semantic Memory ───────────────────────────────────────────────────────
 
@@ -4174,37 +4352,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT mb.bot_id, mb.username, mb.first_name,
-                   COUNT(DISTINCT bum.user_id) AS conv_users,
-                   COUNT(buf.id) AS fact_count
-            FROM managed_bots mb
-            LEFT JOIN bot_user_memory bum ON bum.bot_id = mb.bot_id
-            LEFT JOIN bot_user_facts buf ON buf.bot_id = mb.bot_id
-            WHERE mb.added_by = $1
-            GROUP BY mb.bot_id, mb.username, mb.first_name
-            ORDER BY fact_count DESC NULLS LAST
-            LIMIT 30
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT mb.bot_id, mb.username, mb.first_name,
+                       COUNT(DISTINCT bum.user_id) AS conv_users,
+                       COUNT(buf.id) AS fact_count
+                FROM managed_bots mb
+                LEFT JOIN bot_user_memory bum ON bum.bot_id = mb.bot_id
+                LEFT JOIN bot_user_facts buf ON buf.bot_id = mb.bot_id
+                WHERE mb.added_by = $1
+                GROUP BY mb.bot_id, mb.username, mb.first_name
+                ORDER BY fact_count DESC NULLS LAST
+                LIMIT 30
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("semantic_memory_overview uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def semantic_memory_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        bot_id = int(request.match_info["bot_id"])
-        owner = await pool.fetchval("SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
-        if owner != uid:
-            return _err("forbidden", 403)
-        facts = await pool.fetch(
-            "SELECT user_id, fact_key, fact_value, confidence, updated_at "
-            "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT 100",
-            bot_id,
-        )
-        return _json_resp([dict(r) for r in facts])
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            owner = await pool.fetchval("SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
+            if owner != uid:
+                return _err("forbidden", 403)
+            facts = await pool.fetch(
+                "SELECT user_id, fact_key, fact_value, confidence, updated_at "
+                "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT 100",
+                bot_id,
+            )
+            return _json_resp([dict(r) for r in facts])
+        except Exception as exc:
+            log.exception("semantic_memory_bot uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
 
     # ── Audience DNA ─────────────────────────────────────────────────────────
 
@@ -4212,20 +4401,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT ad.id, ad.bot_id, mb.username, mb.first_name,
-                   ad.avg_engagement_rate, ad.churn_risk_pct,
-                   ad.total_users_analyzed, ad.peak_hours, ad.peak_days,
-                   ad.best_content_types, ad.top_topics, ad.computed_at
-            FROM audience_dna ad
-            LEFT JOIN managed_bots mb ON mb.bot_id = ad.bot_id
-            WHERE ad.owner_id = $1
-            ORDER BY ad.computed_at DESC
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT ad.id, ad.bot_id, mb.username, mb.first_name,
+                       ad.avg_engagement_rate, ad.churn_risk_pct,
+                       ad.total_users_analyzed, ad.peak_hours, ad.peak_days,
+                       ad.best_content_types, ad.top_topics, ad.computed_at
+                FROM audience_dna ad
+                LEFT JOIN managed_bots mb ON mb.bot_id = ad.bot_id
+                WHERE ad.owner_id = $1
+                ORDER BY ad.computed_at DESC
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("audience_dna_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Auto Funnels ──────────────────────────────────────────────────────────
 
@@ -4233,61 +4426,83 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT f.id, f.name, f.bot_id, mb.username AS bot_username,
-                   mb.first_name AS bot_name, f.target_segment, f.enabled, f.created_at,
-                   COUNT(DISTINCT fs.id) AS steps_count,
-                   COUNT(DISTINCT fr.id) FILTER (WHERE fr.status='active') AS active_runs
-            FROM auto_funnels f
-            LEFT JOIN managed_bots mb ON mb.bot_id = f.bot_id
-            LEFT JOIN auto_funnel_steps fs ON fs.funnel_id = f.id
-            LEFT JOIN auto_funnel_runs fr ON fr.funnel_id = f.id
-            WHERE f.owner_id = $1
-            GROUP BY f.id, f.name, f.bot_id, mb.username, mb.first_name,
-                     f.target_segment, f.enabled, f.created_at
-            ORDER BY f.id DESC
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT f.id, f.name, f.bot_id, mb.username AS bot_username,
+                       mb.first_name AS bot_name, f.target_segment, f.enabled, f.created_at,
+                       COUNT(DISTINCT fs.id) AS steps_count,
+                       COUNT(DISTINCT fr.id) FILTER (WHERE fr.status='active') AS active_runs
+                FROM auto_funnels f
+                LEFT JOIN managed_bots mb ON mb.bot_id = f.bot_id
+                LEFT JOIN auto_funnel_steps fs ON fs.funnel_id = f.id
+                LEFT JOIN auto_funnel_runs fr ON fr.funnel_id = f.id
+                WHERE f.owner_id = $1
+                GROUP BY f.id, f.name, f.bot_id, mb.username, mb.first_name,
+                         f.target_segment, f.enabled, f.created_at
+                ORDER BY f.id DESC
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("auto_funnels_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def auto_funnel_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        fid = int(request.match_info["funnel_id"])
-        funnel = await pool.fetchrow(
-            "SELECT enabled FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
-        )
+        try:
+            fid = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("bad funnel_id", 400)
+        try:
+            funnel = await pool.fetchrow(
+                "SELECT enabled FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
+            )
+        except Exception as exc:
+            log.exception("auto_funnel_toggle fetch uid=%d fid=%d", uid, fid)
+            return _err(str(exc), 500)
         if not funnel:
             return _err("not found", 404)
         new_state = not funnel["enabled"]
-        await pool.execute(
-            "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, fid
-        )
+        try:
+            await pool.execute(
+                "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, fid
+            )
+        except Exception as exc:
+            log.exception("auto_funnel_toggle update uid=%d fid=%d", uid, fid)
+            return _err(str(exc), 500)
         return _json_resp({"enabled": new_state})
 
     async def auto_funnel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        fid = int(request.match_info["funnel_id"])
-        funnel = await pool.fetchrow(
-            """
-            SELECT f.*, mb.username AS bot_username, mb.first_name AS bot_name
-            FROM auto_funnels f
-            LEFT JOIN managed_bots mb ON mb.bot_id = f.bot_id
-            WHERE f.id=$1 AND f.owner_id=$2
-            """,
-            fid, uid,
-        )
-        if not funnel:
-            return _err("not found", 404)
-        steps = await pool.fetch(
-            "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
-        )
-        return _json_resp({"funnel": dict(funnel), "steps": [dict(s) for s in steps]})
+        try:
+            fid = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("bad funnel_id", 400)
+        try:
+            funnel = await pool.fetchrow(
+                """
+                SELECT f.*, mb.username AS bot_username, mb.first_name AS bot_name
+                FROM auto_funnels f
+                LEFT JOIN managed_bots mb ON mb.bot_id = f.bot_id
+                WHERE f.id=$1 AND f.owner_id=$2
+                """,
+                fid, uid,
+            )
+            if not funnel:
+                return _err("not found", 404)
+            steps = await pool.fetch(
+                "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
+            )
+            return _json_resp({"funnel": dict(funnel), "steps": [dict(s) for s in steps]})
+        except Exception as exc:
+            log.exception("auto_funnel_detail uid=%d fid=%d", uid, fid)
+            return _err(str(exc), 500)
 
     # ── SSE ──────────────────────────────────────────────────────────────────
 
