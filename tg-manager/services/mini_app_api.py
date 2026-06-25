@@ -2020,11 +2020,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        campaign_id = int(request.match_info["campaign_id"])
-        row = await pool.fetchrow(
-            "SELECT id, name FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
-            campaign_id, uid,
-        )
+        try:
+            campaign_id = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id, name FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+                campaign_id, uid,
+            )
+        except Exception as exc:
+            log.exception("dm_campaign_launch fetch uid=%d", uid)
+            return _err(str(exc), 500)
         if not row:
             return _err("Не найдено", 404)
         try:
@@ -2046,11 +2053,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        campaign_id = int(request.match_info["campaign_id"])
-        await pool.execute(
-            "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2", campaign_id, uid
-        )
-        return _json_resp({"ok": True})
+        try:
+            campaign_id = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2", campaign_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("dm_campaign_delete uid=%d cid=%d", uid, campaign_id)
+            return _err(str(exc), 500)
 
     # ── Account Warmup ─────────────────────────────────────────────────────────
 
@@ -2205,12 +2219,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        exp_id = int(request.match_info["exp_id"])
-        await pool.execute(
-            "DELETE FROM experiments e USING managed_bots b WHERE e.id=$1 AND e.bot_id=b.bot_id AND b.added_by=$2",
-            exp_id, uid,
-        )
-        return _json_resp({"ok": True})
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("bad exp_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM experiments e USING managed_bots b WHERE e.id=$1 AND e.bot_id=b.bot_id AND b.added_by=$2",
+                exp_id, uid,
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("experiment_delete uid=%d exp=%d", uid, exp_id)
+            return _err(str(exc), 500)
 
     # ── Health Dashboard ───────────────────────────────────────────────────────
 
@@ -2373,12 +2394,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("channel обязателен", 400)
         import json as _json
         label = f"Ad Intel scan @{channel}"
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,'ad_intel_scan','pending',$2,1,$3) RETURNING id",
-            uid, _json.dumps({"channel": channel}), label,
-        )
-        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'ad_intel_scan','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"channel": channel}), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("ad_intel_add_channel uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Network / Cluster Overview ─────────────────────────────────────────────
 
@@ -2431,13 +2456,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         valid_roles = ("entry", "conversion", "retention", "general")
         if role not in valid_roles:
             return _err(f"role must be one of {valid_roles}", 400)
-        res = await pool.execute(
-            "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",
-            role, cluster, bot_id, uid,
-        )
-        if res == "UPDATE 0":
-            return _err("Not found", 404)
-        return _json_resp({"ok": True})
+        try:
+            res = await pool.execute(
+                "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",
+                role, cluster, bot_id, uid,
+            )
+            if res == "UPDATE 0":
+                return _err("Not found", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("set_bot_role_api uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
 
     # ── Relay (Inbox) ─────────────────────────────────────────────────────────
 
@@ -2449,9 +2478,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("bad bot_id", 400)
-        owned = await pool.fetchval(
-            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
-        )
+        try:
+            owned = await pool.fetchval(
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+            )
+        except Exception as exc:
+            log.exception("relay_sessions_list ownership uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
         if not owned:
             return _err("Not found", 404)
         try:
@@ -2484,19 +2517,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad session_id", 400)
         # Verify ownership via join
-        row = await pool.fetchrow(
-            """SELECT rs.id FROM relay_sessions rs
-               JOIN managed_bots mb ON mb.bot_id=rs.bot_id
-               WHERE rs.id=$1 AND mb.added_by=$2""",
-            session_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                """SELECT rs.id FROM relay_sessions rs
+                   JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+                   WHERE rs.id=$1 AND mb.added_by=$2""",
+                session_id, uid,
+            )
+        except Exception as exc:
+            log.exception("relay_session_messages ownership uid=%d sess=%d", uid, session_id)
+            return _err(str(exc), 500)
         if not row:
             return _err("Not found", 404)
-        msgs = await pool.fetch(
-            "SELECT id, direction, text, created_at FROM relay_messages "
-            "WHERE session_id=$1 ORDER BY created_at ASC LIMIT 100",
-            session_id,
-        )
+        try:
+            msgs = await pool.fetch(
+                "SELECT id, direction, text, created_at FROM relay_messages "
+                "WHERE session_id=$1 ORDER BY created_at ASC LIMIT 100",
+                session_id,
+            )
+        except Exception as exc:
+            log.exception("relay_session_messages msgs uid=%d sess=%d", uid, session_id)
+            return _err(str(exc), 500)
         return _json_resp({"messages": [
             {
                 "id": r["id"],
@@ -2517,13 +2558,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             enabled = bool(body.get("enabled", True))
         except Exception:
             return _err("bad request", 400)
-        res = await pool.execute(
-            "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
-            enabled, bot_id, uid,
-        )
-        if res == "UPDATE 0":
-            return _err("Not found", 404)
-        return _json_resp({"ok": True, "relay_enabled": enabled})
+        try:
+            res = await pool.execute(
+                "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
+                enabled, bot_id, uid,
+            )
+            if res == "UPDATE 0":
+                return _err("Not found", 404)
+            return _json_resp({"ok": True, "relay_enabled": enabled})
+        except Exception as exc:
+            log.exception("relay_toggle uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
 
     # ── API Keys (API Hub) ─────────────────────────────────────────────────────
 
@@ -2559,13 +2604,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             key_id = int(request.match_info["key_id"])
         except (KeyError, ValueError):
             return _err("bad key_id", 400)
-        res = await pool.execute(
-            "UPDATE api_keys SET is_active=FALSE WHERE id=$1 AND user_id=$2",
-            key_id, uid,
-        )
-        if res == "UPDATE 0":
-            return _err("Not found", 404)
-        return _json_resp({"ok": True})
+        try:
+            res = await pool.execute(
+                "UPDATE api_keys SET is_active=FALSE WHERE id=$1 AND user_id=$2",
+                key_id, uid,
+            )
+            if res == "UPDATE 0":
+                return _err("Not found", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("revoke_api_key uid=%d key=%d", uid, key_id)
+            return _err(str(exc), 500)
 
     # ── Strike history ─────────────────────────────────────────────────────────
 
@@ -2726,11 +2775,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("crm_deals uid=%d", uid)
             return _err(str(exc), 500)
         # Also get pipeline summary
-        summary_rows = await pool.fetch(
-            "SELECT stage, COUNT(*) AS cnt, COALESCE(SUM(value),0) AS total "
-            "FROM crm_deals WHERE owner_id=$1 GROUP BY stage",
-            uid,
-        )
+        try:
+            summary_rows = await pool.fetch(
+                "SELECT stage, COUNT(*) AS cnt, COALESCE(SUM(value),0) AS total "
+                "FROM crm_deals WHERE owner_id=$1 GROUP BY stage",
+                uid,
+            )
+        except Exception:
+            summary_rows = []
         summary = {r["stage"]: {"count": int(r["cnt"]), "total": float(r["total"])} for r in summary_rows}
         return _json_resp({
             "deals": [
@@ -2788,13 +2840,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
         if stage not in valid_stages:
             return _err("invalid stage", 400)
-        res = await pool.execute(
-            "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
-            stage, deal_id, uid,
-        )
-        if res == "UPDATE 0":
-            return _err("Not found", 404)
-        return _json_resp({"ok": True})
+        try:
+            res = await pool.execute(
+                "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+                stage, deal_id, uid,
+            )
+            if res == "UPDATE 0":
+                return _err("Not found", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("update_crm_deal_stage uid=%d deal=%d", uid, deal_id)
+            return _err(str(exc), 500)
 
     async def delete_crm_deal(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -2804,12 +2860,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             deal_id = int(request.match_info["deal_id"])
         except (KeyError, ValueError):
             return _err("bad deal_id", 400)
-        res = await pool.execute(
-            "DELETE FROM crm_deals WHERE id=$1 AND owner_id=$2", deal_id, uid
-        )
-        if res == "DELETE 0":
-            return _err("Not found", 404)
-        return _json_resp({"ok": True})
+        try:
+            res = await pool.execute(
+                "DELETE FROM crm_deals WHERE id=$1 AND owner_id=$2", deal_id, uid
+            )
+            if res == "DELETE 0":
+                return _err("Not found", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("delete_crm_deal uid=%d deal=%d", uid, deal_id)
+            return _err(str(exc), 500)
 
     # ── Workspaces ─────────────────────────────────────────────────────────────
 
@@ -2875,20 +2935,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad ws_id", 400)
         # Check if owner — owners must delete instead of leave
-        role = await pool.fetchval(
-            "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
-            ws_id, uid,
-        )
+        try:
+            role = await pool.fetchval(
+                "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+                ws_id, uid,
+            )
+        except Exception as exc:
+            log.exception("leave_workspace role uid=%d ws=%d", uid, ws_id)
+            return _err(str(exc), 500)
         if not role:
             return _err("Not a member", 404)
-        if role == "owner":
-            # Delete workspace entirely
-            await pool.execute("DELETE FROM workspaces WHERE id=$1 AND owner_id=$2", ws_id, uid)
-        else:
-            await pool.execute(
-                "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, uid
-            )
-        return _json_resp({"ok": True})
+        try:
+            if role == "owner":
+                # Delete workspace entirely
+                await pool.execute("DELETE FROM workspaces WHERE id=$1 AND owner_id=$2", ws_id, uid)
+            else:
+                await pool.execute(
+                    "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, uid
+                )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("leave_workspace delete uid=%d ws=%d", uid, ws_id)
+            return _err(str(exc), 500)
 
     # ── Promo Platform ────────────────────────────────────────────────────────
 
@@ -2950,13 +3018,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             order_id = int(request.match_info["order_id"])
         except (KeyError, ValueError):
             return _err("bad order_id", 400)
-        res = await pool.execute(
-            "UPDATE promo_orders SET status='cancelled', updated_at=NOW() WHERE id=$1 AND owner_id=$2",
-            order_id, uid,
-        )
-        if res == "UPDATE 0":
-            return _err("Not found", 404)
-        return _json_resp({"ok": True})
+        try:
+            res = await pool.execute(
+                "UPDATE promo_orders SET status='cancelled', updated_at=NOW() WHERE id=$1 AND owner_id=$2",
+                order_id, uid,
+            )
+            if res == "UPDATE 0":
+                return _err("Not found", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("promo_cancel_order uid=%d order=%d", uid, order_id)
+            return _err(str(exc), 500)
 
     async def promo_create_order_api(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3046,11 +3118,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await pool.fetch(
-            "SELECT id, description, status, created_at FROM error_reports "
-            "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
-            uid,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT id, description, status, created_at FROM error_reports "
+                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("my_error_reports uid=%d", uid)
+            return _err(str(exc), 500)
         return _json_resp({"reports": [
             {
                 "id": r["id"],
@@ -3799,20 +3875,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        alerts = await pool.fetch(
-            "SELECT id, alert_type, severity, title, description, target_type, "
-            "is_active, first_seen_at, resolved_at "
-            "FROM infrastructure_alerts WHERE owner_id=$1 AND is_active=TRUE "
-            "ORDER BY first_seen_at DESC LIMIT 20",
-            uid,
-        )
-        recovery = await pool.fetch(
-            "SELECT id, recovery_type, target_type, trigger, action, status, "
-            "severity, created_at, completed_at "
-            "FROM recovery_events WHERE owner_id=$1 "
-            "ORDER BY created_at DESC LIMIT 20",
-            uid,
-        )
+        try:
+            alerts = await pool.fetch(
+                "SELECT id, alert_type, severity, title, description, target_type, "
+                "is_active, first_seen_at, resolved_at "
+                "FROM infrastructure_alerts WHERE owner_id=$1 AND is_active=TRUE "
+                "ORDER BY first_seen_at DESC LIMIT 20",
+                uid,
+            )
+        except Exception:
+            log.exception("infra_health_overview alerts uid=%d", uid)
+            alerts = []
+        try:
+            recovery = await pool.fetch(
+                "SELECT id, recovery_type, target_type, trigger, action, status, "
+                "severity, created_at, completed_at "
+                "FROM recovery_events WHERE owner_id=$1 "
+                "ORDER BY created_at DESC LIMIT 20",
+                uid,
+            )
+        except Exception:
+            log.exception("infra_health_overview recovery uid=%d", uid)
+            recovery = []
         return _json_resp({
             "alerts": [dict(a) for a in alerts],
             "recovery": [dict(r) for r in recovery],
@@ -3867,40 +3951,51 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT gpp.id, gpp.asset_type, gpp.name_pattern, gpp.status,
-                   gpp.created_at, gpp.updated_at,
-                   COUNT(gpt.id) AS total_targets,
-                   COUNT(gpt.id) FILTER (WHERE gpt.status='done') AS done_targets,
-                   COUNT(gpt.id) FILTER (WHERE gpt.status='failed') AS failed_targets
-            FROM global_presence_plans gpp
-            LEFT JOIN global_presence_targets gpt ON gpt.plan_id = gpp.id
-            WHERE gpp.owner_id=$1
-            GROUP BY gpp.id, gpp.asset_type, gpp.name_pattern,
-                     gpp.status, gpp.created_at, gpp.updated_at
-            ORDER BY gpp.created_at DESC LIMIT 20
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT gpp.id, gpp.asset_type, gpp.name_pattern, gpp.status,
+                       gpp.created_at, gpp.updated_at,
+                       COUNT(gpt.id) AS total_targets,
+                       COUNT(gpt.id) FILTER (WHERE gpt.status='done') AS done_targets,
+                       COUNT(gpt.id) FILTER (WHERE gpt.status='failed') AS failed_targets
+                FROM global_presence_plans gpp
+                LEFT JOIN global_presence_targets gpt ON gpt.plan_id = gpp.id
+                WHERE gpp.owner_id=$1
+                GROUP BY gpp.id, gpp.asset_type, gpp.name_pattern,
+                         gpp.status, gpp.created_at, gpp.updated_at
+                ORDER BY gpp.created_at DESC LIMIT 20
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("global_presence_plans uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def global_presence_plan_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        plan_id = int(request.match_info["plan_id"])
-        plan = await pool.fetchrow(
-            "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
-        )
-        if not plan:
-            return _err("not found", 404)
-        targets = await pool.fetch(
-            "SELECT country, city, language, asset_type, planned_name, status, error_message "
-            "FROM global_presence_targets WHERE plan_id=$1 ORDER BY status, country, city LIMIT 100",
-            plan_id,
-        )
-        return _json_resp({"plan": dict(plan), "targets": [dict(t) for t in targets]})
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        try:
+            plan = await pool.fetchrow(
+                "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
+            )
+            if not plan:
+                return _err("not found", 404)
+            targets = await pool.fetch(
+                "SELECT country, city, language, asset_type, planned_name, status, error_message "
+                "FROM global_presence_targets WHERE plan_id=$1 ORDER BY status, country, city LIMIT 100",
+                plan_id,
+            )
+            return _json_resp({"plan": dict(plan), "targets": [dict(t) for t in targets]})
+        except Exception as exc:
+            log.exception("global_presence_plan_detail uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
 
     # ── Mass Ops ──────────────────────────────────────────────────────────────
 
@@ -4250,39 +4345,50 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT cm.id, cm.name, cm.enabled, cm.source_channel, cm.delay_minutes,
-                   COUNT(DISTINCT mt.id) AS targets_count,
-                   COUNT(mq.id) FILTER (WHERE mq.status='pending') AS pending_posts,
-                   cm.created_at
-            FROM content_meshes cm
-            LEFT JOIN mesh_targets mt ON mt.mesh_id = cm.id
-            LEFT JOIN mesh_queue mq ON mq.mesh_id = cm.id
-            WHERE cm.owner_id=$1
-            GROUP BY cm.id, cm.name, cm.enabled, cm.source_channel,
-                     cm.delay_minutes, cm.created_at
-            ORDER BY cm.id DESC
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT cm.id, cm.name, cm.enabled, cm.source_channel, cm.delay_minutes,
+                       COUNT(DISTINCT mt.id) AS targets_count,
+                       COUNT(mq.id) FILTER (WHERE mq.status='pending') AS pending_posts,
+                       cm.created_at
+                FROM content_meshes cm
+                LEFT JOIN mesh_targets mt ON mt.mesh_id = cm.id
+                LEFT JOIN mesh_queue mq ON mq.mesh_id = cm.id
+                WHERE cm.owner_id=$1
+                GROUP BY cm.id, cm.name, cm.enabled, cm.source_channel,
+                         cm.delay_minutes, cm.created_at
+                ORDER BY cm.id DESC
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("content_meshes_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def content_mesh_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        mesh_id = int(request.match_info["mesh_id"])
-        mesh = await pool.fetchrow(
-            "SELECT enabled FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid
-        )
-        if not mesh:
-            return _err("not found", 404)
-        new_state = not mesh["enabled"]
-        await pool.execute(
-            "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, mesh_id
-        )
-        return _json_resp({"enabled": new_state})
+        try:
+            mesh_id = int(request.match_info["mesh_id"])
+        except (KeyError, ValueError):
+            return _err("bad mesh_id", 400)
+        try:
+            mesh = await pool.fetchrow(
+                "SELECT enabled FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid
+            )
+            if not mesh:
+                return _err("not found", 404)
+            new_state = not mesh["enabled"]
+            await pool.execute(
+                "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, mesh_id
+            )
+            return _json_resp({"enabled": new_state})
+        except Exception as exc:
+            log.exception("content_mesh_toggle uid=%d mesh=%d", uid, mesh_id)
+            return _err(str(exc), 500)
 
     # ── Narrative Engine ──────────────────────────────────────────────────────
 
@@ -4290,29 +4396,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
-            "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 30",
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
+                "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 30",
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("narrative_campaigns_list uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def narrative_campaign_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        cid = int(request.match_info["campaign_id"])
-        campaign = await pool.fetchrow(
-            "SELECT * FROM narrative_campaigns WHERE id=$1 AND owner_id=$2", cid, uid
-        )
-        if not campaign:
-            return _err("not found", 404)
-        posts = await pool.fetch(
-            "SELECT channel_username, angle, status, scheduled_at, published_at "
-            "FROM narrative_posts WHERE campaign_id=$1 ORDER BY scheduled_at LIMIT 50",
-            cid,
-        )
-        return _json_resp({"campaign": dict(campaign), "posts": [dict(p) for p in posts]})
+        try:
+            cid = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            campaign = await pool.fetchrow(
+                "SELECT * FROM narrative_campaigns WHERE id=$1 AND owner_id=$2", cid, uid
+            )
+            if not campaign:
+                return _err("not found", 404)
+            posts = await pool.fetch(
+                "SELECT channel_username, angle, status, scheduled_at, published_at "
+                "FROM narrative_posts WHERE campaign_id=$1 ORDER BY scheduled_at LIMIT 50",
+                cid,
+            )
+            return _json_resp({"campaign": dict(campaign), "posts": [dict(p) for p in posts]})
+        except Exception as exc:
+            log.exception("narrative_campaign_detail uid=%d cid=%d", uid, cid)
+            return _err(str(exc), 500)
 
     # ── Self Promo ───────────────────────────────────────────────────────────
 
