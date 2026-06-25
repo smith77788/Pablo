@@ -302,6 +302,27 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .acc-trust{height:2px;border-radius:1px;background:var(--sep);margin-top:5px;overflow:hidden;width:80px}
 .acc-trust-fill{height:100%;border-radius:1px}
 .acc-right{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+/* ─── Dashboard KPI scroll ──────────────────────────────── */
+.kpi-scroll{display:flex;gap:8px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
+.kpi-scroll::-webkit-scrollbar{display:none}
+.kpi-chip{background:var(--bg2);border-radius:14px;padding:12px 16px;flex-shrink:0;min-width:86px;cursor:pointer;transition:transform .12s,background .15s;border:1.5px solid transparent}
+.kpi-chip:active{transform:scale(.94)}
+.kpi-chip.hi{border-color:rgba(59,130,246,.35)}
+.kpi-chip-val{font-size:26px;font-weight:700;letter-spacing:-.5px;line-height:1;margin-bottom:5px}
+.kpi-chip-lbl{font-size:11px;color:var(--hint);white-space:nowrap}
+/* ─── Mini bar chart ─────────────────────────────────────── */
+.mini-chart-wrap{margin:0 16px;background:var(--bg2);border-radius:14px;padding:14px}
+.mini-bars{display:flex;align-items:flex-end;gap:4px;height:52px;margin-bottom:4px}
+.mini-bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+.mini-bar-item{width:100%;border-radius:3px 3px 0 0;min-height:3px;transition:height .5s}
+.mini-bar-lbl{font-size:9px;color:var(--hint)}
+/* ─── Quick action tiles ─────────────────────────────────── */
+.qa-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 4px}
+.qa-tile{background:var(--bg2);border-radius:14px;padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;transition:transform .12s,opacity .12s;text-align:center}
+.qa-tile:active{transform:scale(.93);opacity:.7}
+.qa-tile-ico{font-size:26px;line-height:1}
+.qa-tile-lbl{font-size:11px;font-weight:600;color:var(--hint);line-height:1.2}
+.qa-tile-val{font-size:18px;font-weight:700;margin-top:2px}
 </style>
 </head>
 <body>
@@ -314,19 +335,49 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🤖 BotMother</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
-      <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Real-time</span></div>
+      <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
     </div>
   </div>
   <div class="sb">
-    <div class="dash-cards" id="cards">
-      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
-      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
-      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
-      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
-      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
-      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
+    <!-- KPI scroll row -->
+    <div class="kpi-scroll" id="kpiScroll">
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
+      <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
     </div>
-    <div class="sec"><span class="ld" style="margin-right:5px"></span>Последняя активность</div>
+    <!-- Quick actions -->
+    <div class="sec">Быстрые действия</div>
+    <div class="qa-grid">
+      <div class="qa-tile" onclick="goTab('bots')"><div class="qa-tile-ico">🤖</div><div class="qa-tile-lbl">Боты</div><div class="qa-tile-val" id="qa-bots">—</div></div>
+      <div class="qa-tile" onclick="goTab('accounts')"><div class="qa-tile-ico">📱</div><div class="qa-tile-lbl">Аккаунты</div><div class="qa-tile-val" id="qa-accs">—</div></div>
+      <div class="qa-tile" onclick="openChannels()"><div class="qa-tile-ico">📡</div><div class="qa-tile-lbl">Каналы</div><div class="qa-tile-val" id="qa-chs">—</div></div>
+      <div class="qa-tile" onclick="goTab('broadcasts')"><div class="qa-tile-ico">📨</div><div class="qa-tile-lbl">Рассылки</div><div class="qa-tile-val" id="qa-bc">—</div></div>
+      <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div><div class="qa-tile-val" id="qa-ops">—</div></div>
+      <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div><div class="qa-tile-val" style="color:var(--blue)">→</div></div>
+    </div>
+    <!-- Activity chart -->
+    <div class="sec-row" style="margin-top:8px">
+      <div class="sec">Активность за 7 дней</div>
+      <span class="sec-btn" onclick="openAnalytics()">Подробнее →</span>
+    </div>
+    <div class="mini-chart-wrap" id="miniChart">
+      <div class="mini-bars">
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:30px"></div><div class="mini-bar-lbl">Пн</div></div>
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:45px"></div><div class="mini-bar-lbl">Вт</div></div>
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:20px"></div><div class="mini-bar-lbl">Ср</div></div>
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:38px"></div><div class="mini-bar-lbl">Чт</div></div>
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:25px"></div><div class="mini-bar-lbl">Пт</div></div>
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:50px"></div><div class="mini-bar-lbl">Сб</div></div>
+        <div class="mini-bar-col"><div class="sk mini-bar-item" style="height:15px"></div><div class="mini-bar-lbl">Вс</div></div>
+      </div>
+    </div>
+    <!-- Recent activity -->
+    <div class="sec-row" style="margin-top:8px">
+      <div class="sec"><span class="ld" style="margin-right:5px"></span>Последние события</div>
+      <span class="sec-btn" onclick="goTab('more')">Все →</span>
+    </div>
     <div class="lst" id="actList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -2699,7 +2750,7 @@ let REF_CODE = null;
     loadSub();
     loadRef();
   } catch(e) {
-    document.getElementById('cards').innerHTML = `<div class="err-msg" style="grid-column:span 2">⚠️ ${esc(e.message)}</div>`;
+    document.getElementById('kpiScroll').innerHTML = `<div class="err-msg">⚠️ ${esc(e.message)}</div>`;
   }
 })();
 
@@ -2784,27 +2835,54 @@ async function loadHome() {
     renderAct(d.recent_activity||[]);
     updateMoreStats(d);
   } catch(e) {
-    document.getElementById('cards').innerHTML = `<div class="err-msg" style="grid-column:span 2">Ошибка: ${esc(e.message)}</div>`;
+    document.getElementById('kpiScroll').innerHTML = `<div class="err-msg">Ошибка: ${esc(e.message)}</div>`;
   }
 }
 
 function renderCards(d) {
-  const items = [
-    {ico:'🤖', val:d.bots,             lbl:'Боты',           tab:'bots',       color:'var(--blue)',   badge: d.bots?'Управление':'Добавить'},
-    {ico:'📱', val:d.accounts,          lbl:'Аккаунты',       tab:'accounts',   color:'var(--teal)',   badge: d.accounts?'Активные':'Добавить'},
-    {ico:'👥', val:d.subscribers,       lbl:'Подписчики',     tab:'bots',       color:'var(--green)',  badge: d.subscribers?'Всего':'Нет данных'},
-    {ico:'📨', val:d.campaigns_active,  lbl:'Кампании',       tab:'broadcasts', color:'var(--purple)', badge: d.campaigns_active?'Активных':'Создать'},
-    {ico:'🔄', val:d.funnels_active,    lbl:'В воронках',     tab:'broadcasts', color:'var(--orange)', badge: d.funnels_active?'Активных':'Нет'},
-    {ico:'⚙️', val:d.ops_running,       lbl:'Операции',       tab:'more',       color:'var(--hint)',   badge: d.ops_running?'Работает':'Простой'},
+  // KPI scroll row
+  const kpis = [
+    {val:d.bots,        lbl:'🤖 Ботов',       tab:'bots',       color:'var(--blue)'},
+    {val:d.accounts,    lbl:'📱 Аккаунтов',    tab:'accounts',   color:'var(--teal)'},
+    {val:d.subscribers, lbl:'👥 Подписчиков',  tab:'bots',       color:'var(--green)'},
+    {val:d.channels,    lbl:'📡 Каналов',      tab:'accounts',   color:'var(--purple)'},
+    {val:d.campaigns_active, lbl:'📨 Кампаний', tab:'broadcasts', color:'var(--orange)'},
+    {val:d.funnels_active,   lbl:'🔄 Воронок',  tab:'broadcasts', color:'#f472b6'},
+    {val:d.ops_running, lbl:'⚙️ Операций',     tab:'more',       color:'var(--hint)'},
   ];
-  document.getElementById('cards').className = 'dash-cards';
-  document.getElementById('cards').innerHTML = items.map(c=>
-    `<div class="dash-card" onclick="goTab('${c.tab}')">
-      <div class="dash-card-ico">${c.ico}</div>
-      <div class="dash-card-val" style="color:${c.color}">${num(c.val)}</div>
-      <div class="dash-card-lbl">${c.lbl}</div>
-      <div class="dash-card-badge" style="background:rgba(255,255,255,.06);color:var(--hint)">${c.badge}</div>
+  document.getElementById('kpiScroll').innerHTML = kpis.map(k=>
+    `<div class="kpi-chip ${(k.val||0)>0?'hi':''}" onclick="goTab('${k.tab}')">
+      <div class="kpi-chip-val" style="color:${k.color}">${num(k.val)}</div>
+      <div class="kpi-chip-lbl">${k.lbl}</div>
     </div>`).join('');
+  // Quick action counts
+  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  s('qa-bots',num(d.bots)); s('qa-accs',num(d.accounts)); s('qa-chs',num(d.channels));
+  s('qa-bc',num(d.campaigns_active)); s('qa-ops',d.ops_running?'🟡 '+d.ops_running:'—');
+  // Mini chart from recent_activity
+  renderMiniChart(d.recent_activity||[]);
+}
+
+function renderMiniChart(acts) {
+  const el = document.getElementById('miniChart');
+  if (!el) return;
+  const labels = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  const counts = [0,0,0,0,0,0,0];
+  acts.forEach(a => {
+    if (!a.created_at) return;
+    const dow = (new Date(a.created_at).getDay()+6)%7;
+    counts[dow]++;
+  });
+  const max = Math.max(...counts,1);
+  const total = counts.reduce((a,b)=>a+b,0);
+  el.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <span style="font-size:12px;font-weight:600;color:var(--hint)">События по дням</span>
+    <span class="badge b-bl">${total} всего</span>
+  </div>
+  <div class="mini-bars">${labels.map((l,i)=>`<div class="mini-bar-col">
+    <div class="mini-bar-item" style="height:${Math.max(3,Math.round(counts[i]/max*48))}px;background:${counts[i]>0?'linear-gradient(to top,var(--btn),rgba(59,130,246,.45))':'rgba(255,255,255,.06)'}"></div>
+    <div class="mini-bar-lbl">${l}</div>
+  </div>`).join('')}</div>`;
 }
 
 function renderAct(items) {
