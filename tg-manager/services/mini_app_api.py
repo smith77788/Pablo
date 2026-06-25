@@ -105,12 +105,15 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def _apply_inline_migrations(application: web.Application) -> None:
-        try:
-            await pool.execute(
-                "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT"
-            )
-        except Exception:
-            log.exception("inline migration failed")
+        stmts = [
+            "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
+            "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
+        ]
+        for stmt in stmts:
+            try:
+                await pool.execute(stmt)
+            except Exception:
+                log.exception("inline migration failed: %s", stmt)
 
     app.on_startup.append(_apply_inline_migrations)
 
@@ -1312,6 +1315,75 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_factory_status uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def bot_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        token = str(data.get("token", "")).strip()
+        if not token:
+            return _err("token обязателен", 400)
+        import re as _re
+        if not _re.match(r'^\d+:[A-Za-z0-9_-]{30,}$', token):
+            return _err("Неверный формат токена. Пример: 1234567890:AAHxxxxxxxx...", 400)
+        try:
+            import aiohttp as _aio
+            async with _aio.ClientSession() as _http:
+                async with _http.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=_aio.ClientTimeout(total=10),
+                ) as _resp:
+                    me = await _resp.json()
+            if not me.get("ok"):
+                desc = me.get("description") or "неверный токен"
+                return _err(f"Telegram API: {desc}", 400)
+            bot_info = me["result"]
+            bot_id = bot_info["id"]
+            username = bot_info.get("username", "")
+            first_name = bot_info.get("first_name", "")
+            from database import db as _db
+            result = await _db.add_bot(pool, token, bot_id, username, first_name, uid)
+            if result == "taken":
+                return _err("Этот бот уже добавлен другим пользователем", 409)
+            already = (result is False)
+            if already:
+                return _json_resp({
+                    "ok": True, "already_exists": True,
+                    "bot_id": bot_id, "username": username, "first_name": first_name,
+                })
+            return _json_resp({
+                "ok": True, "already_exists": False,
+                "bot_id": bot_id, "username": username, "first_name": first_name,
+            })
+        except Exception as exc:
+            log.exception("bot_add uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def bot_remove(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+            )
+            if not row:
+                return _err("Бот не найден", 404)
+            await pool.execute(
+                "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1", bot_id
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("bot_remove uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
     # ── Persona Hub ───────────────────────────────────────────────────────────
 
     async def persona_list(request: web.Request) -> web.Response:
@@ -1680,6 +1752,56 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception as exc:
             log.exception("node_threads uid=%d node=%d", uid, node_id)
+            return _err(str(exc), 500)
+
+    async def node_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        tg_chat_id_raw = data.get("tg_chat_id")
+        node_type = str(data.get("node_type", "workspace")).strip()
+        name = str(data.get("name", "")).strip()
+        if not tg_chat_id_raw or not name:
+            return _err("tg_chat_id и name обязательны", 400)
+        if node_type not in ("proxies", "accounts", "tasks", "alerts", "workspace"):
+            node_type = "workspace"
+        try:
+            tg_chat_id = int(str(tg_chat_id_raw).replace("-100", "-100").strip())
+        except (ValueError, TypeError):
+            return _err("tg_chat_id должен быть числом (например -1001234567890)", 400)
+        try:
+            nid = await pool.fetchval(
+                """INSERT INTO bm_telegram_nodes (owner_id, tg_chat_id, node_type, name)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (owner_id, tg_chat_id, node_type) DO UPDATE
+                     SET name=EXCLUDED.name, is_active=TRUE
+                   RETURNING id""",
+                uid, tg_chat_id, node_type, name,
+            )
+            return _json_resp({"id": nid, "ok": True})
+        except Exception as exc:
+            log.exception("node_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def node_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2", node_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("node_delete uid=%d node=%d", uid, node_id)
             return _err(str(exc), 500)
 
     # ── Gift Transfer ──────────────────────────────────────────────────────────
@@ -3540,6 +3662,66 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         all_tags = [r["tag"] for r in tags_row]
         return _json_resp({"contacts": rows, "total": total, "offset": offset, "all_tags": all_tags})
 
+    async def crm_contact_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        first_name = str(data.get("first_name", "")).strip()
+        last_name = str(data.get("last_name", "")).strip() or None
+        username = str(data.get("username", "")).strip().lstrip("@") or None
+        phone = str(data.get("phone", "")).strip() or None
+        tg_user_id_raw = data.get("tg_user_id")
+        tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()]
+        notes = str(data.get("notes", "")).strip() or None
+        if not first_name and not username and not phone:
+            return _err("Укажите имя, @username или номер телефона", 400)
+        tg_user_id = int(tg_user_id_raw) if tg_user_id_raw else None
+        if not tg_user_id:
+            import random as _rand
+            tg_user_id = _rand.randint(2_000_000_000, 9_000_000_000)
+        try:
+            cid = await pool.fetchval(
+                """INSERT INTO crm_contacts
+                   (owner_id, tg_user_id, first_name, last_name, username, phone, tags, notes, source)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+                   ON CONFLICT (owner_id, tg_user_id) DO UPDATE
+                     SET first_name=EXCLUDED.first_name,
+                         last_name=EXCLUDED.last_name,
+                         username=EXCLUDED.username,
+                         phone=EXCLUDED.phone,
+                         tags=EXCLUDED.tags,
+                         notes=EXCLUDED.notes,
+                         updated_at=now()
+                   RETURNING id""",
+                uid, tg_user_id, first_name or None, last_name, username, phone,
+                tags, notes,
+            )
+            return _json_resp({"id": cid, "ok": True})
+        except Exception as exc:
+            log.exception("crm_contact_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def crm_contact_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            contact_id = int(request.match_info["contact_id"])
+        except (KeyError, ValueError):
+            return _err("bad contact_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", contact_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("crm_contact_delete uid=%d cid=%d", uid, contact_id)
+            return _err(str(exc), 500)
+
     async def bot_audience(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -4795,12 +4977,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("auth")
         try:
             rows = await pool.fetch(
-                "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count "
-                "FROM self_promo_templates ORDER BY id"
+                "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count, "
+                "CASE WHEN owner_id=$1 THEN true ELSE false END AS is_mine "
+                "FROM self_promo_templates WHERE owner_id=$1 OR owner_id IS NULL ORDER BY id",
+                uid,
             )
             return _json_resp([dict(r) for r in rows])
         except Exception as exc:
             log.exception("self_promo_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def self_promo_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        style = data.get("style", "direct")
+        title = str(data.get("title", "")).strip()
+        content = str(data.get("content", "")).strip()
+        cta_text = str(data.get("cta_text", "")).strip() or None
+        cta_url = str(data.get("cta_url", "")).strip() or None
+        add_referral = bool(data.get("add_referral", False))
+        if not title or not content:
+            return _err("title и content обязательны", 400)
+        if style not in ("direct", "native"):
+            style = "direct"
+        if len(content) > 4096:
+            return _err("content слишком длинный (макс 4096 символов)", 400)
+        try:
+            tid = await pool.fetchval(
+                """INSERT INTO self_promo_templates
+                   (owner_id, style, title, content, cta_text, cta_url, add_referral)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
+                uid, style, title, content, cta_text, cta_url, add_referral,
+            )
+            return _json_resp({"id": tid, "ok": True})
+        except Exception as exc:
+            log.exception("self_promo_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def self_promo_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("bad tpl_id", 400)
+        try:
+            result = await pool.execute(
+                "DELETE FROM self_promo_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
+            )
+            if result == "DELETE 0":
+                return _err("Шаблон не найден или нельзя удалить системный шаблон", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("self_promo_delete uid=%d tpl=%d", uid, tpl_id)
             return _err(str(exc), 500)
 
     async def self_promo_toggle(request: web.Request) -> web.Response:
@@ -5053,6 +5288,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     # Bots
     app.router.add_get("/api/miniapp/bots", bots)
+    app.router.add_post("/api/miniapp/bot/add", bot_add)
+    app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)
     app.router.add_get("/api/miniapp/bot/{bot_id}/auto_replies", bot_auto_replies)
     app.router.add_post("/api/miniapp/bot/{bot_id}/auto_reply", create_auto_reply)
@@ -5094,6 +5331,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/network_broadcast", network_broadcast)
     # CRM
     app.router.add_get("/api/miniapp/crm/contacts", crm_contacts)
+    app.router.add_post("/api/miniapp/crm/contact", crm_contact_create)
+    app.router.add_delete("/api/miniapp/crm/contact/{contact_id}", crm_contact_delete)
     # Audience
     app.router.add_get("/api/miniapp/bot/{bot_id}/audience", bot_audience)
     # Keywords / Search Rankings
@@ -5226,6 +5465,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/ai_memory/{mem_id}", ai_memory_delete)
     # Nodes Hub
     app.router.add_get("/api/miniapp/nodes", nodes_list)
+    app.router.add_post("/api/miniapp/node", node_create)
+    app.router.add_delete("/api/miniapp/node/{node_id}", node_delete)
     app.router.add_get("/api/miniapp/node/{node_id}/threads", node_threads)
     # Gift Transfer
     app.router.add_get("/api/miniapp/gifts", gift_inventory)
@@ -5294,6 +5535,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/narrative/{campaign_id}", narrative_campaign_detail)
     # Self Promo
     app.router.add_get("/api/miniapp/self_promo", self_promo_list)
+    app.router.add_post("/api/miniapp/self_promo/template", self_promo_create)
+    app.router.add_delete("/api/miniapp/self_promo/{tpl_id}", self_promo_delete)
     app.router.add_put("/api/miniapp/self_promo/{tpl_id}/toggle", self_promo_toggle)
     app.router.add_post("/api/miniapp/self_promo/{tpl_id}/launch", self_promo_launch)
     # Semantic Memory

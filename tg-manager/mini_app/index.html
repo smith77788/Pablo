@@ -248,7 +248,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-bots">
   <div class="hdr">
     <div class="hdr-title">🤖 Мои боты</div>
-    <div class="hdr-meta"><div class="hdr-user" id="bots-cnt"></div></div>
+    <div class="hdr-meta">
+      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBotAddModal()">+ Добавить</button>
+    </div>
   </div>
   <div class="sb">
     <div class="sec">Управляемые боты</div>
@@ -656,6 +658,116 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Modal: Add Bot -->
+<div class="mbg" id="mo-bot-add" onclick="if(event.target===this)closeModal('mo-bot-add')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-add')">✕</div>
+    <div class="modal-title">🤖 Добавить бота</div>
+    <div class="field">
+      <label>Bot Token *</label>
+      <input type="text" id="botAddToken" placeholder="1234567890:AAFxxxxxxxx..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px;font-family:monospace">
+    </div>
+    <div class="field" style="font-size:12px;color:var(--hint)">Получите токен у @BotFather в Telegram</div>
+    <div class="field-err" id="botAddErr"></div>
+    <button class="btn btn-p" id="botAddBtn" onclick="submitBotAdd()" style="width:100%">➕ Добавить бота</button>
+  </div>
+</div>
+
+<!-- Modal: Add Node -->
+<div class="mbg" id="mo-node" onclick="if(event.target===this)closeModal('mo-node')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-node')">✕</div>
+    <div class="modal-title">🖥 Добавить ноду</div>
+    <div class="field">
+      <label>Chat ID форум-группы *</label>
+      <input type="number" id="nodeChatId" placeholder="-1001234567890" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    </div>
+    <div class="field">
+      <label>Название ноды *</label>
+      <input type="text" id="nodeName" placeholder="Главный воркспейс" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Тип ноды</label>
+      <select id="nodeType" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="workspace">🖥 Воркспейс (общий)</option>
+        <option value="accounts">📱 Аккаунты</option>
+        <option value="proxies">🌐 Прокси</option>
+        <option value="tasks">⚙️ Задачи</option>
+        <option value="alerts">🔔 Оповещения</option>
+      </select>
+    </div>
+    <div class="field-err" id="nodeErr"></div>
+    <button class="btn btn-p" id="nodeBtn" onclick="submitNodeCreate()" style="width:100%">➕ Добавить ноду</button>
+  </div>
+</div>
+
+<!-- Modal: Add CRM Contact -->
+<div class="mbg" id="mo-crm-contact" onclick="if(event.target===this)closeModal('mo-crm-contact')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-crm-contact')">✕</div>
+    <div class="modal-title">👤 Новый контакт</div>
+    <div class="field">
+      <label>Имя *</label>
+      <input type="text" id="crmFirstName" placeholder="Имя контакта" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Фамилия</label>
+      <input type="text" id="crmLastName" placeholder="Фамилия" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>@username</label>
+      <input type="text" id="crmUsername" placeholder="username (без @)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Telegram ID</label>
+      <input type="number" id="crmTgId" placeholder="Оставьте пустым для ручного контакта" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    </div>
+    <div class="field">
+      <label>Телефон</label>
+      <input type="text" id="crmPhone" placeholder="+7 999 123-45-67" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Теги (через запятую)</label>
+      <input type="text" id="crmTags" placeholder="клиент, горячий, vip" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field-err" id="crmContactErr"></div>
+    <button class="btn btn-p" id="crmContactBtn" onclick="submitCrmContactCreate()" style="width:100%">➕ Добавить контакт</button>
+  </div>
+</div>
+
+<!-- Modal: Create Self Promo Template -->
+<div class="mbg" id="mo-self-promo" onclick="if(event.target===this)closeModal('mo-self-promo')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-self-promo')">✕</div>
+    <div class="modal-title">📣 Новый шаблон</div>
+    <div class="field">
+      <label>Стиль</label>
+      <select id="spStyle" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="direct">🎯 Прямая реклама</option>
+        <option value="native">💡 Нативная интеграция</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Заголовок *</label>
+      <input type="text" id="spTitle" placeholder="Название шаблона" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Текст сообщения * (поддерживает HTML)</label>
+      <textarea id="spContent" rows="5" placeholder="&lt;b&gt;Заголовок&lt;/b&gt;&#10;&#10;Текст рекламы..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
+    </div>
+    <div class="field">
+      <label>Текст кнопки (CTA)</label>
+      <input type="text" id="spCtaText" placeholder="🚀 Перейти" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Ссылка кнопки (CTA URL)</label>
+      <input type="text" id="spCtaUrl" placeholder="https://t.me/MyBot" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field-err" id="spCreateErr"></div>
+    <button class="btn btn-p" id="spCreateBtn" onclick="submitSelfPromoCreate()" style="width:100%">📣 Создать шаблон</button>
+  </div>
+</div>
+
 <!-- Modal: Clone Adapt -->
 <div class="mbg" id="mo-clone" onclick="if(event.target===this)closeModal('mo-clone')">
   <div class="modal">
@@ -754,7 +866,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ SELF PROMO ══════════════════════ -->
 <div class="screen" id="s-selfpromo">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📣 Self Promo</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📣 Self Promo</div>
+    <div class="hdr-meta">
+      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
+    </div>
+  </div>
   <div class="sub-sb">
     <div class="sec">Шаблоны самопиара</div>
     <div class="lst" id="spList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -874,7 +992,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">👤 CRM — Контакты</div>
-    <div class="hdr-meta"><div class="hdr-user" id="crm-cnt"></div></div>
+    <div class="hdr-meta">
+      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openCrmContactModal()">+ Добавить</button>
+    </div>
   </div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px">
@@ -1365,6 +1485,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🖥 Nodes Hub</div>
+    <div class="hdr-meta">
+      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openNodeModal()">+ Добавить</button>
+    </div>
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
@@ -1372,7 +1495,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       Чтобы подключить ноду:<br>
       1. Создайте Forum Group в Telegram<br>
       2. Добавьте бота в группу как администратора<br>
-      3. В боте: Ещё → Nodes Hub → Добавить воркспейс
+      3. Скопируйте Chat ID и нажмите «+ Добавить»
     </div>
     <div id="nodesStats" style="display:flex;gap:10px;padding:4px 0 10px"></div>
     <div class="lst" id="nodesList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2468,16 +2591,20 @@ async function loadBots() {
     BOTS = d.bots||[];
     document.getElementById('bots-cnt').textContent = BOTS.length+' ботов';
     const el = document.getElementById('botList');
-    if (!BOTS.length) { el.innerHTML=empty('🤖','Нет ботов','Добавьте бота через меню в Telegram'); return; }
+    if (!BOTS.length) { el.innerHTML=empty('🤖','Нет ботов','Нажмите «+ Добавить» чтобы подключить бота'); return; }
     el.innerHTML = BOTS.map(b=>{
       const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-      return `<div class="li tap" onclick="openBot(${b.bot_id})">
-        <div class="ava ava-blue">🤖</div>
-        <div class="li-body">
+      return `<div class="li">
+        <div class="ava ava-blue tap" onclick="openBot(${b.bot_id})">🤖</div>
+        <div class="li-body tap" onclick="openBot(${b.bot_id})">
           <div class="li-name">${esc(name)}</div>
           <div class="li-sub">${b.is_active?'🟢 Активен':'🔴 Выкл'} · ${num(b.subscriber_count||0)} подп.</div>
         </div>
-        <div class="li-right"><span class="badge b-bl">${num(b.subscriber_count||0)}</span><span class="chev">›</span></div>
+        <div class="li-right" style="display:flex;gap:6px;align-items:center">
+          <span class="badge b-bl">${num(b.subscriber_count||0)}</span>
+          <span class="chev tap" onclick="openBot(${b.bot_id})">›</span>
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:rgba(239,68,68,.18);color:#f87171" onclick="removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</button>
+        </div>
       </div>`;
     }).join('');
   } catch(e) {
@@ -2498,6 +2625,15 @@ async function openBot(botId) {
   } catch(e) {
     txt('bd-body', `<div class="err-msg">${esc(e.message)}</div>`);
   }
+}
+
+async function removeBotConfirm(botId, name) {
+  if (!confirm(`Отключить бота ${name}? Бот будет деактивирован.`)) return;
+  try {
+    await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
+    toast('🗑 Бот деактивирован');
+    loadBots();
+  } catch(e) { toast('⚠️ '+e.message); }
 }
 
 function buildBotDetail(d) {
@@ -3510,19 +3646,21 @@ async function loadCRM(append) {
     }
     const contacts = d.contacts||[];
     if (!contacts.length && !append) {
-      txt('crmList', empty('👤','Нет контактов','Контакты добавляются через DM-кампании и аудиторию'));
+      txt('crmList', empty('👤','Нет контактов','Нажмите «+ Добавить» чтобы создать контакт вручную'));
       return;
     }
     const html = contacts.map(c=>{
       const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || (c.username?'@'+c.username:'User #'+c.tg_user_id);
       const tags = (c.tags||[]).map(t=>`<span class="badge b-gy" style="font-size:10px">#${esc(t)}</span>`).join(' ');
-      return `<div class="li" style="cursor:default">
+      return `<div class="li">
         <div class="ava ava-red">👤</div>
         <div class="li-body">
           <div class="li-name">${esc(name)}${c.username?` <span style="color:var(--hint)">@${esc(c.username)}</span>`:''}</div>
-          <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'}</div>
+          <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'} ${c.source?`· <span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}</div>
         </div>
-        ${c.source?`<span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}
+        <div class="li-right">
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:rgba(239,68,68,.18);color:#f87171" onclick="deleteCrmContact(${c.id})">🗑</button>
+        </div>
       </div>`;
     }).join('');
     if (append) document.getElementById('crmList').insertAdjacentHTML('beforeend', html);
@@ -4980,15 +5118,18 @@ async function openNodes() {
       <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${active}</div><div class="kpi-lbl">Активных</div></div>
     `);
     txt('m-nodes-val',`${active} активных нод`);
-    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Подключите Forum Group через бота (инструкция выше)')); return; }
+    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Нажмите «+ Добавить» чтобы зарегистрировать Forum Group')); return; }
     txt('nodesList', nodes.map(n=>`
-      <div class="row tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">
-        <div class="row-ico" style="background:rgba(34,197,94,.16)">${n.is_active?'🟢':'⚫'}</div>
-        <div class="row-body">
+      <div class="row">
+        <div class="row-ico tap" style="background:rgba(34,197,94,.16)" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">${n.is_active?'🟢':'⚫'}</div>
+        <div class="row-body tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">
           <div class="row-name">${esc(n.name||'Node')} ${NODE_TYPE[n.node_type]||n.node_type}</div>
           <div class="row-val">${n.open_threads||0} открытых топиков · ${n.total_threads||0} всего</div>
         </div>
-        <div class="row-right chev">›</div>
+        <div class="row-right" style="display:flex;gap:6px;align-items:center">
+          <span class="chev" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">›</span>
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:rgba(239,68,68,.18);color:#f87171" onclick="deleteNode(${n.id})">🗑</button>
+        </div>
       </div>
     `).join(''));
   } catch(e) {
@@ -7076,11 +7217,12 @@ async function openSelfPromo() {
           <div class="row-name">${styleLabel[r.style]||r.style} · ${esc(r.title)}</div>
           <div class="row-val">${esc((r.content||'').slice(0,80))}…</div>
           ${r.cta_text?`<div class="row-val" style="color:var(--accent)">CTA: ${esc(r.cta_text)}</div>`:''}
-          <div class="row-val" style="color:var(--hint)">Использований: ${r.use_count||0} · ${r.is_active?'🟢 Активен':'🔴 Выключен'}</div>
+          <div class="row-val" style="color:var(--hint)">Использований: ${r.use_count||0} · ${r.is_active?'🟢 Активен':'🔴 Выключен'}${r.is_mine?' · ✏️ Мой':''}</div>
         </div>
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleSelfPromo(${r.id},this)">${r.is_active?'Выкл':'Вкл'}</button>
           ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Запуск</button>`:''}
+          ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:rgba(239,68,68,.18);color:#f87171" onclick="deleteSelfPromoTemplate(${r.id})">🗑</button>`:''}
         </div>
       </div>
     `).join(''));
@@ -7101,6 +7243,145 @@ async function launchSelfPromo(id,btn) {
     toast('🚀 Рассылка запущена');
   } catch(e) { toast('⚠️ '+e.message); }
   finally { btn.disabled=false; btn.textContent='▶ Запуск'; }
+}
+
+// ── Bot Add Modal ──────────────────────────────────────
+function openBotAddModal() {
+  document.getElementById('botAddToken').value = '';
+  document.getElementById('botAddErr').textContent = '';
+  showModal('mo-bot-add');
+}
+async function submitBotAdd() {
+  const token = document.getElementById('botAddToken').value.trim();
+  const errEl = document.getElementById('botAddErr');
+  const btn = document.getElementById('botAddBtn');
+  errEl.textContent = '';
+  if (!token) { errEl.textContent = 'Введите токен'; return; }
+  btn.disabled = true; btn.textContent = 'Проверяем...';
+  try {
+    const r = await api('/api/miniapp/bot/add', {method:'POST', body:{token}});
+    toast('✅ Бот @' + (r.username||r.first_name||'') + ' добавлен!');
+    closeModal('mo-bot-add');
+    loadBots();
+  } catch(e) { errEl.textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = '➕ Добавить бота'; }
+}
+
+// ── Node Modal ─────────────────────────────────────────
+function openNodeModal() {
+  document.getElementById('nodeChatId').value = '';
+  document.getElementById('nodeName').value = '';
+  document.getElementById('nodeType').value = 'workspace';
+  document.getElementById('nodeErr').textContent = '';
+  showModal('mo-node');
+}
+async function submitNodeCreate() {
+  const tg_chat_id = document.getElementById('nodeChatId').value.trim();
+  const name = document.getElementById('nodeName').value.trim();
+  const node_type = document.getElementById('nodeType').value;
+  const errEl = document.getElementById('nodeErr');
+  const btn = document.getElementById('nodeBtn');
+  errEl.textContent = '';
+  if (!tg_chat_id) { errEl.textContent = 'Введите Chat ID'; return; }
+  if (!name) { errEl.textContent = 'Введите название'; return; }
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    await api('/api/miniapp/node', {method:'POST', body:{tg_chat_id: parseInt(tg_chat_id), name, node_type}});
+    toast('✅ Нода добавлена');
+    closeModal('mo-node');
+    openNodes();
+  } catch(e) { errEl.textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = '➕ Добавить ноду'; }
+}
+async function deleteNode(nodeId) {
+  if (!confirm('Удалить ноду?')) return;
+  try {
+    await api('/api/miniapp/node/'+nodeId, {method:'DELETE'});
+    toast('🗑 Нода удалена');
+    openNodes();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+
+// ── CRM Contact Modal ─────────────────────────────────
+function openCrmContactModal() {
+  ['crmFirstName','crmLastName','crmUsername','crmTgId','crmPhone','crmTags'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('crmContactErr').textContent = '';
+  showModal('mo-crm-contact');
+}
+async function submitCrmContactCreate() {
+  const first_name = document.getElementById('crmFirstName').value.trim();
+  const last_name = document.getElementById('crmLastName').value.trim();
+  const username = document.getElementById('crmUsername').value.trim().replace(/^@/, '');
+  const tg_id_raw = document.getElementById('crmTgId').value.trim();
+  const phone = document.getElementById('crmPhone').value.trim();
+  const tags_raw = document.getElementById('crmTags').value.trim();
+  const errEl = document.getElementById('crmContactErr');
+  const btn = document.getElementById('crmContactBtn');
+  errEl.textContent = '';
+  if (!first_name) { errEl.textContent = 'Введите имя'; return; }
+  const body = {first_name};
+  if (last_name) body.last_name = last_name;
+  if (username) body.username = username;
+  if (tg_id_raw) body.tg_user_id = parseInt(tg_id_raw);
+  if (phone) body.phone = phone;
+  if (tags_raw) body.tags = tags_raw.split(',').map(t=>t.trim()).filter(Boolean);
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    await api('/api/miniapp/crm/contact', {method:'POST', body});
+    toast('✅ Контакт добавлен');
+    closeModal('mo-crm-contact');
+    openCRM();
+  } catch(e) { errEl.textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = '➕ Добавить контакт'; }
+}
+async function deleteCrmContact(contactId) {
+  if (!confirm('Удалить контакт?')) return;
+  try {
+    await api('/api/miniapp/crm/contact/'+contactId, {method:'DELETE'});
+    toast('🗑 Контакт удалён');
+    openCRM();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+
+// ── Self Promo Create Modal ────────────────────────────
+function openSelfPromoCreateModal() {
+  document.getElementById('spStyle').value = 'direct';
+  document.getElementById('spTitle').value = '';
+  document.getElementById('spContent').value = '';
+  document.getElementById('spCtaText').value = '';
+  document.getElementById('spCtaUrl').value = '';
+  document.getElementById('spCreateErr').textContent = '';
+  showModal('mo-self-promo');
+}
+async function submitSelfPromoCreate() {
+  const style = document.getElementById('spStyle').value;
+  const title = document.getElementById('spTitle').value.trim();
+  const content = document.getElementById('spContent').value.trim();
+  const cta_text = document.getElementById('spCtaText').value.trim();
+  const cta_url = document.getElementById('spCtaUrl').value.trim();
+  const errEl = document.getElementById('spCreateErr');
+  const btn = document.getElementById('spCreateBtn');
+  errEl.textContent = '';
+  if (!title) { errEl.textContent = 'Введите заголовок'; return; }
+  if (!content) { errEl.textContent = 'Введите текст сообщения'; return; }
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  try {
+    await api('/api/miniapp/self_promo/template', {method:'POST', body:{style, title, content, cta_text, cta_url}});
+    toast('✅ Шаблон создан');
+    closeModal('mo-self-promo');
+    openSelfPromo();
+  } catch(e) { errEl.textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = '📣 Создать шаблон'; }
+}
+async function deleteSelfPromoTemplate(id) {
+  if (!confirm('Удалить шаблон?')) return;
+  try {
+    await api('/api/miniapp/self_promo/'+id, {method:'DELETE'});
+    toast('🗑 Шаблон удалён');
+    openSelfPromo();
+  } catch(e) { toast('⚠️ '+e.message); }
 }
 
 // ── Semantic Memory ────────────────────────────────────
