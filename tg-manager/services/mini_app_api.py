@@ -1109,12 +1109,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             accs = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)
             channels = await pool.fetchval("SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
             bots = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
-            # Channel-to-account links via joined_channels (table may not exist)
+            # Channel-to-account links: managed_channels rows with an assigned account
             try:
                 links = await pool.fetchval(
-                    """SELECT COUNT(*) FROM joined_channels jc
-                       JOIN tg_accounts ta ON ta.id=jc.account_id
-                       WHERE ta.owner_id=$1""",
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id IS NOT NULL",
                     uid,
                 )
             except Exception:
@@ -1868,6 +1866,51 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ghost_delete uid=%d profile=%d", uid, profile_id)
             return _err(str(exc), 500)
 
+    async def ghost_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        account_id = data.get("account_id")
+        personality = data.get("personality", "ghost")
+        active_hours_start = int(data.get("active_hours_start", 9))
+        active_hours_end = int(data.get("active_hours_end", 23))
+        daily_cap = int(data.get("daily_cap", 8))
+        cooldown_minutes = int(data.get("cooldown_minutes", 60))
+        if not account_id:
+            return _err("account_id обязателен", 400)
+        if personality not in ("ghost", "watcher", "active"):
+            return _err("personality: ghost|watcher|active", 400)
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", int(account_id), uid
+            )
+            if not acc:
+                return _err("Аккаунт не найден", 404)
+            pid = await pool.fetchval(
+                """INSERT INTO ghost_profiles
+                   (owner_id, account_id, personality, active_hours_start, active_hours_end,
+                    daily_cap, cooldown_minutes)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                   ON CONFLICT (owner_id, account_id) DO UPDATE
+                     SET personality=EXCLUDED.personality,
+                         active_hours_start=EXCLUDED.active_hours_start,
+                         active_hours_end=EXCLUDED.active_hours_end,
+                         daily_cap=EXCLUDED.daily_cap,
+                         cooldown_minutes=EXCLUDED.cooldown_minutes,
+                         updated_at=now()
+                   RETURNING id""",
+                uid, int(account_id), personality,
+                active_hours_start, active_hours_end, daily_cap, cooldown_minutes,
+            )
+            return _json_resp({"id": pid, "ok": True})
+        except Exception as exc:
+            log.exception("ghost_create uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Bot Webhook ────────────────────────────────────────────────────────────
 
     async def bot_webhook_info(request: web.Request) -> web.Response:
@@ -2256,6 +2299,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("experiment_delete uid=%d exp=%d", uid, exp_id)
+            return _err(str(exc), 500)
+
+    async def experiment_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        bot_id = data.get("bot_id")
+        name = str(data.get("name", "")).strip()
+        experiment_type = data.get("experiment_type", "start_message")
+        variants = data.get("variants", [])
+        if not bot_id or not name:
+            return _err("bot_id и name обязательны", 400)
+        if experiment_type not in ("start_message", "auto_reply", "funnel"):
+            experiment_type = "start_message"
+        if not variants or len(variants) < 2:
+            return _err("Нужно минимум 2 варианта", 400)
+        try:
+            bot = await pool.fetchrow(
+                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", int(bot_id), uid
+            )
+            if not bot:
+                return _err("Бот не найден", 404)
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    exp_id = await conn.fetchval(
+                        "INSERT INTO experiments (bot_id, name, experiment_type) VALUES ($1,$2,$3) RETURNING id",
+                        int(bot_id), name, experiment_type,
+                    )
+                    for v in variants[:4]:
+                        await conn.execute(
+                            "INSERT INTO experiment_variants (experiment_id, name, content, weight) VALUES ($1,$2,$3,$4)",
+                            exp_id,
+                            str(v.get("name", "Вариант"))[:100],
+                            str(v.get("content", ""))[:4000],
+                            min(100, max(1, int(v.get("weight", 50)))),
+                        )
+            return _json_resp({"id": exp_id, "ok": True})
+        except Exception as exc:
+            log.exception("experiment_create uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Health Dashboard ───────────────────────────────────────────────────────
@@ -4494,6 +4580,83 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("content_mesh_toggle uid=%d mesh=%d", uid, mesh_id)
             return _err(str(exc), 500)
 
+    async def clone_adapt_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        source_bot_id = data.get("source_bot_id")
+        target_bot_id = data.get("target_bot_id")
+        fields = data.get("fields", "name,desc")
+        if not source_bot_id or not target_bot_id:
+            return _err("source_bot_id и target_bot_id обязательны", 400)
+        if int(source_bot_id) == int(target_bot_id):
+            return _err("Источник и цель должны быть разными ботами", 400)
+        try:
+            src = await pool.fetchrow(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                int(source_bot_id), uid,
+            )
+            tgt = await pool.fetchrow(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                int(target_bot_id), uid,
+            )
+            if not src:
+                return _err("Исходный бот не найден", 404)
+            if not tgt:
+                return _err("Целевой бот не найден", 404)
+            src_name = src["username"] or src["first_name"] or f"id{src['bot_id']}"
+            tgt_name = tgt["username"] or tgt["first_name"] or f"id{tgt['bot_id']}"
+            op_id = await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label)
+                   VALUES($1,'clone_adapt','pending',$2,1,$3) RETURNING id""",
+                uid,
+                _json.dumps({
+                    "source_bot_id": int(source_bot_id),
+                    "target_bot_id": int(target_bot_id),
+                    "fields": fields,
+                }),
+                f"Clone: @{src_name} → @{tgt_name}",
+            )
+            return _json_resp({"op_id": op_id, "ok": True})
+        except Exception as exc:
+            log.exception("clone_adapt_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def content_mesh_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        name = str(data.get("name", "")).strip()
+        source_channel = str(data.get("source_channel", "")).strip() or None
+        source_account_id = data.get("source_account_id")
+        delay_minutes = int(data.get("delay_minutes", 30))
+        append_text = str(data.get("append_text", "")).strip() or None
+        if not name:
+            return _err("name обязателен", 400)
+        if delay_minutes < 1:
+            delay_minutes = 1
+        try:
+            mid = await pool.fetchval(
+                """INSERT INTO content_meshes
+                   (owner_id, name, source_channel, source_account_id, delay_minutes, append_text)
+                   VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+                uid, name, source_channel,
+                int(source_account_id) if source_account_id else None,
+                delay_minutes, append_text,
+            )
+            return _json_resp({"id": mid, "ok": True})
+        except Exception as exc:
+            log.exception("content_mesh_create uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Narrative Engine ──────────────────────────────────────────────────────
 
     async def narrative_campaigns_list(request: web.Request) -> web.Response:
@@ -4533,6 +4696,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"campaign": dict(campaign), "posts": [dict(p) for p in posts]})
         except Exception as exc:
             log.exception("narrative_campaign_detail uid=%d cid=%d", uid, cid)
+            return _err(str(exc), 500)
+
+    async def narrative_campaign_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        topic = str(data.get("topic", "")).strip()
+        core_message = str(data.get("core_message", "")).strip()
+        campaign_type = data.get("campaign_type", "trend")
+        spread_hours = int(data.get("spread_hours", 4))
+        if not topic or not core_message:
+            return _err("topic и core_message обязательны", 400)
+        if campaign_type not in ("trend", "launch", "awareness", "counter"):
+            campaign_type = "trend"
+        if spread_hours < 1:
+            spread_hours = 1
+        try:
+            cid = await pool.fetchval(
+                """INSERT INTO narrative_campaigns
+                   (owner_id, topic, core_message, campaign_type, spread_hours, status)
+                   VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id""",
+                uid, topic, core_message, campaign_type, spread_hours,
+            )
+            return _json_resp({"id": cid, "ok": True})
+        except Exception as exc:
+            log.exception("narrative_campaign_create uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Self Promo ───────────────────────────────────────────────────────────
@@ -4939,6 +5132,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
     # A/B Experiments
     app.router.add_get("/api/miniapp/experiments", experiments_list)
+    app.router.add_post("/api/miniapp/experiment", experiment_create)
     app.router.add_get("/api/miniapp/experiment/{exp_id}", experiment_detail)
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
     # Health Dashboard
@@ -4983,6 +5177,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/stars", stars_overview)
     # Ghost Engine
     app.router.add_get("/api/miniapp/ghost", ghost_profiles)
+    app.router.add_post("/api/miniapp/ghost", ghost_create)
     app.router.add_put("/api/miniapp/ghost/{profile_id}/toggle", ghost_toggle)
     app.router.add_delete("/api/miniapp/ghost/{profile_id}", ghost_delete)
     # Bot Webhook
@@ -5027,11 +5222,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/content_cloner/submit", content_cloner_submit)
     # Clone Adapt
     app.router.add_get("/api/miniapp/clone_adapt/history", clone_adapt_history)
+    app.router.add_post("/api/miniapp/clone_adapt/submit", clone_adapt_submit)
     # Content Mesh
     app.router.add_get("/api/miniapp/content_meshes", content_meshes_list)
+    app.router.add_post("/api/miniapp/content_mesh", content_mesh_create)
     app.router.add_put("/api/miniapp/content_mesh/{mesh_id}/toggle", content_mesh_toggle)
     # Narrative Engine
     app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)
+    app.router.add_post("/api/miniapp/narrative", narrative_campaign_create)
     app.router.add_get("/api/miniapp/narrative/{campaign_id}", narrative_campaign_detail)
     # Self Promo
     app.router.add_get("/api/miniapp/self_promo", self_promo_list)

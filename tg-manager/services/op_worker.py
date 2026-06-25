@@ -928,6 +928,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_delete_contacts(pool, bot, op_id, owner_id, params)
             elif op_type == "run_broadcast":
                 result = await _exec_run_broadcast(pool, bot, op_id, owner_id, params)
+            elif op_type == "clone_adapt":
+                result = await _exec_clone_adapt(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -7185,4 +7187,90 @@ async def _exec_run_broadcast(
         "broadcast_id": broadcast_id,
         "total": total,
         "summary": f"📢 Рассылка запущена: {total} получателей",
+    }
+
+
+async def _exec_clone_adapt(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Клонирование профиля бота: имя/описание/фото/команды.
+    params: {source_bot_id: int, target_bot_id: int, fields: str (comma-sep)}
+    """
+    import aiohttp as _aio
+    from services import bot_api as _bapi
+
+    source_bot_id = params.get("source_bot_id")
+    target_bot_id = params.get("target_bot_id")
+    fields_str = str(params.get("fields", "name,desc"))
+    fields = [f.strip() for f in fields_str.split(",") if f.strip()]
+
+    if not source_bot_id or not target_bot_id or not fields:
+        return {"status": "failed", "summary": "⚠️ Неверные параметры clone_adapt"}
+
+    src_row = await pool.fetchrow(
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        int(source_bot_id), owner_id,
+    )
+    tgt_row = await pool.fetchrow(
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        int(target_bot_id), owner_id,
+    )
+    if not src_row:
+        return {"status": "failed", "summary": "⚠️ Исходный бот не найден"}
+    if not tgt_row:
+        return {"status": "failed", "summary": "⚠️ Целевой бот не найден"}
+
+    src_token = src_row["token"]
+    tgt_token = tgt_row["token"]
+    src_name = src_row["username"] or src_row["first_name"] or f"id{source_bot_id}"
+    tgt_name = tgt_row["username"] or tgt_row["first_name"] or f"id{target_bot_id}"
+
+    errors = []
+    ok_count = 0
+
+    async with _aio.ClientSession() as http:
+        if "name" in fields:
+            me = await _bapi.get_my_name(http, src_token)
+            src_display_name = me.get("name", "") if me else ""
+            if src_display_name and await _bapi.set_name(http, tgt_token, src_display_name):
+                ok_count += 1
+            else:
+                errors.append("имя")
+
+        if "desc" in fields:
+            d = await _bapi.get_my_description(http, src_token)
+            src_desc = d.get("description", "") if d else ""
+            if await _bapi.set_description(http, tgt_token, src_desc):
+                ok_count += 1
+            else:
+                errors.append("описание")
+
+        if "short" in fields:
+            d = await _bapi.get_my_short_description(http, src_token)
+            src_short = d.get("short_description", "") if d else ""
+            if await _bapi.set_short_description(http, tgt_token, src_short):
+                ok_count += 1
+            else:
+                errors.append("краткое описание")
+
+        if "commands" in fields:
+            cmds = await _bapi.get_my_commands(http, src_token)
+            if cmds is not None and await _bapi.set_my_commands(http, tgt_token, cmds):
+                ok_count += 1
+            else:
+                errors.append("команды")
+
+    detail = f"Ошибки: {', '.join(errors)}" if errors else f"OK ({ok_count} полей)"
+    status = "failed" if errors and ok_count == 0 else "done"
+
+    await pool.execute(
+        """INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
+           VALUES ($1, $2, $3, $4, $5, $6)""",
+        owner_id, int(source_bot_id), int(target_bot_id),
+        fields_str, "ok" if status == "done" else "error", detail,
+    )
+
+    return {
+        "status": status,
+        "summary": f"🔄 Клон @{src_name} → @{tgt_name}: {detail}",
     }

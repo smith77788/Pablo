@@ -645,28 +645,104 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ CLONE ADAPT ══════════════════════ -->
 <div class="screen" id="s-cloneadapt">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔄 Clone & Adapt</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔄 Clone &amp; Adapt</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openCloneModal()">+ Клонировать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="sec">История клонирования ботов</div>
     <div class="lst" id="caHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
+<!-- Modal: Clone Adapt -->
+<div class="mbg" id="mo-clone" onclick="if(event.target===this)closeModal('mo-clone')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-clone')">✕</div>
+    <div class="modal-title">🔄 Клонировать профиль бота</div>
+    <div class="field"><label>Источник (откуда)</label><select id="clSrc" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Цель (куда)</label><select id="clTgt" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Что копировать</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFname" checked> Имя</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFdesc" checked> Описание</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFshort"> Краткое опис.</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFphoto"> Фото</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFcmds"> Команды</label>
+      </div>
+    </div>
+    <div class="field-err" id="cl-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-clone')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitCloneAdapt()" style="flex:2">Клонировать</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════ CONTENT MESH ══════════════════════ -->
 <div class="screen" id="s-contentmesh">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Content Mesh</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🕸 Content Mesh</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openMeshModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="sec">Сети контент-репостинга</div>
     <div class="lst" id="meshList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
+<!-- Modal: Content Mesh Create -->
+<div class="mbg" id="mo-mesh" onclick="if(event.target===this)closeModal('mo-mesh')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-mesh')">✕</div>
+    <div class="modal-title">🕸 Новая Content Mesh</div>
+    <div class="field"><label>Название сети</label><input id="mc-name" type="text" placeholder="Моя сеть репостинга" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Источник (канал)</label><input id="mc-src" type="text" placeholder="@username или -100xxx" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Аккаунт для чтения</label><select id="mc-account" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">— без аккаунта —</option></select></div>
+    <div class="field"><label>Задержка репоста (минуты)</label><input id="mc-delay" type="number" min="1" max="1440" value="30" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Суффикс к постам (необязательно)</label><input id="mc-append" type="text" placeholder="Подпишись: @channel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field-err" id="mc-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-mesh')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitMeshCreate()" style="flex:2">Создать</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════ NARRATIVE ENGINE ══════════════════════ -->
 <div class="screen" id="s-narrative">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📖 Narrative Engine</div></div>
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📖 Narrative Engine</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openNarrativeModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="sec">Нарратив-кампании</div>
     <div class="lst" id="narrativeList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: Narrative Create -->
+<div class="mbg" id="mo-narrative" onclick="if(event.target===this)closeModal('mo-narrative')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-narrative')">✕</div>
+    <div class="modal-title">📖 Новая нарратив-кампания</div>
+    <div class="field"><label>Тема / заголовок</label><input id="nc-topic" type="text" placeholder="Запуск нового продукта" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Ключевое послание</label><textarea id="nc-message" rows="3" placeholder="Чего вы хотите донести до аудитории" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field"><label>Тип кампании</label><select id="nc-type" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="trend">📈 Тренд</option>
+      <option value="launch">🚀 Запуск</option>
+      <option value="awareness">💡 Осведомлённость</option>
+      <option value="counter">⚔️ Контр-нарратив</option>
+    </select></div>
+    <div class="field"><label>Распределить за (часов)</label><input id="nc-hours" type="number" min="1" max="168" value="4" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field-err" id="nc-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-narrative')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitNarrativeCreate()" style="flex:2">Создать</button>
+    </div>
   </div>
 </div>
 
@@ -1371,9 +1447,37 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">👻 Ghost Engine</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openGhostModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="ghostList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: Ghost Create -->
+<div class="mbg" id="mo-ghost" onclick="if(event.target===this)closeModal('mo-ghost')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-ghost')">✕</div>
+    <div class="modal-title">👻 Новый Ghost-профиль</div>
+    <div class="field"><label>Аккаунт</label><select id="gc-account" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Персонаж</label><select id="gc-personality" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="ghost">👻 Призрак (пассивный)</option>
+      <option value="watcher">👁 Наблюдатель</option>
+      <option value="active">🌟 Активный</option>
+    </select></div>
+    <div class="field"><label>Активные часы (от — до)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="gc-start" type="number" min="0" max="23" value="9" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+        <span style="color:var(--hint)">—</span>
+        <input id="gc-end" type="number" min="0" max="23" value="23" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+    </div>
+    <div class="field"><label>Действий в день</label><input id="gc-cap" type="number" min="1" max="50" value="8" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field-err" id="gc-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-ghost')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitGhostCreate()" style="flex:2">Создать</button>
+    </div>
   </div>
 </div>
 
@@ -1421,9 +1525,36 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🧪 A/B Эксперименты</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openExpModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="experimentsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: Experiment Create -->
+<div class="mbg" id="mo-exp" onclick="if(event.target===this)closeModal('mo-exp')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-exp')">✕</div>
+    <div class="modal-title">🧪 Новый A/B эксперимент</div>
+    <div class="field"><label>Бот</label><select id="ec-bot" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Название</label><input id="ec-name" type="text" placeholder="Тест приветствия" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Тип</label><select id="ec-type" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <option value="start_message">Приветствие (/start)</option>
+      <option value="auto_reply">Авто-ответ</option>
+      <option value="funnel">Воронка</option>
+    </select></div>
+    <div style="font-size:13px;font-weight:600;margin:10px 0 6px">Вариант А</div>
+    <div class="field"><label>Название варианта</label><input id="ec-va-name" type="text" value="Вариант А" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Текст</label><textarea id="ec-va-text" rows="2" placeholder="Привет! 👋" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div style="font-size:13px;font-weight:600;margin:10px 0 6px">Вариант Б</div>
+    <div class="field"><label>Название варианта</label><input id="ec-vb-name" type="text" value="Вариант Б" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="field"><label>Текст</label><textarea id="ec-vb-text" rows="2" placeholder="Добро пожаловать! 🎉" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field-err" id="ec-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-d" onclick="closeModal('mo-exp')" style="flex:1">Отмена</button>
+      <button class="btn btn-p" onclick="submitExpCreate()" style="flex:2">Создать</button>
+    </div>
   </div>
 </div>
 
@@ -4979,7 +5110,7 @@ async function openGhost() {
     const d = await api('/api/miniapp/ghost');
     const profiles = d.profiles||[];
     txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} профилей`);
-    if (!profiles.length) { txt('ghostList', empty('👻','Нет Ghost-профилей','Создайте профиль в боте')); return; }
+    if (!profiles.length) { txt('ghostList', empty('👻','Нет Ghost-профилей','Нажмите + Создать')); return; }
     txt('ghostList', profiles.map(p=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(139,92,246,.16)">${p.enabled?'🟢':'⚫'}</div>
@@ -5011,6 +5142,37 @@ async function deleteGhost(id) {
     toast('🗑 Удалено');
     openGhost();
   } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+async function openGhostModal() {
+  const el = document.getElementById('gc-account');
+  el.innerHTML = '<option value="">Загрузка...</option>';
+  try {
+    const d = await api('/api/miniapp/accounts');
+    const accs = d.accounts || d || [];
+    el.innerHTML = accs.length
+      ? accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} ${a.phone?'('+a.phone+')':''}</option>`).join('')
+      : '<option value="">Нет аккаунтов</option>';
+  } catch(e) { el.innerHTML = '<option value="">Ошибка загрузки</option>'; }
+  showModal('mo-ghost');
+}
+async function submitGhostCreate() {
+  const errEl = document.getElementById('gc-err');
+  errEl.textContent = '';
+  const account_id = document.getElementById('gc-account').value;
+  const personality = document.getElementById('gc-personality').value;
+  const active_hours_start = parseInt(document.getElementById('gc-start').value)||9;
+  const active_hours_end = parseInt(document.getElementById('gc-end').value)||23;
+  const daily_cap = parseInt(document.getElementById('gc-cap').value)||8;
+  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
+  try {
+    await api('/api/miniapp/ghost',{method:'POST',body:JSON.stringify({
+      account_id:parseInt(account_id), personality, active_hours_start, active_hours_end, daily_cap
+    })});
+    closeModal('mo-ghost');
+    toast('✅ Ghost-профиль создан');
+    openGhost();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
 
 // ── Bot Webhook ─────────────────────────────────────────
@@ -5253,7 +5415,7 @@ async function openExperiments() {
     const d = await api('/api/miniapp/experiments');
     const exps = d.experiments||[];
     txt('m-exp-cnt', exps.length+' экспериментов');
-    if (!exps.length) { txt('experimentsList', empty('🧪','Нет экспериментов','Создайте A/B тест в боте')); return; }
+    if (!exps.length) { txt('experimentsList', empty('🧪','Нет экспериментов','Нажмите + Создать')); return; }
     txt('experimentsList', exps.map(e=>`
       <div class="row tap" onclick="openExpDetail(${e.id},'${esc(e.name)}')">
         <div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div>
@@ -5309,6 +5471,45 @@ async function deleteExp(id) {
     back(); back();
     openExperiments();
   } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+async function openExpModal() {
+  const el = document.getElementById('ec-bot');
+  el.innerHTML = '<option value="">Загрузка...</option>';
+  try {
+    const d = await api('/api/miniapp/bots');
+    const bots = d.bots || d || [];
+    el.innerHTML = bots.length
+      ? bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||b.first_name)}</option>`).join('')
+      : '<option value="">Нет ботов</option>';
+  } catch(e) { el.innerHTML = '<option value="">Ошибка</option>'; }
+  showModal('mo-exp');
+}
+async function submitExpCreate() {
+  const errEl = document.getElementById('ec-err');
+  errEl.textContent = '';
+  const bot_id = document.getElementById('ec-bot').value;
+  const name = document.getElementById('ec-name').value.trim();
+  const experiment_type = document.getElementById('ec-type').value;
+  const va_name = document.getElementById('ec-va-name').value.trim() || 'Вариант А';
+  const va_text = document.getElementById('ec-va-text').value.trim();
+  const vb_name = document.getElementById('ec-vb-name').value.trim() || 'Вариант Б';
+  const vb_text = document.getElementById('ec-vb-text').value.trim();
+  if (!bot_id) { errEl.textContent='Выберите бота'; return; }
+  if (!name) { errEl.textContent='Введите название'; return; }
+  if (!va_text || !vb_text) { errEl.textContent='Заполните оба варианта'; return; }
+  try {
+    await api('/api/miniapp/experiment',{method:'POST',body:JSON.stringify({
+      bot_id:parseInt(bot_id), name, experiment_type,
+      variants:[
+        {name:va_name, content:va_text, weight:50},
+        {name:vb_name, content:vb_text, weight:50}
+      ]
+    })});
+    closeModal('mo-exp');
+    toast('✅ Эксперимент создан');
+    openExperiments();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
 
 // ── Health Dashboard ───────────────────────────────────
@@ -6600,13 +6801,54 @@ async function openCloneAdapt() {
   } catch(e) { txt('caHistory', empty('⚠️','Ошибка',e.message)); }
 }
 
+async function openCloneModal() {
+  const srcEl = document.getElementById('clSrc');
+  const tgtEl = document.getElementById('clTgt');
+  srcEl.innerHTML = '<option value="">Загрузка...</option>';
+  tgtEl.innerHTML = '<option value="">Загрузка...</option>';
+  try {
+    const d = await api('/api/miniapp/bots');
+    const bots = d.bots || d || [];
+    const opts = bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||b.first_name)}</option>`).join('');
+    srcEl.innerHTML = opts || '<option value="">Нет ботов</option>';
+    tgtEl.innerHTML = opts || '<option value="">Нет ботов</option>';
+  } catch(e) {
+    srcEl.innerHTML = '<option value="">Ошибка</option>';
+    tgtEl.innerHTML = '<option value="">Ошибка</option>';
+  }
+  showModal('mo-clone');
+}
+async function submitCloneAdapt() {
+  const errEl = document.getElementById('cl-err');
+  errEl.textContent = '';
+  const source_bot_id = document.getElementById('clSrc').value;
+  const target_bot_id = document.getElementById('clTgt').value;
+  if (!source_bot_id || !target_bot_id) { errEl.textContent='Выберите источник и цель'; return; }
+  if (source_bot_id === target_bot_id) { errEl.textContent='Источник и цель должны быть разными'; return; }
+  const fields = [];
+  if (document.getElementById('clFname').checked) fields.push('name');
+  if (document.getElementById('clFdesc').checked) fields.push('desc');
+  if (document.getElementById('clFshort').checked) fields.push('short');
+  if (document.getElementById('clFphoto').checked) fields.push('photo');
+  if (document.getElementById('clFcmds').checked) fields.push('commands');
+  if (!fields.length) { errEl.textContent='Выберите что копировать'; return; }
+  try {
+    const r = await api('/api/miniapp/clone_adapt/submit',{method:'POST',body:JSON.stringify({
+      source_bot_id:parseInt(source_bot_id), target_bot_id:parseInt(target_bot_id), fields:fields.join(',')
+    })});
+    closeModal('mo-clone');
+    toast(`✅ Задача #${r.op_id} поставлена в очередь`);
+    openCloneAdapt();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+}
+
 // ── Content Mesh ────────────────────────────────────────
 async function openContentMesh() {
   push('s-contentmesh');
   txt('meshList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/content_meshes');
-    if (!rows.length) { txt('meshList', empty('🕸','Мешей нет','Создайте сеть через бота')); return; }
+    if (!rows.length) { txt('meshList', empty('🕸','Мешей нет','Нажмите + Создать')); return; }
     txt('meshList', rows.map(r => `
       <div class="row">
         <div class="row-ico" style="background:rgba(168,85,247,.16)">${r.enabled?'🟢':'🔴'}</div>
@@ -6632,13 +6874,47 @@ async function toggleMesh(meshId, btn) {
   } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
 }
 
+async function openMeshModal() {
+  const el = document.getElementById('mc-account');
+  el.innerHTML = '<option value="">— без аккаунта —</option>';
+  try {
+    const d = await api('/api/miniapp/accounts');
+    const accs = d.accounts || d || [];
+    accs.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = (a.first_name||a.phone)+' ('+(a.phone||'')+')'
+      el.appendChild(opt);
+    });
+  } catch(e) {}
+  showModal('mo-mesh');
+}
+async function submitMeshCreate() {
+  const errEl = document.getElementById('mc-err');
+  errEl.textContent = '';
+  const name = document.getElementById('mc-name').value.trim();
+  const source_channel = document.getElementById('mc-src').value.trim() || null;
+  const source_account_id = document.getElementById('mc-account').value || null;
+  const delay_minutes = parseInt(document.getElementById('mc-delay').value)||30;
+  const append_text = document.getElementById('mc-append').value.trim() || null;
+  if (!name) { errEl.textContent='Введите название'; return; }
+  try {
+    await api('/api/miniapp/content_mesh',{method:'POST',body:JSON.stringify({
+      name, source_channel, source_account_id, delay_minutes, append_text
+    })});
+    closeModal('mo-mesh');
+    toast('✅ Content Mesh создана');
+    openContentMesh();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+}
+
 // ── Narrative Engine ────────────────────────────────────
 async function openNarrative() {
   push('s-narrative');
   txt('narrativeList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/narrative');
-    if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Создайте нарратив через бота')); return; }
+    if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Нажмите + Создать')); return; }
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     const statusCls = {draft:'b-gy',active:'b-gr',paused:'b-or',completed:'b-bl',cancelled:'b-gy'};
     txt('narrativeList', rows.map(r => `
@@ -6694,6 +6970,26 @@ async function openNarrativeDetail(cid, topic) {
     }
     txt('narr-body', html);
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',e.message)); }
+}
+
+function openNarrativeModal() { showModal('mo-narrative'); }
+async function submitNarrativeCreate() {
+  const errEl = document.getElementById('nc-err');
+  errEl.textContent = '';
+  const topic = document.getElementById('nc-topic').value.trim();
+  const core_message = document.getElementById('nc-message').value.trim();
+  const campaign_type = document.getElementById('nc-type').value;
+  const spread_hours = parseInt(document.getElementById('nc-hours').value)||4;
+  if (!topic) { errEl.textContent='Введите тему'; return; }
+  if (!core_message) { errEl.textContent='Введите послание'; return; }
+  try {
+    await api('/api/miniapp/narrative',{method:'POST',body:JSON.stringify({
+      topic, core_message, campaign_type, spread_hours
+    })});
+    closeModal('mo-narrative');
+    toast('✅ Нарратив создан (черновик)');
+    openNarrative();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
 
 // ── Self Promo ─────────────────────────────────────────
@@ -6920,6 +7216,14 @@ function toast(msg) {
   const el=document.getElementById('toast');
   el.textContent=msg; el.classList.add('show');
   clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2800);
+}
+function showModal(id) {
+  const el=document.getElementById(id);
+  if(el) el.classList.add('show');
+}
+function closeModal(id) {
+  const el=document.getElementById(id);
+  if(el) el.classList.remove('show');
 }
 </script>
 </body>
