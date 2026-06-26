@@ -572,12 +572,6 @@ class ApiKeyFSM(StatesGroup):
     waiting_name = State()  # название нового API-ключа
 
 
-class GrowthAgentFSM(StatesGroup):
-    waiting_niche      = State()  # ниша/тематика (куда ищем аудиторию)
-    waiting_promo_text = State()  # рекламный текст для постинга в чужих группах
-    confirming         = State()  # подтверждение запуска
-
-
 class StarsExperimentFSM(StatesGroup):
     choosing_bot    = State()  # выбор бота
     waiting_name    = State()  # название эксперимента
