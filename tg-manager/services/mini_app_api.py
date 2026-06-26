@@ -3242,9 +3242,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
             # Подсчёт доступных аккаунтов
             accs = await pool.fetch(
-                """SELECT id FROM accounts
+                """SELECT id FROM tg_accounts
                    WHERE owner_id=$1 AND is_active=true
-                     AND COALESCE(is_banned, false)=false
+                     AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')
                    LIMIT 50""",
                 uid,
             )
