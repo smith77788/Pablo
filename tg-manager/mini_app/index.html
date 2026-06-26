@@ -2089,6 +2089,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <option value="bot_users">Подписчики ботов</option>
         </select>
       </div>
+      <div class="field">
+        <label>Аккаунты-инвайтеры (не выбрано = все активные)</label>
+        <div id="massInviteAccsWrap" style="max-height:120px;overflow-y:auto;border:1.5px solid rgba(255,255,255,.12);border-radius:10px;padding:6px;background:rgba(30,30,40,.9)">
+          <div style="font-size:12px;color:var(--hint)" id="massInviteAccsLoad">Загрузка аккаунтов…</div>
+        </div>
+      </div>
       <div class="field-err" id="massInviteErr"></div>
       <button class="btn btn-p" id="massInviteBtn" onclick="submitMassInvite()" style="width:100%">🚀 Запустить инвайт</button>
     </div>
@@ -6002,21 +6008,40 @@ async function scanGifts() {
 async function openMassInvite() {
   push('s-massinvite');
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>o.op_type==='mass_invite').slice(0,10);
+  document.getElementById('massInviteAccsLoad').textContent = 'Загрузка аккаунтов…';
+  const [opsD, accsD] = await Promise.allSettled([
+    api('/api/miniapp/operations'),
+    api('/api/miniapp/accounts'),
+  ]);
+  // Render account checkboxes
+  const accs = (accsD.status==='fulfilled' ? (accsD.value.accounts||[]) : []).filter(a=>a.is_active);
+  const wrap = document.getElementById('massInviteAccsWrap');
+  if (accs.length) {
+    wrap.innerHTML = accs.map(a=>`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:13px">
+      <input type="checkbox" value="${a.id}" style="accent-color:var(--btn)">
+      <span>${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span></span>
+    </label>`).join('');
+  } else {
+    wrap.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:4px">Нет активных аккаунтов</div>';
+  }
+  // Render history
+  if (opsD.status==='fulfilled') {
+    const ops = (opsD.value.operations||[]).filter(o=>o.op_type==='mass_invite').slice(0,10);
     if (!ops.length) { txt('massInviteHistory', empty('📨','Нет истории инвайтов','')); return; }
-    txt('massInviteHistory', ops.map(o=>`
-      <div class="row">
+    txt('massInviteHistory', ops.map(o=>{
+      const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
+      const [bc,bl]=stb(o.status);
+      return `<div class="row">
         <div class="row-ico" style="background:rgba(59,130,246,.16)">📨</div>
         <div class="row-body">
           <div class="row-name">${esc(o.label||'mass_invite')}</div>
-          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+          <div class="row-val"><span class="badge ${bc}">${bl}</span> · ${o.done_items||0}/${o.total_items||0}</div>
+          ${o.status==='running'?`<div class="prog" style="margin-top:4px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
         </div>
-      </div>
-    `).join(''));
-  } catch(e) {
-    txt('massInviteHistory', empty('⚠️','Ошибка',e.message));
+      </div>`;
+    }).join(''));
+  } else {
+    txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||''));
   }
 }
 async function submitMassInvite() {
@@ -6024,10 +6049,13 @@ async function submitMassInvite() {
   const source = document.getElementById('massInviteSrc').value;
   const errEl = document.getElementById('massInviteErr');
   if (!group) { errEl.textContent='Укажите группу'; return; }
+  const checked = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')].map(c=>parseInt(c.value));
   const btn = document.getElementById('massInviteBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const r = await api('/api/miniapp/mass_invite',{method:'POST',body:JSON.stringify({group,source})});
+    const body = {group, source};
+    if (checked.length) body.account_ids = checked;
+    const r = await api('/api/miniapp/mass_invite',{method:'POST',body:JSON.stringify(body)});
     toast(`📨 Инвайт запущен (#${r.op_id})`);
     errEl.textContent='';
     openMassInvite();
@@ -7105,17 +7133,22 @@ async function loadDeals() {
     }).join(''));
     txt('m-deal-cnt', DEALS_DATA.length+' сделок');
     if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку')); return; }
-    txt('dealList', DEALS_DATA.map(d2=>`
-      <div class="row">
+    const STAGE_NEXT = {lead:'contact',contact:'proposal',proposal:'negotiation',negotiation:'won'};
+    txt('dealList', DEALS_DATA.map(d2=>{
+      const nextStage = STAGE_NEXT[d2.stage];
+      return `<div class="row">
         <div class="row-ico" style="background:rgba(34,197,94,.16)">💼</div>
         <div class="row-body">
           <div class="row-name">${esc(d2.title)}</div>
           <div class="row-val">${STAGE_LABELS[d2.stage]||d2.stage}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
           <div class="row-val" style="color:#555">${ago(d2.updated_at)}</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id})">✕</button></div>
-      </div>
-    `).join(''));
+        <div class="row-right" style="display:flex;gap:5px;flex-direction:column">
+          ${nextStage?`<button class="btn btn-p" style="padding:4px 8px;min-width:0;font-size:11px" onclick="advanceDeal(${d2.id},'${nextStage}')">→ ${(STAGE_LABELS[nextStage]||nextStage).split(' ')[1]||nextStage}</button>`:''}
+          <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id})">✕</button>
+        </div>
+      </div>`;
+    }).join(''));
   } catch(e) { txt('dealList', empty('⚠️','Ошибка',e.message)); }
 }
 function filterDeals(stage, btn) {
@@ -7158,6 +7191,14 @@ async function deleteDeal(dealId) {
   try {
     await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
     toast('Удалено');
+    loadDeals();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function advanceDeal(dealId, newStage) {
+  try {
+    await api('/api/miniapp/crm/deal/'+dealId+'/stage', {method:'PUT', body:JSON.stringify({stage:newStage})});
+    toast('✅ Стадия обновлена: '+((STAGE_LABELS||{})[newStage]||newStage));
     loadDeals();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }

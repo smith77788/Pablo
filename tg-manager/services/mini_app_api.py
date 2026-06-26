@@ -1919,12 +1919,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not group:
             return _err("Укажите группу/канал", 400)
         source = body.get("source", "parsed")
+        account_ids = body.get("account_ids") or []
+        if account_ids:
+            account_ids = [int(x) for x in account_ids if str(x).isdigit()]
         try:
             label = f"Mass Invite → {group}"
+            params = {"group": group, "source": source}
+            if account_ids:
+                params["account_ids"] = account_ids
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'mass_invite','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"group": group, "source": source}), label,
+                uid, _json.dumps(params), label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
