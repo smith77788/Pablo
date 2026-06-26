@@ -5602,7 +5602,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad tpl_id", 400)
         try:
-            tpl = await pool.fetchrow("SELECT id, title FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
+            tpl = await pool.fetchrow(
+                "SELECT id, title FROM self_promo_templates "
+                "WHERE id=$1 AND is_active AND (owner_id=$2 OR owner_id IS NULL)",
+                tpl_id, uid,
+            )
             if not tpl:
                 return _err("Шаблон не найден или неактивен", 404)
             op_id = await pool.fetchval(

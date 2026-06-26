@@ -5558,16 +5558,25 @@ async def _exec_check_accounts_health(
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
     check_spambot = bool(params.get("check_spambot", True))
 
+    # Включаем device-fingerprint и proxy_url, чтобы проверка статуса шла через
+    # привязанный к аккаунту прокси (иначе подключение с серверного IP искажает
+    # результат и может триггерить флаги безопасности Telegram).
+    _HC_COLS = """
+        SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+               a.device_model, a.system_version, a.app_version,
+               a.lang_code, a.system_lang_code,
+               a.proxy_id, p.proxy_url, p.geo_country
+        FROM tg_accounts a
+        LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+    """
     if account_ids:
         rows = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, username "
-            "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            _HC_COLS + "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
             owner_id, account_ids,
         )
     else:
         rows = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, username "
-            "FROM tg_accounts WHERE owner_id=$1",
+            _HC_COLS + "WHERE a.owner_id=$1",
             owner_id,
         )
     accounts = [dict(r) for r in rows]
@@ -6875,8 +6884,9 @@ async def _exec_self_promo_blast(
 
     try:
         tpl = await pool.fetchrow(
-            "SELECT id, title, content, cta_text, cta_url FROM self_promo_templates WHERE id=$1 AND is_active=TRUE",
-            int(template_id),
+            "SELECT id, title, content, cta_text, cta_url FROM self_promo_templates "
+            "WHERE id=$1 AND is_active=TRUE AND (owner_id=$2 OR owner_id IS NULL)",
+            int(template_id), owner_id,
         )
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения шаблона: {exc}"}
@@ -6958,8 +6968,9 @@ async def _exec_self_promo_blast(
             pass
 
     await pool.execute(
-        "UPDATE self_promo_templates SET use_count = COALESCE(use_count,0)+1 WHERE id=$1",
-        int(template_id),
+        "UPDATE self_promo_templates SET use_count = COALESCE(use_count,0)+1 "
+        "WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
+        int(template_id), owner_id,
     )
     return {
         "status": "done",
