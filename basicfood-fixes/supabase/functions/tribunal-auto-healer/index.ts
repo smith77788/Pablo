@@ -184,7 +184,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (writeBatch.length > 0) await Promise.all(writeBatch);
+    if (writeBatch.length > 0) await Promise.allSettled(writeBatch);
 
     return {
       result: new Response(JSON.stringify({ ok: true, stats, detail }), {

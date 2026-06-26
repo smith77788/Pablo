@@ -118,11 +118,17 @@ Deno.serve(async (req) => {
     }
 
     // 3. Exclude users in cooldown (sent within last 7 days)
+    const remainingAfterPurchases = Array.from(userCartMap.keys());
+    if (remainingAfterPurchases.length === 0) {
+      return new Response(JSON.stringify({ candidates: 0, sent: 0, reason: "all_purchased" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const { data: recentSends } = await supabase
       .from("events")
       .select("user_id")
       .eq("event_type", "cart_recovery_sent")
-      .in("user_id", Array.from(userCartMap.keys()))
+      .in("user_id", remainingAfterPurchases)
       .gte("created_at", cooldownSince);
     for (const s of recentSends ?? []) {
       if (s.user_id) userCartMap.delete(s.user_id);
@@ -205,7 +211,7 @@ Deno.serve(async (req) => {
       | { type: "failed"; userId: string; productId: string | null; code: string; chatId: number }
       | { type: "skip" };
 
-    const sendResults: SendResult[] = await Promise.all(
+    const sendResults: SendResult[] = (await Promise.allSettled(
       [...userCartMap.entries()].map(async ([userId, cart]): Promise<SendResult> => {
         const chatId = tgMap.get(userId);
         if (!chatId) return { type: "skip" };
@@ -245,7 +251,7 @@ Deno.serve(async (req) => {
         }
         return { type: "sent", userId, productId: cart.product_id, code, chatId };
       }),
-    );
+    )).map((r) => (r.status === "fulfilled" ? r.value : { type: "skip" } as SendResult));
 
     const sentItems = sendResults.filter((r): r is Extract<SendResult, { type: "sent" }> => r.type === "sent");
     const failedItems = sendResults.filter((r): r is Extract<SendResult, { type: "failed" }> => r.type === "failed");

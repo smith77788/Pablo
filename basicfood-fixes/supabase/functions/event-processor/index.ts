@@ -49,14 +49,14 @@ async function maybeAnalyzeFunnel(): Promise<void> {
 
   if (stepCounts.product_viewed < 20) return;
 
-  const steps = [
+  const funnelTransitions = [
     { from: "product_viewed", to: "add_to_cart", label: "PDP→Cart" },
     { from: "add_to_cart", to: "begin_checkout", label: "Cart→Checkout" },
     { from: "begin_checkout", to: "purchase_completed", label: "Checkout→Purchase" },
   ];
 
   let worst = { label: "", dropPct: 0, from: 0, to: 0 };
-  for (const s of steps) {
+  for (const s of funnelTransitions) {
     const fromN = stepCounts[s.from];
     const toN = stepCounts[s.to];
     if (fromN === 0) continue;

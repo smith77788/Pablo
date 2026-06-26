@@ -58,8 +58,8 @@ Deno.serve(async (req) => {
     toUpdate.push({ id: p.id, title: p.title, status, note });
   }
 
-  // Parallel status updates
-  await Promise.all(toUpdate.map(({ id, status, note }) =>
+  // Parallel status updates — allSettled so one DB failure doesn't abort the rest
+  await Promise.allSettled(toUpdate.map(({ id, status, note }) =>
     supabase.from("agent_pending_patches").update({
       status,
       reviewed_at: reviewedAt,

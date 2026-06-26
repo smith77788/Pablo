@@ -1,0 +1,600 @@
+"""Mass Publishing wizard.
+
+Sends a post to multiple Telegram channels at once:
+  - All channels across all active accounts
+  - Filtered by specific account
+  - Configurable delay between posts (5s / 30s / 60s)
+  - Dry-run mode (count only, no actual send)
+  - Publication history from operation_queue table
+
+Entry point: MassPubCb(action="menu")
+"""
+
+from __future__ import annotations
+
+import asyncio
+import html
+import logging
+
+import asyncpg
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.callbacks import MassPubCb, BmCb, MassOpCb
+from bot.states import MassPublishFSM2
+from bot.utils.op_helpers import (
+    _acc_label,
+    _get_active_accounts,
+    _format_duration,
+    _progress_text as _progress_text_base,
+)
+from services.logger import log_exc_swallow
+
+log = logging.getLogger(__name__)
+router = Router()
+
+_STARTER = "starter"
+
+# Timing options: label → delay in seconds
+_TIMING_OPTIONS = {
+    "delay_5s": ("⚡ 5 сек (быстро)", 5),
+    "delay_30s": ("🛡️ 30 сек (безопасно)", 30),
+    "delay_60s": ("🐌 60 сек (осторожно)", 60),
+    "delay_smart": ("🧠 Умный (30-90 сек)", -1),  # -1 = random
+}
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+
+def _back_menu_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
+    return kb
+
+
+# ── Main menu ──────────────────────────────────────────────────────────────
+
+
+def _main_menu_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📢 Все каналы", callback_data=MassPubCb(action="start", target_type="all")
+    )
+    kb.button(
+        text="👤 По аккаунту",
+        callback_data=MassPubCb(action="start", target_type="account"),
+    )
+    kb.button(text="🔍 Сухой прогон", callback_data=MassPubCb(action="dry_run"))
+    kb.button(text="📋 История", callback_data=MassPubCb(action="history"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    kb.adjust(2, 2, 1)
+    return kb
+
+
+@router.callback_query(MassPubCb.filter(F.action == "menu"))
+async def cb_mpub_menu(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.edit_text(
+        "📤 <b>Массовая публикация — рассылка в каналы</b>\n\n"
+        "Отправляет один пост одновременно во все ваши каналы.\n\n"
+        "📢 <b>Все каналы</b> — опубликовать во все каналы всех аккаунтов\n"
+        "👤 <b>По аккаунту</b> — выбрать конкретный аккаунт\n"
+        "🔍 <b>Сухой прогон</b> — посчитать каналы без реальной отправки\n"
+        "📋 <b>История</b> — прошлые публикации\n\n"
+        "<i>💡 Сначала импортируйте каналы через "
+        "«📡 Каналы → 📥 Импорт из Telegram»</i>",
+        parse_mode="HTML",
+        reply_markup=_main_menu_kb().as_markup(),
+    )
+
+
+@router.callback_query(MassPubCb.filter(F.action == "back_to_factory"))
+async def cb_mpub_back_factory(callback: CallbackQuery) -> None:
+    await callback.answer()
+    from bot.callbacks import ChanFactCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📡 Channel Factory", callback_data=ChanFactCb(action="menu"))
+    await callback.message.edit_text(
+        "◀️ Вернитесь в Channel Factory или воспользуйтесь /ops",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MAIN FLOW: start (all | account)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@router.callback_query(MassPubCb.filter(F.action == "start"))
+async def cb_mpub_start(
+    callback: CallbackQuery,
+    callback_data: MassPubCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    from bot.utils.subscription import require_plan
+
+    if not await require_plan(pool, callback.from_user.id, _STARTER):
+        await callback.message.edit_text(
+            "🔒 <b>Массовая публикация — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    target_type = callback_data.target_type or ""
+
+    # Check for template prefill from asset_templates apply
+    sd = await state.get_data()
+    prefill = sd.get("tpl_prefill") or {}
+    prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+
+    if target_type == "all":
+        # Skip account selection — use all active accounts
+        accounts = await _get_active_accounts(pool, callback.from_user.id)
+        if not accounts:
+            await state.clear()
+            await callback.message.edit_text(
+                "⚠️ Нет активных аккаунтов. Подключите через /accounts",
+                parse_mode="HTML",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
+            return
+        await state.update_data(
+            target_type="all",
+            target_acc_ids=[a["id"] for a in accounts],
+            dry_run=False,
+            tpl_prefill=None,
+        )
+        if prefill_text:
+            # Auto-inject text from template, skip text input step
+            await state.update_data(post_text=prefill_text)
+            await state.set_state(MassPublishFSM2.choosing_timing)
+            kb = InlineKeyboardBuilder()
+            for key, (label, _) in _TIMING_OPTIONS.items():
+                kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
+            kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+            kb.adjust(2, 2, 1)
+            preview = prefill_text[:200] + ("…" if len(prefill_text) > 200 else "")
+            await callback.message.edit_text(
+                f"📝 <b>Текст из шаблона:</b>\n<i>{preview}</i>\n\n"
+                "⏱️ <b>Задержка между постами:</b>",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        else:
+            await state.set_state(MassPublishFSM2.waiting_text)
+            await _ask_post_text(callback, edit=True)
+
+    else:
+        # Show account picker
+        accounts = await _get_active_accounts(pool, callback.from_user.id)
+        if not accounts:
+            await callback.message.edit_text(
+                "⚠️ Нет активных аккаунтов.",
+                parse_mode="HTML",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
+            return
+        kb = InlineKeyboardBuilder()
+        for acc in accounts:
+            kb.button(
+                text=_acc_label(acc),
+                callback_data=MassPubCb(action="pick_account", target_id=acc["id"]),
+            )
+        kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
+        kb.adjust(1)
+        await state.set_state(MassPublishFSM2.choosing_target)
+        await state.update_data(target_type="account", dry_run=False, tpl_prefill=None)
+        await callback.message.edit_text(
+            "👤 <b>Выберите аккаунт</b>\n\nПубликация будет только в каналы этого аккаунта:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+@router.callback_query(MassPubCb.filter(F.action == "pick_account"))
+async def cb_mpub_pick_account(
+    callback: CallbackQuery, callback_data: MassPubCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    prefill = sd.get("tpl_prefill") or {}
+    prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+
+    await state.update_data(target_acc_ids=[callback_data.target_id], tpl_prefill=None)
+
+    if prefill_text:
+        await state.update_data(post_text=prefill_text)
+        await state.set_state(MassPublishFSM2.choosing_timing)
+        kb = InlineKeyboardBuilder()
+        for key, (label, _) in _TIMING_OPTIONS.items():
+            kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
+        kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+        kb.adjust(2, 2, 1)
+        preview = prefill_text[:200] + ("…" if len(prefill_text) > 200 else "")
+        await callback.message.edit_text(
+            f"📝 <b>Текст из шаблона:</b>\n<i>{preview}</i>\n\n"
+            "⏱️ <b>Задержка между постами:</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await state.set_state(MassPublishFSM2.waiting_text)
+        await _ask_post_text(callback, edit=True)
+
+
+async def _ask_post_text(event, edit: bool = True) -> None:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+    text = (
+        "📝 <b>Текст поста</b>\n\n"
+        "Введите текст публикации или отправьте медиа (фото/видео/документ) с подписью.\n"
+        "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>"
+    )
+    markup = kb.as_markup()
+    if hasattr(event, "message"):
+        if edit:
+            try:
+                await event.message.edit_text(
+                    text, parse_mode="HTML", reply_markup=markup
+                )
+                return
+            except Exception:
+                log_exc_swallow(log, "сбой edit_text в _ask_post_text")
+        await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
+    else:
+        await event.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.message(MassPublishFSM2.waiting_text)
+async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
+    # Accept text message or media message with optional caption
+    text = (message.text or message.caption or "").strip()
+
+    # Extract media info if any (photo, video, animation, document)
+    media_file_id: str | None = None
+    media_type: str | None = None
+    if message.photo:
+        media_file_id = message.photo[-1].file_id
+        media_type = "photo"
+    elif message.video:
+        media_file_id = message.video.file_id
+        media_type = "video"
+    elif message.animation:
+        media_file_id = message.animation.file_id
+        media_type = "animation"
+    elif message.document:
+        media_file_id = message.document.file_id
+        media_type = "document"
+
+    if not text and not media_file_id:
+        await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:")
+        return
+
+    await state.update_data(
+        post_text=text,
+        media_file_id=media_file_id,
+        media_type=media_type,
+    )
+    await state.set_state(MassPublishFSM2.choosing_timing)
+    kb = InlineKeyboardBuilder()
+    for key, (label, _) in _TIMING_OPTIONS.items():
+        kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
+    kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+    kb.adjust(2, 2, 1)
+    media_hint = " + медиа" if media_file_id else ""
+    await message.answer(
+        f"✅ Текст{media_hint} принят.\n\n"
+        "⏱️ <b>Задержка между постами:</b>\n\n"
+        "• <b>5 сек</b> — быстро, риск флуд-бана при большом кол-ве\n"
+        "• <b>30 сек</b> — рекомендуется для большинства случаев\n"
+        "• <b>60 сек</b> — максимально безопасно\n"
+        "• <b>Умный</b> — случайно 30-90 сек, имитирует человека",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassPubCb.filter(F.action.startswith("timing_")))
+async def cb_mpub_timing(
+    callback: CallbackQuery,
+    callback_data: MassPubCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    # Extract timing key from action: "timing_delay_5s" → "delay_5s"
+    timing_key = callback_data.action[len("timing_") :]
+    delay_s = _TIMING_OPTIONS.get(timing_key, ("", 30))[1]
+    await state.update_data(timing_key=timing_key, delay_s=delay_s)
+    await state.set_state(MassPublishFSM2.previewing)
+    await _show_preview(callback, state, pool)
+
+
+async def _show_preview(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    data = await state.get_data()
+    acc_ids: list[int] = data.get("target_acc_ids", [])
+    delay_s: int = data.get("delay_s", 30)
+    post_text: str = data.get("post_text", "")
+    dry_run: bool = data.get("dry_run", False)
+    media_file_id: str | None = data.get("media_file_id")
+    media_type: str | None = data.get("media_type")
+
+    # Count total channels from DB (fast, no Telegram connections)
+    try:
+        channel_counts = await pool.fetch(
+            "SELECT acc_id, COUNT(*) AS cnt FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
+            "GROUP BY acc_id",
+            callback.from_user.id,
+            acc_ids,
+        )
+    except Exception:
+        channel_counts = []
+    total_channels = sum(r["cnt"] for r in channel_counts)
+    acc_count = len(channel_counts)
+
+    effective_delay = 60 if delay_s < 0 else delay_s  # smart = ~60s avg
+    estimated_s = total_channels * effective_delay
+    timing_label = _TIMING_OPTIONS.get(
+        data.get("timing_key", "delay_30s"), ("30с", 30)
+    )[0]
+
+    # Truncate post text for preview and escape HTML chars for bot UI display
+    preview_text = html.escape(post_text[:300]) + ("..." if len(post_text) > 300 else "")
+
+    channels_hint = (
+        "\n⚠️ <i>Каналы не найдены в БД. Импортируйте их через «📡 Каналы → 📥 Импорт».</i>"
+        if total_channels == 0
+        else ""
+    )
+    dry_run_banner = (
+        "\n\n⚠️ <b>Сухой прогон — реальная публикация НЕ выполнится.</b>\n"
+        "<i>Это только предпросмотр: каналы посчитаны, пост НЕ отправлен.</i>"
+        if dry_run
+        else ""
+    )
+
+    # Intelligence block
+    intel_text = ""
+    if not dry_run:
+        try:
+            from services import intelligence_engine
+
+            intel = await intelligence_engine.get_pre_launch_intelligence(
+                pool,
+                callback.from_user.id,
+                "mass_publish",
+                total_channels or 1,
+                account_ids=acc_ids if acc_ids else None,
+            )
+            intel_text = "\n\n" + intelligence_engine.format_pre_launch_block(intel)
+        except Exception:
+            intel_text = ""
+
+    media_hint = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
+    preview_msg = (
+        f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
+        f"Каналов в БД: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'}){channels_hint}\n"
+        f"Задержка: <b>{timing_label}</b>{media_hint}\n"
+        f"Расчётное время: ~{_format_duration(estimated_s)}\n\n"
+        f"Текст поста:\n"
+        f"———\n"
+        f"{preview_text}\n"
+        f"———"
+        f"{dry_run_banner}"
+        f"{intel_text}"
+    )
+
+    kb = InlineKeyboardBuilder()
+    if not dry_run:
+        kb.button(text="✅ Запустить", callback_data=MassPubCb(action="confirm_send"))
+        kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+    else:
+        kb.button(text="◀️ В меню публикации", callback_data=MassPubCb(action="menu"))
+    kb.adjust(1)
+
+    await state.set_state(MassPublishFSM2.confirming)
+    try:
+        await callback.message.edit_text(
+            preview_msg, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message is not modified" in _es:
+            pass
+        elif "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.message.answer(preview_msg, parse_mode="HTML", reply_markup=kb.as_markup())
+        else:
+            log.warning("mass_publish preview edit error: %s", _e)
+
+
+@router.callback_query(MassPubCb.filter(F.action == "confirm_send"))
+async def cb_mpub_confirm_send(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Ставлю в очередь...")
+    data = await state.get_data()
+    await state.clear()
+
+    acc_ids: list[int] = data.get("target_acc_ids", [])
+    delay_s: int = data.get("delay_s", 30)
+    post_text: str = data.get("post_text", "")
+    media_file_id: str | None = data.get("media_file_id")
+    media_type: str | None = data.get("media_type")
+
+    # Считаем каналы из managed_channels для total_items
+    total_channels = 0
+    try:
+        row = await pool.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+            callback.from_user.id,
+            acc_ids,
+        )
+        total_channels = row["cnt"] if row else 0
+    except Exception:
+        pass
+
+    from services import operation_bus
+
+    op_params: dict = {
+        "text": post_text,
+        "delay_seconds": delay_s,
+        "account_ids": acc_ids,
+    }
+    if media_file_id and media_type:
+        op_params["media_file_id"] = media_file_id
+        op_params["media_type"] = media_type
+
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            "mass_publish",
+            op_params,
+            total_items=total_channels,
+        )
+        media_note = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
+        await callback.message.edit_text(
+            f"📤 <b>Публикация поставлена в очередь</b>\n\n"
+            f"Каналов для публикации: <b>{total_channels}</b>{media_note}\n"
+            f"ID операции: <code>#{op_id}</code>\n\n"
+            f"Вы получите уведомление по мере выполнения.\n"
+            f"<i>Управление очередью: /ops → 📋 Очередь</i>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+    except Exception as exc:
+        log.exception(
+            "mass_publish submit error user=%s: %s", callback.from_user.id, exc
+        )
+        await callback.message.edit_text(
+            f"⚠️ Ошибка постановки в очередь: {html.escape(str(exc)[:200])}",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+
+
+# NOTE: _mpub_bg was removed — it was dead code.
+# Actual publishing is executed by op_worker._exec_mass_publish via the operation queue.
+# The queue path: confirm_send → operation_bus.submit → op_worker picks up → _exec_mass_publish
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DRY RUN
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@router.callback_query(MassPubCb.filter(F.action == "dry_run"))
+async def cb_mpub_dry_run(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    from bot.utils.subscription import require_plan
+
+    if not await require_plan(pool, callback.from_user.id, _STARTER):
+        await callback.message.edit_text(
+            "🔒 <b>Сухой прогон — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    try:
+        accounts = await _get_active_accounts(pool, callback.from_user.id)
+    except Exception:
+        await state.clear()
+        await callback.message.edit_text(
+            "❌ Ошибка загрузки аккаунтов. Попробуйте позже.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    if not accounts:
+        await state.clear()
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    await state.update_data(
+        target_type="all",
+        target_acc_ids=[a["id"] for a in accounts],
+        dry_run=True,
+        delay_s=30,
+        timing_key="delay_30s",
+    )
+    await state.set_state(MassPublishFSM2.waiting_text)
+    await _ask_post_text(callback, edit=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# HISTORY
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@router.callback_query(MassPubCb.filter(F.action == "history"))
+async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    rows: list[asyncpg.Record] = []
+    try:
+        rows = await pool.fetch(
+            "SELECT id, status, total_items, done_items, created_at, finished_at, error_msg "
+            "FROM operation_queue "
+            "WHERE owner_id=$1 AND op_type='mass_publish' "
+            "ORDER BY created_at DESC LIMIT 10",
+            callback.from_user.id,
+        )
+    except Exception:
+        rows = []
+
+    if not rows:
+        await callback.message.edit_text(
+            "📋 <b>История публикаций</b>\n\n"
+            "Публикаций ещё не было.\n\n"
+            "<i>Запустите публикацию — записи появятся здесь автоматически.</i>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    _status_icon = {
+        "done": "✅",
+        "running": "⏳",
+        "pending": "🕐",
+        "failed": "❌",
+        "cancelled": "🚫",
+        "skipped": "⏭",
+    }
+    lines = ["📋 <b>История публикаций (последние 10)</b>\n"]
+    for r in rows:
+        icon = _status_icon.get(r["status"], "❓")
+        done = r["done_items"] or 0
+        total = r["total_items"] or 0
+        created = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "—"
+        err_hint = (
+            f" — {html.escape(r['error_msg'][:40])}" if r.get("error_msg") else ""
+        )
+        lines.append(f"{icon} {created} — {done}/{total} каналов{err_hint}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📋 Открыть очередь", callback_data=MassOpCb(action="queue", op_type="all", page=0)
+    )
+    kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )

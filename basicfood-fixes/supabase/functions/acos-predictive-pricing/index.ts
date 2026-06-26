@@ -65,12 +65,13 @@ Deno.serve(async (req) => {
       const chunkSize = 200;
       const chunks: string[][] = [];
       for (let i = 0; i < orderIds.length; i += chunkSize) chunks.push(orderIds.slice(i, i + chunkSize));
-      const chunkResults = await Promise.all(
+      const chunkResults = await Promise.allSettled(
         chunks.map((chunk) =>
           supabase.from("orders").select("id, status, created_at").in("id", chunk)
         ),
       );
-      for (const { data: ords } of chunkResults) {
+      for (const result of chunkResults) {
+        const { data: ords } = result.status === "fulfilled" ? result.value : { data: null };
         for (const o of ords ?? []) {
           if (ORDER_OK.includes(o.status)) validOrderSet.add(o.id);
         }

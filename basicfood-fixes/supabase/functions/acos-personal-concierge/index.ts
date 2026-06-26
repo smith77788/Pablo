@@ -45,7 +45,7 @@ async function buildCustomers(sb: any): Promise<CustomerCtx[]> {
   const { data: rows, error } = await sb.rpc("personal_concierge_candidates", {
     p_min_days_since_order: 14,
     p_limit: BATCH_SIZE,
-  }).maybeSingle();
+  });
   // Fallback if RPC missing: use raw query through views.
   if (error || !rows) {
     const { data: orders } = await sb

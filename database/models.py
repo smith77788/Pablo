@@ -1,4 +1,5 @@
 """Supabase client for BASIC.FOOD business data."""
+
 import os
 from supabase import create_client, Client
 

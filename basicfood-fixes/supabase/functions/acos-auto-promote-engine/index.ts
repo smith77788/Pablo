@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
     }
 
     // Parallel tribunal enqueues
-    const enqResults = await Promise.all(readyItems.map(async ({ insight, actionType, agent, memMatch }) => {
+    const enqSettled = await Promise.allSettled(readyItems.map(async ({ insight, actionType, agent, memMatch }) => {
       const enq = await enqueueTribunalCase({
         source_function: "acos-auto-promote-engine",
         category: actionType === "seo_copy_update" ? "seo" : "other",
@@ -224,7 +224,13 @@ Deno.serve(async (req) => {
       });
       return { insight_id: insight.id, action_type: actionType, case_id: enq.case_id, reused: enq.reused };
     }));
-    queued.push(...enqResults);
+    for (const result of enqSettled) {
+      if (result.status === "fulfilled") {
+        queued.push(result.value);
+      } else {
+        console.error("acos-auto-promote-engine tribunal enqueue failed", result.reason);
+      }
+    }
 
     __agent.success();
     return new Response(

@@ -1,6 +1,8 @@
 """Telegram Bot tools for BASIC.FOOD AI agents."""
+
 from __future__ import annotations
 import os
+import time
 import httpx
 from typing import Any
 
@@ -45,8 +47,17 @@ def send_message_with_keyboard(
     buttons: list[list[str]],
 ) -> dict:
     """Send a message with a reply keyboard."""
-    keyboard = {"keyboard": [[{"text": b} for b in row] for row in buttons], "resize_keyboard": True}
-    return _call("sendMessage", chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+    keyboard = {
+        "keyboard": [[{"text": b} for b in row] for row in buttons],
+        "resize_keyboard": True,
+    }
+    return _call(
+        "sendMessage",
+        chat_id=chat_id,
+        text=text,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 def send_message_with_inline(
@@ -56,12 +67,18 @@ def send_message_with_inline(
 ) -> dict:
     """Send a message with inline keyboard. Each button: {text, callback_data}."""
     keyboard = {"inline_keyboard": inline_buttons}
-    return _call("sendMessage", chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+    return _call(
+        "sendMessage",
+        chat_id=chat_id,
+        text=text,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
-def get_updates(offset: int = 0, limit: int = 20) -> list[dict]:
-    """Poll for new updates (long-poll with timeout=0 for immediate return)."""
-    data = _call("getUpdates", offset=offset, limit=limit, timeout=0)
+def get_updates(offset: int = 0, limit: int = 100) -> list[dict]:
+    """Long-poll for new updates; blocks up to 25 s server-side to avoid hot loops."""
+    data = _call("getUpdates", offset=offset, limit=limit, timeout=25)
     return data.get("result", [])
 
 
@@ -107,6 +124,7 @@ def process_update(update: dict) -> dict | None:
         "first_name": first_name,
         "username": username,
         "text": text,
+        "is_command": text.startswith("/"),
         "is_callback": callback is not None,
         "customer_id": customer_id,
         "customer": customer,
@@ -131,11 +149,20 @@ def get_bot_info() -> dict:
 
 
 def send_photo(chat_id: int | str, photo_url: str, caption: str = "") -> dict:
-    return _call("sendPhoto", chat_id=chat_id, photo=photo_url, caption=caption, parse_mode="HTML")
+    return _call(
+        "sendPhoto",
+        chat_id=chat_id,
+        photo=photo_url,
+        caption=caption,
+        parse_mode="HTML",
+    )
 
 
-def broadcast(chat_ids: list[int], text: str) -> dict[int, bool]:
-    """Send a message to multiple chat IDs. Returns {chat_id: success}."""
+def broadcast(chat_ids: list[int], text: str, delay: float = 0.05) -> dict[int, bool]:
+    """Send a message to multiple chat IDs. Returns {chat_id: success}.
+
+    delay: seconds between sends — stays under Telegram's 30 msg/s group limit.
+    """
     results: dict[int, bool] = {}
     for cid in chat_ids:
         try:
@@ -143,4 +170,5 @@ def broadcast(chat_ids: list[int], text: str) -> dict[int, bool]:
             results[cid] = True
         except Exception:
             results[cid] = False
+        time.sleep(delay)
     return results

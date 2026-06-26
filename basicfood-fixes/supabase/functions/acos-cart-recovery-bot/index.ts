@@ -74,12 +74,15 @@ Deno.serve(async (req) => {
 
     // Filter out sessions that already purchased
     const sessionIds = [...bySession.keys()];
-    const { data: purchases } = await supabase
-      .from("events")
-      .select("session_id")
-      .eq("event_type", "purchase_completed")
-      .in("session_id", sessionIds)
-      .gte("created_at", sinceISO);
+    // Guard: empty .in() returns ALL rows, not zero rows.
+    const { data: purchases } = sessionIds.length
+      ? await supabase
+          .from("events")
+          .select("session_id")
+          .eq("event_type", "purchase_completed")
+          .in("session_id", sessionIds)
+          .gte("created_at", sinceISO)
+      : { data: [] as { session_id: string }[] };
     const purchased = new Set((purchases ?? []).map((p) => p.session_id));
 
     const candidates = [...bySession.entries()].filter(([sid]) => !purchased.has(sid));

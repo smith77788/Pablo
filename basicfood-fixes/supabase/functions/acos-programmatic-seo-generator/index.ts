@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
     const noProductsIds: string[] = [];
 
     // Process clusters in parallel: product lookups + copy generation + tribunal enqueues
-    const caseResults = await Promise.all(
+    const caseSettled = await Promise.allSettled(
       (clusters ?? []).map(async (c): Promise<{ cluster_id: string; case_id: string; reused: boolean } | null> => {
         const slug = slugify(`p-${c.representative_query}`);
         if (existingSlugs.has(slug)) {
@@ -165,6 +165,7 @@ Deno.serve(async (req) => {
         return { cluster_id: c.id, case_id: enq.case_id, reused: enq.reused };
       }),
     );
+    const caseResults = caseSettled.map((r) => (r.status === "fulfilled" ? r.value : null));
 
     // Batch status updates
     const statusOps: Promise<any>[] = [];

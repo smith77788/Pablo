@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
       const chunk = 500;
       const chunks: any[][] = [];
       for (let i = 0; i < upserts.length; i += chunk) chunks.push(upserts.slice(i, i + chunk));
-      await Promise.all(chunks.map((c) => supabase.from("customer_ltv_scores").insert(c)));
+      await Promise.allSettled(chunks.map((c) => supabase.from("customer_ltv_scores").insert(c)));
     }
 
     // Insight: high-value share

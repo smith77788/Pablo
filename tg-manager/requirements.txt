@@ -1,0 +1,15 @@
+aiogram==3.13.1
+asyncpg==0.29.0
+aiohttp==3.10.10
+httpx>=0.27.0
+python-dotenv==1.0.1
+openai>=1.40.0
+telethon>=1.36.0
+PySocks>=1.7.1
+qrcode[pil]>=7.4
+aiohttp-socks>=0.7.3
+pypdf>=4.3.1
+python-docx>=1.1.2
+openpyxl>=3.1.5
+pycryptodome>=3.19.0
+# opentele>=1.15.1  # не работает на Python 3.12 (зависимость pyaes не собирается)

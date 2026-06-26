@@ -1,13 +1,12 @@
 """Email tools for AI agents — IMAP reading and SMTP sending."""
+
 import imaplib
 import smtplib
 import email as email_lib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
-from datetime import datetime
 import os
-from typing import Any
 
 from tools.database_tools import save_message, get_customer_by_email
 
@@ -36,7 +35,9 @@ def _decode_header_value(value: str) -> str:
 def _extract_body(msg: email_lib.message.Message) -> str:
     if msg.is_multipart():
         for part in msg.walk():
-            if part.get_content_type() == "text/plain" and not part.get("Content-Disposition"):
+            if part.get_content_type() == "text/plain" and not part.get(
+                "Content-Disposition"
+            ):
                 payload = part.get_payload(decode=True)
                 charset = part.get_content_charset() or "utf-8"
                 return payload.decode(charset, errors="replace")
@@ -84,23 +85,27 @@ def fetch_unread_emails(folder: str = "INBOX", limit: int = 20) -> list[dict]:
 
             conn.store(uid, "+FLAGS", "\\Seen")
 
-            results.append({
-                "message_id": message_id,
-                "from": from_addr,
-                "sender_email": sender_email,
-                "subject": subject,
-                "body": body,
-                "date": date_str,
-                "customer_id": customer_id,
-                "customer_name": customer["name"] if customer else None,
-            })
+            results.append(
+                {
+                    "message_id": message_id,
+                    "from": from_addr,
+                    "sender_email": sender_email,
+                    "subject": subject,
+                    "body": body,
+                    "date": date_str,
+                    "customer_id": customer_id,
+                    "customer_name": customer["name"] if customer else None,
+                }
+            )
 
         return results
     finally:
         conn.logout()
 
 
-def send_email(to: str, subject: str, body: str, customer_id: int | None = None) -> bool:
+def send_email(
+    to: str, subject: str, body: str, customer_id: int | None = None
+) -> bool:
     """Send an email via SMTP and log it in the messages table."""
     host = os.environ["EMAIL_SMTP_HOST"]
     port = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
@@ -137,7 +142,11 @@ def reply_to_email(
     customer_id: int | None = None,
 ) -> bool:
     """Reply to an email thread (prepends Re: if needed)."""
-    subject = original_subject if original_subject.startswith("Re:") else f"Re: {original_subject}"
+    subject = (
+        original_subject
+        if original_subject.startswith("Re:")
+        else f"Re: {original_subject}"
+    )
     return send_email(to=to, subject=subject, body=body, customer_id=customer_id)
 
 
@@ -172,12 +181,14 @@ def search_emails(query: str, folder: str = "INBOX", limit: int = 10) -> list[di
         for uid in uids:
             _, raw = conn.fetch(uid, "(RFC822)")
             msg = email_lib.message_from_bytes(raw[0][1])
-            results.append({
-                "from": _decode_header_value(msg.get("From", "")),
-                "subject": _decode_header_value(msg.get("Subject", "")),
-                "date": msg.get("Date", ""),
-                "snippet": _extract_body(msg)[:300],
-            })
+            results.append(
+                {
+                    "from": _decode_header_value(msg.get("From", "")),
+                    "subject": _decode_header_value(msg.get("Subject", "")),
+                    "date": msg.get("Date", ""),
+                    "snippet": _extract_body(msg)[:300],
+                }
+            )
         return results
     finally:
         conn.logout()

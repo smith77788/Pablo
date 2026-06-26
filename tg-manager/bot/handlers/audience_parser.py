@@ -1,0 +1,754 @@
+"""
+Audience Parser — UI для парсинга аудитории из каналов/групп Telegram.
+
+Flows:
+- Список запусков парсера с историей
+- Запуск парсинга участников / активных пользователей
+- Просмотр спарсенной аудитории с фильтрами
+- Экспорт в CSV / текстовый список
+- Удаление аудитории
+
+Subscription: STARTER минимум для парсинга.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import csv
+import html
+import io
+import logging
+
+import asyncpg
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    Message,
+)
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.callbacks import ParserCb, BmCb
+from bot.keyboards import subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
+from services.logger import log_exc_swallow
+
+log = logging.getLogger(__name__)
+router = Router()
+
+_PAGE_SIZE = 10
+
+
+class ParserFSM(StatesGroup):
+    waiting_source = State()
+    waiting_limit = State()
+    geo_coords = State()   # широта,долгота для гео-парсинга
+    geo_radius = State()   # радиус в метрах
+
+
+def _back_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=ParserCb(action="menu"))
+    return kb
+
+
+def _menu_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="👥 Парсить участников", callback_data=ParserCb(action="start_members")
+    )
+    kb.button(
+        text="⚡ Парсить активных (группа)",
+        callback_data=ParserCb(action="start_active"),
+    )
+    kb.button(
+        text="📍 Гео-парсинг (Nearby)",
+        callback_data=ParserCb(action="start_geo"),
+    )
+    kb.button(text="📋 История запусков", callback_data=ParserCb(action="runs"))
+    kb.button(text="📊 Моя аудитория", callback_data=ParserCb(action="audience"))
+    kb.button(
+        text="🗑 Очистить всю аудиторию", callback_data=ParserCb(action="clear_all")
+    )
+    kb.adjust(1)
+    return kb
+
+
+# ── Главное меню парсера ──────────────────────────────────────────────────
+
+
+@router.callback_query(ParserCb.filter(F.action == "menu"))
+async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.message.edit_text(
+            locked_text("Парсер аудитории", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "pro", back_callback=BmCb(action="monitoring")
+            ),
+        )
+        return
+
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
+        )
+        runs = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
+        )
+    except Exception:
+        total = runs = 0
+
+    await callback.message.edit_text(
+        "🔍 <b>Парсер аудитории</b>\n\n"
+        f"Всего в базе: <b>{total:,}</b> пользователей\n"
+        f"Запусков парсера: <b>{runs}</b>\n\n"
+        "Извлекайте аудиторию из каналов и групп для дальнейшей работы.\n"
+        "• <b>Участники</b> — все подписчики канала/группы\n"
+        "• <b>Активные</b> — кто писал в группе за последние 30 дней",
+        parse_mode="HTML",
+        reply_markup=_menu_kb().as_markup(),
+    )
+
+
+# ── Начало парсинга ──────────────────────────────────────────────────────
+
+
+@router.callback_query(ParserCb.filter(F.action.in_({"start_members", "start_active"})))
+async def cb_parser_start(
+    callback: CallbackQuery,
+    callback_data: ParserCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer("🔒 Требуется PRO", show_alert=True)
+        return
+    await callback.answer()
+
+    parse_type = "members" if callback_data.action == "start_members" else "active"
+    await state.update_data(parse_type=parse_type)
+    await state.set_state(ParserFSM.waiting_source)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+
+    type_label = "участников" if parse_type == "members" else "активных пользователей"
+    extra = (
+        ""
+        if parse_type == "members"
+        else "\n\n⚠️ Работает только для <b>супергрупп</b> (не каналов)"
+    )
+
+    await callback.message.edit_text(
+        f"🔍 <b>Парсинг {type_label}</b>\n\n"
+        "Введите <b>username</b> или ссылку на канал/группу:\n\n"
+        "<code>@channelname</code>\n"
+        "<code>https://t.me/channelname</code>" + extra,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(ParserFSM.waiting_source)
+async def fsm_parser_source(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    source = (message.text or "").strip()
+    if not source:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+        await message.answer(
+            "⚠️ Введите username или ссылку:", reply_markup=kb.as_markup()
+        )
+        return
+
+    # Нормализуем — убираем https://t.me/
+    if "t.me/" in source:
+        source = "@" + source.split("t.me/")[-1].split("/")[0].lstrip("+")
+    if not source.startswith("@") and not source.lstrip("-").isdigit():
+        source = "@" + source
+
+    await state.update_data(parse_source=source)
+    await state.set_state(ParserFSM.waiting_limit)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="500", callback_data="prs:limit:500")
+    kb.button(text="1000", callback_data="prs:limit:1000")
+    kb.button(text="5000", callback_data="prs:limit:5000")
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    kb.adjust(3, 1)
+
+    await message.answer(
+        f"📊 <b>Источник:</b> <code>{html.escape(source)}</code>\n\n"
+        "Выберите <b>максимальное количество</b> пользователей для парсинга\n"
+        "или введите число вручную:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("prs:limit:"))
+async def cb_parser_limit_quick(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    limit = int(callback.data.split(":")[-1])
+    await _start_parse(callback.message, state, pool, callback.from_user.id, limit)
+
+
+@router.message(ParserFSM.waiting_limit)
+async def fsm_parser_limit(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    text = (message.text or "").strip()
+    try:
+        limit = int(text.replace(" ", "").replace(",", ""))
+        limit = max(10, min(limit, 10000))
+    except ValueError:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+        await message.answer(
+            "⚠️ Введите число (от 10 до 10000):", reply_markup=kb.as_markup()
+        )
+        return
+    await _start_parse(message, state, pool, message.from_user.id, limit)
+
+
+_PARSE_TIMEOUT = 300  # 5 минут максимум на операцию
+
+
+def _friendly_parse_error(e: Exception) -> str:
+    msg = str(e).lower()
+    if "connector is closed" in msg or "clientconnectionerror" in msg:
+        return "Соединение с Telegram прервалось. Попробуйте ещё раз."
+    if "flood" in msg or "floodwaiterror" in msg:
+        return "Telegram ограничил запросы (FloodWait). Подождите несколько минут."
+    if "usernotparticipant" in msg or "channelprivateerror" in msg:
+        return "Нет доступа к каналу/группе. Аккаунт должен быть подписчиком."
+    if "usernaminvalid" in msg or "not found" in msg or "no user" in msg:
+        return "Канал/группа не найдены. Проверьте username."
+    if "timeout" in msg or "timed out" in msg:
+        return "Время ожидания истекло (>5 мин). Попробуйте с меньшим лимитом."
+    return str(e)[:200]
+
+
+async def _start_parse(
+    msg_target, state: FSMContext, pool: asyncpg.Pool, owner_id: int, limit: int
+) -> None:
+    from services.parser import parse_members, parse_active_users
+    from services import infra_orchestrator
+
+    data = await state.get_data()
+    source = data.get("parse_source", "")
+    parse_type = data.get("parse_type", "members")
+    await state.clear()
+
+    if not source:
+        await msg_target.answer("⚠️ Источник не указан. Начните заново.")
+        return
+
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, owner_id)
+    if not ready:
+        await msg_target.answer(f"⚠️ {reason}", parse_mode="HTML")
+        return
+
+    type_label = "участников" if parse_type == "members" else "активных"
+    progress_msg = await msg_target.answer(
+        f"⏳ <b>Парсинг {type_label}</b>\n\n"
+        f"Источник: <code>{html.escape(source)}</code>\n"
+        f"Лимит: <b>{limit:,}</b>\n\n"
+        "🔌 Подключаюсь к Telegram...",
+        parse_mode="HTML",
+    )
+
+    last_update = {"n": 0}
+
+    async def progress_cb(current: int, total: int) -> None:
+        if current - last_update["n"] >= 50:
+            last_update["n"] = current
+            pct = min(100, round(current / max(total, 1) * 100))
+            bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+            try:
+                await progress_msg.edit_text(
+                    f"⏳ <b>Парсинг {type_label}</b>\n\n"
+                    f"Источник: <code>{html.escape(source)}</code>\n\n"
+                    f"[{bar}] {pct}%\n"
+                    f"Собрано: <b>{current:,}</b> / {total:,}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Не удалось обновить сообщение прогресса парсинга")
+
+    try:
+        if parse_type == "members":
+            coro = parse_members(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
+        else:
+            coro = parse_active_users(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
+        result = await asyncio.wait_for(coro, timeout=_PARSE_TIMEOUT)
+    except asyncio.TimeoutError:
+        await progress_msg.edit_text(
+            "⏱ <b>Время ожидания истекло</b>\n\n"
+            "Парсинг занял больше 5 минут. Попробуйте уменьшить лимит "
+            "или выбрать другой источник.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+    except Exception as e:
+        friendly = _friendly_parse_error(e)
+        await progress_msg.edit_text(
+            f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(friendly)}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        log.warning("parse error for user=%s source=%s: %s", owner_id, source, e)
+        return
+
+    if result and result.get("status") == "error":
+        await progress_msg.edit_text(
+            f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(result.get('error', 'неизвестная ошибка')[:200])}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📊 Просмотреть аудиторию",
+        callback_data=ParserCb(action="audience", run_id=result.get("run_id", 0)),
+    )
+    kb.button(
+        text="📥 Экспорт CSV",
+        callback_data=ParserCb(action="export", run_id=result.get("run_id", 0)),
+    )
+    kb.button(text="◀️ В меню парсера", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+
+    await progress_msg.edit_text(
+        f"✅ <b>Парсинг завершён!</b>\n\n"
+        f"Источник: <code>{html.escape(source)}</code>\n"
+        f"Тип: {type_label}\n"
+        f"Найдено: <b>{result.get('total_found', 0):,}</b>\n"
+        f"Сохранено (новых): <b>{result.get('total_saved', 0):,}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── История запусков ──────────────────────────────────────────────────────
+
+
+@router.callback_query(ParserCb.filter(F.action == "runs"))
+async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    from services.parser import get_run_history
+
+    runs = await get_run_history(pool, callback.from_user.id, limit=15)
+
+    if not runs:
+        await callback.message.edit_text(
+            "📋 <b>История запусков пуста</b>\n\nЗапустите парсинг через главное меню.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    lines = ["📋 <b>История запусков парсера</b>\n"]
+    kb = InlineKeyboardBuilder()
+    for r in runs:
+        status_icon = {
+            "done": "✅",
+            "failed": "❌",
+            "running": "⏳",
+            "empty": "⚪",
+        }.get(r["status"], "❓")
+        started = r["started_at"].strftime("%d.%m %H:%M") if r["started_at"] else "—"
+        lines.append(
+            f"{status_icon} <code>{html.escape(r['source_ref'])}</code> "
+            f"[{r['parse_type']}] — {r['total_found']:,} найдено\n"
+            f"   <i>{started}</i>"
+        )
+        if r["status"] == "done" and r["total_found"] > 0:
+            kb.button(
+                text=f"📥 {r['source_ref'][:20]} ({r['total_found']:,})",
+                callback_data=ParserCb(action="export", run_id=r["id"]),
+            )
+
+    kb.button(text="◀️ Назад", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Просмотр аудитории ───────────────────────────────────────────────────
+
+
+@router.callback_query(ParserCb.filter(F.action == "audience"))
+async def cb_parser_audience(
+    callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    from services.parser import get_parsed_audience
+
+    run_id = callback_data.run_id or None
+    page = callback_data.page
+
+    users = await get_parsed_audience(
+        pool,
+        callback.from_user.id,
+        run_id=run_id,
+        offset=page * _PAGE_SIZE,
+        limit=_PAGE_SIZE,
+    )
+
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1"
+                + (" AND parse_run_id=$2" if run_id else ""),
+                *([callback.from_user.id, run_id] if run_id else [callback.from_user.id]),
+            )
+            or 0
+        )
+    except Exception:
+        total = 0
+
+    if not users:
+        await callback.message.edit_text(
+            "📊 <b>Аудитория пуста</b>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    lines = [f"📊 <b>Аудитория</b> (всего: {total:,})\n"]
+    for u in users:
+        uname = (
+            f"@{html.escape(u['username'])}"
+            if u.get("username")
+            else f"ID:{u['tg_user_id']}"
+        )
+        name = html.escape(u.get("first_name") or "") + (
+            " " + html.escape(u.get("last_name") or "") if u.get("last_name") else ""
+        )
+        premium = " ⭐" if u.get("is_premium") else ""
+        lines.append(f"• {uname} — {name.strip()}{premium}")
+
+    kb = InlineKeyboardBuilder()
+    if page > 0:
+        kb.button(
+            text="◀️",
+            callback_data=ParserCb(
+                action="audience", run_id=run_id or 0, page=page - 1
+            ),
+        )
+    if (page + 1) * _PAGE_SIZE < total:
+        kb.button(
+            text="▶️",
+            callback_data=ParserCb(
+                action="audience", run_id=run_id or 0, page=page + 1
+            ),
+        )
+    if run_id:
+        kb.button(
+            text="📥 Экспорт CSV",
+            callback_data=ParserCb(action="export", run_id=run_id),
+        )
+    kb.button(text="◀️ В меню", callback_data=ParserCb(action="menu"))
+    kb.adjust(2, 1, 1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Экспорт CSV ──────────────────────────────────────────────────────────
+
+
+@router.callback_query(ParserCb.filter(F.action == "export"))
+async def cb_parser_export(
+    callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
+) -> None:
+    from services.parser import get_parsed_audience
+
+    run_id = callback_data.run_id or None
+    users = await get_parsed_audience(
+        pool,
+        callback.from_user.id,
+        run_id=run_id,
+        limit=10000,
+    )
+
+    if not users:
+        await callback.answer("⚠️ Нет данных для экспорта.", show_alert=True)
+        return
+    await callback.answer("⏳ Готовлю файл...")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "tg_user_id",
+            "username",
+            "first_name",
+            "last_name",
+            "is_premium",
+            "source_title",
+            "parsed_at",
+        ]
+    )
+    for u in users:
+        writer.writerow(
+            [
+                u["tg_user_id"],
+                u.get("username") or "",
+                u.get("first_name") or "",
+                u.get("last_name") or "",
+                "yes" if u.get("is_premium") else "no",
+                u.get("source_title") or "",
+                str(u.get("parsed_at", ""))[:19],
+            ]
+        )
+
+    csv_bytes = buf.getvalue().encode("utf-8-sig")
+    fname = f"audience_{run_id or 'all'}_{len(users)}.csv"
+    await callback.message.answer_document(
+        BufferedInputFile(csv_bytes, filename=fname),
+        caption=f"📥 <b>Экспорт аудитории</b>\n{len(users):,} пользователей",
+        parse_mode="HTML",
+    )
+
+
+# ── Очистка ──────────────────────────────────────────────────────────────
+
+
+@router.callback_query(ParserCb.filter(F.action == "clear_all"))
+async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Да, очистить всё", callback_data=ParserCb(action="confirm_clear"))
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
+        )
+    except Exception:
+        total = 0
+    await callback.message.edit_text(
+        f"⚠️ <b>Очистить всю аудиторию?</b>\n\n"
+        f"Будет удалено: <b>{total:,}</b> пользователей\n"
+        "<i>Это действие необратимо</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ParserCb.filter(F.action == "confirm_clear"))
+async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    from services.parser import delete_audience
+
+    deleted = await delete_audience(pool, callback.from_user.id)
+    await callback.message.edit_text(
+        f"🗑 <b>Аудитория очищена</b>\n\nУдалено: <b>{deleted:,}</b> пользователей",
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
+    )
+
+
+# ── Гео-парсинг (Nearby People) ───────────────────────────────────────────────
+
+@router.callback_query(ParserCb.filter(F.action == "start_geo"))
+async def cb_parser_geo_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(ParserFSM.geo_coords)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    await callback.message.edit_text(
+        "📍 <b>Гео-парсинг (Nearby People)</b>\n\n"
+        "Собирает пользователей Telegram, находящихся поблизости.\n\n"
+        "Введите координаты через запятую:\n"
+        "<code>55.7558, 37.6173</code>\n\n"
+        "<i>Совет: откройте любую карту, найдите нужный район и скопируйте координаты.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(ParserFSM.geo_coords)
+async def msg_parser_geo_coords(message: Message, state: FSMContext) -> None:
+    import re
+    text = message.text or ""
+    m = re.search(r"([-+]?\d+\.?\d*)[,\s]+([-+]?\d+\.?\d*)", text)
+    if not m:
+        await message.answer("⚠️ Не удалось распознать координаты.\nВведите: 55.7558, 37.6173")
+        return
+    lat, lon = float(m.group(1)), float(m.group(2))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        await message.answer("⚠️ Неверные координаты. Широта: -90..90, долгота: -180..180")
+        return
+    await state.update_data(geo_lat=lat, geo_lon=lon)
+    await state.set_state(ParserFSM.geo_radius)
+    kb = InlineKeyboardBuilder()
+    for label, val in [("500м", 500), ("1км", 1000), ("2км", 2000), ("5км", 5000)]:
+        kb.button(text=label, callback_data=f"prs:geo_r:{val}")
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    kb.adjust(4, 1)
+    await message.answer(
+        f"📌 Координаты: <code>{lat}, {lon}</code>\n\n"
+        "Выберите радиус поиска:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("prs:geo_r:"))
+async def cb_parser_geo_radius(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    radius = int(callback.data.split(":")[-1])
+    await state.update_data(geo_radius=radius)
+    data = await state.get_data()
+    lat = data.get("geo_lat", 0)
+    lon = data.get("geo_lon", 0)
+
+    # Запускаем парсинг
+    acc = await pool.fetchrow(
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+        "AND a.session_str IS NOT NULL AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+        "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1",
+        callback.from_user.id,
+    )
+    if not acc:
+        await callback.message.edit_text(
+            "⚠️ Нет доступных аккаунтов.",
+            reply_markup=_back_kb().as_markup(),
+        )
+        await state.clear()
+        return
+
+    await callback.message.edit_text(
+        f"⏳ Ищу людей в радиусе <b>{radius}м</b> от <code>{lat}, {lon}</code>...",
+        parse_mode="HTML",
+    )
+    await state.clear()
+
+    try:
+        results = await _exec_geo_parse(dict(acc), lat, lon, radius)
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ Ошибка гео-парсинга: <code>{exc}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    if not results:
+        await callback.message.edit_text(
+            "📍 Рядом никого не найдено (Nearby People отключён у пользователей).",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    # Сохраняем в parsed_audiences
+    owner_id = callback.from_user.id
+    saved = 0
+    import time
+    run_id = int(time.time())
+    for user in results:
+        try:
+            await pool.execute(
+                """INSERT INTO parsed_audiences(
+                    owner_id, source_type, source_title, parse_run_id,
+                    tg_user_id, username, first_name, last_name, geo_city
+                ) VALUES($1,'geo','Nearby',$2,$3,$4,$5,$6,$7)
+                ON CONFLICT (owner_id, source_id, tg_user_id) DO NOTHING""",
+                owner_id, run_id,
+                user.get("user_id"), user.get("username", ""),
+                user.get("first_name", ""), user.get("last_name", ""),
+                f"{lat},{lon}",
+            )
+            saved += 1
+        except Exception:
+            pass
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Посмотреть аудиторию", callback_data=ParserCb(action="audience"))
+    kb.button(text="◀️ В меню парсера", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"✅ <b>Гео-парсинг завершён</b>\n\n"
+        f"📍 Координаты: <code>{lat}, {lon}</code>\n"
+        f"📏 Радиус: <b>{radius}м</b>\n"
+        f"👥 Найдено: <b>{len(results)}</b> пользователей\n"
+        f"💾 Сохранено: <b>{saved}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _exec_geo_parse(acc: dict, lat: float, lon: float, radius: int) -> list[dict]:
+    """Выполнить GetLocatedRequest и вернуть список пользователей."""
+    import asyncio
+    from services.account_manager import _make_client
+    from telethon.tl.functions.contacts import GetLocatedRequest
+    from telethon.tl.types import InputGeoPoint, User
+
+    client = _make_client(acc.get("session_str", ""), acc)
+    users = []
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15.0)
+        result = await asyncio.wait_for(
+            client(GetLocatedRequest(
+                geo_point=InputGeoPoint(lat=lat, long=lon, accuracy_radius=radius),
+                self_expires=0,  # не публиковать своё местоположение
+            )),
+            timeout=15.0,
+        )
+        for update in getattr(result, "updates", []):
+            for entity in getattr(update, "users", []):
+                if isinstance(entity, User) and not entity.bot:
+                    users.append({
+                        "user_id": int(entity.id),
+                        "username": getattr(entity, "username", "") or "",
+                        "first_name": getattr(entity, "first_name", "") or "",
+                        "last_name": getattr(entity, "last_name", "") or "",
+                    })
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    return users

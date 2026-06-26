@@ -224,7 +224,7 @@ Deno.serve(async (req) => {
 
     // Batch parallel updates instead of sequential per-insight writes
     if (insightUpdateOps.length > 0) {
-      await Promise.all(
+      await Promise.allSettled(
         insightUpdateOps.map(u => supabase.from("ai_insights").update(u.payload).eq("id", u.id))
       );
     }

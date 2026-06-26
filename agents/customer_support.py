@@ -1,5 +1,7 @@
 """Customer support agent for BASIC.FOOD."""
+
 from __future__ import annotations
+import json
 from agents.base import BaseAgent
 from tools.database_tools import (
     get_customer_by_telegram,
@@ -9,7 +11,7 @@ from tools.database_tools import (
     add_customer_note,
     get_customer_notes,
     mark_message_resolved,
-    update_customer,
+    search_products,
 )
 from tools.telegram_tools import send_message
 
@@ -28,11 +30,24 @@ SYSTEM = """Ти — ШІ-агент служби підтримки BASIC.FOOD,
 - Завжди спочатку перевіряй профіль клієнта і його замовлення
 - Додавай нотатки після кожної важливої взаємодії
 - Якщо проблема вирішена — позначай повідомлення як вирішене
+- Для питань про товари — використовуй search_products
 
 ОБМЕЖЕННЯ:
 - Не робиш повернення коштів самостійно — ескалюй до менеджера
 - Не змінюєш ціни та акції
 - Не маєш доступу до платіжних даних"""
+
+WELCOME_MESSAGE = """👋 Вітаємо у <b>BASIC.FOOD</b> — магазині натуральних ласощів для собак!
+
+Ми пропонуємо повітряно-сушені ласощі з яловичини: легеня, серце, вим'я, нирки — без консервантів та барвників. 🐾
+
+Чим можу допомогти?
+• Запитання про товари
+• Статус замовлення
+• Доставка Новою Поштою
+• Інше"""
+
+_MAX_HISTORY = 40
 
 
 class CustomerSupportAgent(BaseAgent):
@@ -41,7 +56,16 @@ class CustomerSupportAgent(BaseAgent):
 
     def __init__(self) -> None:
         super().__init__()
+        self._chat_histories: dict[int, list[dict]] = {}
         self._register_all_tools()
+
+    def _get_history(self, chat_id: int) -> list[dict]:
+        return self._chat_histories.setdefault(chat_id, [])
+
+    def _trim_history(self, history: list[dict]) -> None:
+        """Keep the most recent _MAX_HISTORY messages to cap token usage."""
+        if len(history) > _MAX_HISTORY:
+            del history[: len(history) - _MAX_HISTORY]
 
     def _register_all_tools(self) -> None:
         self.register_tool(
@@ -155,11 +179,41 @@ class CustomerSupportAgent(BaseAgent):
             },
             send_message,
         )
+        self.register_tool(
+            {
+                "name": "search_products",
+                "description": "Знайти товари за назвою або описом",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+            },
+            search_products,
+        )
 
-    def handle_telegram(self, chat_id: int, user_text: str, customer: dict | None = None) -> str:
+    def handle_telegram(
+        self, chat_id: int, user_text: str, customer: dict | None = None
+    ) -> str:
         """Process an inbound Telegram message and send reply."""
+        if user_text.strip() == "/start":
+            send_message(chat_id, WELCOME_MESSAGE)
+            self._chat_histories.pop(chat_id, None)
+            return WELCOME_MESSAGE
+
+        history = self._get_history(chat_id)
+        self._trim_history(history)
+
         context = {"chat_id": chat_id, "customer": customer}
+        system = (
+            self.system_prompt
+            + f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+        )
+
         prompt = f"Повідомлення від клієнта (chat_id={chat_id}): {user_text}"
-        reply = self.run(prompt, context=context)
+        reply, _ = self.run_with_history(system, history, prompt)
         send_message(chat_id, reply)
         return reply
