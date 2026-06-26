@@ -809,9 +809,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 op_id, uid)
             if not row:
                 return _err("Not found or not failed", 404)
+            # Carry over total_items so the retried op shows a real progress bar;
+            # done_items resets to 0 (fresh run). Executors that recompute
+            # total_items themselves will simply overwrite it.
             new_id = await pool.fetchval(
-                """INSERT INTO operation_queue(owner_id, op_type, params, status, label)
-                   SELECT owner_id, op_type, params, 'pending', label
+                """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
+                   SELECT owner_id, op_type, params, 'pending', label, total_items
                    FROM operation_queue WHERE id=$1
                    RETURNING id""",
                 op_id)
