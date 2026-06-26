@@ -238,6 +238,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .pf-brand{font-size:16px;font-weight:700;letter-spacing:-.3px;margin-bottom:4px}
 .pf-sub{font-size:12px;color:var(--hint);margin-bottom:12px}
 
+/* ─── Strike ─────────────────────────────────────────── */
+.strike-access-bar{margin:10px 16px 4px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:10px}
+.strike-access-bar.ok{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25)}
+.strike-access-ico{font-size:22px}
+.strike-access-body{flex:1}
+.strike-access-title{font-size:14px;font-weight:700}
+.strike-access-sub{font-size:12px;color:var(--hint);margin-top:2px}
+.strike-preview{background:var(--bg3);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.strike-preview-row{display:flex;align-items:flex-start;gap:8px;font-size:13px}
+.strike-preview-lbl{color:var(--hint);min-width:70px;flex-shrink:0}
+.strike-preview-val{font-weight:600;word-break:break-all}
+
 /* ─── Bot profile header ─────────────────────────────────── */
 .bot-phdr{display:flex;align-items:center;gap:14px;padding:16px 16px 8px}
 .bot-phdr-ava{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;flex-shrink:0;letter-spacing:-.5px}
@@ -2377,16 +2389,56 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
-<!-- ══════════════════════ SCREEN: STRIKE HISTORY ══════════════════════ -->
+<!-- ══════════════════════ SCREEN: STRIKE ══════════════════════ -->
 <div class="screen" id="s-strike">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">⚔️ Strike — История</div>
+    <div class="hdr-title">⚔️ Strike</div>
+    <div class="hdr-meta" id="strikeHdrBtn"></div>
   </div>
   <div class="sub-sb">
-    <div id="strikeStats" style="display:flex;gap:10px;padding:6px 0 10px;overflow-x:auto"></div>
+    <div id="strikeAccessBar"></div>
+    <div id="strikeStats" style="display:flex;gap:10px;padding:6px 0 4px;overflow-x:auto;padding-left:16px"></div>
     <div class="sec">Последние операции</div>
     <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: STRIKE LAUNCH ══════════════════════ -->
+<div class="mbg" id="strikeModal-bg" onclick="closeStrikeModal()"></div>
+<div class="modal" id="strikeModal">
+  <div class="modal-hdr">
+    <span id="strikeMTitle">⚔️ Новый Strike</span>
+    <span class="modal-close" onclick="closeStrikeModal()">✕</span>
+  </div>
+  <!-- Step 1: Target -->
+  <div id="strikeStep1">
+    <div style="font-size:13px;color:var(--hint);margin-bottom:10px">
+      Введите username или ссылку на канал/чат для репорта:
+    </div>
+    <input class="inp" id="strikeTargetInput" placeholder="@channel или t.me/..." style="margin-bottom:8px">
+    <div style="font-size:11px;color:var(--hint);margin-bottom:14px">
+      Поддерживается: @username · t.me/channel · t.me/+HASH
+    </div>
+    <button class="btn btn-p" onclick="strikeNextStep1()">Далее →</button>
+  </div>
+  <!-- Step 2: Category -->
+  <div id="strikeStep2" style="display:none">
+    <div style="font-size:13px;color:var(--hint);margin-bottom:6px">Цель: <b id="strikeTgtLabel"></b></div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px">Выберите категорию нарушения:</div>
+    <div class="mgmt-grid" id="strikeCatGrid"></div>
+  </div>
+  <!-- Step 3: Confirm -->
+  <div id="strikeStep3" style="display:none">
+    <div class="strike-preview" id="strikePreviewBox"></div>
+    <div style="font-size:12px;color:var(--hint);margin:10px 0;line-height:1.5">
+      ⚠️ Strike отправляет официальные репорты через Telegram Trust &amp; Safety.
+      Результат зависит исключительно от решения модераторов Telegram.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" style="flex:1;background:var(--bg3)" onclick="strikeBackStep()">← Назад</button>
+      <button class="btn btn-p" style="flex:2;background:var(--red);border-color:var(--red)" onclick="strikeLaunch()" id="strikeLaunchBtn">⚔️ Запустить Strike</button>
+    </div>
   </div>
 </div>
 
@@ -6783,38 +6835,155 @@ function copyApiKey() {
   }
 }
 
-// ── Strike History ──────────────────────────────────────
+// ── Strike ─────────────────────────────────────────────
+let _STRIKE_STATUS = null;
+let _STRIKE_TARGET = '';
+let _STRIKE_CAT = null;
+
 async function openStrike() {
   push('s-strike');
   txt('strikeList','<div class="spin-wrap"><div class="spin"></div></div>');
   document.getElementById('strikeStats').innerHTML='';
+  txt('strikeAccessBar','');
+  txt('strikeHdrBtn','');
   try {
-    const d = await api('/api/miniapp/strike/history');
-    const ops = d.operations||[];
+    const [hist, status] = await Promise.all([
+      api('/api/miniapp/strike/history'),
+      api('/api/miniapp/strike/status'),
+    ]);
+    _STRIKE_STATUS = status;
+
+    // Access bar
+    if (status.has_access) {
+      txt('strikeAccessBar', `<div class="strike-access-bar ok">
+        <div class="strike-access-ico">✅</div>
+        <div class="strike-access-body">
+          <div class="strike-access-title">Strike активен</div>
+          <div class="strike-access-sub">Режим: ${esc(status.mode||'normal')} · Лицензия навсегда</div>
+        </div>
+      </div>`);
+      txt('strikeHdrBtn', `<button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px;background:var(--red);border-color:var(--red)" onclick="openStrikeModal()">+ Запустить</button>`);
+    } else {
+      txt('strikeAccessBar', `<div class="strike-access-bar">
+        <div class="strike-access-ico">🔒</div>
+        <div class="strike-access-body">
+          <div class="strike-access-title">Strike недоступен</div>
+          <div class="strike-access-sub">Приобретите лицензию через бота — /strike</div>
+        </div>
+      </div>`);
+    }
+
+    // Stats
+    const ops = hist.operations||[];
     const done = ops.filter(o=>o.status==='completed').length;
-    const running = ops.filter(o=>o.status==='running'||o.status==='pending').length;
-    const total = ops.reduce((s,o)=>s+(o.total||0),0);
+    const running = ops.filter(o=>['running','pending'].includes(o.status)).length;
     const processed = ops.reduce((s,o)=>s+(o.processed||0),0);
     document.getElementById('strikeStats').innerHTML=`
-      <div class="kpi-card"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${done}</div><div class="kpi-lbl">Завершено</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:#f59e0b">${running}</div><div class="kpi-lbl">В работе</div></div>
-      <div class="kpi-card"><div class="kpi-val">${num(processed)}/${num(total)}</div><div class="kpi-lbl">Обработано</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${done}</div><div class="kpi-lbl">Завершено</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#f59e0b">${running}</div><div class="kpi-lbl">В работе</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${num(processed)}</div><div class="kpi-lbl">Репортов</div></div>
     `;
-    if (!ops.length) { txt('strikeList', empty('⚔️','Нет операций Strike','Запустите Strike из Telegram-бота')); return; }
+
+    if (!ops.length) {
+      txt('strikeList', empty('⚔️','Нет операций Strike', status.has_access ? 'Нажмите «+ Запустить» чтобы создать операцию' : 'Приобретите лицензию в боте'));
+      return;
+    }
     txt('strikeList', ops.map(op=>{
       const [cls,lbl]=stb(op.status);
-      const pct = op.total?Math.round(op.processed/op.total*100):0;
+      const pct = op.total ? Math.round(op.processed/op.total*100) : 0;
+      const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
       return `<div class="row">
         <div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div>
         <div class="row-body">
           <div class="row-name">${esc(op.label)}</div>
-          <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} (${pct}%)</div>
-          <div class="row-val" style="color:#555">${ago(op.created_at)}</div>
+          <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} репортов · ${ago(op.created_at)}</div>
+          ${bar}
         </div>
       </div>`;
     }).join(''));
-  } catch(e) { txt('strikeList', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) {
+    txt('strikeList', errHtml(e.message, 'openStrike()'));
+  }
+}
+
+function openStrikeModal() {
+  if (!_STRIKE_STATUS?.has_access) { toast('Нет доступа к Strike'); return; }
+  _STRIKE_TARGET = '';
+  _STRIKE_CAT = null;
+  document.getElementById('strikeTargetInput').value = '';
+  document.getElementById('strikeStep1').style.display = '';
+  document.getElementById('strikeStep2').style.display = 'none';
+  document.getElementById('strikeStep3').style.display = 'none';
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 1/3';
+  document.getElementById('strikeModal-bg').classList.add('show');
+  document.getElementById('strikeModal').classList.add('show');
+  setTimeout(()=>document.getElementById('strikeTargetInput').focus(), 200);
+}
+
+function closeStrikeModal() {
+  document.getElementById('strikeModal-bg').classList.remove('show');
+  document.getElementById('strikeModal').classList.remove('show');
+}
+
+function strikeNextStep1() {
+  const val = (document.getElementById('strikeTargetInput').value||'').trim();
+  if (!val || val.length < 3) { toast('⚠️ Введите корректный username или ссылку'); return; }
+  _STRIKE_TARGET = val;
+  document.getElementById('strikeTgtLabel').textContent = val;
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 2/3';
+  const cats = _STRIKE_STATUS?.categories || [];
+  const SEVER_COLOR = {CRITICAL:'var(--red)',HIGH:'#f59e0b',MEDIUM:'var(--blue)'};
+  document.getElementById('strikeCatGrid').innerHTML = cats.map(c=>
+    `<div class="mgmt-tile" onclick="strikeSelectCat('${esc(c.key)}','${esc(c.label)}')" style="border:1.5px solid transparent" id="scat-${esc(c.key)}">
+      <div class="mgmt-tile-ico" style="color:${SEVER_COLOR[c.severity]||'var(--text)'}">🚨</div>
+      <div class="mgmt-tile-lbl">${esc(c.label)}</div>
+    </div>`
+  ).join('');
+  document.getElementById('strikeStep1').style.display = 'none';
+  document.getElementById('strikeStep2').style.display = '';
+}
+
+function strikeSelectCat(key, label) {
+  _STRIKE_CAT = {key, label};
+  // Highlight selected
+  document.querySelectorAll('[id^="scat-"]').forEach(el => el.style.borderColor = 'transparent');
+  const el = document.getElementById(`scat-${key}`);
+  if (el) el.style.borderColor = 'var(--red)';
+  // Show preview
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 3/3';
+  txt('strikePreviewBox', `
+    <div class="strike-preview-row"><div class="strike-preview-lbl">🎯 Цель:</div><div class="strike-preview-val">${esc(_STRIKE_TARGET)}</div></div>
+    <div class="strike-preview-row"><div class="strike-preview-lbl">⚠️ Категория:</div><div class="strike-preview-val">${esc(label)}</div></div>
+    <div class="strike-preview-row"><div class="strike-preview-lbl">📱 Аккаунты:</div><div class="strike-preview-val">все доступные активные</div></div>
+    <div class="strike-preview-row"><div class="strike-preview-lbl">📡 Метод:</div><div class="strike-preview-val">Telegram Trust & Safety</div></div>
+  `);
+  document.getElementById('strikeStep2').style.display = 'none';
+  document.getElementById('strikeStep3').style.display = '';
+}
+
+function strikeBackStep() {
+  document.getElementById('strikeStep3').style.display = 'none';
+  document.getElementById('strikeStep2').style.display = '';
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 2/3';
+}
+
+async function strikeLaunch() {
+  if (!_STRIKE_TARGET || !_STRIKE_CAT) return;
+  const btn = document.getElementById('strikeLaunchBtn');
+  btn.disabled = true; btn.textContent = '⏳ Запуск...';
+  try {
+    const d = await api('/api/miniapp/strike/launch', {
+      method: 'POST',
+      body: JSON.stringify({target: _STRIKE_TARGET, category: _STRIKE_CAT.key}),
+    });
+    closeStrikeModal();
+    toast(`✅ Strike запущен — ${d.accounts} аккаунтов`);
+    openStrike();
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
+    btn.disabled = false; btn.textContent = '⚔️ Запустить Strike';
+  }
 }
 
 // ── Audience Parser ────────────────────────────────────

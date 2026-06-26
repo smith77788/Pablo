@@ -3044,6 +3044,97 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             for r in rows
         ]})
 
+    # ── Strike: status + launch ────────────────────────────────────────────────
+
+    async def strike_status(request: web.Request) -> web.Response:
+        """Проверяет доступ к Strike и возвращает список категорий."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            row = await pool.fetchrow(
+                "SELECT purchased_at, mode FROM strike_access WHERE user_id=$1", uid
+            )
+            from services.strike_engine import MINI_CATEGORIES
+            categories = [
+                {"key": k, "label": v["label"], "severity": v.get("severity", "MEDIUM")}
+                for k, v in MINI_CATEGORIES.items()
+            ]
+            return _json_resp({
+                "has_access": row is not None,
+                "mode": row["mode"] if row else None,
+                "purchased_at": row["purchased_at"].isoformat() if row and row["purchased_at"] else None,
+                "categories": categories,
+            })
+        except Exception as exc:
+            log.exception("strike_status uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def strike_launch(request: web.Request) -> web.Response:
+        """Создаёт Strike операцию и ставит её в очередь."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            target = (body.get("target") or "").strip()
+            category = (body.get("category") or "").strip()
+            if not target or len(target) < 3:
+                return _err("Укажите цель (username или ссылку)", 400)
+            if not category:
+                return _err("Выберите категорию нарушения", 400)
+
+            # Проверяем доступ
+            row = await pool.fetchrow(
+                "SELECT mode FROM strike_access WHERE user_id=$1", uid
+            )
+            if not row:
+                return _err("Нет доступа к Strike. Необходима лицензия.", 403)
+
+            from services.strike_engine import MINI_CATEGORIES
+            cat = MINI_CATEGORIES.get(category)
+            if not cat:
+                return _err("Неизвестная категория", 400)
+
+            # Нормализация target
+            from services.account_manager import normalize_telegram_join_ref
+            ref_kind, ref_value = normalize_telegram_join_ref(target)
+            normalized = f"+{ref_value}" if ref_kind == "invite" else ref_value.lstrip("@")
+            if not normalized or len(normalized) < 3:
+                return _err("Некорректный username или ссылка", 400)
+
+            # Подсчёт доступных аккаунтов
+            accs = await pool.fetch(
+                """SELECT id FROM accounts
+                   WHERE owner_id=$1 AND is_active=true
+                     AND COALESCE(is_banned, false)=false
+                   LIMIT 50""",
+                uid,
+            )
+            if not accs:
+                return _err("Нет доступных активных аккаунтов для Strike", 400)
+
+            # Создаём операцию в очереди
+            op_id = await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id, op_type, label, status, params, total_items)
+                   VALUES($1, 'strike_mini', $2, 'pending', $3::jsonb, $4)
+                   RETURNING id""",
+                uid,
+                f"Strike: {normalized} [{cat['label']}]",
+                __import__("json").dumps({
+                    "target": normalized,
+                    "category": category,
+                    "reason": cat["label"],
+                    "tg_reason": cat["tg_reason"],
+                    "account_ids": [r["id"] for r in accs],
+                }),
+                len(accs),
+            )
+            return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs)})
+        except Exception as exc:
+            log.exception("strike_launch uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Audience Parser (read-only history) ───────────────────────────────────
 
     async def parser_runs(request: web.Request) -> web.Response:
@@ -5653,6 +5744,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo", multigeo_set)
     # Strike history
     app.router.add_get("/api/miniapp/strike/history", strike_history)
+    app.router.add_get("/api/miniapp/strike/status", strike_status)
+    app.router.add_post("/api/miniapp/strike/launch", strike_launch)
     # Audience Parser
     app.router.add_get("/api/miniapp/parser/runs", parser_runs)
     app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
