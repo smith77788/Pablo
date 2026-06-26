@@ -4482,7 +4482,10 @@ async def cb_bulk_confirm_selection(
             proxy_count = await pool.fetchval(
                 "SELECT COUNT(*) FROM tg_accounts "
                 "WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
-                "AND proxy_url IS NOT NULL AND proxy_url != ''",
+                "AND proxy_id IS NOT NULL "
+                "AND EXISTS (SELECT 1 FROM user_proxies up "
+                "WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE "
+                "AND COALESCE(up.proxy_url,'') <> '')",
                 callback.from_user.id,
                 list(selected_ids),
             ) or 0
@@ -4515,7 +4518,10 @@ async def cb_bulk_confirm_selection(
             proxy_count = await pool.fetchval(
                 "SELECT COUNT(*) FROM tg_accounts "
                 "WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
-                "AND proxy_url IS NOT NULL AND proxy_url != ''",
+                "AND proxy_id IS NOT NULL "
+                "AND EXISTS (SELECT 1 FROM user_proxies up "
+                "WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE "
+                "AND COALESCE(up.proxy_url,'') <> '')",
                 callback.from_user.id,
                 list(selected_ids),
             ) or 0

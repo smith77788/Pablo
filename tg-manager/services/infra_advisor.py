@@ -171,7 +171,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     stale_ops = await pool.fetch(
         """SELECT COUNT(*) AS cnt FROM operation_queue
            WHERE owner_id=$1 AND status='running'
-             AND COALESCE(updated_at, created_at) < NOW() - INTERVAL '2 hours'""",
+             AND COALESCE(started_at, created_at) < NOW() - INTERVAL '2 hours'""",
         owner_id,
     )
     stale_cnt = (stale_ops[0]["cnt"] if stale_ops else 0) or 0
