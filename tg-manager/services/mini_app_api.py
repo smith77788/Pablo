@@ -1671,26 +1671,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Invalid JSON", 400)
-        count = int(body.get("count", 1))
-        country = body.get("country", "RU")
-        service = body.get("service", "smsactivate")
-        if count < 1 or count > 50:
-            return _err("Количество: от 1 до 50", 400)
-        try:
-            label = f"Авторег {count} аккаунт(ов) · {country}"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'auto_register','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"count": count, "country": country, "service": service}), count, label,
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
-        except Exception as exc:
-            log.exception("autoreg_submit uid=%d", uid)
-            return _err(str(exc), 500)
+        # Auto-registration requires interactive SMS verification and must be done
+        # through the bot (/reg command). The Mini App cannot handle this flow.
+        return _err(
+            "Авторегистрация выполняется только через бота: /reg\n"
+            "Введите /reg в диалоге с ботом и следуйте инструкциям.",
+            400,
+        )
 
     # ── Phone Checker ─────────────────────────────────────────────────────────
 

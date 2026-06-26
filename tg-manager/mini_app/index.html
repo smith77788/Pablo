@@ -5909,19 +5909,8 @@ async function openAutoreg() {
   }
 }
 async function submitAutoreg() {
-  const count = parseInt(document.getElementById('autoregCount').value)||1;
-  const country = document.getElementById('autoregCountry').value;
-  const service = document.getElementById('autoregService').value;
   const errEl = document.getElementById('autoregErr');
-  const btn = document.getElementById('autoregBtn');
-  btn.disabled=true; btn.textContent='Запускаю…';
-  try {
-    const r = await api('/api/miniapp/autoreg',{method:'POST',body:JSON.stringify({count,country,service})});
-    toast(`📱 Регистрация запущена (#${r.op_id})`);
-    errEl.textContent='';
-    openAutoreg();
-  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
-  finally { btn.disabled=false; btn.textContent='📱 Зарегистрировать'; }
+  errEl.textContent = 'Авторегистрация выполняется через бота: введите /reg в диалоге с ботом и следуйте инструкциям.';
 }
 
 // ── Phone Checker ────────────────────────────────────────
@@ -7074,7 +7063,7 @@ async function openStrike() {
 
     // Stats
     const ops = hist.operations||[];
-    const done = ops.filter(o=>o.status==='completed').length;
+    const done = ops.filter(o=>o.status==='done').length;
     const running = ops.filter(o=>['running','pending'].includes(o.status)).length;
     const processed = ops.reduce((s,o)=>s+(o.processed||0),0);
     document.getElementById('strikeStats').innerHTML=`
