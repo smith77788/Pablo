@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>BotMother</title>
+<title>Infragram</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
@@ -222,6 +222,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mgmt-tile:active{transform:scale(.93);opacity:.7}
 .mgmt-tile-ico{font-size:22px;line-height:1}
 .mgmt-tile-lbl{font-size:10.5px;font-weight:600;color:var(--hint);line-height:1.2}
+.mgmt-tile-val{font-size:10px;color:var(--blue);font-weight:700;min-height:12px;line-height:1}
+
+/* ─── More screen status bar ─────────────────────────────── */
+.acc-status-bar{display:flex;gap:8px;padding:10px 16px 6px;flex-wrap:wrap}
+.asb-item{background:var(--bg2);border-radius:10px;padding:7px 12px;font-size:12px;color:var(--hint);flex:1 1 auto;text-align:center;min-width:90px;cursor:default}
+.asb-item.tap{cursor:pointer;color:var(--blue)}
+.asb-item.tap:active{opacity:.7}
+
+/* ─── Platform footer ────────────────────────────────────── */
+.platform-footer{margin:8px 16px 20px;background:var(--bg2);border-radius:16px;padding:16px;text-align:center}
+.pf-brand{font-size:16px;font-weight:700;letter-spacing:-.3px;margin-bottom:4px}
+.pf-sub{font-size:12px;color:var(--hint);margin-bottom:12px}
 
 /* ─── Bot profile header ─────────────────────────────────── */
 .bot-phdr{display:flex;align-items:center;gap:14px;padding:16px 16px 8px}
@@ -332,7 +344,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ HOME ══════════════════════ -->
 <div class="screen show" id="s-home">
   <div class="hdr">
-    <div class="hdr-title">🤖 BotMother</div>
+    <div class="hdr-title">⚡ Infragram</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
@@ -512,101 +524,346 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-more">
   <div class="hdr"><div class="hdr-title">⚙️ Ещё</div></div>
   <div class="sb">
-    <div class="sec">Аккаунт</div>
-    <div class="lst">
-      <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">💳</div><div class="row-body"><div class="row-name">Тариф</div><div class="row-val" id="planVal">Загрузка...</div></div></div>
-      <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">📡</div><div class="row-body"><div class="row-name">Real-time</div><div class="row-val" id="sseVal">Подключение...</div></div></div>
-      <div class="row tap" onclick="goRef()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎁</div><div class="row-body"><div class="row-name">Реферальная программа</div><div class="row-val" id="refVal">Загрузка...</div></div><div class="row-right"><span class="chev">›</span></div></div>
+
+    <!-- Статус аккаунта -->
+    <div class="acc-status-bar">
+      <div class="asb-item">💳 <span id="planVal">—</span></div>
+      <div class="asb-item">📡 <span id="sseVal">—</span></div>
+      <div class="asb-item tap" onclick="goRef()">🎁 <span id="refVal">Реферал</span> ›</div>
     </div>
 
-    <div class="sec" style="margin-top:4px">Разделы</div>
-    <div class="lst">
-      <div class="row tap" onclick="goTab('bots')"><div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div><div class="row-body"><div class="row-name">Мои боты</div><div class="row-val" id="m-bots-cnt"></div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="goTab('accounts')"><div class="row-ico" style="background:rgba(20,184,166,.16)">📱</div><div class="row-body"><div class="row-name">TG Аккаунты</div><div class="row-val" id="m-acc-cnt"></div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openChannels()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Каналы и чаты</div><div class="row-val" id="m-ch-cnt"></div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="goTab('broadcasts')"><div class="row-ico" style="background:rgba(168,85,247,.16)">📨</div><div class="row-body"><div class="row-name">Рассылки и кампании</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openOps()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⚙️</div><div class="row-body"><div class="row-name">Очередь операций</div><div class="row-val" id="m-ops-cnt"></div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openTemplates()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📝</div><div class="row-body"><div class="row-name">Шаблоны сообщений</div><div class="row-val" id="m-tpl-cnt"></div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openMassPub()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Массовая публикация</div><div class="row-val">Пост во все каналы</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openPromo()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🚀</div><div class="row-body"><div class="row-name">Продвижение в топ</div><div class="row-val" id="m-promo-val">Заказы и склад ботов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openProfileSetter()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎨</div><div class="row-body"><div class="row-name">Сеттер профилей</div><div class="row-val">Имя, аватар, 2FA для аккаунтов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openCleaner()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🧹</div><div class="row-body"><div class="row-name">Очистка аккаунтов</div><div class="row-val">Выход из чатов, удаление контактов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openApiKeys()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔑</div><div class="row-body"><div class="row-name">API Ключи</div><div class="row-val" id="m-apikey-cnt">Управление ключами</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openStrike()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div><div class="row-body"><div class="row-name">Strike — История</div><div class="row-val">Операции Strike</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openNetwork()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🕸</div><div class="row-body"><div class="row-name">Сеть ботов</div><div class="row-val" id="m-net-cnt">Кластеры и роли</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openShield()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🛡</div><div class="row-body"><div class="row-name">Account Shield</div><div class="row-val" id="m-shield-val">Защита от бана</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openAdIntel()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📡</div><div class="row-body"><div class="row-name">Ad Intelligence</div><div class="row-val" id="m-adintel-val">Анализ рекламы в Telegram</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openPhysics()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚛️</div><div class="row-body"><div class="row-name">Physics Hub</div><div class="row-val" id="m-physics-val">Риски аккаунтов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openGraph()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🕸</div><div class="row-body"><div class="row-name">Graph Hub</div><div class="row-val" id="m-graph-val">Граф аудитории</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openCompliance()"><div class="row-ico" style="background:rgba(34,197,94,.16)">✅</div><div class="row-body"><div class="row-name">Compliance</div><div class="row-val" id="m-compliance-val">Аудит операций</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openMultigeo()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🌍</div><div class="row-body"><div class="row-name">Мультигео</div><div class="row-val">Мультиязычные профили ботов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openWarmup()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌱</div><div class="row-body"><div class="row-name">Прогрев аккаунтов</div><div class="row-val" id="m-warmup-val">Warmup-планы</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openHealth()"><div class="row-ico" style="background:rgba(239,68,68,.16)">❤️</div><div class="row-body"><div class="row-name">Health Dashboard</div><div class="row-val" id="m-health-val">Здоровье аккаунтов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openGhost()"><div class="row-ico" style="background:rgba(139,92,246,.16)">👻</div><div class="row-body"><div class="row-name">Ghost Engine</div><div class="row-val" id="m-ghost-val">Автономное присутствие</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openStars()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⭐</div><div class="row-body"><div class="row-name">Stars Hub</div><div class="row-val" id="m-stars-val">A/B монетизация</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openRegCheck()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📅</div><div class="row-body"><div class="row-name">Дата регистрации</div><div class="row-val">Reg Checker</div></div><div class="row-right chev">›</div></div>
+    <!-- Основное -->
+    <div class="sec">Основное</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="goTab('bots')">
+        <div class="mgmt-tile-ico">🤖</div>
+        <div class="mgmt-tile-lbl">Боты</div>
+        <div class="mgmt-tile-val" id="m-bots-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="goTab('accounts')">
+        <div class="mgmt-tile-ico">📱</div>
+        <div class="mgmt-tile-lbl">Аккаунты</div>
+        <div class="mgmt-tile-val" id="m-acc-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openChannels()">
+        <div class="mgmt-tile-ico">📡</div>
+        <div class="mgmt-tile-lbl">Каналы</div>
+        <div class="mgmt-tile-val" id="m-ch-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="goTab('broadcasts')">
+        <div class="mgmt-tile-ico">📨</div>
+        <div class="mgmt-tile-lbl">Рассылки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openOps()">
+        <div class="mgmt-tile-ico">⚙️</div>
+        <div class="mgmt-tile-lbl">Операции</div>
+        <div class="mgmt-tile-val" id="m-ops-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openProxies()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Прокси</div>
+        <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
+      </div>
     </div>
 
-    <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
-    <div class="lst">
-      <div class="row tap" onclick="openAnalytics()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Статистика роста</div><div class="row-val">Подписчики за 7 дней</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openKeywordsScreen()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">Позиции в поиске</div><div class="row-val" id="kw-val">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openCRM()"><div class="row-ico" style="background:rgba(239,68,68,.16)">👤</div><div class="row-body"><div class="row-name">CRM — Контакты</div><div class="row-val" id="m-crm-cnt">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openCRMDeals()"><div class="row-ico" style="background:rgba(34,197,94,.16)">💼</div><div class="row-body"><div class="row-name">CRM — Сделки</div><div class="row-val" id="m-deal-cnt">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openWorkspaces()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🏢</div><div class="row-body"><div class="row-name">Рабочие пространства</div><div class="row-val" id="m-ws-cnt">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openCompetitors()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Мониторинг конкурентов</div><div class="row-val" id="m-comp-cnt">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openNetBcModal()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📣</div><div class="row-body"><div class="row-name">Рассылка по всем ботам</div><div class="row-val">Один текст — все боты</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openDmCampaigns()"><div class="row-ico" style="background:rgba(59,130,246,.16)">✉️</div><div class="row-body"><div class="row-name">DM-кампании</div><div class="row-val" id="m-dm-cnt">Прямые рассылки</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openExperiments()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div><div class="row-body"><div class="row-name">A/B Эксперименты</div><div class="row-val" id="m-exp-cnt">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openAiMemory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🧠</div><div class="row-body"><div class="row-name">AI Память</div><div class="row-val" id="m-aimem-val">Заметки для AI-ассистента</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openNodes()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🖥</div><div class="row-body"><div class="row-name">Nodes Hub</div><div class="row-val" id="m-nodes-val">Forum Workspaces</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openGifts()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🎁</div><div class="row-body"><div class="row-name">Gift Transfer</div><div class="row-val" id="m-gifts-val">Подарки в аккаунтах</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openMassInvite()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📨</div><div class="row-body"><div class="row-name">Mass Inviter</div><div class="row-val">Массовый инвайт</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openParser()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div><div class="row-body"><div class="row-name">Парсер аудитории</div><div class="row-val" id="m-parser-cnt">Участники каналов/групп</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openPersonas()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎭</div><div class="row-body"><div class="row-name">Persona Hub</div><div class="row-val" id="m-persona-val">AI-персоны аккаунтов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openReferral()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🤝</div><div class="row-body"><div class="row-name">Реферальная программа</div><div class="row-val" id="m-ref-val">—</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openSelfPromo()"><div class="row-ico" style="background:rgba(239,68,68,.16)">📣</div><div class="row-body"><div class="row-name">Self Promo</div><div class="row-val" id="m-selfpromo-val">Шаблоны самопиара</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openSemanticMemory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🧬</div><div class="row-body"><div class="row-name">Semantic Memory</div><div class="row-val" id="m-semantic-val">Память по пользователям ботов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openAudienceDna()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🔬</div><div class="row-body"><div class="row-name">Audience DNA</div><div class="row-val" id="m-dna-val">Профилирование аудитории</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openAutoFunnels()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔀</div><div class="row-body"><div class="row-name">Авто-воронки</div><div class="row-val" id="m-af-val">Цепочки сообщений</div></div><div class="row-right chev">›</div></div>
+    <!-- Инструменты ботов -->
+    <div class="sec">Инструменты ботов</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openAutoFunnels()">
+        <div class="mgmt-tile-ico">🔀</div>
+        <div class="mgmt-tile-lbl">Авто-воронки</div>
+        <div class="mgmt-tile-val" id="m-af-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openTemplates()">
+        <div class="mgmt-tile-ico">📝</div>
+        <div class="mgmt-tile-lbl">Шаблоны</div>
+        <div class="mgmt-tile-val" id="m-tpl-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMassPub()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Mass Pub</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openBotFactory()">
+        <div class="mgmt-tile-ico">🏭</div>
+        <div class="mgmt-tile-lbl">Bot Factory</div>
+        <div class="mgmt-tile-val" id="m-botfactory-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openQuickPost()">
+        <div class="mgmt-tile-ico">✍️</div>
+        <div class="mgmt-tile-lbl">Quick Post</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSelfPromo()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Self Promo</div>
+        <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
+      </div>
     </div>
 
-    <div class="sec" style="margin-top:4px">Автоматизация</div>
-    <div class="lst">
-      <div class="row tap" onclick="openAutoreg()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📱</div><div class="row-body"><div class="row-name">Авторег аккаунтов</div><div class="row-val" id="m-autoreg-val">Регистрация через SMS</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openPhoneChecker()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📞</div><div class="row-body"><div class="row-name">Phone Checker</div><div class="row-val">Проверка номеров</div></div><div class="row-right chev">›</div></div>
+    <!-- Управление аккаунтами -->
+    <div class="sec">Управление аккаунтами</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openWarmup()">
+        <div class="mgmt-tile-ico">🌱</div>
+        <div class="mgmt-tile-lbl">Прогрев</div>
+        <div class="mgmt-tile-val" id="m-warmup-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openProfileSetter()">
+        <div class="mgmt-tile-ico">🎨</div>
+        <div class="mgmt-tile-lbl">Профили</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCleaner()">
+        <div class="mgmt-tile-ico">🧹</div>
+        <div class="mgmt-tile-lbl">Очистка</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGhost()">
+        <div class="mgmt-tile-ico">👻</div>
+        <div class="mgmt-tile-lbl">Ghost</div>
+        <div class="mgmt-tile-val" id="m-ghost-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPersonas()">
+        <div class="mgmt-tile-ico">🎭</div>
+        <div class="mgmt-tile-lbl">Персоны</div>
+        <div class="mgmt-tile-val" id="m-persona-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAutoreg()">
+        <div class="mgmt-tile-ico">📱</div>
+        <div class="mgmt-tile-lbl">Авторег</div>
+        <div class="mgmt-tile-val" id="m-autoreg-val"></div>
+      </div>
     </div>
 
-    <div class="sec" style="margin-top:4px">Инструменты</div>
-    <div class="lst">
-      <div class="row tap" onclick="openTopology()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🗺</div><div class="row-body"><div class="row-name">Topology Map</div><div class="row-val">Граф связей активов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openInfra()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⚡</div><div class="row-body"><div class="row-name">Инфра-аналитика</div><div class="row-val" id="m-infra-val">Пулы и флуд-статистика</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openSeo()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">SEO-оптимизация</div><div class="row-val">AI-советы для каналов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openQuickPost()"><div class="row-ico" style="background:rgba(168,85,247,.16)">✍️</div><div class="row-body"><div class="row-name">Quick Post</div><div class="row-val">Быстрая публикация в каналы</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openReporter()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🚨</div><div class="row-body"><div class="row-name">Репортинг</div><div class="row-val">Жалобы на аккаунты/каналы</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openBotFactory()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🏭</div><div class="row-body"><div class="row-name">Bot Factory</div><div class="row-val" id="m-botfactory-val">Создание и импорт ботов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openGlobalPresence()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌍</div><div class="row-body"><div class="row-name">Global Presence</div><div class="row-val" id="m-gp-val">Гео-развёртывание каналов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openMassOps()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚡</div><div class="row-body"><div class="row-name">Mass Ops</div><div class="row-val" id="m-massops-val">Массовые операции</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openEcosystems()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌐</div><div class="row-body"><div class="row-name">Экосистемы</div><div class="row-val" id="m-eco-val">Управление экосистемами</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openChannelFactory()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📢</div><div class="row-body"><div class="row-name">Channel Factory</div><div class="row-val">Создание каналов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openGroupFactory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">👥</div><div class="row-body"><div class="row-name">Group Factory</div><div class="row-val">Создание групп</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openContentCloner()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📋</div><div class="row-body"><div class="row-name">Content Cloner</div><div class="row-val">Клонирование контента каналов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openCloneAdapt()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔄</div><div class="row-body"><div class="row-name">Clone & Adapt</div><div class="row-val">История клонирования ботов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openContentMesh()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🕸</div><div class="row-body"><div class="row-name">Content Mesh</div><div class="row-val" id="m-mesh-val">Сети репостинга</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openNarrative()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📖</div><div class="row-body"><div class="row-name">Narrative Engine</div><div class="row-val" id="m-narr-val">Нарратив-кампании</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openAssetTemplates()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📐</div><div class="row-body"><div class="row-name">Asset Templates</div><div class="row-val" id="m-at-val">Шаблоны активов</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openInfraHealth()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🏥</div><div class="row-body"><div class="row-name">Infra Health</div><div class="row-val" id="m-ih-val">Алерты и восстановление</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openSwarm()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🐝</div><div class="row-body"><div class="row-name">Swarm</div><div class="row-val" id="m-swarm-val">Метрики роевого управления</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openPresencePacks()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📦</div><div class="row-body"><div class="row-name">Presence Packs</div><div class="row-val" id="m-pp-val">Пакеты присутствия</div></div><div class="row-right chev">›</div></div>
+    <!-- Аналитика и CRM -->
+    <div class="sec">Аналитика и CRM</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openAnalytics()">
+        <div class="mgmt-tile-ico">📊</div>
+        <div class="mgmt-tile-lbl">Статистика</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openKeywordsScreen()">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">Позиции</div>
+        <div class="mgmt-tile-val" id="kw-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCRM()">
+        <div class="mgmt-tile-ico">👤</div>
+        <div class="mgmt-tile-lbl">CRM</div>
+        <div class="mgmt-tile-val" id="m-crm-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAudienceDna()">
+        <div class="mgmt-tile-ico">🔬</div>
+        <div class="mgmt-tile-lbl">Audience DNA</div>
+        <div class="mgmt-tile-val" id="m-dna-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCompetitors()">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Конкуренты</div>
+        <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAiMemory()">
+        <div class="mgmt-tile-ico">🧠</div>
+        <div class="mgmt-tile-lbl">AI Память</div>
+        <div class="mgmt-tile-val" id="m-aimem-val"></div>
+      </div>
     </div>
 
-    <div class="sec" style="margin-top:4px">Платформа</div>
-    <div class="lst">
-      <div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div><div class="row-body"><div class="row-name">BotMother OS</div><div class="row-val">Telegram Automation Platform</div></div></div>
-      <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
-      <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
+    <!-- Продвижение -->
+    <div class="sec">Продвижение</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openPromo()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Топ поиска</div>
+        <div class="mgmt-tile-val" id="m-promo-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMultigeo()">
+        <div class="mgmt-tile-ico">🌍</div>
+        <div class="mgmt-tile-lbl">Мультигео</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSeo()">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">SEO</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNarrative()">
+        <div class="mgmt-tile-ico">📖</div>
+        <div class="mgmt-tile-lbl">Narrative</div>
+        <div class="mgmt-tile-val" id="m-narr-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openContentMesh()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Content Mesh</div>
+        <div class="mgmt-tile-val" id="m-mesh-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGlobalPresence()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Global Presence</div>
+        <div class="mgmt-tile-val" id="m-gp-val"></div>
+      </div>
     </div>
+
+    <!-- Безопасность -->
+    <div class="sec">Безопасность</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openShield()">
+        <div class="mgmt-tile-ico">🛡</div>
+        <div class="mgmt-tile-lbl">Shield</div>
+        <div class="mgmt-tile-val" id="m-shield-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCompliance()">
+        <div class="mgmt-tile-ico">✅</div>
+        <div class="mgmt-tile-lbl">Compliance</div>
+        <div class="mgmt-tile-val" id="m-compliance-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openInfraHealth()">
+        <div class="mgmt-tile-ico">🏥</div>
+        <div class="mgmt-tile-lbl">Infra Health</div>
+        <div class="mgmt-tile-val" id="m-ih-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openHealth()">
+        <div class="mgmt-tile-ico">❤️</div>
+        <div class="mgmt-tile-lbl">Health Dash</div>
+        <div class="mgmt-tile-val" id="m-health-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPhysics()">
+        <div class="mgmt-tile-ico">⚛️</div>
+        <div class="mgmt-tile-lbl">Physics</div>
+        <div class="mgmt-tile-val" id="m-physics-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openStrike()">
+        <div class="mgmt-tile-ico">⚔️</div>
+        <div class="mgmt-tile-lbl">STRIKE</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+    </div>
+
+    <!-- Расширенные -->
+    <div class="sec">Расширенные</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openGraph()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Graph Hub</div>
+        <div class="mgmt-tile-val" id="m-graph-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAdIntel()">
+        <div class="mgmt-tile-ico">📡</div>
+        <div class="mgmt-tile-lbl">Ad Intel</div>
+        <div class="mgmt-tile-val" id="m-adintel-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSwarm()">
+        <div class="mgmt-tile-ico">🐝</div>
+        <div class="mgmt-tile-lbl">Swarm</div>
+        <div class="mgmt-tile-val" id="m-swarm-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMassInvite()">
+        <div class="mgmt-tile-ico">📨</div>
+        <div class="mgmt-tile-lbl">Mass Invite</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openParser()">
+        <div class="mgmt-tile-ico">🔭</div>
+        <div class="mgmt-tile-lbl">Парсер</div>
+        <div class="mgmt-tile-val" id="m-parser-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openEcosystems()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Экосистемы</div>
+        <div class="mgmt-tile-val" id="m-eco-val"></div>
+      </div>
+    </div>
+
+    <!-- Фабрики -->
+    <div class="sec">Фабрики</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openChannelFactory()">
+        <div class="mgmt-tile-ico">📢</div>
+        <div class="mgmt-tile-lbl">Channel Factory</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGroupFactory()">
+        <div class="mgmt-tile-ico">👥</div>
+        <div class="mgmt-tile-lbl">Group Factory</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openContentCloner()">
+        <div class="mgmt-tile-ico">📋</div>
+        <div class="mgmt-tile-lbl">Content Cloner</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCloneAdapt()">
+        <div class="mgmt-tile-ico">🔄</div>
+        <div class="mgmt-tile-lbl">Clone & Adapt</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openTopology()">
+        <div class="mgmt-tile-ico">🗺</div>
+        <div class="mgmt-tile-lbl">Topology</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openInfra()">
+        <div class="mgmt-tile-ico">⚡</div>
+        <div class="mgmt-tile-lbl">Инфра</div>
+        <div class="mgmt-tile-val" id="m-infra-val"></div>
+      </div>
+    </div>
+
+    <!-- Дополнительно -->
+    <div class="sec">Дополнительно</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openApiKeys()">
+        <div class="mgmt-tile-ico">🔑</div>
+        <div class="mgmt-tile-lbl">API Ключи</div>
+        <div class="mgmt-tile-val" id="m-apikey-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNetwork()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Сеть ботов</div>
+        <div class="mgmt-tile-val" id="m-net-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNodes()">
+        <div class="mgmt-tile-ico">🖥</div>
+        <div class="mgmt-tile-lbl">Nodes Hub</div>
+        <div class="mgmt-tile-val" id="m-nodes-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGifts()">
+        <div class="mgmt-tile-ico">🎁</div>
+        <div class="mgmt-tile-lbl">Gift Transfer</div>
+        <div class="mgmt-tile-val" id="m-gifts-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openStars()">
+        <div class="mgmt-tile-ico">⭐</div>
+        <div class="mgmt-tile-lbl">Stars Hub</div>
+        <div class="mgmt-tile-val" id="m-stars-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPresencePacks()">
+        <div class="mgmt-tile-ico">📦</div>
+        <div class="mgmt-tile-lbl">Presence Packs</div>
+        <div class="mgmt-tile-val" id="m-pp-val"></div>
+      </div>
+    </div>
+
+    <!-- Подвал платформы -->
+    <div class="platform-footer">
+      <div class="pf-brand">⚡ Infragram OS</div>
+      <div class="pf-sub" id="statsSum">Telegram Infrastructure Platform</div>
+      <button class="btn" style="background:var(--bg3);font-size:13px;margin-top:4px" onclick="openErrorReport()">🐛 Сообщить об ошибке</button>
+    </div>
+
+    <!-- Скрытые элементы для обратной совместимости -->
+    <span style="display:none" id="m-deal-cnt"></span>
+    <span style="display:none" id="m-ws-cnt"></span>
+    <span style="display:none" id="m-dm-cnt"></span>
+    <span style="display:none" id="m-exp-cnt"></span>
+    <span style="display:none" id="m-ref-val"></span>
+    <span style="display:none" id="m-semantic-val"></span>
+    <span style="display:none" id="m-at-val"></span>
+    <span style="display:none" id="m-massops-val"></span>
+
   </div>
 </div>
 
@@ -2090,7 +2347,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
-      API ключи для интеграции BotMother с вашими сервисами.<br>
+      API ключи для интеграции Infragram с вашими сервисами.<br>
       Ключ отображается только один раз при создании — сохраните его.
     </div>
     <div class="sec">Активные ключи</div>
