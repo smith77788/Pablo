@@ -3231,19 +3231,30 @@ async function api(path, opts={}) {
 }
 
 // ── SSE ────────────────────────────────────────────────
+let _sseRetry = 0;
 function openSSE() {
   if (SSE) { try{SSE.close()}catch(_){} }
   SSE = new EventSource('/api/miniapp/events?token='+encodeURIComponent(TK));
-  SSE.addEventListener('stats', e => renderCards(JSON.parse(e.data)));
-  SSE.addEventListener('activity', e => renderAct(JSON.parse(e.data).items||[]));
+  SSE.addEventListener('stats', e => {
+    try { renderCards(JSON.parse(e.data)); } catch(_) {}
+  });
+  SSE.addEventListener('activity', e => {
+    try { renderAct((JSON.parse(e.data).items)||[]); } catch(_) {}
+  });
   SSE.onopen = () => {
-    document.getElementById('hLive').style.display='flex';
-    document.getElementById('sseVal').textContent='🟢 Подключено';
+    _sseRetry = 0;
+    const hLive = document.getElementById('hLive');
+    const sseVal = document.getElementById('sseVal');
+    if (hLive) hLive.style.display='flex';
+    if (sseVal) sseVal.textContent='🟢 Подключено';
   };
   SSE.onerror = () => {
-    document.getElementById('hLive').style.display='none';
-    document.getElementById('sseVal').textContent='🟡 Переподключение...';
-    setTimeout(openSSE, 6000);
+    const hLive = document.getElementById('hLive');
+    const sseVal = document.getElementById('sseVal');
+    if (hLive) hLive.style.display='none';
+    if (sseVal) sseVal.textContent='🟡 Переподключение...';
+    _sseRetry = Math.min(_sseRetry + 1, 5);
+    setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
   };
 }
 
@@ -7295,11 +7306,11 @@ function filterDeals(stage, btn) {
   loadDeals();
 }
 function openDealModal() {
-  ['dealTitle','dealContact','dealNotes'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('dealValue').value='0';
-  document.getElementById('dealStage').value='lead';
-  document.getElementById('dealErr').textContent='';
-  document.getElementById('dealMbg').classList.add('show');
+  ['dealTitle','dealContact','dealNotes'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const dv=document.getElementById('dealValue'); if(dv) dv.value='0';
+  const ds=document.getElementById('dealStage'); if(ds) ds.value='lead';
+  const de=document.getElementById('dealErr'); if(de) de.textContent='';
+  const dm=document.getElementById('dealMbg'); if(dm) dm.classList.add('show');
 }
 function closeDealModal() { document.getElementById('dealMbg').classList.remove('show'); }
 async function saveDeal() {
@@ -8813,8 +8824,8 @@ async function deleteAutoFunnel(fid, btn) {
 
 // ── Presence Packs ─────────────────────────────────────
 function openPresencePackModal() {
-  ['pp-name','pp-desc','pp-url','pp-label'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('pp-err').textContent='';
+  ['pp-name','pp-desc','pp-url','pp-label'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const pe=document.getElementById('pp-err'); if(pe) pe.textContent='';
   showModal('mo-presence-pack');
 }
 async function submitPresencePackCreate() {
@@ -8847,9 +8858,9 @@ async function deletePresencePack(id, btn) {
 
 // ── Ecosystems ─────────────────────────────────────────
 function openEcosystemModal() {
-  ['eco-name','eco-desc','eco-region'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('eco-type').value='custom';
-  document.getElementById('eco-err').textContent='';
+  ['eco-name','eco-desc','eco-region'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const et=document.getElementById('eco-type'); if(et) et.value='custom';
+  const ee=document.getElementById('eco-err'); if(ee) ee.textContent='';
   showModal('mo-ecosystem');
 }
 async function submitEcosystemCreate() {
