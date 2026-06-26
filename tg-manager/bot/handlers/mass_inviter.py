@@ -377,7 +377,7 @@ async def cb_inviter_confirm(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Детали операции", callback_data=f"bm:op_detail:{op_id}")
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
     kb.button(text="◀️ В меню", callback_data=InviterCb(action="menu"))
     kb.adjust(1)
     await _edit(
