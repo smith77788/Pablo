@@ -3282,7 +3282,9 @@ async def _exec_bulk_create_channels_multi(
     preset = _BULK_PACING_PRESETS.get(bulk_pacing, _BULK_PACING_PRESETS["medium"])
 
     rows = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
         owner_id, account_ids,
@@ -4666,7 +4668,9 @@ async def _exec_bulk_edit_channels(
         return {"status": "failed", "reason": "Не указаны аккаунты или значение поля"}
 
     rows = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
         owner_id, account_ids,
@@ -4738,14 +4742,18 @@ async def _exec_group_import_all(
     account_ids = params.get("account_ids") or []
     if account_ids:
         rows = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
             "FROM tg_accounts "
             "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
             owner_id, [int(x) for x in account_ids],
         )
     else:
         rows = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
             "FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
             owner_id,
@@ -4807,7 +4815,9 @@ async def _exec_group_announce(
         return {"status": "failed", "reason": "Не указан аккаунт или текст"}
 
     row = await pool.fetchrow(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
         acc_id, owner_id,
     )
@@ -4879,7 +4889,9 @@ async def _exec_bulk_dm_adhoc(
         return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст"}
 
     rows = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
         owner_id,
@@ -4980,7 +4992,9 @@ async def _exec_bulk_post_to_channel(
         return {"status": "failed", "reason": "Не указан channel_ref, text_to_post или account_ids"}
 
     rows = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
         owner_id, account_ids,
@@ -5118,7 +5132,9 @@ async def _exec_bulk_update_profile(
         return {"status": "failed", "reason": "Не указано field, value или account_ids"}
 
     rows = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
         owner_id, account_ids,
@@ -5258,7 +5274,9 @@ async def _exec_bulk_chan_exec(
     # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
     acc_ids = list({int(p["acc_id"]) for p in channel_acc_pairs})
     rows = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
         owner_id, acc_ids,
@@ -5391,7 +5409,9 @@ async def _exec_bulk_post_chans(
         return {"status": "failed", "reason": "Не указан аккаунт, каналы или текст"}
 
     row = await pool.fetchrow(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
         acc_id, owner_id,
     )
@@ -5490,14 +5510,18 @@ async def _exec_channel_import_all(
 
     if account_ids:
         rows = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
             "FROM tg_accounts "
             "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
             owner_id, account_ids,
         )
     else:
         rows = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
             "FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
             owner_id,
@@ -6843,7 +6867,7 @@ async def _exec_ad_intel_scan(
     # Pick any active account for scanning
     try:
         acc_row = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used_at ASC NULLS FIRST LIMIT 1",
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
             owner_id,
         )
         account_id = int(acc_row["id"]) if acc_row else 0
@@ -6996,7 +7020,8 @@ async def _exec_phone_check(
     # Pick any active account
     try:
         acc_row = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used_at ASC NULLS FIRST LIMIT 1",
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
             owner_id,
         )
     except Exception as exc:
@@ -7127,7 +7152,8 @@ async def _exec_report_peer(
 
     try:
         accounts = await pool.fetch(
-            "SELECT * FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used_at ASC NULLS FIRST LIMIT $2",
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT $2",
             owner_id, acc_count,
         )
     except Exception as exc:
@@ -7180,7 +7206,8 @@ async def _exec_leave_all_chats(
 
     try:
         acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
             int(account_id), owner_id,
         )
     except Exception as exc:
@@ -7241,7 +7268,8 @@ async def _exec_delete_contacts(
 
     try:
         acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
             int(account_id), owner_id,
         )
     except Exception as exc:
