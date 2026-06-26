@@ -3114,18 +3114,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not accs:
                 return _err("Нет доступных активных аккаунтов для Strike", 400)
 
-            # Создаём операцию в очереди
+            # Создаём операцию в очереди (op_type='strike' — воркер знает этот тип)
             op_id = await pool.fetchval(
                 """INSERT INTO operation_queue(owner_id, op_type, label, status, params, total_items)
-                   VALUES($1, 'strike_mini', $2, 'pending', $3::jsonb, $4)
+                   VALUES($1, 'strike', $2, 'pending', $3::jsonb, $4)
                    RETURNING id""",
                 uid,
                 f"Strike: {normalized} [{cat['label']}]",
                 __import__("json").dumps({
                     "target": normalized,
-                    "category": category,
-                    "reason": cat["label"],
-                    "tg_reason": cat["tg_reason"],
+                    "reason": cat["tg_reason"],
                     "account_ids": [r["id"] for r in accs],
                 }),
                 len(accs),

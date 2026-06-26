@@ -245,7 +245,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .strike-access-body{flex:1}
 .strike-access-title{font-size:14px;font-weight:700}
 .strike-access-sub{font-size:12px;color:var(--hint);margin-top:2px}
-.strike-preview{background:var(--bg3);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.strike-preview{background:var(--bg);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
 .strike-preview-row{display:flex;align-items:flex-start;gap:8px;font-size:13px}
 .strike-preview-lbl{color:var(--hint);min-width:70px;flex-shrink:0}
 .strike-preview-val{font-weight:600;word-break:break-all}
@@ -866,7 +866,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="platform-footer">
       <div class="pf-brand">⚡ Infragram OS</div>
       <div class="pf-sub" id="statsSum">Telegram Infrastructure Platform</div>
-      <button class="btn" style="background:var(--bg3);font-size:13px;margin-top:4px" onclick="openErrorReport()">🐛 Сообщить об ошибке</button>
+      <button class="btn" style="background:var(--bg);font-size:13px;margin-top:4px" onclick="openErrorReport()">🐛 Сообщить об ошибке</button>
     </div>
 
     <!-- Скрытые элементы для обратной совместимости -->
@@ -2405,39 +2405,40 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ MODAL: STRIKE LAUNCH ══════════════════════ -->
-<div class="mbg" id="strikeModal-bg" onclick="closeStrikeModal()"></div>
-<div class="modal" id="strikeModal">
-  <div class="modal-hdr">
-    <span id="strikeMTitle">⚔️ Новый Strike</span>
-    <span class="modal-close" onclick="closeStrikeModal()">✕</span>
-  </div>
-  <!-- Step 1: Target -->
-  <div id="strikeStep1">
-    <div style="font-size:13px;color:var(--hint);margin-bottom:10px">
-      Введите username или ссылку на канал/чат для репорта:
+<div class="mbg" id="mo-strike" onclick="if(event.target===this)closeStrikeModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeStrikeModal()">✕</div>
+    <div class="modal-title" id="strikeMTitle">⚔️ Новый Strike — Шаг 1/3</div>
+    <!-- Step 1: Target -->
+    <div id="strikeStep1">
+      <div style="font-size:13px;color:var(--hint);margin-bottom:10px">
+        Введите username или ссылку на канал/чат для репорта:
+      </div>
+      <div class="field">
+        <input type="text" id="strikeTargetInput" placeholder="@channel или t.me/..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+      <div style="font-size:11px;color:var(--hint);margin:4px 0 14px">
+        Поддерживается: @username · t.me/channel · t.me/+HASH
+      </div>
+      <button class="btn btn-p" onclick="strikeNextStep1()" style="width:100%">Далее →</button>
     </div>
-    <input class="inp" id="strikeTargetInput" placeholder="@channel или t.me/..." style="margin-bottom:8px">
-    <div style="font-size:11px;color:var(--hint);margin-bottom:14px">
-      Поддерживается: @username · t.me/channel · t.me/+HASH
+    <!-- Step 2: Category -->
+    <div id="strikeStep2" style="display:none">
+      <div style="font-size:13px;color:var(--hint);margin-bottom:4px">Цель: <b id="strikeTgtLabel"></b></div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">Выберите категорию нарушения:</div>
+      <div class="mgmt-grid" id="strikeCatGrid" style="grid-template-columns:repeat(2,1fr)"></div>
     </div>
-    <button class="btn btn-p" onclick="strikeNextStep1()">Далее →</button>
-  </div>
-  <!-- Step 2: Category -->
-  <div id="strikeStep2" style="display:none">
-    <div style="font-size:13px;color:var(--hint);margin-bottom:6px">Цель: <b id="strikeTgtLabel"></b></div>
-    <div style="font-size:13px;font-weight:600;margin-bottom:10px">Выберите категорию нарушения:</div>
-    <div class="mgmt-grid" id="strikeCatGrid"></div>
-  </div>
-  <!-- Step 3: Confirm -->
-  <div id="strikeStep3" style="display:none">
-    <div class="strike-preview" id="strikePreviewBox"></div>
-    <div style="font-size:12px;color:var(--hint);margin:10px 0;line-height:1.5">
-      ⚠️ Strike отправляет официальные репорты через Telegram Trust &amp; Safety.
-      Результат зависит исключительно от решения модераторов Telegram.
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn" style="flex:1;background:var(--bg3)" onclick="strikeBackStep()">← Назад</button>
-      <button class="btn btn-p" style="flex:2;background:var(--red);border-color:var(--red)" onclick="strikeLaunch()" id="strikeLaunchBtn">⚔️ Запустить Strike</button>
+    <!-- Step 3: Confirm -->
+    <div id="strikeStep3" style="display:none">
+      <div class="strike-preview" id="strikePreviewBox"></div>
+      <div style="font-size:12px;color:var(--hint);margin:10px 0;line-height:1.5">
+        ⚠️ Strike отправляет официальные репорты через Telegram Trust &amp; Safety.
+        Результат зависит от решения модераторов Telegram.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" style="flex:1;background:var(--bg)" onclick="strikeBackStep()">← Назад</button>
+        <button class="btn btn-p" style="flex:2;background:#dc2626;border-color:#dc2626" onclick="strikeLaunch()" id="strikeLaunchBtn">⚔️ Запустить Strike</button>
+      </div>
     </div>
   </div>
 </div>
@@ -6916,14 +6917,12 @@ function openStrikeModal() {
   document.getElementById('strikeStep2').style.display = 'none';
   document.getElementById('strikeStep3').style.display = 'none';
   document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 1/3';
-  document.getElementById('strikeModal-bg').classList.add('show');
-  document.getElementById('strikeModal').classList.add('show');
+  showModal('mo-strike');
   setTimeout(()=>document.getElementById('strikeTargetInput').focus(), 200);
 }
 
 function closeStrikeModal() {
-  document.getElementById('strikeModal-bg').classList.remove('show');
-  document.getElementById('strikeModal').classList.remove('show');
+  closeModal('mo-strike');
 }
 
 function strikeNextStep1() {
