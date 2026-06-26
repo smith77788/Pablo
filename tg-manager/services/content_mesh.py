@@ -47,7 +47,7 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
                p.proxy_url
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-        WHERE a.id = $1 AND a.banned = FALSE
+        WHERE a.id = $1 AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
         """,
         account_id,
     )
@@ -148,7 +148,7 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
                   p.proxy_url
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.id = $1 AND a.banned = FALSE""",
+           WHERE a.id = $1 AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')""",
         account_id,
     )
     if not acc:

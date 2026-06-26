@@ -267,7 +267,7 @@ async def msg_mesh_source_channel(
     await state.update_data(source_channel=channel)
     # Show available accounts
     accounts = await pool.fetch(
-        "SELECT id, phone, username, first_name FROM tg_accounts WHERE owner_id=$1 AND banned=FALSE ORDER BY id LIMIT 20",
+        "SELECT id, phone, username, first_name FROM tg_accounts WHERE owner_id=$1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id LIMIT 20",
         message.from_user.id,
     )
     if not accounts:

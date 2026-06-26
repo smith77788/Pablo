@@ -50,7 +50,7 @@ LANGUAGES = [
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
     kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
     kb.button(text="⚡ Активные задачи", callback_data=TaskCb(action="list"))
     kb.button(text="❓ Справка", callback_data=BotCb(action="help"))

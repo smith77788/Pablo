@@ -112,7 +112,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
             # tg_accounts — добавляем поля если отсутствуют
             "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
-            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'ok'",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
             "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMPTZ",
             # user_proxies — полная схема
             """CREATE TABLE IF NOT EXISTS user_proxies (
@@ -157,6 +157,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )""",
             # platform_users — settings_json column
             "ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS settings_json TEXT",
+            # account_warmup_plans — создаём если нет
+            """CREATE TABLE IF NOT EXISTS account_warmup_plans (
+                id             BIGSERIAL PRIMARY KEY,
+                owner_id       BIGINT NOT NULL,
+                account_id     BIGINT NOT NULL,
+                plan_type      TEXT NOT NULL DEFAULT 'standard',
+                current_day    INT  DEFAULT 0,
+                target_days    INT  DEFAULT 14,
+                daily_actions  INT  DEFAULT 5,
+                status         TEXT DEFAULT 'active',
+                started_at     TIMESTAMPTZ DEFAULT now(),
+                completed_at   TIMESTAMPTZ,
+                last_action_at TIMESTAMPTZ,
+                meta           JSONB DEFAULT '{}'
+            )""",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_warmup_account ON account_warmup_plans(account_id)",
         ]
         for stmt in stmts:
             try:
@@ -4160,9 +4176,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, _json.dumps({"account_id": acc_id, "plan_type": plan_type}), label,
             )
             return _json_resp({"ok": True, "id": row["id"], "op_id": op_id, "target_days": target_days})
-        except Exception:
+        except Exception as exc:
             log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
-            return _err("Failed to start warmup", 500)
+            return _err(f"Ошибка запуска прогрева: {exc}", 500)
 
     async def pause_warmup(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6098,7 +6114,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         checks["routes"] = len([r for r in request.app.router.routes()])
         checks["status"] = "ok" if checks.get("db") == "ok" else "degraded"
         return _json_resp(checks)
-    app.router.add_get("/api/miniapp/health", api_health)
+    app.router.add_get("/api/miniapp/sys_health", api_health)
 
     async def miniapp_config(request: web.Request) -> web.Response:
         """Public config endpoint — no auth required. Returns bot info for frontend."""

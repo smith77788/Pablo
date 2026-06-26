@@ -63,7 +63,7 @@ BUILD_VERSION = "2026.06.06-r36"
 @router.message(Command("version"))
 async def cmd_version(message: Message) -> None:
     await message.answer(
-        f"🔖 <b>BotMother OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML"
+        f"🔖 <b>Infragram OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML"
     )
 
 
@@ -224,7 +224,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
 
     await message.answer(
-        f"👋 <b>BotMother OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
+        f"👋 <b>Infragram OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
         f"{summary}{extra}\n\n"
         f"ID: <code>{uid}</code>\n\n"
         f"💡 Нажмите на бота из списка → откроется меню управления",
@@ -250,7 +250,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
 
     text = (
-        f"❓ <b>Справка BotMother OS</b>\n\n"
+        f"❓ <b>Справка Infragram OS</b>\n\n"
         f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
         f"<b>📋 Команды:</b>\n"
         f"/start — главное меню\n"
@@ -290,7 +290,7 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     emoji = PLAN_EMOJIS.get(plan, "🆓")
 
     text = (
-        f"❓ <b>Справка BotMother OS</b>\n\n"
+        f"❓ <b>Справка Infragram OS</b>\n\n"
         f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
         f"<b>📋 Команды:</b>\n"
         f"/start — главное меню\n"
@@ -403,7 +403,7 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
         pressure_line = ""
 
     text = (
-        "📊 <b>Статистика BotMother OS</b>\n\n"
+        "📊 <b>Статистика Infragram OS</b>\n\n"
         f"📱 <b>Аккаунты:</b>\n"
         f"   Активных: <b>{acc_total}</b>"
         + (f"  |  Забанено/спам: <b>{acc_banned}</b>" if acc_banned else "")
