@@ -176,6 +176,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
             "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
             "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
+            # crm_deals: fix stage CHECK constraint (schema had 'new/contacted/qualified',
+            # API and JS use 'lead/contact/proposal/negotiation')
+            "ALTER TABLE crm_deals ALTER COLUMN stage SET DEFAULT 'lead'",
+            "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
+            "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
+            "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
         ]
         for stmt in stmts:
             try:
