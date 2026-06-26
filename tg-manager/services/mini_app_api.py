@@ -3955,6 +3955,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ok": True,
                 "op_id": op_id,
                 "total_recipients": total_recipients,
+                "broadcasts_created": len(bots),
                 "label": label,
             })
         except Exception:
