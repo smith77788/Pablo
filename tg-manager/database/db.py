@@ -2530,10 +2530,11 @@ async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> b
     return result != "DELETE 0"
 
 
-async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int) -> None:
+async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> None:
     await pool.execute(
-        "UPDATE tg_accounts SET last_used=now() WHERE id=$1",
+        "UPDATE tg_accounts SET last_used=now() WHERE id=$1 AND owner_id=$2",
         acc_id,
+        owner_id,
     )
 
 

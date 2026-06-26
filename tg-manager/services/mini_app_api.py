@@ -1518,7 +1518,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not row:
                 return _err("Бот не найден", 404)
             await pool.execute(
-                "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1", bot_id
+                "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
             return _json_resp({"ok": True})
         except Exception as exc:
