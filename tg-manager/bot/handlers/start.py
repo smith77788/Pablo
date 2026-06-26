@@ -145,7 +145,6 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
     # pay_<plan> → redirect to subscription screen
     if start_param.startswith("pay_"):
-        from bot.callbacks import SubCb
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         plan_key = start_param[4:]  # e.g. "paid_1m"
         kb_pay = InlineKeyboardBuilder()
