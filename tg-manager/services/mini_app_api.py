@@ -5577,11 +5577,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad tpl_id", 400)
         try:
-            tpl = await pool.fetchrow("SELECT is_active FROM self_promo_templates WHERE id=$1", tpl_id)
+            tpl = await pool.fetchrow(
+                "SELECT is_active FROM self_promo_templates WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
+                tpl_id, uid,
+            )
             if not tpl:
                 return _err("not found", 404)
             new_state = not tpl["is_active"]
-            await pool.execute("UPDATE self_promo_templates SET is_active=$1 WHERE id=$2", new_state, tpl_id)
+            await pool.execute(
+                "UPDATE self_promo_templates SET is_active=$1 WHERE id=$2 AND (owner_id=$3 OR owner_id IS NULL)",
+                new_state, tpl_id, uid,
+            )
             return _json_resp({"active": new_state})
         except Exception as exc:
             log.exception("self_promo_toggle uid=%d tpl=%d", uid, tpl_id)
