@@ -135,16 +135,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 name TEXT NOT NULL,
                 target_segment TEXT DEFAULT 'all',
                 enabled BOOLEAN DEFAULT true,
-                created_at TIMESTAMPTZ DEFAULT now()
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
             )""",
+            "ALTER TABLE auto_funnels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
             """CREATE TABLE IF NOT EXISTS auto_funnel_steps (
                 id SERIAL PRIMARY KEY,
                 funnel_id INTEGER NOT NULL,
-                step_order INTEGER DEFAULT 0,
+                step_num INTEGER DEFAULT 1,
                 message_text TEXT,
                 delay_hours INTEGER DEFAULT 0,
                 completed BOOLEAN DEFAULT false
             )""",
+            "ALTER TABLE auto_funnel_steps ADD COLUMN IF NOT EXISTS step_num INTEGER DEFAULT 1",
             """CREATE TABLE IF NOT EXISTS auto_funnel_runs (
                 id SERIAL PRIMARY KEY,
                 funnel_id INTEGER NOT NULL,
