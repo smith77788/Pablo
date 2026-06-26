@@ -3117,7 +3117,12 @@ function openSSE() {
 // ── Navigation ─────────────────────────────────────────
 const TAB_SCREENS = ['s-home','s-bots','s-accounts','s-broadcasts','s-more'];
 
+function closeAllModals() {
+  document.querySelectorAll('.mbg.show').forEach(el => el.classList.remove('show'));
+}
+
 function goTab(tab) {
+  closeAllModals();
   if (STACK.length) {
     STACK=[];
     document.querySelectorAll('.screen').forEach(s=>{
@@ -3136,6 +3141,7 @@ function goTab(tab) {
 }
 
 function push(sid) {
+  closeAllModals();
   STACK.push(sid);
   document.getElementById(sid).classList.add('show');
   showTabbar(false);
@@ -3143,6 +3149,7 @@ function push(sid) {
 }
 
 function back() {
+  closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
   document.getElementById(id).classList.remove('show');
