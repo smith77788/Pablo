@@ -5960,6 +5960,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
+    # ── Diagnostics ──────────────────────────────────────────────────────────
+    async def api_health(request: web.Request) -> web.Response:
+        """Публичный health endpoint для диагностики — не требует токена."""
+        checks = {}
+        try:
+            await pool.fetchval("SELECT 1")
+            checks["db"] = "ok"
+        except Exception as e:
+            checks["db"] = f"error: {e}"
+        try:
+            n_accounts = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts")
+            n_ops = await pool.fetchval("SELECT COUNT(*) FROM operation_queue WHERE status IN ('pending','running')")
+            checks["accounts_total"] = int(n_accounts or 0)
+            checks["ops_active"] = int(n_ops or 0)
+        except Exception as e:
+            checks["stats"] = f"error: {e}"
+        checks["routes"] = len([r for r in request.app.router.routes()])
+        checks["status"] = "ok" if checks.get("db") == "ok" else "degraded"
+        return _json_resp(checks)
+    app.router.add_get("/api/miniapp/health", api_health)
+
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
     _index_path = os.path.join(_static_dir, "index.html")
     if os.path.isdir(_static_dir):
