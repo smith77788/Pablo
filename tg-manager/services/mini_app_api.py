@@ -226,9 +226,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stats["plan_expires_at"] = None
         try:
             activity = await pool.fetch(
-                "SELECT action, status, occurred_at AS created_at FROM activity_log WHERE owner_id=$1 ORDER BY occurred_at DESC LIMIT 10",
+                """SELECT COALESCE(label, op_type) AS action,
+                          status, created_at,
+                          done_items, total_items, error_msg
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 10""",
                 uid)
-            stats["recent_activity"] = [dict(r) for r in activity]
+            def _op_action(row):
+                s = row["status"]
+                return ("completed" if s == "done" else
+                        "running" if s == "running" else
+                        "error" if s == "failed" else s)
+            stats["recent_activity"] = [
+                {
+                    "action": r["action"],
+                    "status": _op_action(r),
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                    "detail": (f'{r["done_items"]}/{r["total_items"]}' if (r["total_items"] or 0) > 0 else None),
+                }
+                for r in activity
+            ]
         except Exception:
             stats["recent_activity"] = []
         try:

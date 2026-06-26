@@ -3381,12 +3381,35 @@ function renderAct(items) {
     payment_received:  ['💳','Платёж получен'],
     account_banned:    ['🚫','Аккаунт забанен'],
     warmup_completed:  ['🌱','Прогрев завершён'],
+    warmup_started:    ['🌱','Прогрев запущен'],
+    strike:            ['⚡','STRIKE-операция'],
+    niche_growth_post: ['🌿','Growth Agent пост'],
+    broadcast:         ['📢','Рассылка'],
+    parse_members:     ['👥','Парсинг участников'],
+    invite_members:    ['➕','Добавление участников'],
+    mass_dm:           ['📩','Массовая рассылка'],
     operation_done:    ['⚙️','Операция выполнена'],
     error:             ['⚠️','Ошибка'],
   };
+  const OP_ICONS = {
+    broadcast:'📢', strike:'⚡', warmup:'🌱', growth:'🌿',
+    parse:'👥', invite:'➕', dm:'📩', bot:'🤖', funnel:'🔄',
+  };
   el.innerHTML = items.map(i=>{
-    const [ico, lbl] = ACT_INFO[i.action] || ['•', i.action||'событие'];
-    const detail = i.detail || i.bot_username ? `@${i.bot_username||''}` : '';
+    let [ico, lbl] = ACT_INFO[i.action] || ['', ''];
+    if (!ico) {
+      // Free-form label from operation_queue — detect icon by keyword
+      const a = (i.action||'').toLowerCase();
+      ico = a.includes('рассылк') ? '📢'
+          : a.includes('strike') ? '⚡'
+          : a.includes('прогрев') ? '🌱'
+          : a.includes('парсинг') || a.includes('parse') ? '👥'
+          : a.includes('добавлени') || a.includes('invite') ? '➕'
+          : a.includes('growth') || a.includes('нишев') ? '🌿'
+          : '⚙️';
+      lbl = i.action || 'Операция';
+    }
+    const detail = i.detail ? i.detail : (i.bot_username ? `@${i.bot_username||''}` : '');
     const stCls = i.status==='error'?'b-rd':i.status==='warning'?'b-or':i.status==='completed'?'b-gr':'b-bl';
     const stLbl = {ok:'✓',error:'✕',warning:'!',completed:'✓',running:'▶'}[i.status]||i.status||'';
     return `<div class="act">
