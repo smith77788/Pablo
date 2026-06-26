@@ -4258,9 +4258,11 @@ async def _exec_network_broadcast(
             )
             total_started += 1
             total_users += len(ids)
+            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
+            # incrementing by len(ids) here overflowed done_items past total_items.
             await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
-                len(ids), op_id,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
             )
 
     elif segment == "unique":
@@ -4280,9 +4282,11 @@ async def _exec_network_broadcast(
             )
             total_started += 1
             total_users += len(ids)
+            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
+            # incrementing by len(ids) here overflowed done_items past total_items.
             await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
-                len(ids), op_id,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
             )
 
     elif segment in ("cold_all", "lost_all"):
@@ -4301,9 +4305,11 @@ async def _exec_network_broadcast(
             )
             total_started += 1
             total_users += len(ids)
+            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
+            # incrementing by len(ids) here overflowed done_items past total_items.
             await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
-                len(ids), op_id,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
             )
 
     elif segment == "lang":
@@ -4328,9 +4334,11 @@ async def _exec_network_broadcast(
             )
             total_started += 1
             total_users += len(ids)
+            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
+            # incrementing by len(ids) here overflowed done_items past total_items.
             await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
-                len(ids), op_id,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
             )
 
     if total_started == 0:
@@ -4339,6 +4347,15 @@ async def _exec_network_broadcast(
             "ok": 0,
             "summary": "⚠️ Нет пользователей в выбранном сегменте — рассылка не запущена",
         }
+
+    # Normalise progress counters to the bot-launch unit. total_items was set to
+    # len(bots) up front, but bots without an audience are skipped, so done_items
+    # (incremented per launched bot) could stay below total_items and read <100%.
+    # Per-user delivery progress is tracked separately in the broadcasts table.
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1, done_items=$1 WHERE id=$2",
+        total_started, op_id,
+    )
 
     segment_labels = {
         "all_each": "Все боты → своей аудитории",

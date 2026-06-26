@@ -486,7 +486,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (TypeError, ValueError):
             return _err("Invalid bot_id")
         bot_row = await _safe_fetchrow(pool,
-            "SELECT bot_id, token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            "SELECT bot_id, token, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id_int, uid)
         if not bot_row:
             return _err("Bot not found", 404)
@@ -498,7 +498,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 bot_id_int, text, total, uid)
             broadcast_id = row["id"]
             # Create op_queue entry so user can track progress
-            label = f"Рассылка боту @{bot_row.get('username', bot_id_int)}: {text[:40]}…" if len(text) > 40 else f"Рассылка: {text[:60]}"
+            bot_label = bot_row.get("username") or bot_id_int
+            label = f"Рассылка боту @{bot_label}: {text[:40]}…" if len(text) > 40 else f"Рассылка: {text[:60]}"
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
