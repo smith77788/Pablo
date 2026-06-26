@@ -5812,9 +5812,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         async def fetch_activity() -> list:
             try:
                 rows = await pool.fetch(
-                    "SELECT action, status, occurred_at AS created_at FROM activity_log WHERE owner_id=$1 ORDER BY occurred_at DESC LIMIT 10",
+                    """SELECT COALESCE(label, op_type) AS action,
+                              status, created_at, done_items, total_items
+                       FROM operation_queue WHERE owner_id=$1
+                       ORDER BY created_at DESC LIMIT 10""",
                     uid)
-                return [dict(r) for r in rows]
+                def _map(r):
+                    s = r["status"]
+                    return {
+                        "action": r["action"],
+                        "status": ("completed" if s == "done" else "running" if s == "running" else "error" if s == "failed" else s),
+                        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                        "detail": (f'{r["done_items"]}/{r["total_items"]}' if (r["total_items"] or 0) > 0 else None),
+                    }
+                return [_map(r) for r in rows]
             except Exception:
                 return []
 
