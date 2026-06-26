@@ -46,7 +46,8 @@ def _get_uid(request: web.Request) -> int | None:
 async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
     try:
         return int(await pool.fetchval(query, *args) or 0)
-    except Exception:
+    except Exception as e:
+        log.warning("_safe_count error: %s | query=%.120s", e, query)
         return 0
 
 
@@ -54,7 +55,8 @@ async def _safe_fetch(pool: asyncpg.Pool, query: str, *args) -> list:
     try:
         rows = await pool.fetch(query, *args)
         return [dict(r) for r in rows]
-    except Exception:
+    except Exception as e:
+        log.warning("_safe_fetch error: %s | query=%.120s", e, query)
         return []
 
 
@@ -108,12 +110,54 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         stmts = [
             "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
             "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
+            # tg_accounts — добавляем поля если отсутствуют
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'ok'",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMPTZ",
+            # user_proxies — полная схема
+            """CREATE TABLE IF NOT EXISTS user_proxies (
+                id SERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                label TEXT DEFAULT '',
+                proxy_url TEXT NOT NULL,
+                proxy_type TEXT DEFAULT 'socks5',
+                is_active BOOLEAN DEFAULT true,
+                is_alive BOOLEAN DEFAULT true,
+                last_check TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE(owner_id, proxy_url)
+            )""",
+            # auto_funnels — создаём если нет
+            """CREATE TABLE IF NOT EXISTS auto_funnels (
+                id SERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                bot_id BIGINT,
+                name TEXT NOT NULL,
+                target_segment TEXT DEFAULT 'all',
+                enabled BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            """CREATE TABLE IF NOT EXISTS auto_funnel_steps (
+                id SERIAL PRIMARY KEY,
+                funnel_id INTEGER NOT NULL,
+                step_order INTEGER DEFAULT 0,
+                message_text TEXT,
+                delay_hours INTEGER DEFAULT 0,
+                completed BOOLEAN DEFAULT false
+            )""",
+            """CREATE TABLE IF NOT EXISTS auto_funnel_runs (
+                id SERIAL PRIMARY KEY,
+                funnel_id INTEGER NOT NULL,
+                user_id BIGINT,
+                status TEXT DEFAULT 'active',
+                started_at TIMESTAMPTZ DEFAULT now()
+            )""",
         ]
         for stmt in stmts:
             try:
                 await pool.execute(stmt)
             except Exception:
-                log.exception("inline migration failed: %s", stmt)
+                log.exception("inline migration failed: %.80s", stmt[:80])
 
     app.on_startup.append(_apply_inline_migrations)
 

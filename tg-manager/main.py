@@ -402,10 +402,24 @@ async def main() -> None:
                 )
                 await asyncio.sleep(5)
 
+    # Определяем webhook режим ДО старта сервера, чтобы передать dp в payment_webhook
+    _webhook_path = "/webhook"
+    _webhook_url = os.getenv("WEBHOOK_URL") or None
+    _allowed_updates = [
+        "message", "callback_query", "inline_query",
+        "chosen_inline_result", "pre_checkout_query",
+    ]
+
     try:
         # HTTP server starts FIRST — must bind to PORT immediately for Railway web services.
-        # All other services use _resilient (staggered) to avoid DB overload at startup.
-        asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
+        # Если задан WEBHOOK_URL — передаём dp чтобы Telegram webhook работал на том же порту.
+        # Это предотвращает конфликт двух серверов на одном PORT.
+        if _webhook_url:
+            asyncio.create_task(_web_resilient(
+                "payment_webhook", payment_webhook.run, pool, bot, dp, _webhook_path, http
+            ))
+        else:
+            asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
 
         asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
         asyncio.create_task(
@@ -506,48 +520,18 @@ async def main() -> None:
         log.info("TG Manager started")
 
         # ── Webhook or long-polling ───────────────────────────────────────────
-        # Webhook only if WEBHOOK_URL is explicitly set (not auto-detected).
-        # RAILWAY_PUBLIC_DOMAIN alone is NOT enough: Railway worker processes
-        # don't expose HTTP ports, so Telegram can't reach the webhook endpoint.
-        # Set WEBHOOK_URL manually only if the service is configured as a web
-        # service with a routed port (e.g. Railway web service with Generate Domain).
-        _webhook_path = "/webhook"
-        _webhook_url = os.getenv("WEBHOOK_URL") or None
-        _allowed_updates = [
-            "message", "callback_query", "inline_query",
-            "chosen_inline_result", "pre_checkout_query",
-        ]
-
         if _webhook_url:
-            from aiohttp import web as _web
-            from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-
+            # Webhook handler уже зарегистрирован на payment_webhook сервере (выше).
+            # Просто подключаемся к Telegram и ждём — никакого отдельного сервера.
             await bot.set_webhook(
                 _webhook_url,
                 allowed_updates=_allowed_updates,
                 drop_pending_updates=True,
             )
-            log.info("Webhook mode: %s", _webhook_url)
-
-            _app = _web.Application()
-            SimpleRequestHandler(
-                dispatcher=dp,
-                bot=bot,
-                pool=pool,
-                http=http,
-            ).register(_app, path=_webhook_path)
-            setup_application(_app, dp, bot=bot, pool=pool, http=http)
-
-            _port = int(os.getenv("PORT", "8080"))
-            _runner = _web.AppRunner(_app)
-            await _runner.setup()
-            _site = _web.TCPSite(_runner, "0.0.0.0", _port)
-            await _site.start()
-            log.info("Webhook server on port %d", _port)
+            log.info("Webhook mode: %s (handler on shared HTTP server)", _webhook_url)
             try:
                 await asyncio.Event().wait()
             finally:
-                await _runner.cleanup()
                 try:
                     await bot.delete_webhook()
                 except Exception:
