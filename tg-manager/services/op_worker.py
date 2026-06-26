@@ -4238,6 +4238,7 @@ async def _exec_network_broadcast(
 
     total_started = 0
     total_users = 0
+    launched_bc_ids: list[int] = []
     _BOT_START_DELAY_S = 2.0
 
     await pool.execute(
@@ -4248,6 +4249,14 @@ async def _exec_network_broadcast(
     # (avoids closed-session bug when ClientSession exits before background tasks start)
     if segment in ("all_each", "selected_bots", "cluster"):
         for b in bots:
+            if await _is_cancelled(pool, op_id):
+                for _bc in launched_bc_ids:
+                    broadcaster.cancel(_bc)
+                return {
+                    "status": "cancelled",
+                    "ok": total_started,
+                    "summary": f"Отменено. Запущено {total_started} из {len(bots)} ботов",
+                }
             try:
                 rows = await pool.fetch(
                     "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", b["bot_id"]
@@ -4265,6 +4274,7 @@ async def _exec_network_broadcast(
                 pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, None,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
+            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
             # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
@@ -4282,6 +4292,14 @@ async def _exec_network_broadcast(
             by_bot[u["bot_id"]].append(u["user_id"])
             token_map[u["bot_id"]] = u["token"]
         for bid, ids in by_bot.items():
+            if await _is_cancelled(pool, op_id):
+                for _bc in launched_bc_ids:
+                    broadcaster.cancel(_bc)
+                return {
+                    "status": "cancelled",
+                    "ok": total_started,
+                    "summary": f"Отменено. Запущено {total_started} ботов",
+                }
             bc_id = await db.create_broadcast(pool, bid, text, len(ids), owner_id)
             if not bc_id:
                 continue
@@ -4289,6 +4307,7 @@ async def _exec_network_broadcast(
                 pool, None, bc_id, token_map[bid], bid, text, None, ids, None,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
+            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
             # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
@@ -4302,6 +4321,14 @@ async def _exec_network_broadcast(
         days_from = 30 if segment == "lost_all" else 7
         days_to = None if segment == "lost_all" else 30
         for b in bots:
+            if await _is_cancelled(pool, op_id):
+                for _bc in launched_bc_ids:
+                    broadcaster.cancel(_bc)
+                return {
+                    "status": "cancelled",
+                    "ok": total_started,
+                    "summary": f"Отменено. Запущено {total_started} из {len(bots)} ботов",
+                }
             ids = await db.get_inactive_user_ids(pool, b["bot_id"], days_from, days_to)
             if not ids:
                 continue
@@ -4312,6 +4339,7 @@ async def _exec_network_broadcast(
                 pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, None,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
+            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
             # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
@@ -4323,6 +4351,14 @@ async def _exec_network_broadcast(
 
     elif segment == "lang":
         for b in bots:
+            if await _is_cancelled(pool, op_id):
+                for _bc in launched_bc_ids:
+                    broadcaster.cancel(_bc)
+                return {
+                    "status": "cancelled",
+                    "ok": total_started,
+                    "summary": f"Отменено. Запущено {total_started} из {len(bots)} ботов",
+                }
             try:
                 rows = await pool.fetch(
                     "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2 AND is_active=TRUE",
@@ -4341,6 +4377,7 @@ async def _exec_network_broadcast(
                 pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, None,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
+            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
             # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
@@ -6663,9 +6700,23 @@ async def _exec_account_warmup(
     if not acc:
         return {"status": "failed", "summary": "⚠️ Аккаунт не найден или не принадлежит вам"}
 
+    name = acc.get("first_name") or acc.get("phone") or str(account_id)
+
     try:
+        # If a plan already exists (created by the API before enqueuing this op),
+        # do NOT reset current_day/started_at — just confirm and return.
+        existing = await pool.fetchrow(
+            "SELECT id, status FROM account_warmup_plans WHERE account_id=$1 AND owner_id=$2",
+            account_id, owner_id,
+        )
+        if existing:
+            return {
+                "status": "done",
+                "plan_id": existing["id"],
+                "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
+            }
+        # Plan not yet created (op triggered from bot handler or legacy path) — create it.
         plan_id = await account_warmer.create_warmup_plan(pool, owner_id, account_id, plan_type)
-        name = acc.get("first_name") or acc.get("phone") or str(account_id)
         return {
             "status": "done",
             "plan_id": plan_id,

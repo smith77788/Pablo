@@ -3372,7 +3372,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if not source_ref:
             return _err("source_ref обязателен", 400)
-        if parse_type not in ("members", "active", "comments"):
+        if parse_type not in ("members", "active"):
             parse_type = "members"
         if limit < 1 or limit > 10000:
             limit = 500
