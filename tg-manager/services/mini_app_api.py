@@ -3997,7 +3997,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def crm_contact_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             data = await request.json()
         except Exception:
@@ -4040,7 +4040,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def crm_contact_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             contact_id = int(request.match_info["contact_id"])
         except (KeyError, ValueError):
@@ -4601,7 +4601,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def asset_templates_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         asset_type = request.rel_url.query.get("type")
         try:
             if asset_type:
@@ -4624,7 +4624,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def asset_template_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -4643,7 +4643,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def asset_template_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -4664,7 +4664,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def infra_health_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             alerts = await pool.fetch(
                 "SELECT id, alert_type, severity, title, description, target_type, "
@@ -4697,7 +4697,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def swarm_metrics(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4723,7 +4723,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def presence_packs_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, name, description, target_url, target_label, bot_id "
@@ -4788,7 +4788,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def global_presence_plans(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4814,7 +4814,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def global_presence_plan_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
@@ -4840,7 +4840,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def mass_ops_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4861,7 +4861,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def ecosystems_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4886,7 +4886,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def ecosystem_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             eco_id = int(request.match_info["eco_id"])
         except (KeyError, ValueError):
@@ -4966,7 +4966,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def channel_factory_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -4999,7 +4999,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def channel_factory_recent(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, title, username, type, added_at FROM managed_channels "
@@ -5016,7 +5016,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def group_factory_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -5051,7 +5051,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def physics_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5074,7 +5074,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def physics_account_telemetry(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             account_id = int(request.match_info["account_id"])
         except (KeyError, ValueError):
@@ -5105,7 +5105,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def graph_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             # Filter via owner's known channels (graph_nodes has no owner_id)
             stats = await pool.fetchrow(
@@ -5143,7 +5143,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def graph_overlaps(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5174,7 +5174,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def compliance_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             totals = await pool.fetchrow(
                 """
@@ -5203,7 +5203,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_cloner_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, op_type, status, params, COALESCE(label, op_type) AS label, created_at FROM operation_queue "
@@ -5218,7 +5218,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_cloner_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -5244,7 +5244,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def clone_adapt_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5269,7 +5269,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_meshes_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5295,7 +5295,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_mesh_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             mesh_id = int(request.match_info["mesh_id"])
         except (KeyError, ValueError):
@@ -5318,7 +5318,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def clone_adapt_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             data = await request.json()
         except Exception:
@@ -5364,7 +5364,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_mesh_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             data = await request.json()
         except Exception:
@@ -5397,7 +5397,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def narrative_campaigns_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
@@ -5412,7 +5412,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def narrative_campaign_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             cid = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
@@ -5436,7 +5436,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def narrative_campaign_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             data = await request.json()
         except Exception:
@@ -5468,7 +5468,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def self_promo_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count, "
@@ -5484,7 +5484,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def self_promo_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             data = await request.json()
         except Exception:
@@ -5516,7 +5516,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def self_promo_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -5535,7 +5535,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def self_promo_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -5554,7 +5554,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def self_promo_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -5579,7 +5579,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def semantic_memory_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5604,7 +5604,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def semantic_memory_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
@@ -5628,7 +5628,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def audience_dna_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5653,7 +5653,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def auto_funnels_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -5680,7 +5680,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def auto_funnel_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
@@ -5707,7 +5707,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def auto_funnel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
