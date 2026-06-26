@@ -201,7 +201,7 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
     except Exception:
         pass
 
-    lines += ["", f"🤖 <i>BotMother OS — Build {BUILD_VERSION}</i>"]
+    lines += ["", f"🤖 <i>Infragram OS — Build {BUILD_VERSION}</i>"]
     text = "\n".join(lines)
 
     admin_ids_raw = os.getenv("ADMIN_IDS", "")
