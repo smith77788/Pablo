@@ -3181,6 +3181,19 @@ function errHtml(msg, retryFn) {
 }
 
 // ── API ────────────────────────────────────────────────
+let _reAuthPending = false;
+async function _reAuth() {
+  if (_reAuthPending) return;
+  _reAuthPending = true;
+  try {
+    const r = await fetch('/api/miniapp/auth', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({initData: tg.initData || ''}),
+    });
+    if (r.ok) { TK = (await r.json()).token; openSSE(); }
+  } catch(_) {}
+  _reAuthPending = false;
+}
 async function api(path, opts={}) {
   let r;
   try {
@@ -3191,6 +3204,18 @@ async function api(path, opts={}) {
   } catch(_) {
     throw new Error('Нет соединения с сервером');
   }
+  if (r.status === 401) {
+    // Auto re-auth: token may have expired (2h lifetime)
+    await _reAuth();
+    // Retry once with new token
+    try {
+      r = await fetch(path, {
+        ...opts,
+        headers: {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})},
+      });
+    } catch(_) { throw new Error('Нет соединения с сервером'); }
+    if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
+  }
   if (!r.ok) {
     let msg;
     try { const j=await r.json(); msg=j.message||j.error||j.detail||null; } catch(_){}
@@ -3198,7 +3223,6 @@ async function api(path, opts={}) {
     const INFRA_ERRORS = ['Application failed to respond','failed to respond','upstream connect error','Bad Gateway','Service Unavailable'];
     if (msg && INFRA_ERRORS.some(e=>msg.includes(e))) msg = null;
     if (!msg) msg = r.status===502||r.status===503||r.status>=520 ? 'Сервис временно недоступен — попробуйте позже'
-                   : r.status===401 ? 'Сессия истекла, перезапустите приложение'
                    : r.status===403 ? 'Нет доступа'
                    : r.status===404 ? 'Не найдено'
                    : `Ошибка сервера (${r.status})`;
