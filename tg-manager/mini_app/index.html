@@ -1555,7 +1555,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:8px 16px 4px">
       <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону..." style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:12px;padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
     </div>
-    <div id="crmTags" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch"></div>
+    <div id="crmTagsBar" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="crmList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="crm-more" style="padding:12px 16px;display:none">
       <button class="btn btn-s" style="width:100%" onclick="loadMoreCRM()">Загрузить ещё</button>
@@ -4576,7 +4576,7 @@ async function loadCRM(append) {
     txt('m-crm-cnt', CRM_TOTAL+' контактов');
     // Render tag chips
     if (!append && (d.all_tags||[]).length) {
-      document.getElementById('crmTags').innerHTML =
+      document.getElementById('crmTagsBar').innerHTML =
         `<span class="badge ${!CRM_TAG?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px" onclick="setCRMTag('')">Все</span>` +
         d.all_tags.map(t=>`<span class="badge ${CRM_TAG===t?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px;white-space:nowrap" onclick="setCRMTag('${esc(t)}')">#${esc(t)}</span>`).join('');
     }
