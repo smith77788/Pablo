@@ -3181,6 +3181,7 @@ async function loadHome() {
 
 function renderCards(d) {
   // KPI scroll row
+  const healthColor = (d.acc_health||100)>=80?'var(--green)':(d.acc_health||100)>=50?'var(--orange)':'var(--red)';
   const kpis = [
     {val:d.bots,        lbl:'🤖 Ботов',       tab:'bots',       color:'var(--blue)'},
     {val:d.accounts,    lbl:'📱 Аккаунтов',    tab:'accounts',   color:'var(--teal)'},
@@ -3188,13 +3189,19 @@ function renderCards(d) {
     {val:d.channels,    lbl:'📡 Каналов',      tab:'accounts',   color:'var(--purple)'},
     {val:d.campaigns_active, lbl:'📨 Кампаний', tab:'broadcasts', color:'var(--orange)'},
     {val:d.funnels_active,   lbl:'🔄 Воронок',  tab:'broadcasts', color:'#f472b6'},
-    {val:d.ops_running, lbl:'⚙️ Операций',     tab:'more',       color:'var(--hint)'},
+    {val:d.ops_running, lbl:'⚙️ В работе',     tab:'more',       color:'var(--hint)'},
+    {val:(d.queue_backlog||0), lbl:'⏳ В очереди', tab:'more',   color:'var(--orange)'},
+    {raw:(d.acc_health!=null?(d.acc_health+'%'):'—'), lbl:'💚 Здоровье', tab:'accounts', color:healthColor},
+    {val:(d.ops_failed||0), lbl:'❌ Ошибок 24ч', tab:'more',    color:(d.ops_failed>0?'var(--red)':'var(--hint)')},
   ];
-  document.getElementById('kpiScroll').innerHTML = kpis.map(k=>
-    `<div class="kpi-chip ${(k.val||0)>0?'hi':''}" onclick="goTab('${k.tab}')">
-      <div class="kpi-chip-val" style="color:${k.color}">${num(k.val)}</div>
+  document.getElementById('kpiScroll').innerHTML = kpis.map(k=>{
+    const display = k.raw !== undefined ? k.raw : num(k.val);
+    const hi = k.raw !== undefined ? (k.raw!=='—') : (k.val||0)>0;
+    return `<div class="kpi-chip ${hi?'hi':''}" onclick="goTab('${k.tab}')">
+      <div class="kpi-chip-val" style="color:${k.color}">${display}</div>
       <div class="kpi-chip-lbl">${k.lbl}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   // Quick action counts
   const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   s('qa-bots',num(d.bots)); s('qa-accs',num(d.accounts)); s('qa-chs',num(d.channels));
@@ -4075,6 +4082,7 @@ async function loadOps() {
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
             ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="cancelOp(${o.id})">Отмена</span>`:''}
+            ${o.status==='failed'?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="retryOp(${o.id})">↺ Повтор</span>`:''}
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
@@ -4088,6 +4096,13 @@ async function cancelOp(id) {
   try {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
     toast('Операция отменена'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function retryOp(id) {
+  try {
+    const d = await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'});
+    toast('✅ Операция поставлена в очередь повторно'); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 

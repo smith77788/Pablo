@@ -166,6 +166,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stats["recent_activity"] = [dict(r) for r in activity]
         except Exception:
             stats["recent_activity"] = []
+        try:
+            acc_health = await pool.fetchval(
+                "SELECT ROUND(AVG(COALESCE(trust_score, 100))) FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+                uid)
+            stats["acc_health"] = int(acc_health) if acc_health is not None else 100
+        except Exception:
+            stats["acc_health"] = 100
+        try:
+            queue_backlog = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'",
+                uid)
+            stats["queue_backlog"] = int(queue_backlog or 0)
+        except Exception:
+            stats["queue_backlog"] = 0
+        try:
+            ops_failed = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='failed' AND created_at > NOW() - INTERVAL '24 hours'",
+                uid)
+            stats["ops_failed"] = int(ops_failed or 0)
+        except Exception:
+            stats["ops_failed"] = 0
         return _json_resp(stats)
 
     # ── Bots ─────────────────────────────────────────────────────────────────
@@ -681,6 +702,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception:
             return _err("Failed to cancel", 500)
+
+    async def retry_operation(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid op_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id FROM operation_queue WHERE id=$1 AND owner_id=$2 AND status='failed'",
+                op_id, uid)
+            if not row:
+                return _err("Not found or not failed", 404)
+            new_id = await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id, op_type, params, status, label)
+                   SELECT owner_id, op_type, params, 'pending', label
+                   FROM operation_queue WHERE id=$1
+                   RETURNING id""",
+                op_id)
+            return _json_resp({"ok": True, "new_id": new_id})
+        except Exception:
+            log.exception("retry_operation op_id=%d uid=%d", op_id, uid)
+            return _err("Failed to retry", 500)
 
     # ── Deeplinks ────────────────────────────────────────────────────────────
 
@@ -5662,6 +5708,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
+    app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     # Bot toggle
     app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)
     # Funnel steps
