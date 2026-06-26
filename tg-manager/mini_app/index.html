@@ -7417,10 +7417,14 @@ async function loadPromo() {
   }
 }
 function showPromoTab(tab) {
+  // Map tab keys to content pane IDs and button IDs (they differ)
+  const PANE = {orders:'promoOrdersTab', bots:'promoBotsTab', panels:'promoPanelsTab'};
+  const BTN  = {orders:'promoTabOrders',  bots:'promoTabBots',  panels:'promoTabPanels'};
   ['orders','bots','panels'].forEach(t=>{
-    document.getElementById('promoTab'+t.charAt(0).toUpperCase()+t.slice(1)).style.display=t===tab?'':'none';
-    const btn = document.getElementById('promoTab'+t.charAt(0).toUpperCase()+t.slice(1));
-    if (btn) btn.className = t===tab?'btn btn-p':'btn btn-s';
+    const pane = document.getElementById(PANE[t]);
+    if (pane) pane.style.display = t===tab ? '' : 'none';
+    const btn = document.getElementById(BTN[t]);
+    if (btn) btn.className = t===tab ? 'btn btn-p' : 'btn btn-s';
   });
   if (PROMO_DATA) renderPromoTab(tab);
 }
