@@ -5205,9 +5205,9 @@ async function saveCmp() {
   const btn = document.getElementById('cmpBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
   try {
-    const d = await api('/api/miniapp/dm_campaign', {
+    const d = await api('/api/miniapp/dm_campaigns', {
       method:'POST',
-      body: JSON.stringify({name, text_template:text, target_type, target_id})
+      body: JSON.stringify({name, text:text, target_type, target_id})
     });
     closeCmpModal();
     tg.HapticFeedback?.notificationOccurred('success');
