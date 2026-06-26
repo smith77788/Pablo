@@ -4465,10 +4465,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE p.user_id=$1
                    ORDER BY s.expires_at DESC NULLS LAST LIMIT 1""", uid)
             if row:
+                plan = row["current_plan"] or "free"
+                is_active = bool(row["is_active"])
+                # use whichever expiry is later
+                plan_exp = row["plan_expires_at"]
+                sub_exp = row["sub_expires"]
+                expires = None
+                if plan_exp and sub_exp:
+                    expires = str(max(plan_exp, sub_exp))
+                elif sub_exp:
+                    expires = str(sub_exp)
+                elif plan_exp:
+                    expires = str(plan_exp)
                 return _json_resp({
-                    "plan": row["current_plan"] or "free",
-                    "expires_at": str(row["plan_expires_at"]) if row["plan_expires_at"] else None,
-                    "is_active": bool(row["is_active"]),
+                    "plan": plan,
+                    "expires_at": expires,
+                    "is_active": is_active,
                 })
         except Exception:
             pass
