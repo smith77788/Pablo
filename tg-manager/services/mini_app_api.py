@@ -2506,13 +2506,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("account_id обязателен", 400)
         try:
             acc = await pool.fetchrow(
-                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
+                "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
             )
         except Exception as exc:
             log.exception("warmup_create_plan fetchrow uid=%d", uid)
             return _err(str(exc), 500)
         if not acc:
             return _err("Аккаунт не найден", 404)
+        if not acc["session_str"]:
+            return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
         try:
             days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
             actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
