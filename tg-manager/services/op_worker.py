@@ -7157,8 +7157,6 @@ async def _exec_leave_all_chats(
     params: {account_id: int}
     """
     from services import account_manager
-    from telethon.tl.functions.messages import GetDialogsRequest
-    from telethon.tl.types import InputPeerEmpty
 
     account_id = params.get("account_id")
     if not account_id:
@@ -7180,13 +7178,11 @@ async def _exec_leave_all_chats(
     failed = 0
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
-        dialogs = await client(GetDialogsRequest(
-            offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(),
-            limit=200, hash=0,
-        ))
-        chats = [d.entity for d in dialogs.dialogs
-                 if hasattr(d, "entity") and getattr(d.entity, "megagroup", False) or
-                 getattr(getattr(d, "entity", None), "__class__", None).__name__ in ("Chat", "Channel")]
+        # Use high-level get_dialogs() which resolves entities automatically.
+        # Raw GetDialogsRequest returns Dialog TL types without .entity attribute,
+        # which caused the list comprehension to always produce an empty chats list.
+        dialogs = await client.get_dialogs(limit=200)
+        chats = [d.entity for d in dialogs if d.is_group or d.is_channel]
         total = len(chats)
         await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
         for entity in chats:
