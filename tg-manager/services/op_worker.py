@@ -5665,16 +5665,22 @@ async def _exec_scan_owned_resources(
 
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
 
+    _ACCOUNT_COLS = """
+        SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+               a.device_model, a.system_version, a.app_version,
+               a.lang_code, a.system_lang_code,
+               a.proxy_id, p.proxy_url, p.geo_country
+        FROM tg_accounts a
+        LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+    """
     if account_ids:
         rows = await pool.fetch(
-            "SELECT id, first_name, phone, username "
-            "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            _ACCOUNT_COLS + "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
             owner_id, account_ids,
         )
     else:
         rows = await pool.fetch(
-            "SELECT id, first_name, phone, username "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            _ACCOUNT_COLS + "WHERE a.owner_id=$1 AND a.is_active=TRUE",
             owner_id,
         )
     accounts = [dict(r) for r in rows]
@@ -5709,10 +5715,9 @@ async def _exec_scan_owned_resources(
         )
 
         try:
-            acc_dict = await _db.get_account_for_telethon(pool, acc_id, owner_id)
-            session_str = (acc_dict.get("session_str") if acc_dict else None) or ""
+            session_str = acc.get("session_str") or ""
             result = await account_manager.scan_owned_assets(
-                session_str, _acc=dict(acc_dict) if acc_dict else None
+                session_str, _acc=acc
             )
             err = result.get("error")
             owned = result.get("channels", []) + result.get("groups", [])
