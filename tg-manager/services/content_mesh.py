@@ -41,7 +41,7 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
 
     acc = await pool.fetchrow(
         """
-        SELECT a.id, a.session_str, a.cooldown_until, a.banned,
+        SELECT a.id, a.session_str, a.cooldown_until,
                a.device_model, a.system_version, a.app_version,
                a.lang_code, a.system_lang_code,
                p.proxy_url
@@ -142,7 +142,7 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
 
     account_id = mesh["source_account_id"]
     acc = await pool.fetchrow(
-        """SELECT a.id, a.session_str, a.cooldown_until, a.banned,
+        """SELECT a.id, a.session_str, a.cooldown_until,
                   a.device_model, a.system_version, a.app_version,
                   a.lang_code, a.system_lang_code,
                   p.proxy_url
