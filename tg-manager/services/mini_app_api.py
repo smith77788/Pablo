@@ -5237,12 +5237,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not source:
             return _err("source required")
         account_id = body.get("account_id")
+        # Resolve the worker's contract here: _exec_content_clone expects source_ref,
+        # a list of target channels and an explicit account list. The Mini App only
+        # collects a source, so derive the rest — clone the source channel's recent
+        # posts into the user's own managed channels using an active account.
+        if account_id:
+            try:
+                account_ids = [int(account_id)]
+            except (TypeError, ValueError):
+                account_ids = []
+        else:
+            acc_rows = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+                "AND session_str IS NOT NULL "
+                "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "ORDER BY last_used DESC NULLS LAST LIMIT 1", uid)
+            account_ids = [r["id"] for r in acc_rows]
+        if not account_ids:
+            return _err("Нет активного аккаунта с сессией для клонирования", 400)
+        chan_rows = await _safe_fetch(pool,
+            "SELECT username, channel_id FROM managed_channels WHERE owner_id=$1", uid)
+        target_refs = [
+            ("@" + r["username"]) if r["username"] else r["channel_id"]
+            for r in chan_rows
+        ]
+        if not target_refs:
+            return _err("Нет управляемых каналов — добавьте канал, куда клонировать контент", 400)
         try:
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'content_clone','pending',$2,1,$3) RETURNING id",
-                uid, json.dumps({"source": source, "account_id": account_id}),
-                f"Клонировать контент: {source}",
+                "VALUES($1,'content_clone','pending',$2,$3,$4) RETURNING id",
+                uid, json.dumps({
+                    "source": source,          # kept for history display (JS reads payload.source)
+                    "source_ref": source,      # read by _exec_content_clone
+                    "target_refs": target_refs,
+                    "account_ids": account_ids,
+                    "mode": "forward",
+                    "msg_count": 10,
+                }),
+                len(target_refs),
+                f"Клонировать контент: {source} → {len(target_refs)} канал(ов)",
             )
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception as exc:

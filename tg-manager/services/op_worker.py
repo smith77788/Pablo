@@ -3419,6 +3419,10 @@ async def _exec_bulk_create_channels(
     about = params.get("about", "")
     username_pattern = params.get("username_pattern", "")
     acc_id = params.get("acc_id", 0)
+    # Group Factory passes is_group=True to create a supergroup instead of a
+    # broadcast channel. Without honouring it, create_group silently produced a
+    # channel (wrong entity type).
+    is_group = bool(params.get("is_group", False))
 
     # Get the account via resource_selector (flood-aware)
     if acc_id:
@@ -3497,7 +3501,9 @@ async def _exec_bulk_create_channels(
             }
 
         num = i + 1
-        title = f"{prefix} #{num}"
+        # Single-item creation (Factory) uses the title verbatim; only bulk runs
+        # get a "#N" suffix to keep names unique.
+        title = prefix if count == 1 else f"{prefix} #{num}"
         if username_pattern:
             username = f"{username_pattern}_{num}"
         else:
@@ -3507,7 +3513,7 @@ async def _exec_bulk_create_channels(
         await session_simulator.typing_delay(title)
 
         result = await account_manager.create_channel(
-            acc["session_str"], title, about=about, _acc=acc
+            acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
         )
 
         # Handle flood wait
@@ -3524,7 +3530,7 @@ async def _exec_bulk_create_channels(
                 log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
                 await asyncio.sleep(wait_time)
                 result = await account_manager.create_channel(
-                    acc["session_str"], title, about=about, _acc=acc
+                    acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
                 )
 
         if (
@@ -3534,15 +3540,17 @@ async def _exec_bulk_create_channels(
         ):
             ch_id = result["channel_id"]
             # Save to managed_channels
+            ch_type = result.get("type") or ("group" if is_group else "channel")
             await pool.execute(
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
-                   VALUES($1,$2,$3,$4,$5)
-                   ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, type)
+                   VALUES($1,$2,$3,$4,$5,$6)
+                   ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4, type=$6""",
                 owner_id,
                 acc["id"],
                 ch_id,
                 title,
                 username or None,
+                ch_type,
             )
             # Set username if pattern provided — 60-120s delay prevents geo-ban detection
             if username:
@@ -3634,11 +3642,12 @@ async def _exec_bulk_create_channels(
                     f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}",
                 )
 
+    _unit = "групп" if is_group else "каналов"
     return {
         "status": "done",
         "created": created_count,
         "failed": failed_count,
-        "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+        "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
     }
 
 
@@ -6017,13 +6026,77 @@ async def _exec_mass_invite(
     from services import mass_inviter_engine as inv
 
     group = params.get("group", "")
+    source = params.get("source", "")
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
-    user_refs: list[str] = list(params.get("user_refs") or [])
+    user_refs: list[str | int] = list(params.get("user_refs") or [])
     phones: list[str] = list(params.get("phones") or [])
     batch_size: int = int(params.get("batch_size") or 5)
 
-    if not group or not account_ids:
-        return {"status": "failed", "summary": "⚠️ Неполные параметры mass_invite"}
+    if not group:
+        return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
+
+    # Audience may be passed explicitly (bot handler sends user_refs/phones) OR
+    # referenced by source (Mini App sends only {group, source}). When no explicit
+    # list is given, load it from the matching table here — otherwise the invite
+    # loop iterates an empty audience and adds nobody.
+    if not user_refs and not phones:
+        if source == "parsed":
+            rows = await pool.fetch(
+                "SELECT username, tg_user_id FROM parsed_audiences "
+                "WHERE owner_id=$1 ORDER BY parsed_at DESC LIMIT 2000",
+                owner_id,
+            )
+            user_refs = [
+                ("@" + r["username"]) if r["username"] else r["tg_user_id"]
+                for r in rows if r["username"] or r["tg_user_id"]
+            ]
+        elif source == "crm":
+            rows = await pool.fetch(
+                "SELECT username, tg_user_id, phone FROM crm_contacts WHERE owner_id=$1 LIMIT 2000",
+                owner_id,
+            )
+            for r in rows:
+                if r["username"]:
+                    user_refs.append("@" + r["username"])
+                elif r["tg_user_id"]:
+                    user_refs.append(r["tg_user_id"])
+                elif r["phone"]:
+                    phones.append(r["phone"])
+        elif source == "bot_users":
+            rows = await pool.fetch(
+                "SELECT DISTINCT bu.user_id FROM bot_users bu "
+                "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
+                "WHERE mb.added_by=$1 AND bu.is_active=TRUE LIMIT 2000",
+                owner_id,
+            )
+            user_refs = [r["user_id"] for r in rows]
+
+    if not user_refs and not phones:
+        return {
+            "status": "failed",
+            "summary": f"⚠️ Аудитория пуста — нечего добавлять (источник: {source or 'не задан'})",
+        }
+
+    # account_ids is optional in the Mini App ("не выбрано = все активные"):
+    # fall back to every active account that still has a usable session.
+    if not account_ids:
+        acc_rows = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+            "AND session_str IS NOT NULL "
+            "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
+            owner_id,
+        )
+        account_ids = [r["id"] for r in acc_rows]
+
+    if not account_ids:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов-инвайтеров с сессией"}
+
+    # Keep op progress meaningful: total_items reflects the real audience size
+    # (the Mini App submits total_items=1 as a placeholder).
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        len(user_refs) + len(phones), op_id,
+    )
 
     accounts = await pool.fetch(
         "SELECT a.id, a.session_str, a.device_model, a.system_version, "
