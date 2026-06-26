@@ -135,7 +135,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .empty-ico{font-size:38px;margin-bottom:10px;opacity:.7}
 .empty-txt{font-size:14px;font-weight:500}
 .empty-sub{font-size:13px;margin-top:4px;opacity:.7}
-.err-msg{padding:14px 16px;color:var(--red);font-size:14px;text-align:center}
+.err-msg{padding:20px 16px;color:var(--red);font-size:14px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px}
+.err-msg-ico{font-size:32px;opacity:.7}
+.err-msg-txt{font-weight:500;line-height:1.4}
+.err-retry{margin-top:4px;padding:7px 20px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:12px;color:var(--red);font-size:13px;font-weight:600;cursor:pointer}
 
 /* ─── Skeleton ───────────────────────────────────────────────── */
 .sk{background:linear-gradient(90deg,rgba(255,255,255,.06) 25%,rgba(255,255,255,.02) 50%,rgba(255,255,255,.06) 75%);background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
@@ -3007,17 +3010,37 @@ let REF_CODE = null;
     loadSub();
     loadRef();
   } catch(e) {
-    document.getElementById('kpiScroll').innerHTML = `<div class="err-msg">⚠️ ${esc(e.message)}</div>`;
+    document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
 })();
 
+// ── Error helper ───────────────────────────────────────
+function errHtml(msg, retryFn) {
+  const retry = retryFn ? `<button class="err-retry" onclick="${retryFn}">↺ Повторить</button>` : '';
+  return `<div class="err-msg"><div class="err-msg-ico">⚠️</div><div class="err-msg-txt">${esc(msg)}</div>${retry}</div>`;
+}
+
 // ── API ────────────────────────────────────────────────
 async function api(path, opts={}) {
-  const r = await fetch(path, {
-    ...opts,
-    headers: {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})},
-  });
-  if (!r.ok) { const t=await r.text(); throw new Error('HTTP '+r.status+': '+t.substring(0,80)); }
+  let r;
+  try {
+    r = await fetch(path, {
+      ...opts,
+      headers: {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})},
+    });
+  } catch(_) {
+    throw new Error('Нет соединения с сервером');
+  }
+  if (!r.ok) {
+    let msg;
+    try { const j=await r.json(); msg=j.message||j.error||j.detail||null; } catch(_){}
+    if (!msg) msg = r.status===502||r.status===503 ? 'Сервис временно недоступен — попробуйте позже'
+                   : r.status===401 ? 'Сессия истекла, перезапустите приложение'
+                   : r.status===403 ? 'Нет доступа'
+                   : r.status===404 ? 'Не найдено'
+                   : `Ошибка сервера (${r.status})`;
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -3092,7 +3115,7 @@ async function loadHome() {
     renderAct(d.recent_activity||[]);
     updateMoreStats(d);
   } catch(e) {
-    document.getElementById('kpiScroll').innerHTML = `<div class="err-msg">Ошибка: ${esc(e.message)}</div>`;
+    document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
 }
 
@@ -3223,7 +3246,7 @@ async function loadBots() {
       </div>`;
     }).join('')+'</div>';
   } catch(e) {
-    document.getElementById('botsBody').innerHTML=`<div id="botList"><div class="err-msg">${esc(e.message)}</div></div>`;
+    document.getElementById('botsBody').innerHTML=`<div id="botList">${errHtml(e.message,'loadBots()')}</div>`;
   }
 }
 
@@ -3238,7 +3261,7 @@ async function openBot(botId) {
     const d = await api('/api/miniapp/bot/'+botId);
     txt('bd-body', buildBotDetail(d));
   } catch(e) {
-    txt('bd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('bd-body', errHtml(e.message));
   }
 }
 
@@ -3248,7 +3271,7 @@ async function removeBotConfirm(botId, name) {
     await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
     toast('🗑 Бот деактивирован');
     loadBots();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 function buildBotDetail(d) {
@@ -3354,7 +3377,7 @@ async function loadArList() {
     const d = await api('/api/miniapp/bot/'+CUR_BOT.id+'/auto_replies');
     renderArList(d.auto_replies||[]);
   } catch(e) {
-    txt('arList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('arList', errHtml(e.message,'loadArList()'));
   }
 }
 
@@ -3385,7 +3408,7 @@ async function toggleAr(id, el) {
     toast(wasOn?'Авто-ответ выключен':'Авто-ответ включён');
   } catch(e) {
     el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn);
-    toast('Ошибка: '+e.message);
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
   }
 }
 
@@ -3396,7 +3419,7 @@ async function doDeleteAr(id) {
   try {
     await api('/api/miniapp/auto_reply/'+id, {method:'DELETE'});
     toast('Удалено'); loadArList();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 let AR_SAVE_BOT = null;
@@ -3455,7 +3478,7 @@ async function openBotFunnels(botId, botName) {
         <span class="chev">›</span>
       </div>
     </div>`).join(''));
-  } catch(e) { txt('bfList', `<div class="err-msg">${esc(e.message)}</div>`); }
+  } catch(e) { txt('bfList', errHtml(e.message)); }
 }
 
 async function toggleFunnel(id, el) {
@@ -3465,7 +3488,7 @@ async function toggleFunnel(id, el) {
     await api('/api/miniapp/funnel/'+id+'/toggle', {method:'PUT'});
     toast(wasOn?'Воронка остановлена':'Воронка запущена');
   } catch(e) {
-    el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn); toast('Ошибка: '+e.message);
+    el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn); toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
   }
 }
 
@@ -3480,7 +3503,7 @@ async function loadAccounts() {
     updateAccKpi(CUR_ACCS);
     renderAccounts(CUR_ACCS);
   }).catch(e => {
-    document.getElementById('accList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
+    document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
   api('/api/miniapp/channels').then(cd => {
     CUR_CHANNELS = cd.channels||[];
@@ -3606,7 +3629,7 @@ async function openAccount(accId) {
     const d = await api('/api/miniapp/account/'+accId);
     txt('acd-body', buildAccDetail(d));
   } catch(e) {
-    txt('acd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('acd-body', errHtml(e.message));
   }
 }
 
@@ -3742,7 +3765,7 @@ async function openChannels() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('chList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('chList', errHtml(e.message,'loadChannels()'));
   }
 }
 
@@ -3756,7 +3779,7 @@ async function openChannel(chId) {
     const d = await api('/api/miniapp/channel/'+chId);
     txt('chd-body', buildChDetail(d));
   } catch(e) {
-    txt('chd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('chd-body', errHtml(e.message));
   }
 }
 
@@ -3840,7 +3863,7 @@ async function loadBroadcasts() {
     renderCmps(cd.campaigns||[]);
     renderFuns(fd.funnels||[]);
   } catch(e) {
-    txt('bcastList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('bcastList', errHtml(e.message,'loadBroadcasts()'));
     txt('cmpList',''); txt('funList','');
   }
 }
@@ -3998,14 +4021,14 @@ async function loadOps() {
         ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(o.error_msg.substring(0,80))}</div>`:''}
       </div>`;
     }).join(''));
-  } catch(e) { txt('opsList',`<div class="err-msg">${esc(e.message)}</div>`); }
+  } catch(e) { txt('opsList', errHtml(e.message,'loadOps()')); }
 }
 
 async function cancelOp(id) {
   try {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
     toast('Операция отменена'); loadOps();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 function filterOps(status, btn) {
@@ -4064,7 +4087,7 @@ async function loadAnalytics() {
     }).join('') : empty('🔍','Нет ключевых слов','Добавьте через меню бота'));
     txt('kw-val', kws.length ? kws.length+' ключей отслеживается' : '—');
   } catch(e) {
-    txt('topBots',`<div class="err-msg">${esc(e.message)}</div>`);
+    txt('topBots', errHtml(e.message,'loadPromoData()'));
   }
 }
 
@@ -4082,7 +4105,7 @@ async function toggleBotActive(botId, el) {
     if (b) b.is_active = d.is_active;
   } catch(e) {
     el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn);
-    toast('Ошибка: '+e.message);
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
   }
 }
 
@@ -4098,7 +4121,7 @@ async function openFunnelDetail(funnelId, funnelName) {
     const d = await api('/api/miniapp/funnel/'+funnelId+'/steps');
     txt('fd-body', buildFunnelDetail(d));
   } catch(e) {
-    txt('fd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('fd-body', errHtml(e.message));
   }
 }
 
@@ -4244,7 +4267,7 @@ async function loadCompetitors() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('compList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('compList', errHtml(e.message,'loadCompetitors()'));
   }
 }
 
@@ -4283,7 +4306,7 @@ async function deleteComp(id) {
   try {
     await api('/api/miniapp/competitor/'+id, {method:'DELETE'});
     toast('Удалено'); loadCompetitors();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Network Broadcast ──────────────────────────────────
@@ -4372,8 +4395,8 @@ async function loadCRM(append) {
     CRM_OFFSET += contacts.length;
     document.getElementById('crm-more').style.display = CRM_OFFSET < CRM_TOTAL ? 'block':'none';
   } catch(e) {
-    if (!append) txt('crmList', `<div class="err-msg">${esc(e.message)}</div>`);
-    else toast('Ошибка: '+e.message);
+    if (!append) txt('crmList', errHtml(e.message,'loadCRM(false)'));
+    else toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
   }
 }
 
@@ -4405,7 +4428,7 @@ async function openAudience(botId, botName) {
     const d = await api('/api/miniapp/bot/'+botId+'/audience');
     txt('aud-body', buildAudience(d, botId, botName));
   } catch(e) {
-    txt('aud-body', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('aud-body', errHtml(e.message));
   }
 }
 
@@ -4480,7 +4503,7 @@ async function loadKeywords() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('kwTrackList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('kwTrackList', errHtml(e.message,'loadKeywords()'));
   }
 }
 
@@ -4488,7 +4511,7 @@ async function deleteKw(id) {
   try {
     await api('/api/miniapp/keyword/'+id, {method:'DELETE'});
     toast('Удалено'); loadKeywords();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 function openKwModal() {
@@ -4535,7 +4558,7 @@ async function startWarmup(accId, planType) {
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🔥 Прогрев запущен · '+d.target_days+' дней');
     openAccount(accId);
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 async function pauseWarmup(accId) {
@@ -4544,7 +4567,7 @@ async function pauseWarmup(accId) {
     tg.HapticFeedback?.notificationOccurred('success');
     toast('⏸ Прогрев поставлен на паузу');
     openAccount(accId);
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Schedule ───────────────────────────────────────────
@@ -4589,7 +4612,7 @@ async function loadSchedules() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('schList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('schList', errHtml(e.message));
   }
 }
 
@@ -4635,7 +4658,7 @@ async function cancelSchedule(id) {
   try {
     await api('/api/miniapp/schedule/'+id+'/cancel', {method:'POST'});
     toast('Отменено'); await loadSchedules();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Templates ──────────────────────────────────────────
@@ -4666,7 +4689,7 @@ async function loadTemplates() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('tplList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('tplList', errHtml(e.message,'loadTemplates()'));
   }
 }
 
@@ -4682,7 +4705,7 @@ async function deleteTpl(id) {
   try {
     await api('/api/miniapp/template/'+id, {method:'DELETE'});
     toast('Удалено'); loadTemplates();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 function openTplModal() {
@@ -4811,7 +4834,7 @@ async function loadProxies() {
       </div>`;
     }).join(''));
   } catch(e) {
-    txt('proxyList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('proxyList', errHtml(e.message,'loadProxies()'));
   }
 }
 
@@ -4850,7 +4873,7 @@ async function deleteProxy(id) {
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
     toast('Удалено'); loadProxies();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Bot Subscribers ────────────────────────────────────
@@ -4899,8 +4922,8 @@ async function loadBotSubs(append) {
     const moreEl = document.getElementById('bs-more');
     moreEl.style.display = (BS_OFFSET < BS_TOTAL) ? 'block' : 'none';
   } catch(e) {
-    if (!append) txt('bsList', `<div class="err-msg">${esc(e.message)}</div>`);
-    else toast('Ошибка: '+e.message);
+    if (!append) txt('bsList', errHtml(e.message));
+    else toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
   }
 }
 
@@ -5105,7 +5128,7 @@ async function deleteDl(linkId) {
     await api('/api/miniapp/deeplink/'+linkId, {method:'DELETE'});
     toast('Удалено');
     loadDeeplinks();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Engagement ─────────────────────────────────────────
@@ -5217,7 +5240,7 @@ async function deleteCmd(idx) {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:newList})});
     toast('Удалено');
     loadBotCommands();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function clearBotCommands() {
   if (!confirm('Удалить все команды бота?')) return;
@@ -5225,7 +5248,7 @@ async function clearBotCommands() {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:[]})});
     toast('🗑 Все команды удалены');
     loadBotCommands();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Bot Stats (detailed) ───────────────────────────────
@@ -5586,7 +5609,7 @@ async function togglePersona(id, active) {
     await api(`/api/miniapp/persona/${id}/toggle`,{method:'PUT'});
     toast(active?'⚫ Деактивировано':'🟢 Активировано');
     openPersonas();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deletePersona(id) {
   if (!confirm('Удалить персону?')) return;
@@ -5594,7 +5617,7 @@ async function deletePersona(id) {
     await api(`/api/miniapp/persona/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
     openPersonas();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function submitPersona() {
   const name = (document.getElementById('pName')||{}).value?.trim();
@@ -5804,7 +5827,7 @@ async function deleteAiMem(id) {
     await api(`/api/miniapp/ai_memory/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
     openAiMemory();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Nodes Hub ───────────────────────────────────────────
@@ -5897,7 +5920,7 @@ async function scanGifts() {
   try {
     const r = await api('/api/miniapp/gifts/scan',{method:'POST'});
     toast(`📡 Сканирование запущено (#${r.op_id})`);
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Mass Inviter ─────────────────────────────────────────
@@ -6013,7 +6036,7 @@ async function toggleStarsExp(id) {
     const r = await api(`/api/miniapp/stars/experiment/${id}/toggle`,{method:'PUT'});
     toast(r.status==='active'?'▶️ Активен':'⏸ Пауза');
     openStars();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Ghost Engine ────────────────────────────────────────
@@ -6048,7 +6071,7 @@ async function toggleGhost(id, enabled) {
     await api(`/api/miniapp/ghost/${id}/toggle`,{method:'PUT'});
     toast(enabled?'⚫ Отключён':'🟢 Включён');
     openGhost();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deleteGhost(id) {
   if (!confirm('Удалить Ghost-профиль?')) return;
@@ -6056,7 +6079,7 @@ async function deleteGhost(id) {
     await api(`/api/miniapp/ghost/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
     openGhost();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 async function openGhostModal() {
@@ -6124,7 +6147,7 @@ async function deleteWebhook(botId) {
     await api(`/api/miniapp/bot/${botId}/webhook`,{method:'DELETE'});
     toast('🗑 Вебхук удалён');
     openBotWebhook(botId,'');
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Reg Checker ─────────────────────────────────────────
@@ -6237,7 +6260,7 @@ async function launchDm(id) {
     await api(`/api/miniapp/dm_campaign/${id}/launch`,{method:'POST'});
     toast('▶️ Кампания запущена');
     openDmCampaigns();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deleteDm(id) {
   if (!confirm('Удалить кампанию?')) return;
@@ -6245,7 +6268,7 @@ async function deleteDm(id) {
     await api(`/api/miniapp/dm_campaign/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
     openDmCampaigns();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Account Warmup ─────────────────────────────────────
@@ -6317,7 +6340,7 @@ async function deleteWarmupPlan(id) {
     await api(`/api/miniapp/warmup/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
     openWarmup();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── A/B Experiments ────────────────────────────────────
@@ -6385,7 +6408,7 @@ async function deleteExp(id) {
     toast('🗑 Удалено');
     back(); back();
     openExperiments();
-  } catch(e) { toast('Ошибка: '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 async function openExpModal() {
@@ -6675,7 +6698,7 @@ async function toggleRelay(botId, enable) {
     await api('/api/miniapp/bot/'+botId+'/relay/toggle', {method:'PUT', body:JSON.stringify({enabled:enable})});
     toast(enable?'▶ Relay включён':'⏸ Relay выключен');
     openRelay(botId, '');
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function openRelaySession(sessionId, name) {
   txt('relaymsgs-title', '💬 '+name);
@@ -6726,7 +6749,7 @@ async function revokeApiKey(keyId) {
     await api('/api/miniapp/api_key/'+keyId, {method:'DELETE'});
     toast('🔑 Ключ отключён');
     openApiKeys();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 function openApiKeyModal() {
   document.getElementById('ak-name').value='';
@@ -6946,7 +6969,7 @@ async function deleteDeal(dealId) {
     await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
     toast('Удалено');
     loadDeals();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Workspaces ──────────────────────────────────────────
@@ -7003,7 +7026,7 @@ async function leaveWs(wsId, role) {
     await api('/api/miniapp/workspace/'+wsId, {method:'DELETE'});
     toast(role==='owner' ? '🗑 Пространство удалено' : '🚪 Вы покинули пространство');
     loadWorkspaces();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Promo Platform ─────────────────────────────────────
@@ -7073,7 +7096,7 @@ async function cancelPromoOrder(orderId) {
     await api('/api/miniapp/promo/order/'+orderId+'/cancel', {method:'POST'});
     toast('Заказ отменён');
     loadPromo();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 function openPromoOrderModal() {
   document.getElementById('promoKw').value='';
@@ -7259,7 +7282,7 @@ async function deleteAssetTpl(id, btn) {
     await api(`/api/miniapp/asset_template/${id}`,{method:'DELETE'});
     toast('🗑 Шаблон удалён');
     loadAssetTpl(_atFilter);
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 function openAssetTplModal() {
   document.getElementById('at-name').value='';
@@ -7924,7 +7947,7 @@ async function toggleMesh(meshId, btn) {
     const r = await api(`/api/miniapp/content_mesh/${meshId}/toggle`,{method:'PUT'});
     toast(r.enabled?'🟢 Меш включён':'🔴 Меш выключен');
     openContentMesh();
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 
 async function openMeshModal() {
@@ -8076,14 +8099,14 @@ async function toggleSelfPromo(id,btn) {
     const r = await api(`/api/miniapp/self_promo/${id}/toggle`,{method:'PUT'});
     toast(r.active?'✅ Шаблон включён':'🔴 Шаблон выключен');
     openSelfPromo();
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 async function launchSelfPromo(id,btn) {
   btn.disabled=true; btn.textContent='...';
   try {
     await api(`/api/miniapp/self_promo/${id}/launch`,{method:'POST'});
     toast('🚀 Рассылка запущена');
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
   finally { btn.disabled=false; btn.textContent='▶ Запуск'; }
 }
 
@@ -8142,7 +8165,7 @@ async function deleteNode(nodeId) {
     await api('/api/miniapp/node/'+nodeId, {method:'DELETE'});
     toast('🗑 Нода удалена');
     openNodes();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── CRM Contact Modal ─────────────────────────────────
@@ -8185,7 +8208,7 @@ async function deleteCrmContact(contactId) {
     await api('/api/miniapp/crm/contact/'+contactId, {method:'DELETE'});
     toast('🗑 Контакт удалён');
     openCRM();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Self Promo Create Modal ────────────────────────────
@@ -8224,7 +8247,7 @@ async function deleteSelfPromoTemplate(id) {
     await api('/api/miniapp/self_promo/'+id, {method:'DELETE'});
     toast('🗑 Шаблон удалён');
     openSelfPromo();
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 // ── Semantic Memory ────────────────────────────────────
@@ -8327,7 +8350,7 @@ async function toggleFunnel(fid, btn) {
     const r = await api(`/api/miniapp/auto_funnel/${fid}/toggle`,{method:'PUT'});
     toast(r.enabled?'🟢 Воронка включена':'🔴 Воронка выключена');
     openAutoFunnels();
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 async function openFunnelSteps(fid, fname) {
   push('s-afsteps');
@@ -8413,7 +8436,7 @@ async function deleteAutoFunnel(fid, btn) {
     await api(`/api/miniapp/auto_funnel/${fid}`,{method:'DELETE'});
     toast('🗑 Воронка удалена');
     openAutoFunnels();
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 
 // ── Presence Packs ─────────────────────────────────────
@@ -8447,7 +8470,7 @@ async function deletePresencePack(id, btn) {
     await api(`/api/miniapp/presence_pack/${id}`,{method:'DELETE'});
     toast('🗑 Pack удалён');
     openPresencePacks();
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 
 // ── Ecosystems ─────────────────────────────────────────
@@ -8482,7 +8505,7 @@ async function deleteEcosystem(id, btn) {
     await api(`/api/miniapp/ecosystem/${id}`,{method:'DELETE'});
     toast('🗑 Экосистема удалена');
     openEcosystems();
-  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 
 // ── Utils ──────────────────────────────────────────────
