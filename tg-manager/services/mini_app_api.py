@@ -2427,7 +2427,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, _json.dumps({"campaign_id": campaign_id}), label,
             )
             await pool.execute(
-                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1", campaign_id
+                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1 AND owner_id=$2", campaign_id, uid
             )
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception as exc:
@@ -4188,8 +4188,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Cancel any active warmup first
         try:
             await pool.execute(
-                "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND status='active'",
-                acc_id)
+                "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND owner_id=$2 AND status='active'",
+                acc_id, uid)
             row = await pool.fetchrow(
                 """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
                    VALUES($1,$2,$3,$4,$5)
@@ -5344,7 +5344,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("not found", 404)
             new_state = not mesh["enabled"]
             await pool.execute(
-                "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, mesh_id
+                "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, mesh_id, uid
             )
             return _json_resp({"enabled": new_state})
         except Exception as exc:
