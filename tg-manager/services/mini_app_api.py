@@ -2409,7 +2409,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad campaign_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT id, name FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+                "SELECT id, name, status FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
                 campaign_id, uid,
             )
         except Exception as exc:
@@ -2417,6 +2417,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
         if not row:
             return _err("Не найдено", 404)
+        if row["status"] == "running":
+            return _err("Кампания уже выполняется", 409)
         try:
             label = f"DM-кампания: {row['name']}"
             op_id = await pool.fetchval(
