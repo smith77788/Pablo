@@ -173,6 +173,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 meta           JSONB DEFAULT '{}'
             )""",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_warmup_account ON account_warmup_plans(account_id)",
+            # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
         ]
         for stmt in stmts:
             try:
@@ -4171,8 +4174,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("standard", "gentle", "aggressive"):
             plan_type = "standard"
-        target_days = {"standard": 14, "gentle": 21, "aggressive": 7}[plan_type]
-        daily_actions = {"standard": 10, "gentle": 5, "aggressive": 20}[plan_type]
+        # Values must match account_warmer.create_warmup_plan() — aggressive capped at 12/day
+        target_days    = {"gentle": 21, "standard": 14, "aggressive": 10}[plan_type]
+        daily_actions  = {"gentle":  5, "standard": 10, "aggressive": 12}[plan_type]
+        # Require session_str so the worker doesn't fail immediately
+        has_session = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            acc_id, uid)
+        if not has_session:
+            return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
         # Cancel any active warmup first
         try:
             await pool.execute(
