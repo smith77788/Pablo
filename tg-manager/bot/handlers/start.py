@@ -139,19 +139,37 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     except Exception:
         log_exc_swallow(log, "Не удалось зарегистрировать или обновить пользователя")
 
-    # Handle referral code from /start inv_XXXXXX
-    if is_new:
-        args = message.text.split(maxsplit=1)
-        start_param = args[1].strip() if len(args) > 1 else ""
-        if start_param.startswith("inv_"):
-            try:
-                referrer_id = await db.get_user_by_referral_code(pool, start_param)
-                if referrer_id and referrer_id != uid:
-                    recorded = await db.record_platform_referral(pool, referrer_id, uid)
-                    if recorded:
-                        await db.give_welcome_bonus(pool, uid, message.bot)
-            except Exception as e:
-                log.warning("Referral processing error: %s", e)
+    # Handle deep link params from /start
+    args = message.text.split(maxsplit=1)
+    start_param = args[1].strip() if len(args) > 1 else ""
+
+    # pay_<plan> → redirect to subscription screen
+    if start_param.startswith("pay_"):
+        from bot.callbacks import SubCb
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        plan_key = start_param[4:]  # e.g. "paid_1m"
+        kb_pay = InlineKeyboardBuilder()
+        kb_pay.button(text="💳 Перейти к оплате", callback_data=SubCb(action="menu"))
+        kb_pay.button(text="◀️ Главное меню", callback_data="bm:main")
+        await message.answer(
+            f"💳 <b>Оформление подписки</b>\n\n"
+            f"Тариф: <b>{plan_key.upper()}</b>\n\n"
+            f"Нажмите кнопку ниже чтобы выбрать способ оплаты:",
+            parse_mode="HTML",
+            reply_markup=kb_pay.as_markup(),
+        )
+        return
+
+    # inv_XXXXXX → referral code (only for new users)
+    if is_new and start_param.startswith("inv_"):
+        try:
+            referrer_id = await db.get_user_by_referral_code(pool, start_param)
+            if referrer_id and referrer_id != uid:
+                recorded = await db.record_platform_referral(pool, referrer_id, uid)
+                if recorded:
+                    await db.give_welcome_bonus(pool, uid, message.bot)
+        except Exception as e:
+            log.warning("Referral processing error: %s", e)
 
     # bots already fetched in parallel above
     bot_count = len(bots)
