@@ -5894,6 +5894,25 @@ async def _exec_promote_all_admins(
 
 # ── Накрутка: просмотры, реакции, сторис ─────────────────────────────────────
 
+async def _record_boost_flood(pool: asyncpg.Pool, acc_id: int, err: str, op_id: int) -> None:
+    """Если ошибка аккаунта — FloodWait, выставить cooldown через flood_engine.
+
+    Без этого аккаунт остаётся с cooldown_until=NULL и будет выбран следующей
+    накруткой повторно → повторный флуд → риск бана. Записываем штраф один раз
+    на аккаунт при флуде.
+    """
+    if "flood" not in (err or "").lower():
+        return
+    try:
+        from services import boost_engine, flood_engine
+        wait = boost_engine.extract_flood_wait(None, err) or 60
+        await flood_engine.record_flood(
+            pool, int(acc_id), wait, action_type="boost", operation_id=op_id
+        )
+    except Exception:
+        log.debug("boost flood record failed acc=%s", acc_id)
+
+
 async def _exec_boost_views(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -5938,6 +5957,7 @@ async def _exec_boost_views(
                 )
             else:
                 fail_count += 1
+                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
@@ -6004,6 +6024,7 @@ async def _exec_boost_reactions(
                 )
             else:
                 fail_count += 1
+                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
@@ -6067,6 +6088,7 @@ async def _exec_boost_stories(
                 )
             else:
                 fail_count += 1
+                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
