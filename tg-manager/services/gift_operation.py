@@ -35,7 +35,7 @@ class GiftTransferResult:
     cost: int = 0
 
 
-async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
+async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
     """Execute gift transfer operation via Operation Engine.
 
     This runs as a background operation - never call directly from handlers.
@@ -46,14 +46,14 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
     plan_id = params.get("plan_id")
     if not plan_id:
         log.error("_exec_gift_transfer: no plan_id")
-        return
+        return {"status": "failed", "summary": "⚠️ gift_transfer: plan_id отсутствует в params"}
 
     log.info("_exec_gift_transfer: starting plan_id=%d op_id=%d", plan_id, op_id)
 
     plan = await GiftTransferService.get_plan(pool, plan_id)
     if not plan:
         log.error("_exec_gift_transfer: plan %d not found", plan_id)
-        return
+        return {"status": "failed", "summary": f"⚠️ gift_transfer: план #{plan_id} не найден"}
 
     await GiftTransferService.mark_plan_running(pool, plan_id)
 
