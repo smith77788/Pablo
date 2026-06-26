@@ -3180,7 +3180,7 @@ async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
 
 # In-memory rate-limit cache: (user_id, pref) -> last_sent_timestamp
 # Prevents notification spam when many events fire simultaneously.
-_notify_cooldown: dict[tuple[int, str], float] = {}
+_notify_cooldown: dict[tuple[int, str, str | None], float] = {}
 _NOTIFY_COOLDOWN_SECONDS = 60  # minimum interval between same-type notifications per user
 
 
@@ -3191,16 +3191,23 @@ async def notify_if_enabled(
     pref: str,
     text: str,
     reply_markup=None,
+    *,
+    dedup_key: str | None = None,
 ) -> None:
     """Send a notification to user only if the given preference flag is True.
 
-    Rate-limited: each (user_id, pref) pair can fire at most once per
-    _NOTIFY_COOLDOWN_SECONDS to prevent spam when many events happen at once.
+    Rate-limited: each (user_id, pref, dedup_key) triple can fire at most once
+    per _NOTIFY_COOLDOWN_SECONDS to prevent spam when many events happen at once.
+
+    dedup_key разделяет кулдаун для логически разных событий одного типа.
+    Без него уведомления вроде "new_user" со всех ботов владельца делили один
+    слот, и при потоке новых подписчиков большинство уведомлений терялось.
+    Для таких событий передавайте уникальный ключ (например, id нового юзера).
     """
     try:
         # Rate-limit check (in-memory, process-scoped)
         now = time.monotonic()
-        key = (user_id, pref)
+        key = (user_id, pref, dedup_key)
         last_sent = _notify_cooldown.get(key, 0.0)
         if now - last_sent < _NOTIFY_COOLDOWN_SECONDS:
             return
@@ -3212,8 +3219,14 @@ async def notify_if_enabled(
         await bot.send_message(
             user_id, text, parse_mode="HTML", reply_markup=reply_markup
         )
-    except Exception:
-        log_exc_swallow(log, "Сбой notify_if_enabled", user_id=user_id, pref=pref)
+    except Exception as exc:
+        # Доставка уведомлений — критичный путь: сбой логируем на WARNING, а не
+        # глушим в DEBUG. Частые причины: владелец не нажал /start у основного
+        # бота (403) или заблокировал его — иначе это полностью невидимо в проде.
+        log.warning(
+            "notify_if_enabled: не доставлено user=%s pref=%s: %s",
+            user_id, pref, str(exc)[:200],
+        )
 
 
 # ── Global Presence Factory ────────────────────────────────────────────────
