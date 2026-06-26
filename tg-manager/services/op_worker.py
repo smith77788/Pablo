@@ -2815,14 +2815,17 @@ async def _exec_global_presence_channel(
                     target["id"],
                 )
                 await _conn.execute(
-                    """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
-                       VALUES($1,$2,$3,$4,$5)
-                       ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                    """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+                       VALUES($1,$2,$3,$4,$5,$6,$7)
+                       ON CONFLICT(owner_id, channel_id) DO UPDATE
+                       SET title=$4, access_hash=$6, type=$7""",
                     owner_id,
                     acc["id"],
                     channel_id,
                     title,
                     target.get("planned_username") or None,
+                    int(channel_access_hash or 0),
+                    "channel",
                 )
 
         _infra_mem.record_account_op(
@@ -3541,17 +3544,24 @@ async def _exec_bulk_create_channels(
             and not result.get("error")
         ):
             ch_id = result["channel_id"]
-            # Save to managed_channels
+            # Save to managed_channels. Персистим access_hash, возвращённый
+            # create_channel: без него публикация (bulk_post_chans/mass_publish)
+            # вынуждена дорезолвивать peer лишними API-вызовами, а для приватного
+            # канала без username — рискует не найти entity. Импорт каналов тоже
+            # сохраняет access_hash — приводим создание к тому же контракту.
             ch_type = result.get("type") or ("group" if is_group else "channel")
+            ch_hash = int(result.get("access_hash") or 0)
             await pool.execute(
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, type)
-                   VALUES($1,$2,$3,$4,$5,$6)
-                   ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4, type=$6""",
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+                   VALUES($1,$2,$3,$4,$5,$6,$7)
+                   ON CONFLICT(owner_id, channel_id) DO UPDATE
+                   SET title=$4, access_hash=$6, type=$7""",
                 owner_id,
                 acc["id"],
                 ch_id,
                 title,
                 username or None,
+                ch_hash,
                 ch_type,
             )
             # Set username if pattern provided — 60-120s delay prevents geo-ban detection
