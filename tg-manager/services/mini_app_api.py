@@ -1569,7 +1569,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_val = not row["is_active"]
             await pool.execute(
-                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2", new_val, persona_id
+                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
             )
             return _json_resp({"is_active": new_val})
         except Exception as exc:
@@ -2110,7 +2110,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_status = "paused" if row["status"] == "active" else "active"
             await pool.execute(
-                "UPDATE stars_experiments SET status=$1 WHERE id=$2", new_status, eid
+                "UPDATE stars_experiments SET status=$1 WHERE id=$2 AND owner_id=$3", new_status, eid, uid
             )
             return _json_resp({"status": new_status})
         except Exception as exc:
@@ -2157,7 +2157,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_val = not row["enabled"]
             await pool.execute(
-                "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2", new_val, profile_id
+                "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2 AND owner_id=$3", new_val, profile_id, uid
             )
             return _json_resp({"enabled": new_val})
         except Exception as exc:
@@ -5739,7 +5739,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         new_state = not funnel["enabled"]
         try:
             await pool.execute(
-                "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, fid
+                "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, fid, uid
             )
         except Exception as exc:
             log.exception("auto_funnel_toggle update uid=%d fid=%d", uid, fid)
