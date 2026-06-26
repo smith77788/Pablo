@@ -3929,7 +3929,7 @@ function buildAccDetail(d) {
       const [bc,bl]=stb(o.status);
       return `<div class="li" style="cursor:default">
         <div class="ava ava-orange">⚙️</div>
-        <div class="li-body"><div class="li-name">${esc(o.op_type||'операция')}</div>
+        <div class="li-body"><div class="li-name">${esc(o.label||o.op_type||'операция')}</div>
           <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} · ${ago(o.created_at)}</div>
         </div>
         <span class="badge ${bc}">${bl}</span>
@@ -4021,7 +4021,7 @@ function buildChDetail(d) {
       const [bc,bl]=stb(o.status);
       return `<div class="li" style="cursor:default">
         <div class="ava ava-orange">⚙️</div>
-        <div class="li-body"><div class="li-name">${esc(o.op_type||'операция')}</div>
+        <div class="li-body"><div class="li-name">${esc(o.label||o.op_type||'операция')}</div>
           <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} · ${ago(o.created_at)}</div>
         </div>
         <span class="badge ${bc}">${bl}</span>
@@ -4232,7 +4232,7 @@ async function loadOps() {
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
-            <div class="li-name">${esc(o.op_type||'операция')}</div>
+            <div class="li-name">${esc(o.label||o.op_type||'операция')}</div>
             <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} · ${ago(o.created_at)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
