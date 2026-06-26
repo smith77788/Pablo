@@ -104,7 +104,7 @@ async def cmd_ranking(message: Message) -> None:
     from bot.callbacks import BmCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))
     await message.answer(
         "📊 <b>Трекер позиций</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"

@@ -202,8 +202,8 @@ async def post_welcome_and_pin(
         from telethon.tl.types import InputChannel
 
         text = (
-            f'📣 <b>Этот канал создан и управляется через <a href="{PROMO_URL}">BotMother</a></b>\n\n'
-            f'🔧 <b>BotMother</b> — Telegram OS: автоматизация каналов, ботов и аудитории '
+            f'📣 <b>Этот канал создан и управляется через <a href="{PROMO_URL}">Infragram</a></b>\n\n'
+            f'🔧 <b>Infragram</b> — Telegram OS: автоматизация каналов, ботов и аудитории '
             f'в единой инфраструктуре.\n\n'
             f'📈 Публикация • Рассылки • DM-кампании • Аналитика • Strike\n\n'
             f'🚀 Попробуй бесплатно: @{PROMO_USERNAME}'

@@ -348,7 +348,7 @@ async def main() -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="menu", description="🏠 BotMother OS"),
+            BotCommand(command="menu", description="🏠 Infragram OS"),
             BotCommand(command="find", description="🔍 Найти функцию"),
             BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
             BotCommand(command="accounts", description="📱 Мои аккаунты"),

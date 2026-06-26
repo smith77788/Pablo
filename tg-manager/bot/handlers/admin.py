@@ -122,7 +122,7 @@ def _admin_main_kb(new_error_reports: int = 0):
     kb.button(text="⚙️ Операции", callback_data="adm:section_ops")
     kb.button(text="🧠 AI / провайдеры", callback_data="adm:section_ai")
     kb.button(text="🛠 Система", callback_data="adm:section_system")
-    kb.button(text="📢 Канал BotMother", callback_data="adm:bm_channel")
+    kb.button(text="📢 Канал Infragram", callback_data="adm:bm_channel")
     kb.button(text=err_label, callback_data="adm:error_reports")
     kb.button(text="🚪 Выйти", callback_data="adm:exit")
     kb.adjust(2, 2, 2, 2, 2, 1)
@@ -3357,7 +3357,7 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
     kb.button(text="⚙️ Задать ID канала", callback_data="adm:bm_channel_set_id")
     if channel_id:
         kb.button(text="🚀 Промо: Возможности системы", callback_data="adm:bm_post_feature")
-        kb.button(text="📣 Промо: Реклама в BotMother", callback_data="adm:bm_post_adoffer")
+        kb.button(text="📣 Промо: Реклама в Infragram", callback_data="adm:bm_post_adoffer")
         kb.button(text="📝 Пост: Произвольный текст", callback_data="adm:bm_post_update")
     kb.button(text="◀️ Админка", callback_data="adm:main")
     kb.adjust(1)
