@@ -860,6 +860,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Presence Packs</div>
         <div class="mgmt-tile-val" id="m-pp-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openSettings()">
+        <div class="mgmt-tile-ico">⚙️</div>
+        <div class="mgmt-tile-lbl">Настройки</div>
+        <div class="mgmt-tile-val" id="m-settings-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openBilling()">
+        <div class="mgmt-tile-ico">💳</div>
+        <div class="mgmt-tile-lbl">Тариф</div>
+        <div class="mgmt-tile-val" id="m-billing-val"></div>
+      </div>
     </div>
 
     <!-- Подвал платформы -->
@@ -2546,6 +2556,94 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: SETTINGS ══════════════════════ -->
+<div class="screen" id="s-settings">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⚙️ Настройки</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="saveSettings()">Сохранить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Уведомления</div>
+    <div class="card" style="padding:14px 16px">
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:14px">🔔 Уведомления об операциях</span>
+        <input type="checkbox" id="set-notif-ops" style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:14px">💳 Уведомления об оплате</span>
+        <input type="checkbox" id="set-notif-pay" style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:14px">📊 Еженедельные отчёты</span>
+        <input type="checkbox" id="set-notif-report" style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
+        <span style="font-size:14px">⚠️ Критические ошибки</span>
+        <input type="checkbox" id="set-notif-error" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+    </div>
+
+    <div class="sec" style="margin-top:16px">Интерфейс</div>
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:14px">🌐 Язык</span>
+        <select id="set-lang" style="background:#222;border:1px solid #333;border-radius:8px;color:#fff;padding:6px 10px;font-size:13px">
+          <option value="ru">Русский</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
+        <span style="font-size:14px">🕐 UTC-время в логах</span>
+        <input type="checkbox" id="set-utc-logs" style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+    </div>
+
+    <div class="sec" style="margin-top:16px">Безопасность</div>
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:14px">🔐 Webhook Secret</span>
+        <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">Изменить</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">
+        <span style="font-size:14px">📋 User ID</span>
+        <span id="set-uid-val" style="font-family:monospace;font-size:13px;color:#aaa"></span>
+      </div>
+    </div>
+
+    <div id="set-save-msg" style="display:none;color:#22c55e;font-size:13px;text-align:center;margin:12px 0"></div>
+    <div id="set-err" style="color:#f87171;font-size:13px;text-align:center;margin:4px 0"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: BILLING ══════════════════════ -->
+<div class="screen" id="s-billing">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">💳 Тариф и оплата</div>
+  </div>
+  <div class="sub-sb">
+    <!-- Current plan card -->
+    <div class="card" id="billingPlanCard" style="background:linear-gradient(135deg,rgba(139,92,246,.2),rgba(59,130,246,.15));border:1px solid rgba(139,92,246,.3);padding:20px 16px;margin-bottom:2px">
+      <div style="font-size:12px;color:#aaa;margin-bottom:4px">Текущий тариф</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:28px;font-weight:700" id="billingPlanName">—</div>
+        <div id="billingPlanBadge" style="background:rgba(139,92,246,.3);border:1px solid rgba(139,92,246,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600"></div>
+      </div>
+      <div style="font-size:13px;color:#aaa;margin-top:6px" id="billingExpires"></div>
+    </div>
+
+    <div class="sec" style="margin-top:16px">Возможности тарифа</div>
+    <div class="lst" id="billingFeaturesList"></div>
+
+    <div class="sec" style="margin-top:16px">Выбрать тариф</div>
+    <div id="billingPlansList"><div class="spin-wrap"><div class="spin"></div></div></div>
+
+    <div class="sec" style="margin-top:16px">История платежей</div>
+    <div class="lst" id="billingHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
 <div class="screen" id="s-errreport">
   <div class="hdr">
@@ -3064,6 +3162,9 @@ let REF_CODE = null;
     });
     if (!r.ok) throw new Error('Auth '+r.status);
     TK = (await r.json()).token;
+    fetch('/api/miniapp/config').then(r=>r.json()).then(cfg=>{
+      if(cfg.bot_username) window._botUsername = cfg.bot_username;
+    }).catch(()=>{});
     loadHome();
     openSSE();
     loadSub();
@@ -8784,6 +8885,148 @@ function showModal(id) {
 function closeModal(id) {
   const el=document.getElementById(id);
   if(el) el.classList.remove('show');
+}
+
+// ── Settings ───────────────────────────────────────────
+const _SETTINGS_KEY = 'infra_settings';
+function _loadLocalSettings() {
+  try { return JSON.parse(localStorage.getItem(_SETTINGS_KEY)||'{}'); } catch { return {}; }
+}
+function _saveLocalSettings(s) {
+  localStorage.setItem(_SETTINGS_KEY, JSON.stringify(s));
+}
+async function openSettings() {
+  push('s-settings');
+  const uid = window._tgUid || (tg.initDataUnsafe?.user?.id);
+  if (uid) txt('set-uid-val', String(uid));
+  const s = _loadLocalSettings();
+  const setChk = (id, val, def=false) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = (val !== undefined ? val : def);
+  };
+  setChk('set-notif-ops', s.notif_ops, true);
+  setChk('set-notif-pay', s.notif_pay, true);
+  setChk('set-notif-report', s.notif_report, false);
+  setChk('set-notif-error', s.notif_error, true);
+  setChk('set-utc-logs', s.utc_logs, false);
+  const langEl = document.getElementById('set-lang');
+  if (langEl) langEl.value = s.lang || 'ru';
+  txt('set-save-msg','');
+  txt('set-err','');
+  document.getElementById('m-settings-val').textContent = '⚙️';
+  try {
+    await api('/api/miniapp/settings');
+  } catch(e) {/* ok, settings from local */}
+}
+async function saveSettings() {
+  const s = {
+    notif_ops: document.getElementById('set-notif-ops')?.checked ?? true,
+    notif_pay: document.getElementById('set-notif-pay')?.checked ?? true,
+    notif_report: document.getElementById('set-notif-report')?.checked ?? false,
+    notif_error: document.getElementById('set-notif-error')?.checked ?? true,
+    utc_logs: document.getElementById('set-utc-logs')?.checked ?? false,
+    lang: document.getElementById('set-lang')?.value || 'ru',
+  };
+  _saveLocalSettings(s);
+  try {
+    await api('/api/miniapp/settings', {method:'POST', body: JSON.stringify(s)});
+  } catch(e) {/* saved locally, backend optional */}
+  const msgEl = document.getElementById('set-save-msg');
+  if (msgEl) { msgEl.style.display='block'; msgEl.textContent='✅ Настройки сохранены'; setTimeout(()=>msgEl.style.display='none', 2500); }
+}
+function openWebhookSecretModal() {
+  toast('ℹ️ Webhook Secret настраивается в переменных окружения Railway');
+}
+
+// ── Billing ────────────────────────────────────────────
+const _PLAN_FEATURES = {
+  free: ['✅ 1 управляемый бот','✅ 50 аккаунтов','✅ Базовые рассылки','❌ Авто-воронки','❌ Intent Engine','❌ STRIKE','❌ Продвижение ботов'],
+  paid: ['✅ Неограниченно ботов','✅ 500 аккаунтов','✅ Все рассылки','✅ Авто-воронки','✅ Intent Engine','✅ STRIKE','✅ Продвижение ботов','✅ Аналитика позиций','✅ Приоритетная поддержка'],
+};
+const _PLAN_PRICES = [
+  {key:'paid_1m', label:'1 месяц', price:'$29', months:1, popular:false},
+  {key:'paid_3m', label:'3 месяца', price:'$75', months:3, popular:true, save:'14%'},
+  {key:'paid_6m', label:'6 месяцев', price:'$139', months:6, popular:false, save:'20%'},
+  {key:'paid_12m', label:'12 месяцев', price:'$249', months:12, popular:false, save:'28%'},
+];
+async function openBilling() {
+  push('s-billing');
+  txt('billingHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const sub = await api('/api/miniapp/subscription');
+    const plan = sub.plan || 'free';
+    const nameMap = {free:'Free', paid:'Paid'};
+    txt('billingPlanName', nameMap[plan] || plan.toUpperCase());
+    const badge = document.getElementById('billingPlanBadge');
+    if (badge) {
+      if (plan==='paid') {
+        badge.textContent='PRO';
+        badge.style.cssText='background:rgba(139,92,246,.3);border:1px solid rgba(139,92,246,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
+      } else {
+        badge.textContent='FREE';
+        badge.style.cssText='background:rgba(107,114,128,.3);border:1px solid rgba(107,114,128,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
+      }
+    }
+    const expEl = document.getElementById('billingExpires');
+    if (expEl) {
+      if (sub.expires_at && sub.is_active) {
+        const d = new Date(sub.expires_at);
+        expEl.textContent = `Действует до: ${d.toLocaleDateString('ru-RU')}`;
+        expEl.style.color = '#22c55e';
+      } else if (plan==='paid') {
+        expEl.textContent = 'Истёк';
+        expEl.style.color = '#f87171';
+      } else {
+        expEl.textContent = 'Бессрочно';
+        expEl.style.color = '#aaa';
+      }
+    }
+    document.getElementById('m-billing-val').textContent = (nameMap[plan]||plan).toUpperCase();
+    const feats = _PLAN_FEATURES[plan] || _PLAN_FEATURES.free;
+    txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:#aaa':'color:#e5e7eb'}">${f}</div>`).join('')}</div>`);
+    txt('billingPlansList', _PLAN_PRICES.map(p=>`
+      <div class="card" style="padding:14px 16px;margin-bottom:8px;cursor:pointer;${p.popular?'border:1px solid rgba(139,92,246,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(139,92,246,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
+            ${p.save?`<div style="font-size:12px;color:#22c55e">Экономия ${p.save}</div>`:''}
+          </div>
+          <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.price}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('billingPlanName','Free');
+    txt('billingExpires','');
+  }
+  try {
+    const hist = await api('/api/miniapp/payments');
+    if (!hist || !hist.length) {
+      txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
+    } else {
+      txt('billingHistory', hist.map(p=>`
+        <div class="row">
+          <div class="row-ico" style="background:rgba(34,197,94,.12)">💳</div>
+          <div class="row-body">
+            <div class="row-name">${esc(p.plan||'—')} · ${p.period_months||1} мес.</div>
+            <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
+            <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
+          </div>
+          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${p.status==='confirmed'?'✓ Оплачен':'—'}</span></div>
+        </div>
+      `).join(''));
+    }
+  } catch(e) {
+    txt('billingHistory', empty('⚠️','Ошибка загрузки истории',e.message));
+  }
+}
+function initPayment(planKey, label, price) {
+  if (tg && tg.openTelegramLink) {
+    const botUsername = window._botUsername || 'infragram_bot';
+    tg.openTelegramLink(`https://t.me/${botUsername}?start=pay_${planKey}`);
+  } else {
+    toast(`Для оплаты перейдите в бот и выберите тариф "${label}" (${price})`);
+  }
 }
 </script>
 </body>

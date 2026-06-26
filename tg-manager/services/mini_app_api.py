@@ -152,6 +152,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 status TEXT DEFAULT 'active',
                 started_at TIMESTAMPTZ DEFAULT now()
             )""",
+            # platform_users — settings_json column
+            "ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS settings_json TEXT",
         ]
         for stmt in stmts:
             try:
@@ -4469,6 +4471,59 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pass
         return _json_resp({"plan": "free", "expires_at": None, "is_active": False})
 
+    async def user_settings_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            row = await pool.fetchrow(
+                "SELECT settings_json FROM platform_users WHERE user_id=$1", uid)
+            if row and row["settings_json"]:
+                import json as _json
+                return _json_resp(_json.loads(row["settings_json"]))
+        except Exception:
+            pass
+        return _json_resp({
+            "notif_ops": True,
+            "notif_pay": True,
+            "notif_report": False,
+            "notif_error": True,
+            "utc_logs": False,
+            "lang": "ru",
+        })
+
+    async def user_settings_save(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            import json as _json
+            settings_json = _json.dumps(data)
+            await pool.execute(
+                """UPDATE platform_users SET settings_json=$1 WHERE user_id=$2""",
+                settings_json, uid)
+        except Exception:
+            pass
+        return _json_resp({"ok": True})
+
+    async def payments_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT plan, period_months, amount_usd, currency, status, created_at
+                   FROM payments
+                   WHERE user_id=$1
+                   ORDER BY created_at DESC
+                   LIMIT 20""",
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception:
+            return _json_resp([])
+
     async def referral(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -5801,6 +5856,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/analytics", analytics)
     # Subscription
     app.router.add_get("/api/miniapp/subscription", subscription)
+    # Settings
+    app.router.add_get("/api/miniapp/settings", user_settings_get)
+    app.router.add_post("/api/miniapp/settings", user_settings_save)
+    # Payments history
+    app.router.add_get("/api/miniapp/payments", payments_history)
     app.router.add_get("/api/miniapp/referral", referral)
     # Deeplinks
     app.router.add_get("/api/miniapp/bot/{bot_id}/deeplinks", bot_deeplinks)
@@ -6024,6 +6084,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         checks["status"] = "ok" if checks.get("db") == "ok" else "degraded"
         return _json_resp(checks)
     app.router.add_get("/api/miniapp/health", api_health)
+
+    async def miniapp_config(request: web.Request) -> web.Response:
+        """Public config endpoint — no auth required. Returns bot info for frontend."""
+        bot_username = os.getenv("BOT_USERNAME", "")
+        mini_app_url = os.getenv("MINI_APP_URL", "")
+        return _json_resp({
+            "bot_username": bot_username,
+            "mini_app_url": mini_app_url,
+            "platform": "Infragram OS",
+            "version": "2.0",
+        })
+
+    app.router.add_get("/api/miniapp/config", miniapp_config)
 
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
     _index_path = os.path.join(_static_dir, "index.html")
