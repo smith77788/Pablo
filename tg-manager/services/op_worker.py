@@ -5626,6 +5626,7 @@ async def _exec_check_accounts_health(
 
     status_counts: dict[str, int] = {}
     deactivated = 0
+    reactivated = 0
     errors = 0
 
     for idx, acc in enumerate(accounts):
@@ -5658,6 +5659,24 @@ async def _exec_check_accounts_health(
                 deactivated += 1
             except Exception:
                 pass
+        elif status == "active":
+            # Подтверждённо рабочий аккаунт (get_me прошёл, ограничений нет):
+            # вернуть в строй, если был ошибочно деактивирован разовой auth-ошибкой
+            # или сменой прокси. Без реактивации деактивированный аккаунт навсегда
+            # оставался "Выкл", даже когда снова рабочий — пользователь видел
+            # меньше аккаунтов, чем реально доступно.
+            try:
+                _res = await pool.execute(
+                    "UPDATE tg_accounts SET acc_status='active', status_reason=NULL, "
+                    "is_active=TRUE WHERE id=$1 AND is_active=FALSE",
+                    acc["id"],
+                )
+                if str(_res).endswith(" 1"):
+                    reactivated += 1
+                else:
+                    await _db.update_acc_status(pool, acc["id"], status, result.get("reason", ""))
+            except Exception:
+                pass
         elif should_persist_account_status(
             status,
             auth_error=bool(result.get("auth_error", False)),
@@ -5681,7 +5700,8 @@ async def _exec_check_accounts_health(
     }
     parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
-    summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note
+    react_note = f"\n🔄 Восстановлено: {reactivated}" if reactivated else ""
+    summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note + react_note
 
     # Persist health snapshots immediately so health_dashboard trends show current data
     # without waiting for the hourly run_health_check_loop cycle.
@@ -5696,6 +5716,7 @@ async def _exec_check_accounts_health(
         "status": "done",
         "checked": n,
         "deactivated": deactivated,
+        "reactivated": reactivated,
         "status_counts": status_counts,
         "summary": summary,
     }
