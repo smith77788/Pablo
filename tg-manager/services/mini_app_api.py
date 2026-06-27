@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
 import os
 from typing import Any
