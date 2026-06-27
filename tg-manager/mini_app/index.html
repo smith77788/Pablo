@@ -8209,10 +8209,19 @@ async function openGpDetail(planId, planName) {
 
 // ── Mass Ops ────────────────────────────────────────────
 const MASS_OP_LABELS = {
-  mass_post:'📨 Масс. публикация', mass_join:'➕ Масс. подписка',
-  mass_leave:'➖ Масс. выход', mass_invite:'📨 Масс. инвайт',
-  mass_mute:'🔕 Масс. мьют', mass_unmute:'🔔 Масс. размьют',
-  mass_delete:'🗑 Масс. удаление', mass_forward:'⏩ Масс. форвард'
+  // реальные op_type из воркера
+  mass_publish:'📨 Масс. публикация', bulk_post_to_channel:'📤 Пост в канал',
+  bulk_post_chans:'📤 Пост в каналы', bulk_join:'➕ Масс. подписка',
+  bulk_leave:'➖ Масс. выход', mass_invite:'👥 Масс. инвайт',
+  mass_report:'🚩 Масс. жалоба', bulk_set_profile:'🎨 Профили', profile_setter:'🎨 Профили',
+  bulk_update_profile:'🎨 Обновление профилей', bulk_edit_channels:'✏️ Ред. каналов',
+  bulk_chan_exec:'✏️ Username/About', bulk_create_channels:'📡 Создание каналов',
+  bulk_dm_adhoc:'📨 Рассылка ЛС', boost_views:'👁 Просмотры', boost_reactions:'❤ Реакции',
+  boost_stories:'📖 Сторис', niche_growth_post:'🌿 Growth Agent',
+  check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
+  channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
+  promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
+  content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
 async function openMassOps() {
   push('s-massops');
