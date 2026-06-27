@@ -41,7 +41,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:rgba(24,24,27,.94);backdrop-filter:blur(20px);border-top:1px solid var(--sep);display:flex;z-index:100}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;user-select:none}
 .tab:active{opacity:.6}
-.tab-ico{font-size:22px;line-height:1;position:relative}
+.tab-ico{font-size:22px;line-height:1;position:relative;color:var(--hint);transition:color .15s}
+.tab-ico svg{width:24px;height:24px;display:block}
+.tab.on .tab-ico{color:var(--btn)}
 .tab-lbl{font-size:10px;color:var(--hint);font-weight:500;transition:color .15s}
 .tab.on .tab-lbl{color:var(--btn)}
 .tab.on .tab-ico::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--btn)}
@@ -2772,11 +2774,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
 <div id="tabbar">
-  <div class="tab on" id="t-home" onclick="goTab('home')"><span class="tab-ico">🏠</span><span class="tab-lbl">Главная</span></div>
-  <div class="tab" id="t-bots" onclick="goTab('bots')"><span class="tab-ico">🤖</span><span class="tab-lbl">Боты</span></div>
-  <div class="tab" id="t-accounts" onclick="goTab('accounts')"><span class="tab-ico">📱</span><span class="tab-lbl">Аккаунты</span></div>
-  <div class="tab" id="t-broadcasts" onclick="goTab('broadcasts')"><span class="tab-ico">📨</span><span class="tab-lbl">Рассылки</span></div>
-  <div class="tab" id="t-more" onclick="goTab('more')"><span class="tab-ico">⚙️</span><span class="tab-lbl">Ещё</span></div>
+  <div class="tab on" id="t-home" onclick="goTab('home')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5Z"/></svg></span><span class="tab-lbl">Главная</span></div>
+  <div class="tab" id="t-bots" onclick="goTab('bots')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="2.6" r="1.3"/><circle cx="9" cy="14" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="14" r="1.2" fill="currentColor" stroke="none"/></svg></span><span class="tab-lbl">Боты</span></div>
+  <div class="tab" id="t-accounts" onclick="goTab('accounts')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/></svg></span><span class="tab-lbl">Аккаунты</span></div>
+  <div class="tab" id="t-broadcasts" onclick="goTab('broadcasts')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></span><span class="tab-lbl">Рассылки</span></div>
+  <div class="tab" id="t-more" onclick="goTab('more')"><span class="tab-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span class="tab-lbl">Ещё</span></div>
 </div>
 
 <div id="toast"></div>
