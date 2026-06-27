@@ -226,10 +226,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                      "campaigns_active": 0, "funnels_active": 0,
                      "accounts": 0, "ops_running": 0}
         try:
+            # План — из того же источника, что и у бота (subscriptions/get_plan),
+            # иначе дашборд показывал «free» при оплаченном тарифе.
+            try:
+                from bot.utils.subscription import get_plan as _gp
+                stats["plan"] = await _gp(pool, uid)
+            except Exception:
+                stats["plan"] = None
             plan_row = await pool.fetchrow(
                 "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid)
-            stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
-            stats["plan_expires_at"] = str(plan_row["plan_expires_at"]) if plan_row and plan_row["plan_expires_at"] else None
+            if not stats.get("plan"):
+                stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
+            try:
+                from bot.utils.subscription import coerce_plan as _cp
+                stats["plan"] = _cp(stats["plan"])
+            except Exception:
+                pass
+            # Срок — из активной подписки, иначе из platform_users.
+            _exp_row = await pool.fetchrow(
+                "SELECT expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
+                "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid)
+            if _exp_row:
+                stats["plan_expires_at"] = str(_exp_row["expires_at"])
+            else:
+                stats["plan_expires_at"] = str(plan_row["plan_expires_at"]) if plan_row and plan_row["plan_expires_at"] else None
         except Exception:
             stats["plan"] = "free"
             stats["plan_expires_at"] = None
@@ -4630,35 +4650,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        # Источник истины — тот же, что у бота: активная не истёкшая подписка в
+        # subscriptions (get_plan). Раньше Mini App читал platform_users.current_plan,
+        # который часть платёжных путей не обновляет → приложение показывало «free»
+        # при реально оплаченном тарифе.
+        plan = None
         try:
-            row = await pool.fetchrow(
-                """SELECT p.current_plan, p.plan_expires_at,
-                          s.is_active, s.expires_at AS sub_expires
-                   FROM platform_users p
-                   LEFT JOIN subscriptions s ON s.user_id=p.user_id AND s.is_active=true
-                   WHERE p.user_id=$1
-                   ORDER BY s.expires_at DESC NULLS LAST LIMIT 1""", uid)
-            if row:
-                plan = row["current_plan"] or "free"
-                is_active = bool(row["is_active"])
-                # use whichever expiry is later
-                plan_exp = row["plan_expires_at"]
-                sub_exp = row["sub_expires"]
-                expires = None
-                if plan_exp and sub_exp:
-                    expires = str(max(plan_exp, sub_exp))
-                elif sub_exp:
-                    expires = str(sub_exp)
-                elif plan_exp:
-                    expires = str(plan_exp)
-                return _json_resp({
-                    "plan": plan,
-                    "expires_at": expires,
-                    "is_active": is_active,
-                })
+            from bot.utils.subscription import get_plan as _gp
+            plan = await _gp(pool, uid)
+        except Exception:
+            plan = None
+        expires = None
+        is_active = False
+        try:
+            srow = await pool.fetchrow(
+                "SELECT plan, expires_at FROM subscriptions "
+                "WHERE user_id=$1 AND is_active=true AND expires_at > now() "
+                "ORDER BY expires_at DESC LIMIT 1", uid)
+            if srow:
+                is_active = True
+                expires = str(srow["expires_at"])
+                if not plan or plan == "free":
+                    plan = srow["plan"] or plan
         except Exception:
             pass
-        return _json_resp({"plan": "free", "expires_at": None, "is_active": False})
+        # Фолбэк на platform_users только если источник истины недоступен.
+        if not plan:
+            try:
+                prow = await pool.fetchrow(
+                    "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid)
+                if prow:
+                    plan = prow["current_plan"] or "free"
+                    if not expires and prow["plan_expires_at"]:
+                        expires = str(prow["plan_expires_at"])
+            except Exception:
+                pass
+        # Нормализуем к бинарной модели (starter/pro/enterprise → paid),
+        # чтобы клиент корректно показал платный тариф.
+        try:
+            from bot.utils.subscription import coerce_plan as _cp
+            plan = _cp(plan or "free")
+        except Exception:
+            plan = plan or "free"
+        return _json_resp({
+            "plan": plan,
+            "expires_at": expires,
+            "is_active": is_active or plan != "free",
+        })
 
     async def user_settings_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
