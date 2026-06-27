@@ -348,6 +348,41 @@ def start(
     task.add_done_callback(lambda t: _on_broadcast_done(broadcast_id, t))
 
 
+async def resume_interrupted(
+    pool: asyncpg.Pool, session: aiohttp.ClientSession | None = None
+) -> None:
+    """Перезапустить рассылки, оборвавшиеся на рестарте процесса.
+
+    После рестарта in-memory _running пуст, а в БД остаются рассылки в статусе
+    running/pending, чьи asyncio-задачи умерли. broadcaster.run докатывает их,
+    пропуская уже доставленных через delivery log (без дублей). Сегментные
+    рассылки используют сохранённый target_user_ids, полные — всю аудиторию.
+    """
+    try:
+        rows = await db.get_interrupted_broadcasts(pool)
+    except Exception as exc:
+        logger.warning("resume_interrupted: не удалось загрузить рассылки: %s", exc)
+        return
+    if not rows:
+        return
+    logger.info("resume_interrupted: перезапуск %d прерванных рассылок", len(rows))
+    for i, r in enumerate(rows):
+        try:
+            start(
+                pool,
+                session,
+                r["id"],
+                r["token"],
+                r["bot_id"],
+                r["message_text"] or "",
+                r.get("photo_file_id"),
+                r.get("target_user_ids"),  # список (сегмент) или None (полная аудитория)
+                start_delay=i * 2.0,  # разносим старты, чтобы не бить по Telegram разом
+            )
+        except Exception as exc:
+            logger.warning("resume_interrupted: рассылка %s не перезапущена: %s", r.get("id"), exc)
+
+
 def cancel(broadcast_id: int) -> bool:
     task = _running.get(broadcast_id)
     if task and not task.done():

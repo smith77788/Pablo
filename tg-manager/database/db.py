@@ -371,15 +371,22 @@ async def create_broadcast(
     total: int,
     created_by: int,
     photo_file_id: str | None = None,
+    target_user_ids: list[int] | None = None,
 ) -> int:
+    # target_user_ids сохраняем только для сегментных рассылок (подмножество
+    # аудитории); NULL = полная аудитория бота. Используется resume после
+    # рестарта, чтобы сегментная рассылка не ушла всей аудитории.
+    import json as _json
+    target_json = _json.dumps(target_user_ids) if target_user_ids else None
     return await pool.fetchval(
-        """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id)
-           VALUES ($1, $2, $3, 'pending', $4, $5) RETURNING id""",
+        """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids)
+           VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb) RETURNING id""",
         bot_id,
         message_text,
         total,
         created_by,
         photo_file_id,
+        target_json,
     )
 
 
@@ -406,6 +413,39 @@ async def get_broadcast(
             "SELECT * FROM broadcasts WHERE id=$1 AND bot_id=$2", broadcast_id, bot_id
         )
     return await pool.fetchrow("SELECT * FROM broadcasts WHERE id=$1", broadcast_id)
+
+
+async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
+    """Рассылки, оборвавшиеся на рестарте процесса (status running/pending).
+
+    Возвращает dict с расшифрованным токеном бота и распарсенным target_user_ids
+    (список или None). Используется resume при старте — broadcaster.run докатывает
+    рассылку, пропуская уже доставленных через delivery log.
+    """
+    import json as _json
+    rows = await pool.fetch(
+        """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
+                  m.token
+           FROM broadcasts b
+           JOIN managed_bots m ON m.bot_id = b.bot_id
+           WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
+             AND m.token IS NOT NULL
+           ORDER BY b.id"""
+    )
+    from services.token_vault import decrypt_token as _dt
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        if d.get("token"):
+            d["token"] = _dt(d["token"])
+        tgt = d.get("target_user_ids")
+        if isinstance(tgt, str):
+            try:
+                d["target_user_ids"] = _json.loads(tgt)
+            except Exception:
+                d["target_user_ids"] = None
+        out.append(d)
+    return out
 
 
 async def log_broadcast_delivery(
