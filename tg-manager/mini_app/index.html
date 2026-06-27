@@ -547,6 +547,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="asb-item tap" onclick="goRef()">🎁 <span id="refVal">Реферал</span> ›</div>
     </div>
 
+    <!-- Поиск по функциям -->
+    <div style="padding:6px 0 2px">
+      <input type="text" id="moreSearch" oninput="filterMore(this.value)" placeholder="🔍 Поиск функции…"
+             style="width:100%;padding:11px 12px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div id="moreNoResult" style="display:none;text-align:center;color:var(--hint);padding:20px;font-size:13px">Ничего не найдено</div>
+
     <!-- Основное -->
     <div class="sec">Основное</div>
     <div class="mgmt-grid">
@@ -3314,6 +3321,32 @@ function openSSE() {
     _sseRetry = Math.min(_sseRetry + 1, 5);
     setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
   };
+}
+
+// ── Поиск по функциям на экране «Ещё» ───────────────────
+function filterMore(q) {
+  const more = document.getElementById('s-more');
+  if (!more) return;
+  const query = (q||'').trim().toLowerCase();
+  let anyVisible = false;
+  // Показ/скрытие тайлов по подписи
+  more.querySelectorAll('.mgmt-tile').forEach(tile => {
+    const lbl = (tile.querySelector('.mgmt-tile-lbl')?.textContent || '').toLowerCase();
+    const match = !query || lbl.includes(query);
+    tile.style.display = match ? '' : 'none';
+    if (match) anyVisible = true;
+  });
+  // Скрыть пустые секции (заголовок .sec + следующий .mgmt-grid)
+  more.querySelectorAll('.mgmt-grid').forEach(grid => {
+    const hasVisible = Array.from(grid.querySelectorAll('.mgmt-tile')).some(t => t.style.display !== 'none');
+    grid.style.display = hasVisible ? '' : 'none';
+    // Заголовок секции — ближайший предыдущий .sec
+    let sec = grid.previousElementSibling;
+    while (sec && !sec.classList.contains('sec')) sec = sec.previousElementSibling;
+    if (sec) sec.style.display = (!query || hasVisible) ? '' : 'none';
+  });
+  const nr = document.getElementById('moreNoResult');
+  if (nr) nr.style.display = (query && !anyVisible) ? 'block' : 'none';
 }
 
 // ── Navigation ─────────────────────────────────────────
