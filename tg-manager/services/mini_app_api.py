@@ -726,7 +726,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if len(text) > 4096:
             return _err("Message too long (max 4096 chars)")
         ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
             ch_id, uid)
         if not ch:
             return _err("Channel not found", 404)
@@ -734,10 +734,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("No linked account for this channel", 400)
         try:
             from services.operation_bus import submit
+            # Контракт _exec_bulk_post_to_channel: account_ids[], channel_ref (числовой
+            # channel_id), text_to_post, bulk_access_hash. Раньше слали channel_id/
+            # account_id/text — воркер их не читал и пост в канал ничего не делал.
             op_id = await submit(pool, uid, "bulk_post_to_channel", {
-                "channel_id": ch_id,
-                "account_id": ch["acc_id"],
-                "text": text,
+                "account_ids": [int(ch["acc_id"])],
+                "channel_ref": int(ch_id),
+                "text_to_post": text,
+                "bulk_access_hash": int(ch.get("access_hash") or 0),
             }, total_items=1)
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception:
