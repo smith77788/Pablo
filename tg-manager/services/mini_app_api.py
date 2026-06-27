@@ -1367,6 +1367,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
+    async def accounts_check(request: web.Request) -> web.Response:
+        """Массовая проверка всех аккаунтов владельца (с реактивацией рабочих)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1", uid)
+        ids = [int(r["id"]) for r in (rows or [])]
+        if not ids:
+            return _err("Нет аккаунтов для проверки", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'check_accounts_health','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"account_ids": ids, "check_spambot": True}),
+                len(ids), f"Проверка {len(ids)} аккаунтов",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
+        except Exception as exc:
+            log.exception("accounts_check uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def diag(request: web.Request) -> web.Response:
         """Сквозная диагностика исполнения: креды/транспорт, аккаунты, очередь,
         живой тест подключения одного аккаунта (тот же путь, что у операций)."""
@@ -6294,6 +6316,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
+    app.router.add_post("/api/miniapp/accounts/check", accounts_check)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)

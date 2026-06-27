@@ -419,6 +419,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
   </div>
   <div class="sb" id="botsBody">
+    <!-- Массовые действия по ботам -->
+    <div style="display:flex;gap:8px;padding:0 0 10px">
+      <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1;font-size:13px;padding:10px 6px">📢 Рассылка</button>
+      <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1;font-size:13px;padding:10px 6px">📣 Self Promo</button>
+      <button class="btn btn-s" onclick="openBotFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
+    </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -480,6 +486,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="acc-kpi-num" id="kpi-ban" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Заблокированы</div>
       </div>
     </div>
+    <!-- Массовые действия по аккаунтам -->
+    <div style="display:flex;gap:8px;padding:4px 0 8px">
+      <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
+      <button class="btn btn-s" onclick="openMassOps()" style="flex:1;font-size:13px;padding:10px 6px">⚡ Массовые</button>
+      <button class="btn btn-s" onclick="openWarmup()" style="flex:1;font-size:13px;padding:10px 6px">🌱 Прогрев</button>
+    </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:12px">
       <div class="sec">📡 Каналы и чаты</div>
@@ -506,6 +518,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><div class="hdr-user" id="ch-cnt"></div></div>
   </div>
   <div class="sub-sb">
+    <!-- Массовые действия по каналам -->
+    <div style="display:flex;gap:8px;padding:4px 0 8px">
+      <button class="btn btn-p" onclick="openMassPub()" style="flex:1;font-size:13px;padding:10px 6px">📤 Массовый пост</button>
+      <button class="btn btn-s" onclick="openQuickPost()" style="flex:1;font-size:13px;padding:10px 6px">✍️ Quick Post</button>
+      <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
+    </div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -3876,6 +3894,13 @@ async function toggleFunnel(id, el) {
 }
 
 // ── Accounts ───────────────────────────────────────────
+async function massCheckAccounts() {
+  if (!confirm('Проверить все аккаунты? Рабочие, ошибочно отключённые, будут восстановлены.')) return;
+  try {
+    const r = await api('/api/miniapp/accounts/check', {method:'POST'});
+    toast(`🔍 Проверка ${r.count} аккаунтов запущена (#${r.op_id}). Результат придёт в бот.`);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
   api('/api/miniapp/accounts').then(ad => {
