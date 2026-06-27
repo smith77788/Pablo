@@ -368,13 +368,30 @@ async def run_campaign(
         user_id: int = target["user_id"]
         username: str | None = target.get("username")
 
-        # Проверить не отменена ли кампания
+        # Проверить не отменена ли кампания (из UI кампаний → status='paused')
         current = await pool.fetchrow(
             "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id
         )
         if current and current["status"] == "paused":
             log.info("dm_engine: campaign %d paused", campaign_id)
             return
+
+        # Реагировать на отмену операции из очереди (operation_queue.status='cancelled').
+        # Без этого «Отмена» во вью операций не останавливала рассылку — DM продолжали
+        # уходить до конца, хотя пользователь её отменил.
+        if op_id:
+            op_row = await pool.fetchrow(
+                "SELECT status FROM operation_queue WHERE id=$1", op_id
+            )
+            if op_row and op_row["status"] == "cancelled":
+                log.info(
+                    "dm_engine: operation %s отменена → останавливаю кампанию %d",
+                    op_id, campaign_id,
+                )
+                await pool.execute(
+                    "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+                )
+                return
 
         acc = dict(acc_cycle[acc_idx % len(acc_cycle)])
         acc_idx += 1
