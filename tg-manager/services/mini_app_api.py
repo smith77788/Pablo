@@ -1441,6 +1441,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("boost_submit uid=%d type=%s", uid, btype)
             return _err(str(exc), 500)
 
+    async def growth_submit(request: web.Request) -> web.Response:
+        """Growth Agent: постинг промо-текста в нишевых группах.
+        body: {niche, promo_text}
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        niche = (body.get("niche") or "").strip()
+        promo_text = (body.get("promo_text") or "").strip()
+        if not niche:
+            return _err("Укажите нишу", 400)
+        if not promo_text:
+            return _err("Укажите рекламный текст", 400)
+        # Нужен хотя бы один активный аккаунт с сессией.
+        has_acc = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            uid)
+        if not has_acc:
+            return _err("Нет активных аккаунтов", 400)
+        try:
+            label = f"Growth Agent: {niche[:40]}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'niche_growth_post','pending',$2,5,$3) RETURNING id",
+                uid, _json.dumps({"niche": niche, "promo_text": promo_text}), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("growth_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -6156,6 +6191,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
     app.router.add_post("/api/miniapp/boost", boost_submit)
+    app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)

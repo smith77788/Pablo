@@ -620,6 +620,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Накрутка</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openGrowth()">
+        <div class="mgmt-tile-ico">🌿</div>
+        <div class="mgmt-tile-lbl">Growth Agent</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Управление аккаунтами -->
@@ -1885,6 +1890,26 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:8px">История накруток</div>
     <div class="lst" id="boostHistory"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: GROWTH AGENT ══════════════════════ -->
+<div class="screen" id="s-growth">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌿 Growth Agent</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Продвижение в нише</div>
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Агент найдёт группы по нише, вступит и опубликует ваш текст (до 5 групп за запуск, с паузами для безопасности).</div>
+    <div style="padding:8px 0">
+      <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
+      <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+      <div class="field-err" id="growthErr"></div>
+      <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
+    </div>
+    <div class="sec" style="margin-top:8px">История</div>
+    <div class="lst" id="growthHistory"></div>
   </div>
 </div>
 
@@ -5789,6 +5814,42 @@ async function submitBoost() {
     openBoost();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Growth Agent ─────────────────────────────────────────
+async function openGrowth() {
+  push('s-growth');
+  const e=document.getElementById('growthErr'); if(e) e.textContent='';
+  txt('growthHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/operations');
+    const ops = (d.operations||[]).filter(o=>o.op_type==='niche_growth_post').slice(0,10);
+    txt('growthHistory', ops.length ? ops.map(o=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">🌿</div>
+        <div class="row-body">
+          <div class="row-name">${esc(o.label||'Growth Agent')}</div>
+          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+        </div>
+      </div>
+    `).join('') : empty('📋','История пуста','Запустите первое продвижение'));
+  } catch(e) {
+    txt('growthHistory', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function submitGrowth() {
+  const errEl=document.getElementById('growthErr'); errEl.textContent='';
+  const niche=document.getElementById('growthNiche').value.trim();
+  const promo_text=document.getElementById('growthPromo').value.trim();
+  if(!niche){ errEl.textContent='Укажите нишу'; return; }
+  if(!promo_text){ errEl.textContent='Укажите рекламный текст'; return; }
+  const btn=document.getElementById('growthBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify({niche,promo_text})});
+    toast(`🌿 Запущено (#${r.op_id})`);
+    openGrowth();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🌿 Запустить'; }
 }
 
 // ── Quick Post ───────────────────────────────────────────
