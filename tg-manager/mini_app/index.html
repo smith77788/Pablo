@@ -552,6 +552,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <input type="text" id="moreSearch" oninput="filterMore(this.value)" placeholder="🔍 Поиск функции…"
              style="width:100%;padding:11px 12px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
     </div>
+    <!-- Категории действий -->
+    <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;-ms-overflow-style:none;scrollbar-width:none"></div>
     <div id="moreNoResult" style="display:none;text-align:center;color:var(--hint);padding:20px;font-size:13px">Ничего не найдено</div>
 
     <!-- Основное -->
@@ -3323,11 +3325,48 @@ function openSSE() {
   };
 }
 
+// ── Категории действий на экране «Ещё» ──────────────────
+function buildMoreCategories() {
+  const more = document.getElementById('s-more');
+  const bar = document.getElementById('moreCatBar');
+  if (!more || !bar || bar.dataset.built) return;
+  const secs = Array.from(more.querySelectorAll('.sec'));
+  let html = '<span class="chip on" onclick="moreCategory(\'all\',this)">📂 Все</span>';
+  secs.forEach((s,i)=>{
+    s.dataset.catIdx = String(i);
+    html += `<span class="chip" onclick="moreCategory('${i}',this)">${esc(s.textContent)}</span>`;
+  });
+  bar.innerHTML = html;
+  bar.dataset.built = '1';
+}
+function moreCategory(cat, el) {
+  const more = document.getElementById('s-more');
+  if (!more) return;
+  document.querySelectorAll('#moreCatBar .chip').forEach(c=>c.classList.remove('on'));
+  if (el) el.classList.add('on');
+  const search = document.getElementById('moreSearch'); if (search) search.value='';
+  const nr = document.getElementById('moreNoResult'); if (nr) nr.style.display='none';
+  more.querySelectorAll('.sec').forEach(s=>{
+    const show = (cat==='all') || (s.dataset.catIdx===cat);
+    s.style.display = show ? '' : 'none';
+    let g = s.nextElementSibling;
+    while (g && !g.classList.contains('mgmt-grid')) g = g.nextElementSibling;
+    if (g) {
+      g.style.display = show ? '' : 'none';
+      g.querySelectorAll('.mgmt-tile').forEach(t=>t.style.display='');  // сброс фильтра поиска
+    }
+  });
+}
+
 // ── Поиск по функциям на экране «Ещё» ───────────────────
 function filterMore(q) {
   const more = document.getElementById('s-more');
   if (!more) return;
   const query = (q||'').trim().toLowerCase();
+  // Поиск работает по всем категориям: сбрасываем выбор категории на «Все».
+  if (query) {
+    document.querySelectorAll('#moreCatBar .chip').forEach((c,i)=>c.classList.toggle('on', i===0));
+  }
   let anyVisible = false;
   // Показ/скрытие тайлов по подписи
   more.querySelectorAll('.mgmt-tile').forEach(tile => {
@@ -3371,6 +3410,7 @@ function goTab(tab) {
   const ti = document.getElementById('t-'+tab);
   if (ti) ti.classList.add('on');
   CUR = tab;
+  if (tab === 'more') buildMoreCategories();
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
 }
