@@ -966,20 +966,34 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             elapsed = time.monotonic() - _t_start
             duration_seconds = round(elapsed, 1)
             result = _normalize_result(result, op_type, duration_seconds)
+            # Честный финальный статус. Раньше success-путь жёстко писал 'done',
+            # из-за чего операция выглядела выполненной, даже когда исполнитель
+            # вернул status='failed' (нет аккаунтов/текста и т.п.) или когда все
+            # элементы провалились (ok=0 при наличии ошибок). Это и создавало
+            # «рабочий вид без реального исполнения».
+            _ok = int(result.get("ok", 0) or 0)
+            _failed = int(result.get("failed", 0) or 0)
+            if str(result.get("status") or "").lower() == "failed":
+                _final_status = "failed"
+            elif _ok == 0 and _failed > 0:
+                _final_status = "failed"
+                result["status"] = "failed"
+            else:
+                _final_status = "done"
             log.info(
-                "op_worker: op_id=%d op_type=%s done in %.1fs (duration_seconds=%.1f) — %s",
-                op_id,
-                op_type,
-                elapsed,
-                duration_seconds,
+                "op_worker: op_id=%d op_type=%s → %s in %.1fs (ok=%d failed=%d) — %s",
+                op_id, op_type, _final_status, elapsed, _ok, _failed,
                 result.get("summary", ""),
             )
             await pool.execute(
-                "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
+                "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
+                _final_status,
             )
-            # Audit trail: write operation completion to operation_audit
+            # Audit trail: write operation completion to operation_audit.
+            # Outcome согласован с финальным статусом — провал не пишется как success.
+            _audit_outcome = "success" if _final_status == "done" else "failed"
             _op_summary = result.get("summary", "")
             _acc_ids_done = params.get("account_ids") or []
             if _acc_ids_done:
@@ -988,7 +1002,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         pool,
                         owner_id,
                         op_type,
-                        "success",
+                        _audit_outcome,
                         operation_id=op_id,
                         account_id=int(_audit_acc_id),
                         duration_ms=int(duration_seconds * 1000),
@@ -998,7 +1012,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     pool,
                     owner_id,
                     op_type,
-                    "success",
+                    _audit_outcome,
                     operation_id=op_id,
                     duration_ms=int(duration_seconds * 1000),
                 )
@@ -1014,7 +1028,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     for _tid in _acc_ids_done:
                         asyncio.create_task(
                             _pe.record_telemetry(
-                                pool, int(_tid), owner_id, op_type, "success", 0, _dur_ms
+                                pool, int(_tid), owner_id, op_type, _audit_outcome, 0, _dur_ms
                             )
                         )
                 asyncio.create_task(
@@ -1041,7 +1055,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             kb.adjust(1)
             # Strike summaries can be very long (one block per target × many accounts).
             # Telegram messages cap at 4096 chars; truncate to leave room for the header.
-            _notify_header = f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n"
+            _notify_icon = "✅" if _final_status == "done" else "⚠️"
+            _notify_verb = "завершена" if _final_status == "done" else "завершена с ошибкой"
+            _notify_header = f"{_notify_icon} <b>Операция #{op_id}</b> {_notify_verb} за {duration_seconds}с\n"
             _max_summary = 4096 - len(_notify_header) - 50
             _summary_notify = summary[:_max_summary] + ("…" if len(summary) > _max_summary else "")
             await db.notify_if_enabled(
@@ -1052,13 +1068,14 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _notify_header + _summary_notify,
                 reply_markup=kb.as_markup(),
             )
-            # Фиксируем успех в Infrastructure Memory для всех аккаунтов из params
+            # Фиксируем исход в Infrastructure Memory для всех аккаунтов из params
             try:
                 from services.infra_memory import record_account_op
 
+                _mem_ok = _final_status == "done"
                 for _acc_id in params.get("account_ids") or []:
                     record_account_op(
-                        int(_acc_id), op_type, success=True, duration_s=duration_seconds
+                        int(_acc_id), op_type, success=_mem_ok, duration_s=duration_seconds
                     )
             except Exception:
                 pass
