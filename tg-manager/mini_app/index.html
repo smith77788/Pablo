@@ -3894,6 +3894,14 @@ async function toggleFunnel(id, el) {
 }
 
 // ── Accounts ───────────────────────────────────────────
+async function removeChannel(chId) {
+  if (!confirm('Убрать канал из управления? (сам канал в Telegram не удаляется)')) return;
+  try {
+    await api(`/api/miniapp/channel/${chId}`, {method:'DELETE'});
+    toast('🗑 Канал убран из управления');
+    back(); loadAccounts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function checkAccount(id) {
   try {
     const r = await api(`/api/miniapp/account/${id}/check`, {method:'POST'});
@@ -4248,8 +4256,9 @@ function buildChDetail(d) {
       <div class="profile-badges"><span class="badge b-bl">${type}</span></div>
     </div>
 
-    <div class="actions">
-      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})">📝 Опубликовать</button>
+    <div class="actions" style="display:flex;gap:8px">
+      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1">📝 Опубликовать</button>
+      <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1">🗑 Убрать</button>
     </div>
 
     <div class="sec">Информация</div>

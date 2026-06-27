@@ -1393,6 +1393,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("accounts_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def channel_remove(request: web.Request) -> web.Response:
+        """Убрать канал из управления (запись managed_channels)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("bad ch_id", 400)
+        try:
+            res = await pool.execute(
+                "DELETE FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+            if str(res).endswith(" 0"):
+                return _err("Канал не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
+            return _err(str(exc), 500)
+
     async def account_toggle(request: web.Request) -> web.Response:
         """Вкл/выкл аккаунта (is_active)."""
         uid = _get_uid(request)
@@ -6387,6 +6406,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
