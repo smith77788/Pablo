@@ -1367,6 +1367,71 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
+    async def diag(request: web.Request) -> web.Response:
+        """Сквозная диагностика исполнения: креды/транспорт, аккаунты, очередь,
+        живой тест подключения одного аккаунта (тот же путь, что у операций)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        import time as _t
+        try:
+            from config import TG_API_ID, CF_RELAY_URL, TG_PROXY
+        except Exception:
+            TG_API_ID, CF_RELAY_URL, TG_PROXY = 0, "", ""
+        report: dict = {
+            "env": {
+                "api_configured": bool(TG_API_ID),
+                "cf_relay": bool(CF_RELAY_URL),
+                "tg_proxy": bool(TG_PROXY),
+            },
+            "accounts": {}, "queue": {}, "live_test": {},
+        }
+        try:
+            a = await pool.fetchrow(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE is_active) AS active, "
+                "COUNT(*) FILTER (WHERE session_str IS NOT NULL AND session_str<>'') AS with_session, "
+                "COUNT(*) FILTER (WHERE proxy_id IS NOT NULL) AS with_proxy "
+                "FROM tg_accounts WHERE owner_id=$1", uid)
+            report["accounts"] = {k: int(v or 0) for k, v in dict(a).items()} if a else {}
+        except Exception as e:
+            report["accounts"] = {"error": str(e)[:120]}
+        try:
+            q = await pool.fetchrow(
+                "SELECT COUNT(*) FILTER (WHERE status='pending') AS pending, "
+                "COUNT(*) FILTER (WHERE status='running') AS running, "
+                "COUNT(*) FILTER (WHERE status='done' AND finished_at>now()-interval '24 hours') AS done_24h, "
+                "COUNT(*) FILTER (WHERE status='failed' AND finished_at>now()-interval '24 hours') AS failed_24h "
+                "FROM operation_queue WHERE owner_id=$1", uid)
+            report["queue"] = {k: int(v or 0) for k, v in dict(q).items()} if q else {}
+        except Exception as e:
+            report["queue"] = {"error": str(e)[:120]}
+        try:
+            row = await pool.fetchrow(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, a.device_model, a.system_version, "
+                "a.app_version, a.lang_code, a.system_lang_code, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+                "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1", uid)
+            if not row:
+                report["live_test"] = {"ok": False, "reason": "Нет активного аккаунта с сессией для теста"}
+            else:
+                from services.account_manager import check_account_status_full
+                t0 = _t.monotonic()
+                res = await check_account_status_full(
+                    row["session_str"], _acc=dict(row), check_spambot=False)
+                report["live_test"] = {
+                    "ok": res.get("status") == "active",
+                    "account": str(row["first_name"] or row["phone"] or row["id"]),
+                    "status": res.get("status"),
+                    "reason": (res.get("reason") or "")[:200],
+                    "latency_ms": round((_t.monotonic() - t0) * 1000),
+                    "via_proxy": bool(row["proxy_url"]),
+                }
+        except Exception as e:
+            report["live_test"] = {"ok": False, "reason": f"Ошибка теста подключения: {str(e)[:160]}"}
+        return _json_resp(report)
+
     async def boost_submit(request: web.Request) -> web.Response:
         """Накрутка: просмотры / реакции / сторис через аккаунты владельца.
         body: {type: views|reactions|stories, channel|target, msg_ids|msg_id, emoji, acc_count}
@@ -6228,6 +6293,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
+    app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
