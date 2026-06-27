@@ -4528,6 +4528,8 @@ async def _exec_seed_presence_pack(
 
     async with _aiohttp.ClientSession() as http:
         for idx, ch in enumerate(channels, 1):
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "summary": f"Отменено на {idx - 1}/{total}"}
             post_text = _ps.build_seed_post(
                 channel_title=ch["title"] or ch.get("username") or pack["name"],
                 bot_username=pack.get("bot_username"),
@@ -4621,6 +4623,8 @@ async def _exec_promote_presence_pack(
     )
 
     for idx, ch_id in enumerate(channel_ids, 1):
+        if await _is_cancelled(pool, op_id):
+            return {"status": "cancelled", "summary": f"Отменено на {idx - 1}/{total}"}
         try:
             row = await pool.fetchrow(
                 "SELECT channel_id, access_hash FROM managed_channels WHERE id=$1", ch_id
@@ -6504,6 +6508,8 @@ async def _exec_content_clone(
     cloned_to: list[str] = []
 
     for idx, target_ref in enumerate(target_refs, 1):
+        if await _is_cancelled(pool, op_id):
+            return {"status": "cancelled", "summary": f"Отменено на {idx - 1}/{total}"}
         try:
             res = await clone_to_channel(
                 acc["session_str"], acc, source_ref, target_ref, msg_ids, mode,
