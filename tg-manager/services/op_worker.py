@@ -4146,7 +4146,7 @@ async def _exec_strike(
                 pass
 
     try:
-        results = await staggered_strike(plan, progress_cb=_strike_progress, pool=pool)
+        results = await staggered_strike(plan, progress_cb=_strike_progress, pool=pool, op_id=op_id)
     except Exception as e:
         log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
         return {
