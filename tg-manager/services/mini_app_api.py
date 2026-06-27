@@ -1389,6 +1389,72 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("accounts_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def account_toggle(request: web.Request) -> web.Response:
+        """Вкл/выкл аккаунта (is_active)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT is_active FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            if not row:
+                return _err("Аккаунт не найден", 404)
+            new_state = not bool(row["is_active"])
+            await pool.execute(
+                "UPDATE tg_accounts SET is_active=$1 WHERE id=$2 AND owner_id=$3",
+                new_state, acc_id, uid)
+            return _json_resp({"ok": True, "is_active": new_state})
+        except Exception as exc:
+            log.exception("account_toggle uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def account_delete(request: web.Request) -> web.Response:
+        """Удалить аккаунт."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        try:
+            res = await pool.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            if str(res).endswith(" 0"):
+                return _err("Аккаунт не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("account_delete uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def account_check_one(request: web.Request) -> web.Response:
+        """Проверить один аккаунт (с реактивацией если рабочий)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'check_accounts_health','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"account_ids": [acc_id], "check_spambot": True}),
+                "Проверка аккаунта")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("account_check_one uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
     async def diag(request: web.Request) -> web.Response:
         """Сквозная диагностика исполнения: креды/транспорт, аккаунты, очередь,
         живой тест подключения одного аккаунта (тот же путь, что у операций)."""
@@ -6317,6 +6383,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
+    app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
+    app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)

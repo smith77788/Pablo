@@ -3894,6 +3894,27 @@ async function toggleFunnel(id, el) {
 }
 
 // ── Accounts ───────────────────────────────────────────
+async function checkAccount(id) {
+  try {
+    const r = await api(`/api/miniapp/account/${id}/check`, {method:'POST'});
+    toast(`🔍 Проверка запущена (#${r.op_id}). Результат — в боте.`);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function toggleAccount(id) {
+  try {
+    const r = await api(`/api/miniapp/account/${id}/toggle`, {method:'POST'});
+    toast(r.is_active ? '▶️ Аккаунт включён' : '⏸ Аккаунт выключен');
+    openAccount(id);  // обновить экран
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function deleteAccount(id) {
+  if (!confirm('Удалить аккаунт? Действие необратимо.')) return;
+  try {
+    await api(`/api/miniapp/account/${id}`, {method:'DELETE'});
+    toast('🗑 Аккаунт удалён');
+    back(); loadAccounts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function massCheckAccounts() {
   if (!confirm('Проверить все аккаунты? Рабочие, ошибочно отключённые, будут восстановлены.')) return;
   try {
@@ -4127,6 +4148,12 @@ function buildAccDetail(d) {
       <div class="profile-name">${esc(name)}</div>
       ${a.username?`<div class="profile-sub">@${esc(a.username)}</div>`:''}
       <div class="profile-badges">${statusBadge}</div>
+    </div>
+
+    <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:90px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
+      <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1;min-width:90px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
+      <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:90px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
     </div>
 
     <div class="sec">Профиль</div>
