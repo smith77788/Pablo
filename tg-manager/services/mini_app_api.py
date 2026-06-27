@@ -1347,6 +1347,100 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
+    async def boost_submit(request: web.Request) -> web.Response:
+        """Накрутка: просмотры / реакции / сторис через аккаунты владельца.
+        body: {type: views|reactions|stories, channel|target, msg_ids|msg_id, emoji, acc_count}
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        btype = (body.get("type") or "").strip()
+        if btype not in ("views", "reactions", "stories"):
+            return _err("Неверный тип накрутки", 400)
+        try:
+            acc_count = int(body.get("acc_count") or 0)
+        except (TypeError, ValueError):
+            acc_count = 0
+
+        # Подбор аккаунтов как в боте: активные, без кулдауна, по trust_score.
+        rows = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+            "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
+            "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
+            uid, acc_count if acc_count > 0 else 1000)
+        account_ids = [r["id"] for r in (rows or [])]
+        if not account_ids:
+            return _err("Нет доступных аккаунтов", 400)
+
+        def _parse_ids(raw: str) -> list[int]:
+            out: list[int] = []
+            for part in str(raw or "").replace(" ", "").split(","):
+                if not part:
+                    continue
+                if "-" in part:
+                    try:
+                        a, b = part.split("-", 1)
+                        a, b = int(a), int(b)
+                        if 0 < b - a <= 1000:
+                            out.extend(range(a, b + 1))
+                    except ValueError:
+                        continue
+                else:
+                    try:
+                        out.append(int(part))
+                    except ValueError:
+                        continue
+            # dedup, preserve order
+            seen: set[int] = set()
+            return [x for x in out if not (x in seen or seen.add(x))]
+
+        if btype == "views":
+            channel = (body.get("channel") or "").strip()
+            msg_ids = _parse_ids(body.get("msg_ids"))
+            if not channel or not msg_ids:
+                return _err("Укажите канал и ID сообщений", 400)
+            op_type = "boost_views"
+            params = {"channel": channel, "msg_ids": msg_ids, "account_ids": account_ids}
+            total = len(account_ids) * len(msg_ids)
+            label = f"Просмотры: {channel} × {len(msg_ids)} × {len(account_ids)} акк."
+        elif btype == "reactions":
+            channel = (body.get("channel") or "").strip()
+            try:
+                msg_id = int(body.get("msg_id") or 0)
+            except (TypeError, ValueError):
+                msg_id = 0
+            emoji = (body.get("emoji") or "👍").strip() or "👍"
+            if not channel or not msg_id:
+                return _err("Укажите канал и ID сообщения", 400)
+            op_type = "boost_reactions"
+            params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
+            total = len(account_ids)
+            label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
+        else:  # stories
+            target = (body.get("target") or "").strip()
+            if not target:
+                return _err("Укажите цель (@username)", 400)
+            op_type = "boost_stories"
+            params = {"target": target, "account_ids": account_ids}
+            total = len(account_ids)
+            label = f"Сторис: {target} × {len(account_ids)} акк."
+
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
+                uid, op_type, _json.dumps(params), total, label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "accounts": len(account_ids)})
+        except Exception as exc:
+            log.exception("boost_submit uid=%d type=%s", uid, btype)
+            return _err(str(exc), 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -6061,6 +6155,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
+    app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)

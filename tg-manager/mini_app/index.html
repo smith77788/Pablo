@@ -615,6 +615,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Self Promo</div>
         <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openBoost()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Накрутка</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Управление аккаунтами -->
@@ -1852,6 +1857,34 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:8px">История задач</div>
     <div class="lst" id="reporterHistory"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: BOOST (Накрутка) ══════════════════════ -->
+<div class="screen" id="s-boost">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🚀 Накрутка</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Тип накрутки</div>
+    <div style="display:flex;gap:8px;padding:8px 0">
+      <button class="btn btn-s" id="boostTab-views" onclick="boostSetType('views')" style="flex:1;padding:9px 4px;font-size:13px">👁 Просмотры</button>
+      <button class="btn btn-s" id="boostTab-reactions" onclick="boostSetType('reactions')" style="flex:1;padding:9px 4px;font-size:13px">❤ Реакции</button>
+      <button class="btn btn-s" id="boostTab-stories" onclick="boostSetType('stories')" style="flex:1;padding:9px 4px;font-size:13px">📖 Сторис</button>
+    </div>
+    <div style="padding:8px 0">
+      <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
+      <div class="field" id="boostF-msgids"><label>ID сообщений (через запятую или диапазон 120-130)</label><input type="text" id="boostMsgIds" placeholder="123, 124, 125"></div>
+      <div class="field" id="boostF-msgid"><label>ID сообщения</label><input type="number" id="boostMsgId" placeholder="123" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field" id="boostF-emoji"><label>Эмодзи реакции</label><input type="text" id="boostEmoji" value="👍" maxlength="8"></div>
+      <div class="field" id="boostF-target"><label>Цель — чьи сторис смотреть (@username)</label><input type="text" id="boostTarget" placeholder="@username"></div>
+      <div class="field"><label>Количество аккаунтов (0 = все доступные)</label><input type="number" id="boostAccCount" value="0" min="0" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field-err" id="boostErr"></div>
+      <button class="btn btn-p" id="boostBtn" onclick="submitBoost()" style="width:100%">🚀 Запустить</button>
+    </div>
+    <div class="sec" style="margin-top:8px">История накруток</div>
+    <div class="lst" id="boostHistory"></div>
   </div>
 </div>
 
@@ -5692,6 +5725,70 @@ async function submitReporter() {
     openReporter();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚨 Отправить репорт'; }
+}
+
+// ── Boost (Накрутка) ─────────────────────────────────────
+let BOOST_TYPE = 'views';
+function boostSetType(t) {
+  BOOST_TYPE = t;
+  ['views','reactions','stories'].forEach(x=>{
+    const tab=document.getElementById('boostTab-'+x);
+    if(tab) tab.className = 'btn '+(x===t?'btn-p':'btn-s');
+  });
+  // Показ полей по типу
+  const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display=on?'':'none'; };
+  show('boostF-channel', t==='views'||t==='reactions');
+  show('boostF-msgids', t==='views');
+  show('boostF-msgid', t==='reactions');
+  show('boostF-emoji', t==='reactions');
+  show('boostF-target', t==='stories');
+}
+async function openBoost() {
+  push('s-boost');
+  boostSetType('views');
+  const e=document.getElementById('boostErr'); if(e) e.textContent='';
+  txt('boostHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/operations');
+    const ops = (d.operations||[]).filter(o=>['boost_views','boost_reactions','boost_stories'].includes(o.op_type)).slice(0,10);
+    const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖'};
+    txt('boostHistory', ops.length ? ops.map(o=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">${ICO[o.op_type]||'🚀'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(o.label||o.op_type)}</div>
+          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+        </div>
+      </div>
+    `).join('') : empty('📋','История пуста','Запустите первую накрутку'));
+  } catch(e) {
+    txt('boostHistory', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function submitBoost() {
+  const errEl=document.getElementById('boostErr'); errEl.textContent='';
+  const acc_count=parseInt(document.getElementById('boostAccCount').value)||0;
+  const payload={type:BOOST_TYPE, acc_count};
+  if (BOOST_TYPE==='views') {
+    payload.channel=document.getElementById('boostChannel').value.trim();
+    payload.msg_ids=document.getElementById('boostMsgIds').value.trim();
+    if(!payload.channel||!payload.msg_ids){ errEl.textContent='Укажите канал и ID сообщений'; return; }
+  } else if (BOOST_TYPE==='reactions') {
+    payload.channel=document.getElementById('boostChannel').value.trim();
+    payload.msg_id=parseInt(document.getElementById('boostMsgId').value)||0;
+    payload.emoji=document.getElementById('boostEmoji').value.trim()||'👍';
+    if(!payload.channel||!payload.msg_id){ errEl.textContent='Укажите канал и ID сообщения'; return; }
+  } else {
+    payload.target=document.getElementById('boostTarget').value.trim();
+    if(!payload.target){ errEl.textContent='Укажите цель'; return; }
+  }
+  const btn=document.getElementById('boostBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r=await api('/api/miniapp/boost',{method:'POST',body:JSON.stringify(payload)});
+    toast(`🚀 Поставлено в очередь (#${r.op_id}) · ${r.accounts} акк.`);
+    openBoost();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
 }
 
 // ── Quick Post ───────────────────────────────────────────
