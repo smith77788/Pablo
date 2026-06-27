@@ -55,14 +55,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Cards ──────────────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px 0}
-.card{background:var(--bg2);border-radius:16px;padding:14px;cursor:pointer;transition:transform .12s,opacity .12s;min-height:90px}
+.card{background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;cursor:pointer;transition:transform .12s,opacity .12s;min-height:90px;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .card:active{transform:scale(.96);opacity:.8}
 .card-ico{font-size:22px;margin-bottom:6px}
 .card-val{font-size:24px;font-weight:700;letter-spacing:-.5px}
 .card-lbl{font-size:12px;color:var(--hint);margin-top:3px;line-height:1.3}
 
 /* ─── Lists ──────────────────────────────────────────────────── */
-.lst{background:var(--bg2);border-radius:16px;overflow:hidden;margin:0 16px}
+.lst{background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;margin:0 16px;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .li{padding:12px 14px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--sep)}
 .li:last-child{border-bottom:none}
 .li.tap{cursor:pointer}
@@ -221,10 +221,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Management tile grid ───────────────────────────────── */
 .mgmt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 4px}
-.mgmt-tile{background:var(--bg2);border-radius:14px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;transition:transform .12s,opacity .12s;text-align:center;min-height:70px;justify-content:center}
-.mgmt-tile:active{transform:scale(.93);opacity:.7}
-.mgmt-tile-ico{font-size:22px;line-height:1}
-.mgmt-tile-lbl{font-size:10.5px;font-weight:600;color:var(--hint);line-height:1.2}
+.mgmt-tile{background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:7px;cursor:pointer;transition:transform .12s,opacity .12s,background .12s;text-align:center;min-height:78px;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.mgmt-tile:active{transform:scale(.93);opacity:.8;background:rgba(255,255,255,.04)}
+.mgmt-tile-ico{font-size:25px;line-height:1}
+.mgmt-tile-lbl{font-size:11.5px;font-weight:600;color:var(--text);opacity:.92;line-height:1.2}
 .mgmt-tile-val{font-size:10px;color:var(--blue);font-weight:700;min-height:12px;line-height:1}
 
 /* ─── More screen status bar ─────────────────────────────── */
