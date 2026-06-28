@@ -4697,24 +4697,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("text required")
         if len(text) > 4096:
             return _err("text too long (max 4096)")
-        # Get all active bots with subscriber counts
-        bots = await _safe_fetch(pool,
-            """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
-               FROM managed_bots mb
-               LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
-               WHERE mb.added_by=$1 AND mb.is_active=true
-               GROUP BY mb.bot_id""", uid)
+        # Опциональный выбор ботов: bot_ids → рассылка только выбранным
+        sel_ids = [int(x) for x in (body.get("bot_ids") or []) if str(x).lstrip("-").isdigit()]
+        if sel_ids:
+            bots = await _safe_fetch(pool,
+                """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
+                   FROM managed_bots mb
+                   LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
+                   WHERE mb.added_by=$1 AND mb.is_active=true AND mb.bot_id = ANY($2::bigint[])
+                   GROUP BY mb.bot_id""", uid, sel_ids)
+        else:
+            bots = await _safe_fetch(pool,
+                """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
+                   FROM managed_bots mb
+                   LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
+                   WHERE mb.added_by=$1 AND mb.is_active=true
+                   GROUP BY mb.bot_id""", uid)
         if not bots:
             return _err("No active bots found")
         total_recipients = sum(b["active_subs"] or 0 for b in bots)
-        segment = body.get("segment", "all_each")
         lang = body.get("lang", "")
+        if sel_ids:
+            segment = "selected_bots"
+            op_params = {"text": text, "segment": segment, "lang": lang,
+                         "selected_bot_ids": [int(b["bot_id"]) for b in bots]}
+        else:
+            segment = body.get("segment", "all_each")
+            op_params = {"text": text, "segment": segment, "lang": lang}
         label = f"Network Broadcast: {text[:40]}{'…' if len(text) > 40 else ''}"
         try:
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'network_broadcast','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"text": text, "segment": segment, "lang": lang}),
+                uid, _json.dumps(op_params),
                 total_recipients, label,
             )
             return _json_resp({
@@ -7013,11 +7028,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Public config endpoint — no auth required. Returns bot info for frontend."""
         bot_username = await _resolve_bot_username()
         mini_app_url = os.getenv("MINI_APP_URL", "")
+        try:
+            from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
+            paid_price = int(PLAN_PRICES_USD.get("paid", 29))
+            period_discounts = {str(k): v for k, v in PERIOD_DISCOUNTS.items()}
+        except Exception:
+            paid_price = 29
+            period_discounts = {"1": 0, "3": 10, "6": 15, "12": 20}
         return _json_resp({
             "bot_username": bot_username,
             "mini_app_url": mini_app_url,
             "platform": "Infragram OS",
             "version": "2.0",
+            "paid_price": paid_price,
+            "period_discounts": period_discounts,
         })
 
     app.router.add_get("/api/miniapp/config", miniapp_config)

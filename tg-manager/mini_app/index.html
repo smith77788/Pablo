@@ -3429,6 +3429,9 @@ let REF_CODE = null;
     TK = (await r.json()).token;
     fetch('/api/miniapp/config').then(r=>r.json()).then(cfg=>{
       if(cfg.bot_username) window._botUsername = cfg.bot_username;
+      if(cfg.paid_price) window._paidPrice = cfg.paid_price;
+      if(cfg.period_discounts) window._periodDiscounts = cfg.period_discounts;
+      rebuildPlanPrices();
     }).catch(()=>{});
     loadHome();
     openSSE();
@@ -9899,12 +9902,25 @@ const _PLAN_FEATURES = {
   free: ['✅ 1 управляемый бот','✅ 50 аккаунтов','✅ Базовые рассылки','❌ Авто-воронки','❌ Intent Engine','❌ STRIKE','❌ Продвижение ботов'],
   paid: ['✅ Неограниченно ботов','✅ 500 аккаунтов','✅ Все рассылки','✅ Авто-воронки','✅ Intent Engine','✅ STRIKE','✅ Продвижение ботов','✅ Аналитика позиций','✅ Приоритетная поддержка'],
 };
-const _PLAN_PRICES = [
-  {key:'paid_1m', label:'1 месяц', price:'$29', months:1, popular:false},
-  {key:'paid_3m', label:'3 месяца', price:'$75', months:3, popular:true, save:'14%'},
-  {key:'paid_6m', label:'6 месяцев', price:'$139', months:6, popular:false, save:'20%'},
-  {key:'paid_12m', label:'12 месяцев', price:'$249', months:12, popular:false, save:'28%'},
-];
+// Цены строятся из конфига (базовая цена + скидки за период), чтобы совпадать
+// с реальным расчётом списания на бэкенде: base*months*(1-disc/100).
+let _PLAN_PRICES = [];
+function rebuildPlanPrices() {
+  const base = window._paidPrice || 29;
+  const disc = window._periodDiscounts || {'1':0,'3':10,'6':15,'12':20};
+  const periods = [
+    {key:'paid_1m', label:'1 месяц', months:1, popular:false},
+    {key:'paid_3m', label:'3 месяца', months:3, popular:true},
+    {key:'paid_6m', label:'6 месяцев', months:6, popular:false},
+    {key:'paid_12m', label:'12 месяцев', months:12, popular:false},
+  ];
+  _PLAN_PRICES = periods.map(p=>{
+    const d = Number(disc[String(p.months)]||0);
+    const total = Math.round(base * p.months * (1 - d/100));
+    return {...p, price:'$'+total, save: d?d+'%':null};
+  });
+}
+rebuildPlanPrices();
 async function openBilling() {
   push('s-billing');
   txt('billingHistory','<div class="spin-wrap"><div class="spin"></div></div>');

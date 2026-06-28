@@ -45,7 +45,16 @@ def invalidate_plan_cache(user_id: int) -> None:
 PLAN_LEVELS: dict[str, int] = {"free": 0, "paid": 1}
 BOT_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
 CHANNEL_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
-PLAN_PRICES = {"paid": "$29"}
+def _paid_price_str() -> str:
+    """Цена платного тарифа из конфига (env PRICE_PAID), а не хардкод."""
+    try:
+        from config import PLAN_PRICES_USD
+        return f"${PLAN_PRICES_USD.get('paid', 29)}"
+    except Exception:
+        return "$29"
+
+
+PLAN_PRICES = {"paid": _paid_price_str()}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
 PLAN_FEATURES = {
     "paid": "∞ ботов и каналов, CRM, воронки, аккаунты, AI-ассистент, рассылки, аналитика, все функции",
