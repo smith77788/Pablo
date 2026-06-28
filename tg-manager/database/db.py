@@ -371,16 +371,29 @@ async def create_broadcast(
     total: int,
     created_by: int,
     photo_file_id: str | None = None,
+    target_user_ids: list[int] | None = None,
+    buttons: list[dict] | None = None,
 ) -> int:
-    return await pool.fetchval(
-        """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id)
-           VALUES ($1, $2, $3, 'pending', $4, $5) RETURNING id""",
-        bot_id,
-        message_text,
-        total,
-        created_by,
-        photo_file_id,
-    )
+    # target_user_ids сохраняем только для сегментных рассылок (подмножество
+    # аудитории); NULL = полная аудитория бота. Используется resume после
+    # рестарта, чтобы сегментная рассылка не ушла всей аудитории.
+    # buttons сохраняем, чтобы инлайн-кнопки пережили рестарт (resume).
+    import json as _json
+    target_json = _json.dumps(target_user_ids) if target_user_ids else None
+    buttons_json = _json.dumps(buttons) if buttons else None
+    try:
+        return await pool.fetchval(
+            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons)
+               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb) RETURNING id""",
+            bot_id, message_text, total, created_by, photo_file_id, target_json, buttons_json,
+        )
+    except asyncpg.UndefinedColumnError:
+        # Совместимость со старой схемой без колонки buttons
+        return await pool.fetchval(
+            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids)
+               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb) RETURNING id""",
+            bot_id, message_text, total, created_by, photo_file_id, target_json,
+        )
 
 
 async def update_broadcast(
@@ -406,6 +419,56 @@ async def get_broadcast(
             "SELECT * FROM broadcasts WHERE id=$1 AND bot_id=$2", broadcast_id, bot_id
         )
     return await pool.fetchrow("SELECT * FROM broadcasts WHERE id=$1", broadcast_id)
+
+
+async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
+    """Рассылки, оборвавшиеся на рестарте процесса (status running/pending).
+
+    Возвращает dict с расшифрованным токеном бота и распарсенным target_user_ids
+    (список или None). Используется resume при старте — broadcaster.run докатывает
+    рассылку, пропуская уже доставленных через delivery log.
+    """
+    import json as _json
+    try:
+        rows = await pool.fetch(
+            """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
+                      b.buttons, m.token
+               FROM broadcasts b
+               JOIN managed_bots m ON m.bot_id = b.bot_id
+               WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
+                 AND m.token IS NOT NULL
+               ORDER BY b.id"""
+        )
+    except asyncpg.UndefinedColumnError:
+        rows = await pool.fetch(
+            """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
+                      m.token
+               FROM broadcasts b
+               JOIN managed_bots m ON m.bot_id = b.bot_id
+               WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
+                 AND m.token IS NOT NULL
+               ORDER BY b.id"""
+        )
+    from services.token_vault import decrypt_token as _dt
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        if d.get("token"):
+            d["token"] = _dt(d["token"])
+        tgt = d.get("target_user_ids")
+        if isinstance(tgt, str):
+            try:
+                d["target_user_ids"] = _json.loads(tgt)
+            except Exception:
+                d["target_user_ids"] = None
+        btns = d.get("buttons")
+        if isinstance(btns, str):
+            try:
+                d["buttons"] = _json.loads(btns)
+            except Exception:
+                d["buttons"] = None
+        out.append(d)
+    return out
 
 
 async def log_broadcast_delivery(
@@ -2538,10 +2601,11 @@ async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> b
     return result != "DELETE 0"
 
 
-async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int) -> None:
+async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> None:
     await pool.execute(
-        "UPDATE tg_accounts SET last_used=now() WHERE id=$1",
+        "UPDATE tg_accounts SET last_used=now() WHERE id=$1 AND owner_id=$2",
         acc_id,
+        owner_id,
     )
 
 
@@ -3187,7 +3251,7 @@ async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
 
 # In-memory rate-limit cache: (user_id, pref) -> last_sent_timestamp
 # Prevents notification spam when many events fire simultaneously.
-_notify_cooldown: dict[tuple[int, str], float] = {}
+_notify_cooldown: dict[tuple[int, str, str | None], float] = {}
 _NOTIFY_COOLDOWN_SECONDS = 60  # minimum interval between same-type notifications per user
 
 
@@ -3198,16 +3262,23 @@ async def notify_if_enabled(
     pref: str,
     text: str,
     reply_markup=None,
+    *,
+    dedup_key: str | None = None,
 ) -> None:
     """Send a notification to user only if the given preference flag is True.
 
-    Rate-limited: each (user_id, pref) pair can fire at most once per
-    _NOTIFY_COOLDOWN_SECONDS to prevent spam when many events happen at once.
+    Rate-limited: each (user_id, pref, dedup_key) triple can fire at most once
+    per _NOTIFY_COOLDOWN_SECONDS to prevent spam when many events happen at once.
+
+    dedup_key разделяет кулдаун для логически разных событий одного типа.
+    Без него уведомления вроде "new_user" со всех ботов владельца делили один
+    слот, и при потоке новых подписчиков большинство уведомлений терялось.
+    Для таких событий передавайте уникальный ключ (например, id нового юзера).
     """
     try:
         # Rate-limit check (in-memory, process-scoped)
         now = time.monotonic()
-        key = (user_id, pref)
+        key = (user_id, pref, dedup_key)
         last_sent = _notify_cooldown.get(key, 0.0)
         if now - last_sent < _NOTIFY_COOLDOWN_SECONDS:
             return
@@ -3219,8 +3290,14 @@ async def notify_if_enabled(
         await bot.send_message(
             user_id, text, parse_mode="HTML", reply_markup=reply_markup
         )
-    except Exception:
-        log_exc_swallow(log, "Сбой notify_if_enabled", user_id=user_id, pref=pref)
+    except Exception as exc:
+        # Доставка уведомлений — критичный путь: сбой логируем на WARNING, а не
+        # глушим в DEBUG. Частые причины: владелец не нажал /start у основного
+        # бота (403) или заблокировал его — иначе это полностью невидимо в проде.
+        log.warning(
+            "notify_if_enabled: не доставлено user=%s pref=%s: %s",
+            user_id, pref, str(exc)[:200],
+        )
 
 
 # ── Global Presence Factory ────────────────────────────────────────────────

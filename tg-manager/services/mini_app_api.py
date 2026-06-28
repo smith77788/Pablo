@@ -586,9 +586,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
         try:
-            row = await pool.fetchrow(
-                "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
-                bot_id_int, text, total, uid)
+            try:
+                row = await pool.fetchrow(
+                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons) "
+                    "VALUES($1,$2,$3,'pending',$4,$5::jsonb) RETURNING id",
+                    bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None)
+            except Exception:
+                row = await pool.fetchrow(
+                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
+                    bot_id_int, text, total, uid)
             broadcast_id = row["id"]
             # Create op_queue entry so user can track progress
             bot_label = bot_row.get("username") or bot_id_int
