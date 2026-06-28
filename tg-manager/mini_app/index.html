@@ -3745,8 +3745,13 @@ function _syncBackButton() {
 
 function push(sid) {
   closeAllModals();
+  // Прячем все видимые экраны — иначе абсолютно спозиционированные элементы
+  // предыдущего экрана (напр. кнопки удаления с z-index) «протекают» поверх
+  // нового экрана.
+  document.querySelectorAll('.screen.show').forEach(s=>s.classList.remove('show'));
   STACK.push(sid);
-  document.getElementById(sid).classList.add('show');
+  const el = document.getElementById(sid);
+  if (el) { el.classList.add('show'); el.scrollTop = 0; }
   showTabbar(false);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -3756,7 +3761,11 @@ function back() {
   closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
-  document.getElementById(id).classList.remove('show');
+  document.getElementById(id)?.classList.remove('show');
+  // Возвращаем предыдущий экран стека, либо экран текущей вкладки.
+  const prev = STACK.length ? STACK[STACK.length - 1] : ('s-' + CUR);
+  const pel = document.getElementById(prev);
+  if (pel) pel.classList.add('show');
   if (!STACK.length) showTabbar(true);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
