@@ -1292,6 +1292,55 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Modal: Account Profile -->
+<div class="mbg" id="mo-acc-profile" onclick="if(event.target===this)closeModal('mo-acc-profile')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-acc-profile')">✕</div>
+    <div class="modal-title">🎨 Профиль аккаунта</div>
+    <div class="field">
+      <label>Что меняем</label>
+      <select id="apOp" onchange="apToggle()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="name">Имя и Bio</option>
+        <option value="avatar">Аватар</option>
+        <option value="2fa">2FA пароль</option>
+      </select>
+    </div>
+    <div id="apF-name">
+      <div class="field"><label>Имя *</label><input type="text" id="apFirst" placeholder="Имя" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field"><label>Фамилия</label><input type="text" id="apLast" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field"><label>Bio / О себе</label><textarea id="apAbout" rows="2" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea></div>
+    </div>
+    <div id="apF-avatar">
+      <div class="field"><label>Ссылка на изображение *</label><input type="text" id="apAvatar" placeholder="https://..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    </div>
+    <div id="apF-2fa">
+      <div class="field"><label>Новый пароль 2FA *</label><input type="text" id="apNewPass" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field"><label>Текущий пароль (если уже стоит)</label><input type="text" id="apCurPass" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field"><label>Подсказка</label><input type="text" id="apHint" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    </div>
+    <div class="field-err" id="apErr"></div>
+    <button class="btn btn-p" id="apBtn" onclick="submitAccProfile()" style="width:100%">Применить</button>
+  </div>
+</div>
+
+<!-- Modal: Channel Edit -->
+<div class="mbg" id="mo-chan-edit" onclick="if(event.target===this)closeModal('mo-chan-edit')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-chan-edit')">✕</div>
+    <div class="modal-title">✏️ Редактировать канал</div>
+    <div class="field">
+      <label>Что меняем</label>
+      <select id="ceOp" onchange="ceToggle()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="about">Описание</option>
+        <option value="username">Username</option>
+      </select>
+    </div>
+    <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea></div>
+    <div class="field-err" id="ceErr"></div>
+    <button class="btn btn-p" id="ceBtn" onclick="submitChanEdit()" style="width:100%">Применить</button>
+  </div>
+</div>
+
 <!-- Modal: Asset Template Create -->
 <div class="mbg" id="mo-asset-tpl" onclick="if(event.target===this)closeModal('mo-asset-tpl')">
   <div class="modal">
@@ -3987,6 +4036,66 @@ async function removeChannel(chId) {
     back(); loadAccounts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
+// ── Профиль аккаунта (модалка) ───────────────────────────
+let AP_ACC_ID = null;
+function openAccProfile(id) {
+  AP_ACC_ID = id;
+  const e=document.getElementById('apErr'); if(e) e.textContent='';
+  document.getElementById('apOp').value='name';
+  apToggle();
+  showModal('mo-acc-profile');
+}
+function apToggle() {
+  const op=document.getElementById('apOp').value;
+  const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none';};
+  show('apF-name', op==='name'); show('apF-avatar', op==='avatar'); show('apF-2fa', op==='2fa');
+}
+async function submitAccProfile() {
+  const errEl=document.getElementById('apErr'); errEl.textContent='';
+  const op=document.getElementById('apOp').value;
+  const payload={op};
+  if(op==='name'){ payload.first_name=document.getElementById('apFirst').value.trim(); payload.last_name=document.getElementById('apLast').value.trim(); payload.about=document.getElementById('apAbout').value.trim(); if(!payload.first_name){errEl.textContent='Укажите имя';return;} }
+  else if(op==='avatar'){ payload.avatar_url=document.getElementById('apAvatar').value.trim(); if(!payload.avatar_url){errEl.textContent='Укажите ссылку';return;} }
+  else { payload.new_password=document.getElementById('apNewPass').value.trim(); payload.current_password=document.getElementById('apCurPass').value.trim(); payload.hint=document.getElementById('apHint').value.trim(); if(!payload.new_password){errEl.textContent='Укажите новый пароль';return;} }
+  const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Применяю…';
+  try {
+    const r=await api(`/api/miniapp/account/${AP_ACC_ID}/profile`,{method:'POST',body:JSON.stringify(payload)});
+    toast(`✅ Поставлено в очередь (#${r.op_id})`); closeModal('mo-acc-profile');
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Применить'; }
+}
+// ── Редактирование канала (модалка) ──────────────────────
+let CE_CH_ID = null;
+function openChanEdit(id) {
+  CE_CH_ID = id;
+  const e=document.getElementById('ceErr'); if(e) e.textContent='';
+  document.getElementById('ceValue').value='';
+  document.getElementById('ceOp').value='about'; ceToggle();
+  showModal('mo-chan-edit');
+}
+function ceToggle() {
+  const op=document.getElementById('ceOp').value;
+  document.getElementById('ceLbl').textContent = op==='about'?'Новое описание *':'Новый username (без @) *';
+}
+async function submitChanEdit() {
+  const errEl=document.getElementById('ceErr'); errEl.textContent='';
+  const op=document.getElementById('ceOp').value;
+  const value=document.getElementById('ceValue').value.trim();
+  if(!value){ errEl.textContent='Укажите значение'; return; }
+  const btn=document.getElementById('ceBtn'); btn.disabled=true; btn.textContent='Применяю…';
+  try {
+    const r=await api(`/api/miniapp/channel/${CE_CH_ID}/edit`,{method:'POST',body:JSON.stringify({op,value})});
+    toast(`✅ Поставлено в очередь (#${r.op_id})`); closeModal('mo-chan-edit');
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Применить'; }
+}
+async function promoteChannel(chId) {
+  if(!confirm('Назначить все аккаунты администраторами этого канала?')) return;
+  try {
+    const r=await api(`/api/miniapp/channel/${chId}/promote`,{method:'POST'});
+    toast(`👑 Поставлено в очередь (#${r.op_id})`);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function accAction(id, act, confirmMsg) {
   if (confirmMsg && !confirm(confirmMsg)) return;
   try {
@@ -4256,6 +4365,7 @@ function buildAccDetail(d) {
       <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
+      <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
     </div>
@@ -4352,9 +4462,11 @@ function buildChDetail(d) {
       <div class="profile-badges"><span class="badge b-bl">${type}</span></div>
     </div>
 
-    <div class="actions" style="display:flex;gap:8px">
-      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1">📝 Опубликовать</button>
-      <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1">🗑 Убрать</button>
+    <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1;min-width:88px">📝 Опубликовать</button>
+      <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1;min-width:88px">✏️ Изменить</button>
+      <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1;min-width:88px">👑 Админы</button>
+      <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1;min-width:88px">🗑 Убрать</button>
     </div>
 
     <div class="sec">Информация</div>

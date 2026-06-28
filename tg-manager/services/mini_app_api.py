@@ -1410,6 +1410,125 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("accounts_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def account_profile(request: web.Request) -> web.Response:
+        """Сменить профиль аккаунта: имя/bio | аватар | 2FA (op).
+        Маппится на op_type=profile_setter (контракт _exec_bulk_set_profile)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        op = body.get("op")
+        params: dict = {"op": op, "account_ids": [acc_id]}
+        if op == "name":
+            fn = (body.get("first_name") or "").strip()
+            if not fn:
+                return _err("Укажите имя", 400)
+            params["name_data"] = {
+                "first_name": fn,
+                "last_name": (body.get("last_name") or "").strip(),
+                "about": (body.get("about") or "").strip(),
+            }
+            label = "Смена имени/bio"
+        elif op == "avatar":
+            url = (body.get("avatar_url") or "").strip()
+            if not url:
+                return _err("Укажите ссылку на аватар", 400)
+            params["avatar_url"] = url
+            label = "Смена аватара"
+        elif op == "2fa":
+            np = (body.get("new_password") or "").strip()
+            if not np:
+                return _err("Укажите новый пароль", 400)
+            params["new_password"] = np
+            params["current_password"] = (body.get("current_password") or "").strip()
+            params["hint"] = (body.get("hint") or "").strip()
+            label = "Смена 2FA"
+        else:
+            return _err("Неизвестная операция", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'profile_setter','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps(params), label)
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("account_profile uid=%d acc=%d op=%s", uid, acc_id, op)
+            return _err(str(exc), 500)
+
+    async def channel_edit(request: web.Request) -> web.Response:
+        """Изменить описание/username канала (op: about|username).
+        Маппится на op_type=bulk_chan_exec (per-channel пара)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        op = body.get("op")
+        value = (body.get("value") or "").strip()
+        if op not in ("about", "username") or not value:
+            return _err("Укажите op (about|username) и значение", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта", 400)
+        worker_op = "chan_about" if op == "about" else "chan_uname"
+        params = {
+            "op": worker_op,
+            "value": value,
+            "base_uname": value,
+            "channel_acc_pairs": [{"channel_id": ch_id, "acc_id": int(ch["acc_id"]), "title": ch.get("title") or ""}],
+        }
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'bulk_chan_exec','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps(params), f"Канал: {op}")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("channel_edit uid=%d ch=%d op=%s", uid, ch_id, op)
+            return _err(str(exc), 500)
+
+    async def channel_promote(request: web.Request) -> web.Response:
+        """Назначить все аккаунты администраторами канала (promote_all_admins)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("bad ch_id", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта (создателя)", 400)
+        params = {"channel_id": ch_id, "owner_acc_id": int(ch["acc_id"])}
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'promote_all_admins','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps(params), "Назначение админов")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
+            return _err(str(exc), 500)
+
     async def channel_remove(request: web.Request) -> web.Response:
         """Убрать канал из управления (запись managed_channels)."""
         uid = _get_uid(request)
@@ -6455,6 +6574,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_get("/api/miniapp/new_users", new_users)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
