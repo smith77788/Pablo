@@ -377,6 +377,7 @@ async def resume_interrupted(
                 r["message_text"] or "",
                 r.get("photo_file_id"),
                 r.get("target_user_ids"),  # список (сегмент) или None (полная аудитория)
+                r.get("buttons"),  # восстановить инлайн-кнопки после рестарта
                 start_delay=i * 2.0,  # разносим старты, чтобы не бить по Telegram разом
             )
         except Exception as exc:

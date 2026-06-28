@@ -4297,7 +4297,7 @@ async def _exec_network_broadcast(
             ids = [r["user_id"] for r in rows]
             if not ids:
                 continue
-            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id)
+            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id, buttons=_bc_buttons)
             if not bc_id:
                 continue
             broadcaster.start(
@@ -4330,7 +4330,7 @@ async def _exec_network_broadcast(
                     "ok": total_started,
                     "summary": f"Отменено. Запущено {total_started} ботов",
                 }
-            bc_id = await db.create_broadcast(pool, bid, text, len(ids), owner_id)
+            bc_id = await db.create_broadcast(pool, bid, text, len(ids), owner_id, buttons=_bc_buttons)
             if not bc_id:
                 continue
             broadcaster.start(
@@ -4362,7 +4362,7 @@ async def _exec_network_broadcast(
             ids = await db.get_inactive_user_ids(pool, b["bot_id"], days_from, days_to)
             if not ids:
                 continue
-            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id)
+            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id, buttons=_bc_buttons)
             if not bc_id:
                 continue
             broadcaster.start(
@@ -4400,7 +4400,7 @@ async def _exec_network_broadcast(
             ids = [r["user_id"] for r in rows]
             if not ids:
                 continue
-            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id)
+            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id, buttons=_bc_buttons)
             if not bc_id:
                 continue
             broadcaster.start(
@@ -7469,7 +7469,7 @@ async def _exec_run_broadcast(
     # Create/reuse broadcast record
     if not broadcast_id:
         from database import db as _db
-        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id)
+        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id, buttons=buttons)
 
     broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, buttons)
     await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", total, op_id)

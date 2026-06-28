@@ -372,22 +372,28 @@ async def create_broadcast(
     created_by: int,
     photo_file_id: str | None = None,
     target_user_ids: list[int] | None = None,
+    buttons: list[dict] | None = None,
 ) -> int:
     # target_user_ids сохраняем только для сегментных рассылок (подмножество
     # аудитории); NULL = полная аудитория бота. Используется resume после
     # рестарта, чтобы сегментная рассылка не ушла всей аудитории.
+    # buttons сохраняем, чтобы инлайн-кнопки пережили рестарт (resume).
     import json as _json
     target_json = _json.dumps(target_user_ids) if target_user_ids else None
-    return await pool.fetchval(
-        """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids)
-           VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb) RETURNING id""",
-        bot_id,
-        message_text,
-        total,
-        created_by,
-        photo_file_id,
-        target_json,
-    )
+    buttons_json = _json.dumps(buttons) if buttons else None
+    try:
+        return await pool.fetchval(
+            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons)
+               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb) RETURNING id""",
+            bot_id, message_text, total, created_by, photo_file_id, target_json, buttons_json,
+        )
+    except asyncpg.UndefinedColumnError:
+        # Совместимость со старой схемой без колонки buttons
+        return await pool.fetchval(
+            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids)
+               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb) RETURNING id""",
+            bot_id, message_text, total, created_by, photo_file_id, target_json,
+        )
 
 
 async def update_broadcast(
@@ -423,15 +429,26 @@ async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
     рассылку, пропуская уже доставленных через delivery log.
     """
     import json as _json
-    rows = await pool.fetch(
-        """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
-                  m.token
-           FROM broadcasts b
-           JOIN managed_bots m ON m.bot_id = b.bot_id
-           WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
-             AND m.token IS NOT NULL
-           ORDER BY b.id"""
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
+                      b.buttons, m.token
+               FROM broadcasts b
+               JOIN managed_bots m ON m.bot_id = b.bot_id
+               WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
+                 AND m.token IS NOT NULL
+               ORDER BY b.id"""
+        )
+    except asyncpg.UndefinedColumnError:
+        rows = await pool.fetch(
+            """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
+                      m.token
+               FROM broadcasts b
+               JOIN managed_bots m ON m.bot_id = b.bot_id
+               WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE
+                 AND m.token IS NOT NULL
+               ORDER BY b.id"""
+        )
     from services.token_vault import decrypt_token as _dt
     out: list[dict] = []
     for r in rows:
@@ -444,6 +461,12 @@ async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
                 d["target_user_ids"] = _json.loads(tgt)
             except Exception:
                 d["target_user_ids"] = None
+        btns = d.get("buttons")
+        if isinstance(btns, str):
+            try:
+                d["buttons"] = _json.loads(btns)
+            except Exception:
+                d["buttons"] = None
         out.append(d)
     return out
 
