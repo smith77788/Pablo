@@ -356,6 +356,47 @@ async def send_message(
     return False, None
 
 
+def classify_send_error(error_code: int, description: str) -> str:
+    """Категория ошибки доставки для понятной статистики рассылки.
+    Возвращает: 'flood'|'blocked'|'deactivated'|'not_started'|'other'."""
+    d = (description or "").lower()
+    if error_code == 429:
+        return "flood"
+    if "blocked" in d:
+        return "blocked"
+    if "deactivated" in d:
+        return "deactivated"
+    if "chat not found" in d or "user not found" in d or "can't initiate" in d or "bot can't initiate" in d:
+        return "not_started"
+    return "other"
+
+
+async def send_message_classified(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+    text: str,
+    buttons: list[dict] | None = None,
+    reply_markup: dict | None = None,
+) -> tuple[bool, int | None, str]:
+    """Как send_message, но возвращает ещё категорию ошибки: (ok, retry_after, category)."""
+    params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup is not None:
+        params["reply_markup"] = reply_markup
+    elif buttons:
+        kb = _build_inline_keyboard(buttons)
+        if kb:
+            params["reply_markup"] = kb
+    data = await _call(session, token, "sendMessage", **params)
+    if data.get("ok"):
+        return True, None, ""
+    error_code = data.get("error_code", 0)
+    cat = classify_send_error(error_code, data.get("description", ""))
+    if error_code == 429:
+        return False, data.get("parameters", {}).get("retry_after", 5), cat
+    return False, None, cat
+
+
 async def send_photo(
     session: aiohttp.ClientSession,
     token: str,
