@@ -155,6 +155,23 @@ _PROMO_POSTS = [
 ]
 
 
+def _paid_price() -> str:
+    """Актуальная цена платного тарифа из конфига (env PRICE_PAID)."""
+    try:
+        from config import PLAN_PRICES_USD
+        return f"${PLAN_PRICES_USD.get('paid', 29)}"
+    except Exception:
+        return "$29"
+
+
+def _apply_price(text: str) -> str:
+    """Подставить реальную цену вместо захардкоженной $29 в шаблонах."""
+    price = _paid_price()
+    if price == "$29":
+        return text
+    return text.replace("$29", price)
+
+
 async def post_promo(pool: asyncpg.Pool, bot: Bot) -> bool:
     """Публикует ротирующий промо-пост в канал (FOMO через функции, не через числа)."""
     try:
@@ -172,7 +189,7 @@ async def post_promo(pool: asyncpg.Pool, bot: Bot) -> bool:
     except Exception:
         idx = random.randint(0, len(_PROMO_POSTS) - 1)
 
-    return await post(pool, bot, _PROMO_POSTS[idx])
+    return await post(pool, bot, _apply_price(_PROMO_POSTS[idx]))
 
 
 async def post_promo_offer(pool: asyncpg.Pool, bot: Bot) -> bool:
