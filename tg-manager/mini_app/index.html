@@ -208,6 +208,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .sel-bar-acts{display:flex;gap:6px;flex-wrap:wrap}
 .sel-bar-acts .mini-btn{flex:1;min-width:calc(50% - 3px);text-align:center;padding:9px 6px}
 .acc-row.sel{background:rgba(59,130,246,.14)}
+.bot-card.sel{outline:2px solid var(--btn);outline-offset:-2px}
+.li.tap.sel{background:rgba(59,130,246,.14)}
 .acc-check{width:22px;height:22px;border-radius:7px;border:2px solid var(--hint);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;flex-shrink:0;margin-right:2px}
 .acc-check.on{background:var(--btn);border-color:var(--btn)}
 
@@ -439,12 +441,40 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sb" id="botsBody">
     <!-- Массовые действия по ботам -->
-    <div style="display:flex;gap:8px;padding:0 0 10px">
+    <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1;font-size:13px;padding:10px 6px">📢 Рассылка</button>
       <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1;font-size:13px;padding:10px 6px">📣 Self Promo</button>
       <button class="btn btn-s" onclick="openBotFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
+    <div style="display:flex;gap:8px;padding:0 0 10px">
+      <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+    </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+  <!-- Плавающая панель: рассылка выбранным ботам -->
+  <div id="botSelBar" style="display:none">
+    <div class="sel-bar">
+      <div class="sel-bar-top">
+        <span id="botSelCount">Выбрано: 0</span>
+        <span class="sel-bar-link" onclick="botSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="botSelClear()">Сброс</span>
+      </div>
+      <div class="sel-bar-acts">
+        <button class="mini-btn" onclick="openBotBroadcast()">📢 Рассылка выбранным</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: РАССЫЛКА ВЫБРАННЫМ БОТАМ ══════════════════════ -->
+<div class="mbg" id="mo-bot-broadcast" onclick="if(event.target===this)closeModal('mo-bot-broadcast')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-broadcast')">✕</div>
+    <div class="modal-title">📢 Рассылка выбранным ботам</div>
+    <div id="bbHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
+    <textarea id="bbText" rows="5" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:14px;resize:vertical"></textarea>
+    <div id="bbErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
   </div>
 </div>
 
@@ -830,7 +860,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="mgmt-tile" onclick="openGlobalPresence()">
         <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Global Presence</div>
+        <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
         <div class="mgmt-tile-val" id="m-gp-val"></div>
       </div>
     </div>
@@ -969,8 +999,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-val" id="m-stars-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openPresencePacks()">
-        <div class="mgmt-tile-ico">📦</div>
-        <div class="mgmt-tile-lbl">Presence Packs</div>
+        <div class="mgmt-tile-ico">🔗</div>
+        <div class="mgmt-tile-lbl">Связки (бот+каналы)</div>
         <div class="mgmt-tile-val" id="m-pp-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSettings()">
@@ -1048,20 +1078,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-presencepacks">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">📦 Presence Packs</div>
+    <div class="hdr-title">🔗 Связки (бот+каналы)</div>
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
-    <div class="sec">Пакеты присутствия</div>
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Объединяет ВАШИ существующие бота + каналы + группы в одну воронку: бот-админ, посевные посты, синхронная работа. Это <b>не</b> создание новых каналов.</div>
+    <div class="sec">Мои связки</div>
     <div class="lst" id="ppList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Global Presence</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div></div>
   <div class="sub-sb">
-    <div class="sec">Планы глобального присутствия</div>
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Бот <b>создаёт НОВЫЕ</b> каналы/группы/боты сразу по многим городам с локализованными названиями. Чтобы объединить уже существующие — раздел «🔗 Связки».</div>
+    <div class="sec">Мои планы гео-сети</div>
     <div class="lst" id="gpList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -1445,8 +1477,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="mbg" id="mo-presence-pack" onclick="if(event.target===this)closeModal('mo-presence-pack')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-presence-pack')">✕</div>
-    <div class="modal-title">📦 Новый Presence Pack</div>
-    <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Мой Pack" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="modal-title">🔗 Новая связка</div>
+    <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Моя связка" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Описание</label><input id="pp-desc" type="text" placeholder="Краткое описание..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Целевой URL / @username</label><input id="pp-url" type="text" placeholder="@mybot или https://t.me/..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Метка цели</label><input id="pp-label" type="text" placeholder="Мой бот" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
@@ -3856,29 +3888,86 @@ async function loadBots() {
     BOTS = d.bots||[];
     const cntEl = document.getElementById('bots-cnt');
     if (cntEl) cntEl.textContent = BOTS.length ? BOTS.length+' ботов' : '';
-    const wrap = document.getElementById('botsBody');
-    if (!BOTS.length) {
-      wrap.innerHTML = '<div id="botList">'+empty('🤖','Нет ботов','Нажмите «+ Бот» чтобы подключить бота')+'</div>';
-      return;
-    }
-    wrap.innerHTML = '<div class="bot-cards" id="botList">'+BOTS.map(b=>{
-      const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-      const initials = (b.first_name||name).replace('@','').slice(0,2).toUpperCase();
-      const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
-      const active = b.is_active;
-      const subs = b.subscriber_count||0;
-      return `<div class="bot-card" onclick="openBot(${b.bot_id})">
-        <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
+    renderBots();
+  } catch(e) {
+    const wrap = document.getElementById('botList');
+    if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); }
+  }
+}
+
+function renderBots() {
+  const wrap = document.getElementById('botList');
+  if (!wrap) return;
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Нажмите «+ Бот» чтобы подключить бота'); return; }
+  wrap.className = 'bot-cards';
+  wrap.innerHTML = BOTS.map(b=>{
+    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+    const initials = (b.first_name||name).replace('@','').slice(0,2).toUpperCase();
+    const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
+    const active = b.is_active;
+    const subs = b.subscriber_count||0;
+    const sel = BOT_SEL.has(b.bot_id);
+    if (BOT_SEL_MODE) {
+      return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id})">
         <div class="bot-card-ava" style="background:${grad}">${initials}</div>
         <div class="bot-card-name">${esc(name)}</div>
         <div class="bot-card-subs">${num(subs)}</div>
         <div class="bot-card-lbl">подписчиков</div>
-        <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
+        <span class="badge ${sel?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${sel?'✓ Выбран':'Выбрать'}</span>
       </div>`;
-    }).join('')+'</div>';
-  } catch(e) {
-    document.getElementById('botsBody').innerHTML=`<div id="botList">${errHtml(e.message,'loadBots()')}</div>`;
-  }
+    }
+    return `<div class="bot-card" onclick="openBot(${b.bot_id})">
+      <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
+      <div class="bot-card-ava" style="background:${grad}">${initials}</div>
+      <div class="bot-card-name">${esc(name)}</div>
+      <div class="bot-card-subs">${num(subs)}</div>
+      <div class="bot-card-lbl">подписчиков</div>
+      <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Режим выбора ботов и массовая рассылка ──────────────
+let BOT_SEL_MODE = false;
+let BOT_SEL = new Set();
+function toggleBotSelMode() {
+  BOT_SEL_MODE = !BOT_SEL_MODE;
+  BOT_SEL.clear();
+  const btn = document.getElementById('botSelToggle');
+  if (btn) btn.textContent = BOT_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
+  document.getElementById('botSelBar').style.display = BOT_SEL_MODE ? '' : 'none';
+  renderBots();
+  updateBotSelBar();
+}
+function toggleBotSel(id) {
+  if (BOT_SEL.has(id)) BOT_SEL.delete(id); else BOT_SEL.add(id);
+  renderBots();
+  updateBotSelBar();
+}
+function botSelAll() { BOTS.forEach(b=>BOT_SEL.add(b.bot_id)); renderBots(); updateBotSelBar(); }
+function botSelClear() { BOT_SEL.clear(); renderBots(); updateBotSelBar(); }
+function updateBotSelBar() {
+  const el = document.getElementById('botSelCount');
+  if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
+}
+function openBotBroadcast() {
+  if (!BOT_SEL.size) { toast('Выберите хотя бы одного бота'); return; }
+  document.getElementById('bbText').value='';
+  document.getElementById('bbErr').textContent='';
+  document.getElementById('bbHint').textContent = `Сообщение получат подписчики ${BOT_SEL.size} выбранных ботов.`;
+  showModal('mo-bot-broadcast');
+}
+async function submitBotBroadcast() {
+  const errEl=document.getElementById('bbErr'); errEl.textContent='';
+  const text=document.getElementById('bbText').value.trim();
+  if(!text){ errEl.textContent='Введите текст рассылки'; return; }
+  const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify({text, bot_ids:[...BOT_SEL]})});
+    toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
+    closeModal('mo-bot-broadcast'); toggleBotSelMode();
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Запустить рассылку'; }
 }
 
 async function openBot(botId) {
@@ -9752,13 +9841,13 @@ async function submitPresencePackCreate() {
   };
   try {
     await api('/api/miniapp/presence_pack',{method:'POST',body:JSON.stringify(body)});
-    toast('✅ Presence Pack создан');
+    toast('✅ Связка создана');
     closeModal('mo-presence-pack');
     openPresencePacks();
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deletePresencePack(id, btn) {
-  if (!confirm('Удалить Presence Pack?')) return;
+  if (!confirm('Удалить связку?')) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/presence_pack/${id}`,{method:'DELETE'});

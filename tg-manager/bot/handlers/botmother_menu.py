@@ -208,14 +208,14 @@ def _operations_kb(plan: str = "free"):
 
     kb = InlineKeyboardBuilder()
     kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Strike (зачистка)", callback_data=StrikeCb(action="menu"))
-    kb.button(text=f"{_lock(plan,'enterprise')}🌍 Глоб. присутствие", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'enterprise')}🌍 Гео-сеть: создать", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}📤 Публикация", callback_data=MassPubCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}✍️ Быстрый пост", callback_data=QuickPostCb(action="start"))
     kb.button(text="🚀 Накрутка", callback_data=BoostCb(action="menu"))
     kb.button(text="👥 Инвайтер", callback_data=InviterCb(action="menu"))
     kb.button(text="📋 Контент-клонер", callback_data=ContentClonerCb(action="menu"))
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
-    kb.button(text=f"{_lock(plan,'starter')}📦 Пакеты присутствия", callback_data=PackCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'starter')}🔗 Связки (бот+каналы)", callback_data=PackCb(action="menu"))
     kb.button(text="🎁 Подарки", callback_data="gt:main")
     kb.button(text="📋 Очередь задач", callback_data=MassOpCb(action="queue"))
     kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
@@ -631,11 +631,11 @@ async def cb_operations(
         callback,
         "⚡ <b>Операции — Strike, публикация, массовые действия</b>\n\n"
         "⚔️ <b>Strike</b> — целевые зачистки по каналам/группам [enterprise]\n"
-        "🌍 <b>Присутствие</b> — Global Presence Factory [enterprise]\n"
+        "🌍 <b>Гео-сеть: создать</b> — массово СОЗДАЁТ новые каналы/группы/боты по городам [enterprise]\n"
         "📤 <b>Публикация</b> — массовая публикация во все каналы\n"
         "✍️ <b>Быстрый пост</b> — пошаговый мастер публикации\n"
         "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
-        "📦 <b>Пакеты присутствия</b> — подготовленные сценарии активности\n"
+        "🔗 <b>Связки (бот+каналы)</b> — объединяет ВАШИ бота+каналы+группы в одну воронку\n"
         "🎁 <b>Подарки</b> — перевод подарков между аккаунтами\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
         "⏱️ <b>Планировщик</b> — запустить операцию по расписанию" + infra_line,

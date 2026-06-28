@@ -39,7 +39,7 @@ router = Router()
 log = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "Ты AI-ассистент платформы BotMother OS — корпоративной системы управления Telegram-инфраструктурой.\n"
+    "Ты AI-ассистент платформы Infragram OS — корпоративной системы управления Telegram-инфраструктурой.\n"
     "Ты можешь АНАЛИЗИРОВАТЬ данные пользователя И РЕАЛЬНО ВЫПОЛНЯТЬ задачи управления.\n\n"
     "ВОЗМОЖНОСТИ (инструменты):\n"
     "READ — данные:\n"
@@ -501,7 +501,7 @@ async def _call_ai_providers(
     user_id: int,
     http: aiohttp.ClientSession | None = None,
 ) -> str | dict:
-    """OpenAI-compatible provider failover with BotMother memory context."""
+    """OpenAI-compatible provider failover with Infragram memory context."""
     providers = configured_providers()
     if not providers:
         return (

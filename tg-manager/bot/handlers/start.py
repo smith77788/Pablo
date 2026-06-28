@@ -175,7 +175,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
     if not bot_count:
         await message.answer(
-            "👋 <b>Добро пожаловать в BotMother!</b>\n\n"
+            "👋 <b>Добро пожаловать в Infragram!</b>\n\n"
             "Это система управления Telegram-активами:\n"
             "боты, каналы, группы, аккаунты — всё в одном месте.\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -515,7 +515,7 @@ async def cmd_find(message: Message) -> None:
 
 @router.message(Command("app"))
 async def cmd_app(message: Message) -> None:
-    """Открыть BotMother Mini App."""
+    """Открыть Infragram Mini App."""
     from config import MINI_APP_URL as _MINI_APP_URL
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from aiogram.types import WebAppInfo
@@ -525,7 +525,7 @@ async def cmd_app(message: Message) -> None:
 
     if not url:
         await message.answer(
-            "📱 <b>BotMother Mini App</b>\n\n"
+            "📱 <b>Infragram Mini App</b>\n\n"
             "Приложение не настроено. Добавьте в Railway:\n"
             "<code>MINI_APP_URL = https://ВАШ-СЕРВИС.up.railway.app</code>\n\n"
             "1. Railway → ваш сервис → Settings → Networking → Generate Domain\n"
@@ -540,7 +540,7 @@ async def cmd_app(message: Message) -> None:
     kb.button(text="🌐 Открыть приложение", web_app=WebAppInfo(url=url))
     kb.adjust(1)
     await message.answer(
-        "📱 <b>BotMother Mini App</b>\n\n"
+        "📱 <b>Infragram Mini App</b>\n\n"
         "Нажмите кнопку ниже чтобы открыть панель управления:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

@@ -86,7 +86,7 @@ async def cmd_referral(message: Message) -> None:
     kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))
     await message.answer(
         "👥 <b>Реферальная программа</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
+        "Откройте Infragram OS и перейдите в:\n"
         "<code>/menu → ⚙️ Настройки → 👥 Рефералы</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",

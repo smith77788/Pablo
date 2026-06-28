@@ -882,7 +882,7 @@ async def cb_admin(
     elif action == "bm_channel_set_id":
         await state.set_state(BotMotherChannelFSM.set_channel_id)
         await callback.message.edit_text(
-            "📢 <b>Настройка канала BotMother</b>\n\n"
+            "📢 <b>Настройка канала Infragram</b>\n\n"
             "Введите ID или @username канала:\n"
             "<i>Примеры: @BotMotherChannel или -1001234567890</i>\n\n"
             "Бот должен быть администратором канала с правом публикации.",
@@ -896,7 +896,7 @@ async def cb_admin(
         kb2.button(text="❌ Отмена", callback_data="adm:bm_channel")
         kb2.adjust(1)
         await callback.message.edit_text(
-            "📝 <b>Новый пост в канал BotMother</b>\n\n"
+            "📝 <b>Новый пост в канал Infragram</b>\n\n"
             "Напишите текст поста (HTML поддерживается):\n\n"
             "<i>Совет: используйте <b>жирный</b>, <i>курсив</i>, <code>код</code>, "
             "ссылки через &lt;a href=&quot;...&quot;&gt;текст&lt;/a&gt;</i>",
@@ -3369,11 +3369,11 @@ async def cb_adm_gate_notify_all(
     )
 
 
-# ── BotMother Channel Management ─────────────────────────────────────────────
+# ── Infragram Channel Management ─────────────────────────────────────────────
 
 
 async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
-    """Показать раздел управления каналом BotMother."""
+    """Показать раздел управления каналом Infragram."""
     from services import botmother_channel as _bmc
 
     channel_id = await _bmc.get_channel_id(pool)
@@ -3389,7 +3389,7 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
 
     text = (
-        "📢 <b>Канал BotMother</b>\n\n"
+        "📢 <b>Канал Infragram</b>\n\n"
         f"Канал: {ch_label}\n\n"
         "<b>Типы публикаций:</b>\n"
         "🚀 <b>Возможности</b> — показывает конкретную фичу (6 ротирующих вариантов)\n"
@@ -3447,7 +3447,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
     kb.adjust(1)
     await message.answer(
         f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"
-        f"<i>Опубликовать в канал BotMother?</i>",
+        f"<i>Опубликовать в канал Infragram?</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

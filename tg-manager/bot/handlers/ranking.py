@@ -107,7 +107,7 @@ async def cmd_ranking(message: Message) -> None:
     kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))
     await message.answer(
         "📊 <b>Трекер позиций</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
+        "Откройте Infragram OS и перейдите в:\n"
         "<code>/menu → 📊 Аналитика → 📊 Позиции</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",

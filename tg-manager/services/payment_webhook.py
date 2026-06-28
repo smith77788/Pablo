@@ -314,7 +314,7 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         lines = [
             f"<b>{status_emoji} Деплой {status}</b>",
             "",
-            f"🏷️ <b>Проект:</b> {project.get('name', 'BotMother')}",
+            f"🏷️ <b>Проект:</b> {project.get('name', 'Infragram')}",
             f"🔧 <b>Сервис:</b> {service.get('name', 'tg-manager')}",
             f"🌍 <b>Окружение:</b> {environment.get('name', 'production')}",
             f"🌿 <b>Ветка:</b> <code>{branch}</code>",

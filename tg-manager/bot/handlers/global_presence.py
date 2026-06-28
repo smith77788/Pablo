@@ -151,10 +151,11 @@ async def cb_gp_menu(
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2, 1, 1, 1, 1)
     await callback.message.edit_text(
-        f"🌍 <b>Global Presence Factory</b>\n"
+        f"🌍 <b>Гео-сеть: создать</b> (Global Presence)\n"
         f"{'─' * 28}\n"
-        f"Создайте Telegram-инфраструктуру сразу в сотнях городов — "
+        f"Бот <b>создаёт НОВУЮ</b> Telegram-инфраструктуру сразу в сотнях городов — "
         f"каналы, группы и боты с локализованными названиями и username.\n"
+        f"<i>Если нужно объединить уже существующие активы — это «🔗 Связки».</i>\n"
         f"{plans_hint}\n"
         f"<b>Шаг 1/8 — Выберите тип актива:</b>\n"
         f"📡 <b>Каналы</b> — публичные каналы под каждый город\n"
