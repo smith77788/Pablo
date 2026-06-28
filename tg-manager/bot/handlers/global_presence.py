@@ -125,6 +125,21 @@ async def cb_gp_menu(
         }
         last_status = status_map.get(last["status"], last["status"])
         plans_hint = f"\n📋 Последний план #{last['id']}: {last_status}\n"
+        # Показать причину ошибки, чтобы было понятно что делать
+        if last["status"] == "failed":
+            reason = None
+            try:
+                reason = await pool.fetchval(
+                    "SELECT error_message FROM global_presence_targets "
+                    "WHERE plan_id=$1 AND error_message IS NOT NULL AND error_message<>'' "
+                    "ORDER BY id DESC LIMIT 1",
+                    last["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, "cb_gp_menu: fetch target error failed")
+            if reason:
+                plans_hint += f"<i>Причина: {reason[:120]}</i>\n"
+            plans_hint += "<i>Частые причины: нет активных аккаунтов с сессией, FloodWait, аккаунт в кулдауне. Откройте «Мои планы» для деталей.</i>\n"
 
     await state.set_state(GlobalPresenceFSM.choosing_asset_type)
     kb = InlineKeyboardBuilder()
