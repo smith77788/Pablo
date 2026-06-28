@@ -246,7 +246,7 @@ async def get_effective_bot_count(pool: asyncpg.Pool, user_id: int) -> int:
     if coerce_plan(plan) != "free":
         from database import db as _db
         return await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", user_id
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", user_id
         ) or 0
     from database import db as _db
     return await _db.count_bots_across_linked(pool, user_id)

@@ -754,10 +754,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if target_type == "bot_users" and target_id:
             try:
                 bot_id_int = int(target_id)
-                total_targets = await _safe_count(pool,
-                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
             except (TypeError, ValueError):
-                pass
+                return _err("Invalid target_id", 400)
+            # IDOR-защита: бот должен принадлежать пользователю, иначе можно
+            # разослать DM подписчикам чужого бота и узнать их число.
+            owns_bot = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
+            if not owns_bot:
+                return _err("Бот не найден", 404)
+            total_targets = await _safe_count(pool,
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
         elif target_type == "all_bots":
             total_targets = await _safe_count(pool,
                 """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
@@ -2259,6 +2265,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             username = bot_info.get("username", "")
             first_name = bot_info.get("first_name", "")
             from database import db as _db
+            # Лимит тарифа: enforce только для нового бота (повторное добавление
+            # уже своего бота идемпотентно и не должно блокироваться).
+            already_owned = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            if not already_owned:
+                from bot.utils.subscription import get_bot_limit, get_effective_bot_count
+                _lim = await get_bot_limit(pool, uid)
+                if await get_effective_bot_count(pool, uid) >= _lim:
+                    return _err(f"Достигнут лимит ботов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
             result = await _db.add_bot(pool, token, bot_id, username, first_name, uid)
             if result == "taken":
                 return _err("Этот бот уже добавлен другим пользователем", 409)
@@ -2631,7 +2646,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        node_id = int(request.match_info["node_id"])
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
         try:
             node = await pool.fetchrow(
                 "SELECT id, name FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2",
@@ -2776,7 +2794,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         source = body.get("source", "parsed")
         account_ids = body.get("account_ids") or []
         if account_ids:
-            account_ids = [int(x) for x in account_ids if str(x).isdigit()]
+            req_ids = [int(x) for x in account_ids if str(x).isdigit()]
+            # Фильтруем по владельцу (как в accounts_mass) — не полагаемся только
+            # на повторный скоуп в executor.
+            owned = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                uid, req_ids)
+            account_ids = [int(r["id"]) for r in (owned or [])]
+            if not account_ids:
+                return _err("Аккаунты не найдены", 404)
         try:
             label = f"Mass Invite → {group}"
             params = {"group": group, "source": source}
@@ -3148,6 +3174,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         target_id = body.get("target_id")
         if not name or not text:
             return _err("Заполните название и текст", 400)
+        # IDOR-защита: при таргете на конкретного бота проверяем владение.
+        if target_type in ("bot_users", "cohort") and target_id:
+            try:
+                _bid = int(target_id)
+            except (TypeError, ValueError):
+                return _err("Invalid target_id", 400)
+            owns_bot = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", _bid, uid)
+            if not owns_bot:
+                return _err("Бот не найден", 404)
         # Calculate total_targets depending on type
         total_targets = 0
         try:
@@ -3350,7 +3386,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        exp_id = int(request.match_info["exp_id"])
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("bad exp_id", 400)
         try:
             exp = await pool.fetchrow(
                 """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
@@ -5793,6 +5832,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not acc:
                 return _err("Аккаунт не найден или неактивен", 404)
+            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+            _lim = await get_channel_limit(pool, uid)
+            if await get_effective_channel_count(pool, uid) >= _lim:
+                return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
                 "VALUES($1,'create_channel','pending',$2,1,$3) RETURNING id",
@@ -5843,6 +5886,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not acc:
                 return _err("Аккаунт не найден или неактивен", 404)
+            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+            _lim = await get_channel_limit(pool, uid)
+            if await get_effective_channel_count(pool, uid) >= _lim:
+                return _err(f"Достигнут лимит каналов/групп ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
                 "VALUES($1,'create_group','pending',$2,1,$3) RETURNING id",
@@ -6384,14 +6431,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad tpl_id", 400)
         try:
             tpl = await pool.fetchrow(
-                "SELECT is_active FROM self_promo_templates WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
+                "SELECT is_active, owner_id FROM self_promo_templates WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
                 tpl_id, uid,
             )
             if not tpl:
                 return _err("not found", 404)
+            # Системные (общие) шаблоны нельзя переключать обычному пользователю —
+            # это влияло бы на всех. Меняем только свои.
+            if tpl["owner_id"] is None:
+                return _err("Системный шаблон нельзя переключать", 403)
             new_state = not tpl["is_active"]
             await pool.execute(
-                "UPDATE self_promo_templates SET is_active=$1 WHERE id=$2 AND (owner_id=$3 OR owner_id IS NULL)",
+                "UPDATE self_promo_templates SET is_active=$1 WHERE id=$2 AND owner_id=$3",
                 new_state, tpl_id, uid,
             )
             return _json_resp({"active": new_state})

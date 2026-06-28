@@ -92,15 +92,17 @@ async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
     if bot_id in _plan_cache:
         return _plan_cache[bot_id]
     try:
-        row = await pool.fetchrow(
-            """SELECT pu.current_plan
-               FROM managed_bots mb
-               JOIN platform_users pu ON pu.user_id = mb.added_by
-               WHERE mb.bot_id = $1""",
-            bot_id,
+        owner = await pool.fetchval(
+            "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
         )
-        plan = (row["current_plan"] if row else "free") or "free"
-        result = plan.lower() in ("free", "")
+        if not owner:
+            return False
+        # Авторитетный источник плана — get_plan (таблица subscriptions), а не
+        # platform_users.current_plan, который может отставать → иначе платящему
+        # клиенту вставляется промо-брендинг.
+        from bot.utils.subscription import get_plan, coerce_plan
+        plan = coerce_plan(await get_plan(pool, owner))
+        result = plan == "free"
         _plan_cache[bot_id] = result
         return result
     except Exception as e:
@@ -113,12 +115,9 @@ async def is_user_free_tier(pool: asyncpg.Pool, user_id: int) -> bool:
     if user_id in _user_plan_cache:
         return _user_plan_cache[user_id]
     try:
-        row = await pool.fetchrow(
-            "SELECT current_plan FROM platform_users WHERE user_id=$1",
-            user_id,
-        )
-        plan = (row["current_plan"] if row else "free") or "free"
-        result = plan.lower() in ("free", "")
+        from bot.utils.subscription import get_plan, coerce_plan
+        plan = coerce_plan(await get_plan(pool, user_id))
+        result = plan == "free"
         _user_plan_cache[user_id] = result
         return result
     except Exception as e:
