@@ -3993,6 +3993,9 @@ async function submitBotBroadcast() {
   const text=document.getElementById('bbText').value.trim();
   if(!text){ errEl.textContent='Введите текст рассылки'; return; }
   const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
+  const preview = `Отправить рассылку по ${BOT_SEL.size} ботам?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+    + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
+  if (!await askConfirm(preview)) return;
   const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
@@ -5023,6 +5026,11 @@ async function sendBcast() {
   if (btnsRaw.trim() && !buttons.length) {
     errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
   }
+  // Предпросмотр перед отправкой — защита от случайной рассылки
+  const recip = document.getElementById('bcastRecip')?.textContent || '';
+  const preview = `Отправить рассылку?\n\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+    + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
+  if (!await askConfirm(preview)) return;
   const btn = document.getElementById('bcastBtn');
   btn.disabled=true; btn.textContent='⏳ Отправка...';
   try {
