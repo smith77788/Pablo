@@ -175,7 +175,7 @@ def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
 
     # Нормализация ok: разные exec-функции используют sent/ok/created
     if "ok" not in result:
-        for alias in ("sent", "created", "waves_completed"):
+        for alias in ("sent", "created", "waves_completed", "left", "deleted", "joined", "invited", "published"):
             if alias in result:
                 result["ok"] = result[alias]
                 break
@@ -7223,8 +7223,11 @@ async def _exec_gift_scan(
         except Exception as exc:
             log.warning("_exec_gift_scan sync error: %s", exc)
 
+    failed_accounts = total_accounts - accounts_ok
     return {
-        "status": "done",
+        "status": "done" if accounts_ok else "failed",
+        "ok": accounts_ok,
+        "failed": failed_accounts,
         "accounts_scanned": accounts_ok,
         "gifts_found": len(all_gifts),
         "gifts_saved": saved,
@@ -7289,9 +7292,9 @@ async def _exec_report_peer(
             await asyncio.sleep(2.5)
 
     return {
-        "status": "done",
+        "status": "done" if ok_count else "failed",
         "ok": ok_count,
-        "fail": fail_count,
+        "failed": fail_count,
         "total": len(accounts),
         "summary": f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно" + (f" ❌ {fail_count}" if fail_count else ""),
     }
@@ -7329,7 +7332,8 @@ async def _exec_leave_all_chats(
         # Use high-level get_dialogs() which resolves entities automatically.
         # Raw GetDialogsRequest returns Dialog TL types without .entity attribute,
         # which caused the list comprehension to always produce an empty chats list.
-        dialogs = await client.get_dialogs(limit=200)
+        # wait_for: мёртвый прокси/half-open сокет иначе подвешивает операцию навсегда.
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=200), timeout=60)
         chats = [d.entity for d in dialogs if d.is_group or d.is_channel]
         total = len(chats)
         await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
@@ -7337,7 +7341,7 @@ async def _exec_leave_all_chats(
             if await _is_cancelled(pool, op_id):
                 break
             try:
-                await client.delete_dialog(entity)
+                await asyncio.wait_for(client.delete_dialog(entity), timeout=30)
                 left += 1
             except Exception as exc:
                 log.debug("leave_all_chats: skip %s: %s", getattr(entity, "id", "?"), exc)
