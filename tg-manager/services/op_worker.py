@@ -6994,14 +6994,43 @@ async def _exec_self_promo_blast(
     if not tpl:
         return {"status": "failed", "summary": "⚠️ Шаблон не найден или неактивен"}
 
+    # Правильная реф-ссылка на системного бота (а не хардкод @BotMotherBot из сидов).
+    correct_link = None
+    try:
+        from database import db as _db
+        me = await bot.get_me()
+        code = await _db.get_or_create_referral_code(pool, owner_id)
+        if me and me.username:
+            correct_link = f"https://t.me/{me.username}?start={code}"
+    except Exception as exc:
+        log.warning("self_promo_blast: не удалось построить реф-ссылку: %s", exc)
+
+    def _fix_link(s):
+        """Заменить хардкод-ссылки на BotMother на реальную реф-ссылку бота."""
+        if not s or not correct_link:
+            return s
+        import re as _re
+        return _re.sub(
+            r"https?://t\.me/(?:BotMotherBot|botmother_bot|BotMother)\b[^\s\"<]*",
+            correct_link, s, flags=_re.IGNORECASE,
+        )
+
+    content = _fix_link(tpl["content"])
+    cta_url = _fix_link(tpl["cta_url"])
+    # Если в шаблоне вообще нет ссылки — добавим реальную реф-ссылку как CTA
+    if not cta_url and correct_link:
+        cta_url = correct_link
+
     # Build message text
     text_parts = []
-    if tpl["content"]:
-        text_parts.append(tpl["content"])
-    if tpl["cta_text"] and tpl["cta_url"]:
-        text_parts.append(f'\n<a href="{_html.escape(tpl["cta_url"])}">{_html.escape(tpl["cta_text"])}</a>')
+    if content:
+        text_parts.append(content)
+    if tpl["cta_text"] and cta_url:
+        text_parts.append(f'\n<a href="{_html.escape(cta_url)}">{_html.escape(tpl["cta_text"])}</a>')
     elif tpl["cta_text"]:
         text_parts.append(f"\n{_html.escape(tpl['cta_text'])}")
+    elif cta_url:
+        text_parts.append(f"\n{_html.escape(cta_url)}")
     message_text = "\n".join(text_parts) or tpl["title"] or "Promo"
 
     # Get all active bot_users across owner's bots

@@ -369,7 +369,8 @@ async def fsm_sp_add_cta_text(message: Message, state: FSMContext) -> None:
     await state.update_data(cta_text=cta_text)
     await state.set_state(SelfPromoFSM.add_cta_url)
     await message.answer(
-        "Введите <b>URL для кнопки</b> (например: https://t.me/BotMotherBot):",
+        "Введите <b>URL для кнопки</b> (например: https://t.me/ваш_канал).\n"
+        "Можно пропустить — тогда подставится ваша реферальная ссылка на бота автоматически:",
         parse_mode="HTML",
         reply_markup=_skip_back_kb("add_skip_url"),
     )

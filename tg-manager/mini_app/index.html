@@ -201,6 +201,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .kpi-mini{flex:1;background:var(--bg2);border-radius:10px;padding:10px;text-align:center}
 .kpi-mini-v{font-size:20px;font-weight:700;color:var(--text)}
 .kpi-mini-l{font-size:11px;color:var(--hint);margin-top:2px}
+.sel-bar{position:fixed;left:0;right:0;bottom:60px;z-index:60;margin:0 12px;background:var(--bg2);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:10px 12px;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.sel-bar-top{display:flex;align-items:center;gap:12px;font-size:13px;font-weight:600;margin-bottom:8px}
+.sel-bar-top span:first-child{flex:1}
+.sel-bar-link{color:var(--btn);cursor:pointer;font-weight:600}
+.sel-bar-acts{display:flex;gap:6px;flex-wrap:wrap}
+.sel-bar-acts .mini-btn{flex:1;min-width:calc(50% - 3px);text-align:center;padding:9px 6px}
+.acc-row.sel{background:rgba(59,130,246,.14)}
+.acc-check{width:22px;height:22px;border-radius:7px;border:2px solid var(--hint);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;flex-shrink:0;margin-right:2px}
+.acc-check.on{background:var(--btn);border-color:var(--btn)}
 
 /* ─── Profile header (Telegram-style) ───────────────────── */
 .profile-hdr{display:flex;flex-direction:column;align-items:center;padding:24px 16px 16px;text-align:center}
@@ -499,8 +508,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Массовые действия по аккаунтам -->
     <div style="display:flex;gap:8px;padding:4px 0 8px">
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
-      <button class="btn btn-s" onclick="openMassOps()" style="flex:1;font-size:13px;padding:10px 6px">⚡ Массовые</button>
-      <button class="btn btn-s" onclick="openWarmup()" style="flex:1;font-size:13px;padding:10px 6px">🌱 Прогрев</button>
+      <button class="btn btn-s" onclick="openMassOps()" style="flex:1;font-size:13px;padding:10px 6px">⚡ История</button>
+      <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
     </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:12px">
@@ -508,6 +517,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="sec-btn" onclick="openChannels()">Открыть →</span>
     </div>
     <div class="lst" id="chPreview"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+  <!-- Плавающая панель массовых действий (режим выбора) -->
+  <div id="accSelBar" style="display:none">
+    <div class="sel-bar">
+      <div class="sel-bar-top">
+        <span id="accSelCount">Выбрано: 0</span>
+        <span class="sel-bar-link" onclick="accSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="accSelClear()">Сброс</span>
+      </div>
+      <div class="sel-bar-acts">
+        <button class="mini-btn" onclick="runAccMass('check')">🔍 Проверка</button>
+        <button class="mini-btn" onclick="runAccMass('scan')">🔎 Скан</button>
+        <button class="mini-btn" onclick="openMassProfile()">🎨 Профиль</button>
+        <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1531,6 +1556,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
   </div>
   <div class="sub-sb">
+    <!-- Настройки/инфо: куда ведёт реклама -->
+    <div id="spInfo" style="background:var(--bg2);border-radius:12px;padding:12px;margin:4px 0 10px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">⚙️ Куда ведёт реклама</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Рассылка идёт подписчикам ваших ботов. Ссылка ведёт на системного бота с вашим реферальным кодом — все приглашённые засчитываются вам.</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <code id="spRefLink" style="flex:1;font-size:11px;background:var(--bg);padding:8px;border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</code>
+        <button class="mini-btn" onclick="copySpRefLink()">📋</button>
+      </div>
+    </div>
     <div class="sec">Шаблоны самопиара</div>
     <div class="lst" id="spList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -4067,8 +4101,10 @@ async function removeChannel(chId) {
 }
 // ── Профиль аккаунта (модалка) ───────────────────────────
 let AP_ACC_ID = null;
+let AP_MASS = false;
 function openAccProfile(id) {
   AP_ACC_ID = id;
+  AP_MASS = false;
   const e=document.getElementById('apErr'); if(e) e.textContent='';
   document.getElementById('apOp').value='name';
   apToggle();
@@ -4088,8 +4124,18 @@ async function submitAccProfile() {
   else { payload.new_password=document.getElementById('apNewPass').value.trim(); payload.current_password=document.getElementById('apCurPass').value.trim(); payload.hint=document.getElementById('apHint').value.trim(); if(!payload.new_password){errEl.textContent='Укажите новый пароль';return;} }
   const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
-    const r=await api(`/api/miniapp/account/${AP_ACC_ID}/profile`,{method:'POST',body:JSON.stringify(payload)});
-    toast(`✅ Поставлено в очередь (#${r.op_id})`); closeModal('mo-acc-profile');
+    let r;
+    if (AP_MASS) {
+      payload.account_ids = [...ACC_SEL];
+      r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify(payload)});
+      toast(`✅ Поставлено в очередь для ${r.count||payload.account_ids.length} аккаунтов`);
+      closeModal('mo-acc-profile');
+      toggleAccSelMode();
+    } else {
+      r = await api(`/api/miniapp/account/${AP_ACC_ID}/profile`,{method:'POST',body:JSON.stringify(payload)});
+      toast(`✅ Поставлено в очередь (#${r.op_id})`);
+      closeModal('mo-acc-profile');
+    }
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Применить'; }
 }
@@ -4269,20 +4315,89 @@ function renderAccounts(list) {
     else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
     else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
     else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
-    return `<div class="acc-row" onclick="openAccount(${a.id})">
+    const sel = ACC_SEL.has(a.id);
+    const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
+    const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
+    const right = ACC_SEL_MODE ? '' : `<div class="acc-right">
+        <span class="badge ${cls}">${status}</span>
+        <span style="font-size:10px;color:var(--hint)">${trust}%</span>
+        <span class="chev">›</span>
+      </div>`;
+    return `<div class="acc-row ${ACC_SEL_MODE&&sel?'sel':''}" onclick="${onclick}">
+      ${checkbox}
       <div class="ava ${ava_cls}" style="font-size:15px">${flag}</div>
       <div class="acc-body">
         <div class="acc-name">${esc(name)}</div>
         <div class="acc-phone">${esc(phone)}</div>
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
       </div>
-      <div class="acc-right">
-        <span class="badge ${cls}">${status}</span>
-        <span style="font-size:10px;color:var(--hint)">${trust}%</span>
-        <span class="chev">›</span>
-      </div>
+      ${right}
     </div>`;
   }).join('');
+}
+
+// ── Режим выбора аккаунтов и массовые действия ──────────
+let ACC_SEL_MODE = false;
+let ACC_SEL = new Set();
+function toggleAccSelMode() {
+  ACC_SEL_MODE = !ACC_SEL_MODE;
+  ACC_SEL.clear();
+  const btn = document.getElementById('accSelToggle');
+  if (btn) btn.textContent = ACC_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
+  document.getElementById('accSelBar').style.display = ACC_SEL_MODE ? '' : 'none';
+  renderAccounts(_accFiltered());
+  updateAccSelBar();
+}
+function _accFiltered() {
+  // текущий активный фильтр KPI
+  const active = document.querySelector('.acc-kpi-card.on');
+  const f = active ? active.getAttribute('data-filter') : 'all';
+  if (f==='active') return CUR_ACCS.filter(a=>a.is_active && a.acc_status!=='banned' && !isOnCooldown(a));
+  if (f==='cooldown') return CUR_ACCS.filter(a=>isOnCooldown(a));
+  if (f==='banned') return CUR_ACCS.filter(a=>a.acc_status==='banned');
+  return CUR_ACCS;
+}
+function toggleAccSel(id) {
+  if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
+  renderAccounts(_accFiltered());
+  updateAccSelBar();
+}
+function accSelAll() {
+  _accFiltered().forEach(a=>ACC_SEL.add(a.id));
+  renderAccounts(_accFiltered());
+  updateAccSelBar();
+}
+function accSelClear() {
+  ACC_SEL.clear();
+  renderAccounts(_accFiltered());
+  updateAccSelBar();
+}
+function updateAccSelBar() {
+  const el = document.getElementById('accSelCount');
+  if (el) el.textContent = 'Выбрано: '+ACC_SEL.size;
+}
+async function runAccMass(op) {
+  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  const ids = [...ACC_SEL];
+  const confirmMsg = op==='leave_all'
+    ? `Выйти из всех чатов на ${ids.length} аккаунтах? Действие необратимо.`
+    : op==='scan' ? `Сканировать ресурсы на ${ids.length} аккаунтах?`
+    : op==='check' ? `Проверить ${ids.length} аккаунтов?` : null;
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try {
+    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, account_ids:ids})});
+    const cnt = r.count||ids.length;
+    toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
+    toggleAccSelMode();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+function openMassProfile() {
+  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  AP_MASS = true;
+  const e=document.getElementById('apErr'); if(e) e.textContent='';
+  document.getElementById('apOp').value='name';
+  apToggle();
+  showModal('mo-acc-profile');
 }
 
 // ── Account Detail ─────────────────────────────────────
@@ -5748,8 +5863,14 @@ function goRef() {
   document.getElementById('refMbg').classList.add('show');
 }
 function closeRef() { document.getElementById('refMbg').classList.remove('show'); }
+function refLink() {
+  const u = (window._botUsername||'').replace(/^@/,'');
+  if (!u) return null;
+  return `https://t.me/${u}?start=${REF_CODE}`;
+}
 function copyRef() {
-  const url = `https://t.me/botmother_bot?start=ref_${REF_CODE}`;
+  const url = refLink();
+  if (!url) { toast('⚠️ Username бота не определён'); return; }
   navigator.clipboard?.writeText(url).then(()=>toast('✅ Ссылка скопирована!')).catch(()=>toast(url));
 }
 
@@ -9126,8 +9247,17 @@ async function submitNarrativeCreate() {
 }
 
 // ── Self Promo ─────────────────────────────────────────
+function copySpRefLink() {
+  const url = refLink();
+  if (!url) { toast('⚠️ Username бота не определён'); return; }
+  navigator.clipboard?.writeText(url).then(()=>toast('✅ Ссылка скопирована!')).catch(()=>toast(url));
+}
 async function openSelfPromo() {
   push('s-selfpromo');
+  // Показать реальную реф-ссылку на системного бота
+  const link = refLink();
+  const el = document.getElementById('spRefLink');
+  if (el) el.textContent = link || 'Username бота определяется…';
   txt('spList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/self_promo');

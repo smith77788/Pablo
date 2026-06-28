@@ -20,6 +20,39 @@ def _bot_token() -> str:
     return os.getenv("BOT_TOKEN", os.getenv("MANAGER_BOT_TOKEN", ""))
 
 
+_bot_username_cache: str | None = None
+
+
+async def _resolve_bot_username() -> str:
+    """Реальный username системного бота. Сначала env BOT_USERNAME, иначе get_me()
+    (с кэшем), чтобы фронт не подставлял хардкод вроде @botmother_bot."""
+    global _bot_username_cache
+    env_u = os.getenv("BOT_USERNAME", "").lstrip("@").strip()
+    if env_u:
+        return env_u
+    if _bot_username_cache is not None:
+        return _bot_username_cache
+    token = _bot_token()
+    if not token:
+        _bot_username_cache = ""
+        return ""
+    try:
+        from aiogram import Bot as _Bot
+        _b = _Bot(token=token)
+        try:
+            me = await _b.get_me()
+            _bot_username_cache = (me.username or "").lstrip("@")
+        finally:
+            try:
+                await _b.session.close()
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning("_resolve_bot_username failed: %s", e)
+        _bot_username_cache = ""
+    return _bot_username_cache
+
+
 def _json_resp(data: Any, status: int = 200) -> web.Response:
     return web.Response(
         text=json.dumps(data, ensure_ascii=False, default=str),
@@ -1498,6 +1531,95 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
         except Exception as exc:
             log.exception("accounts_check uid=%d", uid)
+            return _err(str(exc), 500)
+
+    def _build_profile_params(op: str, body: dict, ids: list) -> tuple:
+        """Собрать params для profile_setter. Возвращает (params, label) или (None, error)."""
+        params: dict = {"op": op, "account_ids": ids}
+        if op == "name":
+            fn = (body.get("first_name") or "").strip()
+            if not fn:
+                return None, "Укажите имя"
+            params["name_data"] = {
+                "first_name": fn,
+                "last_name": (body.get("last_name") or "").strip(),
+                "about": (body.get("about") or "").strip(),
+            }
+            return params, "Смена имени/bio"
+        if op == "avatar":
+            url = (body.get("avatar_url") or "").strip()
+            if not url:
+                return None, "Укажите ссылку на аватар"
+            params["avatar_url"] = url
+            return params, "Смена аватара"
+        if op == "2fa":
+            np = (body.get("new_password") or "").strip()
+            if not np:
+                return None, "Укажите новый пароль"
+            params["new_password"] = np
+            params["current_password"] = (body.get("current_password") or "").strip()
+            params["hint"] = (body.get("hint") or "").strip()
+            return params, "Смена 2FA"
+        return None, "Неизвестная операция"
+
+    async def accounts_mass(request: web.Request) -> web.Response:
+        """Массовое действие над выбранными аккаунтами.
+        body: {op: check|scan|leave_all|name|avatar|2fa, account_ids: [..], ...}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        op = body.get("op")
+        ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
+        if not ids_in:
+            return _err("Выберите аккаунты", 400)
+        owned = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            uid, ids_in)
+        ids = [int(r["id"]) for r in (owned or [])]
+        if not ids:
+            return _err("Аккаунты не найдены", 404)
+        n = len(ids)
+        try:
+            if op == "check":
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'check_accounts_health','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps({"account_ids": ids, "check_spambot": True}), n,
+                    f"Проверка {n} аккаунтов")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "scan":
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'scan_owned_resources','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps({"account_ids": ids}), n,
+                    f"Скан ресурсов: {n} акк.")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "leave_all":
+                # leave_all_chats — по одному аккаунту, ставим N операций
+                op_ids = []
+                for aid in ids:
+                    oid = await pool.fetchval(
+                        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                        "VALUES($1,'leave_all_chats','pending',$2,1,$3) RETURNING id",
+                        uid, _json.dumps({"account_id": aid}), f"Выход из всех чатов (акк. {aid})")
+                    op_ids.append(int(oid))
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            if op in ("name", "avatar", "2fa"):
+                params, label = _build_profile_params(op, body, ids)
+                if params is None:
+                    return _err(label, 400)
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'profile_setter','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps(params), n, f"{label}: {n} акк.")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            return _err("Неизвестная операция", 400)
+        except Exception as exc:
+            log.exception("accounts_mass uid=%d op=%s", uid, op)
             return _err(str(exc), 500)
 
     async def account_profile(request: web.Request) -> web.Response:
@@ -6667,6 +6789,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/platform_users", platform_new_users)
     app.router.add_get("/api/miniapp/platform_users/export", platform_new_users_export)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
@@ -6818,7 +6941,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def miniapp_config(request: web.Request) -> web.Response:
         """Public config endpoint — no auth required. Returns bot info for frontend."""
-        bot_username = os.getenv("BOT_USERNAME", "")
+        bot_username = await _resolve_bot_username()
         mini_app_url = os.getenv("MINI_APP_URL", "")
         return _json_resp({
             "bot_username": bot_username,
