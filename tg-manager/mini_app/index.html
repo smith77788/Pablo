@@ -554,12 +554,43 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <!-- Массовые действия по каналам -->
-    <div style="display:flex;gap:8px;padding:4px 0 8px">
+    <div style="display:flex;gap:8px;padding:4px 0 6px">
       <button class="btn btn-p" onclick="openMassPub()" style="flex:1;font-size:13px;padding:10px 6px">📤 Массовый пост</button>
       <button class="btn btn-s" onclick="openQuickPost()" style="flex:1;font-size:13px;padding:10px 6px">✍️ Quick Post</button>
       <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
+    <div style="display:flex;gap:8px;padding:0 0 8px">
+      <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
+    </div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+  <!-- Плавающая панель массовых действий по каналам -->
+  <div id="chSelBar" style="display:none">
+    <div class="sel-bar">
+      <div class="sel-bar-top">
+        <span id="chSelCount">Выбрано: 0</span>
+        <span class="sel-bar-link" onclick="chSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="chSelClear()">Сброс</span>
+      </div>
+      <div class="sel-bar-acts">
+        <button class="mini-btn" onclick="openChMass('post')">📤 Пост</button>
+        <button class="mini-btn" onclick="openChMass('about')">✏️ Описание</button>
+        <button class="mini-btn" onclick="openChMass('username')">🔗 Username</button>
+        <button class="mini-btn" onclick="runChMass('promote')">👑 Админы</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: МАСС. ДЕЙСТВИЕ ПО КАНАЛАМ ══════════════════════ -->
+<div class="mbg" id="mo-chan-mass" onclick="if(event.target===this)closeModal('mo-chan-mass')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-chan-mass')">✕</div>
+    <div class="modal-title" id="chmTitle">Массовое действие</div>
+    <div id="chmHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
+    <textarea id="chmValue" rows="4" placeholder="" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:14px;resize:vertical"></textarea>
+    <div id="chmErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" id="chmBtn" onclick="submitChMass()" style="width:100%;margin-top:8px">Применить</button>
   </div>
 </div>
 
@@ -4545,21 +4576,94 @@ async function openChannels() {
     CUR_CHANNELS = d.channels||[];
     txt('ch-cnt', CUR_CHANNELS.length+' каналов');
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Добавьте канал через меню в Telegram')); return; }
-    txt('chList', CUR_CHANNELS.map(c=>{
-      const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
-      const type = c.type==='supergroup'?'💬 Группа':c.type==='channel'?'📡 Канал':'💬 Чат';
-      return `<div class="li tap" onclick="openChannel(${c.channel_id})">
-        <div class="ava ava-purple">📡</div>
-        <div class="li-body">
-          <div class="li-name">${esc(name)}</div>
-          <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div>
-        </div>
-        <div class="li-right"><span class="badge b-bl">${num(c.member_count||0)}</span><span class="chev">›</span></div>
-      </div>`;
-    }).join(''));
+    renderChannels(CUR_CHANNELS);
   } catch(e) {
     txt('chList', errHtml(e.message,'loadChannels()'));
   }
+}
+
+function renderChannels(list) {
+  txt('chList', list.map(c=>{
+    const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
+    const type = c.type==='supergroup'?'💬 Группа':c.type==='channel'?'📡 Канал':'💬 Чат';
+    const sel = CH_SEL.has(c.channel_id);
+    const onclick = CH_SEL_MODE ? `toggleChSel('${c.channel_id}')` : `openChannel(${c.channel_id})`;
+    const checkbox = CH_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
+    const right = CH_SEL_MODE ? '' : `<div class="li-right"><span class="badge b-bl">${num(c.member_count||0)}</span><span class="chev">›</span></div>`;
+    return `<div class="li tap ${CH_SEL_MODE&&sel?'sel':''}" onclick="${onclick}">
+      ${checkbox}
+      <div class="ava ava-purple">📡</div>
+      <div class="li-body">
+        <div class="li-name">${esc(name)}</div>
+        <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div>
+      </div>
+      ${right}
+    </div>`;
+  }).join(''));
+}
+
+// ── Режим выбора каналов и массовые действия ────────────
+let CH_SEL_MODE = false;
+let CH_SEL = new Set();
+let CHM_OP = null;
+function toggleChSelMode() {
+  CH_SEL_MODE = !CH_SEL_MODE;
+  CH_SEL.clear();
+  const btn = document.getElementById('chSelToggle');
+  if (btn) btn.textContent = CH_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать каналы';
+  document.getElementById('chSelBar').style.display = CH_SEL_MODE ? '' : 'none';
+  renderChannels(CUR_CHANNELS);
+  updateChSelBar();
+}
+function toggleChSel(id) {
+  id = Number(id);
+  if (CH_SEL.has(id)) CH_SEL.delete(id); else CH_SEL.add(id);
+  renderChannels(CUR_CHANNELS);
+  updateChSelBar();
+}
+function chSelAll() { CUR_CHANNELS.forEach(c=>CH_SEL.add(Number(c.channel_id))); renderChannels(CUR_CHANNELS); updateChSelBar(); }
+function chSelClear() { CH_SEL.clear(); renderChannels(CUR_CHANNELS); updateChSelBar(); }
+function updateChSelBar() {
+  const el = document.getElementById('chSelCount');
+  if (el) el.textContent = 'Выбрано: '+CH_SEL.size;
+}
+function openChMass(op) {
+  if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
+  CHM_OP = op;
+  const cfg = {
+    post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах.`, ph:'Текст поста…'},
+    about:{t:'✏️ Новое описание', h:`Описание изменится в ${CH_SEL.size} каналах.`, ph:'Новое описание…'},
+    username:{t:'🔗 Новый username', h:'Без @. Применяется по одному каналу (username уникален).', ph:'newusername'},
+  }[op];
+  document.getElementById('chmTitle').textContent = cfg.t;
+  document.getElementById('chmHint').textContent = cfg.h;
+  const ta = document.getElementById('chmValue');
+  ta.placeholder = cfg.ph; ta.value=''; ta.rows = op==='post'?5:2;
+  document.getElementById('chmErr').textContent='';
+  showModal('mo-chan-mass');
+}
+async function submitChMass() {
+  const errEl = document.getElementById('chmErr'); errEl.textContent='';
+  const val = document.getElementById('chmValue').value.trim();
+  if (!val) { errEl.textContent='Введите значение'; return; }
+  const body = {op:CHM_OP, channel_ids:[...CH_SEL]};
+  if (CHM_OP==='post') body.text = val; else body.value = val.replace(/^@/,'');
+  const btn=document.getElementById('chmBtn'); btn.disabled=true; btn.textContent='Применяю…';
+  try {
+    const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify(body)});
+    toast(`✅ Поставлено в очередь для ${r.count||CH_SEL.size} каналов`);
+    closeModal('mo-chan-mass'); toggleChSelMode();
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Применить'; }
+}
+async function runChMass(op) {
+  if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
+  if (op==='promote' && !confirm(`Назначить аккаунты администраторами в ${CH_SEL.size} каналах?`)) return;
+  try {
+    const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify({op, channel_ids:[...CH_SEL]})});
+    toast(`✅ Поставлено в очередь для ${r.count||CH_SEL.size} каналов`);
+    toggleChSelMode();
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function openChannel(chId) {

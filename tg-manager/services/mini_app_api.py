@@ -1741,6 +1741,75 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
             return _err(str(exc), 500)
 
+    async def channels_mass(request: web.Request) -> web.Response:
+        """Массовое действие над выбранными каналами.
+        body: {op: post|about|username|promote, channel_ids: [..], value?/text?}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        op = body.get("op")
+        ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        if not ids_in:
+            return _err("Выберите каналы", 400)
+        chans = await _safe_fetch(pool,
+            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
+            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
+        chans = [c for c in (chans or []) if c.get("acc_id")]
+        if not chans:
+            return _err("Каналы не найдены или нет привязанного аккаунта", 404)
+        n = len(chans)
+        try:
+            if op in ("about", "username"):
+                value = (body.get("value") or "").strip()
+                if not value:
+                    return _err("Укажите значение", 400)
+                worker_op = "chan_about" if op == "about" else "chan_uname"
+                pairs = [{"channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
+                          "title": c.get("title") or ""} for c in chans]
+                params = {"op": worker_op, "value": value, "base_uname": value,
+                          "channel_acc_pairs": pairs}
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'bulk_chan_exec','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps(params), n, f"Каналы ({op}): {n}")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "post":
+                text = (body.get("text") or "").strip()
+                if not text:
+                    return _err("Введите текст поста", 400)
+                if len(text) > 4096:
+                    return _err("Слишком длинный текст (макс. 4096)", 400)
+                from services.operation_bus import submit
+                op_ids = []
+                for c in chans:
+                    oid = await submit(pool, uid, "bulk_post_to_channel", {
+                        "account_ids": [int(c["acc_id"])],
+                        "channel_ref": int(c["channel_id"]),
+                        "text_to_post": text,
+                        "bulk_access_hash": int(c.get("access_hash") or 0),
+                    }, total_items=1)
+                    op_ids.append(int(oid))
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            if op == "promote":
+                op_ids = []
+                for c in chans:
+                    oid = await pool.fetchval(
+                        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                        "VALUES($1,'promote_all_admins','pending',$2,1,$3) RETURNING id",
+                        uid, _json.dumps({"channel_id": int(c["channel_id"]),
+                                          "owner_acc_id": int(c["acc_id"])}),
+                        f"Админы: {c.get('title') or c['channel_id']}")
+                    op_ids.append(int(oid))
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            return _err("Неизвестная операция", 400)
+        except Exception as exc:
+            log.exception("channels_mass uid=%d op=%s", uid, op)
+            return _err(str(exc), 500)
+
     async def channel_remove(request: web.Request) -> web.Response:
         """Убрать канал из управления (запись managed_channels)."""
         uid = _get_uid(request)
@@ -6793,6 +6862,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
+    app.router.add_post("/api/miniapp/channels/mass", channels_mass)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
