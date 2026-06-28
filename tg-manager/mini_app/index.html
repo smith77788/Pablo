@@ -579,6 +579,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Основное -->
     <div class="sec">Основное</div>
     <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openNewUsers()">
+        <div class="mgmt-tile-ico">🆕</div>
+        <div class="mgmt-tile-lbl">Новые подписчики</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openDiag()">
         <div class="mgmt-tile-ico">🩺</div>
         <div class="mgmt-tile-lbl">Диагностика</div>
@@ -1937,6 +1942,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Проверка всей цепочки исполнения: креды, аккаунты, очередь и живое подключение одного аккаунта (тот же путь, что у операций).</div>
     <button class="btn btn-p" id="diagBtn" onclick="runDiag()" style="width:100%;margin-bottom:10px">▶️ Запустить диагностику</button>
     <div id="diagResult"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: НОВЫЕ ПОДПИСЧИКИ ══════════════════════ -->
+<div class="screen" id="s-newusers">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🆕 Новые подписчики</div>
+  </div>
+  <div class="sub-sb">
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Последние пользователи, написавшие вашим ботам (по всем ботам). Обновляется автоматически — независимо от push-уведомлений.</div>
+    <div class="lst" id="newUsersList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -5968,6 +5985,27 @@ async function submitBoost() {
     openBoost();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Новые подписчики ─────────────────────────────────────
+async function openNewUsers() {
+  push('s-newusers');
+  txt('newUsersList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/new_users');
+    const us = d.users||[];
+    if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); return; }
+    txt('newUsersList', us.map(u=>{
+      const nm = u.first_name || (u.username?'@'+u.username:'User #'+u.user_id);
+      return `<div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">👤</div>
+        <div class="row-body">
+          <div class="row-name">${esc(nm)}</div>
+          <div class="row-val" style="color:var(--hint)">${u.bot_username?'@'+esc(u.bot_username):''} · ${u.first_seen?ago(u.first_seen):''}</div>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('newUsersList', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── Диагностика ──────────────────────────────────────────

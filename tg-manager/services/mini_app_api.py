@@ -1372,6 +1372,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
+    async def new_users(request: web.Request) -> web.Response:
+        """Лента новых подписчиков по всем ботам владельца (надёжный фид —
+        не зависит от доставки push-уведомлений)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
+                      mb.username AS bot_username
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by = $1 AND bu.user_id > 0
+               ORDER BY bu.first_seen DESC NULLS LAST
+               LIMIT 100""", uid)
+        return _json_resp({"users": rows or []})
+
     async def accounts_check(request: web.Request) -> web.Response:
         """Массовая проверка всех аккаунтов владельца (с реактивацией рабочих)."""
         uid = _get_uid(request)
@@ -6406,6 +6422,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
+    app.router.add_get("/api/miniapp/new_users", new_users)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)

@@ -181,6 +181,11 @@ async def _process_bot(
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
 
             # Notify bot owner about new user
+            if is_new_user:
+                log.info(
+                    "new_user: bot_id=%s chat_id=%s main_bot=%s added_by=%s",
+                    bot_id, chat_id, bool(main_bot), bot_row.get("added_by") if bot_row else None,
+                )
             if is_new_user and main_bot and bot_row and bot_row.get("added_by"):
                 owner_id = bot_row["added_by"]
                 bot_name = (
