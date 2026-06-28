@@ -4241,6 +4241,7 @@ async def _exec_network_broadcast(
     lang: str = str(params.get("lang") or "")
     selected_bot_ids: list[int] = [int(x) for x in (params.get("selected_bot_ids") or [])]
     cluster_name: str = str(params.get("cluster_name") or "")
+    _bc_buttons = params.get("buttons") or None
 
     if not text:
         return {"status": "failed", "summary": "⚠️ Текст рассылки не указан"}
@@ -4300,7 +4301,7 @@ async def _exec_network_broadcast(
             if not bc_id:
                 continue
             broadcaster.start(
-                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, None,
+                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, _bc_buttons,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
             launched_bc_ids.append(bc_id)
@@ -4333,7 +4334,7 @@ async def _exec_network_broadcast(
             if not bc_id:
                 continue
             broadcaster.start(
-                pool, None, bc_id, token_map[bid], bid, text, None, ids, None,
+                pool, None, bc_id, token_map[bid], bid, text, None, ids, _bc_buttons,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
             launched_bc_ids.append(bc_id)
@@ -4365,7 +4366,7 @@ async def _exec_network_broadcast(
             if not bc_id:
                 continue
             broadcaster.start(
-                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, None,
+                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, _bc_buttons,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
             launched_bc_ids.append(bc_id)
@@ -4403,7 +4404,7 @@ async def _exec_network_broadcast(
             if not bc_id:
                 continue
             broadcaster.start(
-                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, None,
+                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, _bc_buttons,
                 start_delay=total_started * _BOT_START_DELAY_S,
             )
             launched_bc_ids.append(bc_id)
@@ -7436,6 +7437,7 @@ async def _exec_run_broadcast(
     bot_id = params.get("bot_id")
     broadcast_id = params.get("broadcast_id")
     text = (params.get("text") or "").strip()
+    buttons = params.get("buttons") or None
 
     if not bot_id or not text:
         return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
@@ -7469,7 +7471,7 @@ async def _exec_run_broadcast(
         from database import db as _db
         broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id)
 
-    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, None)
+    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, buttons)
     await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", total, op_id)
 
     return {

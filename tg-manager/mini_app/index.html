@@ -472,7 +472,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="modal-x" onclick="closeModal('mo-bot-broadcast')">✕</div>
     <div class="modal-title">📢 Рассылка выбранным ботам</div>
     <div id="bbHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
-    <textarea id="bbText" rows="5" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:14px;resize:vertical"></textarea>
+    <textarea id="bbText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:14px;resize:vertical"></textarea>
+    <textarea id="bbButtons" rows="2" placeholder="Кнопки: Текст | https://ссылка (по одной на строку)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:13px;resize:vertical"></textarea>
     <div id="bbErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
   </div>
@@ -3001,6 +3002,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст..."></textarea>
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
     </div>
+    <div class="field">
+      <label>Кнопки под сообщением (необязательно)</label>
+      <textarea id="bcastButtons" rows="2" placeholder="Текст кнопки | https://ссылка&#10;Вторая кнопка | https://..."></textarea>
+      <div class="field-note">По одной кнопке на строку: <code>Текст | URL</code></div>
+    </div>
     <div class="field-err" id="bcastErr"></div>
     <button class="btn btn-p" id="bcastBtn" onclick="sendBcast()" style="width:100%">📢 Отправить</button>
   </div>
@@ -3977,6 +3983,7 @@ function updateBotSelBar() {
 function openBotBroadcast() {
   if (!BOT_SEL.size) { toast('Выберите хотя бы одного бота'); return; }
   document.getElementById('bbText').value='';
+  { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
   document.getElementById('bbErr').textContent='';
   document.getElementById('bbHint').textContent = `Сообщение получат подписчики ${BOT_SEL.size} выбранных ботов.`;
   showModal('mo-bot-broadcast');
@@ -3985,9 +3992,11 @@ async function submitBotBroadcast() {
   const errEl=document.getElementById('bbErr'); errEl.textContent='';
   const text=document.getElementById('bbText').value.trim();
   if(!text){ errEl.textContent='Введите текст рассылки'; return; }
+  const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
   const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify({text, bot_ids:[...BOT_SEL]})});
+    const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
+    const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify(_p)});
     toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
     closeModal('mo-bot-broadcast'); toggleBotSelMode();
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
@@ -4941,6 +4950,7 @@ function openBcastPick() {
   if (!BOTS.length) { toast('Сначала загрузите список ботов'); goTab('bots'); return; }
   fillBcastBots(-1);
   document.getElementById('bcastText').value='';
+  { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -4954,6 +4964,7 @@ function openBcastForBot(botId, botName, recipCount) {
   if (!BOTS.length) BOTS = [{bot_id:botId, username:botName.replace('@',''), subscriber_count:recipCount}];
   fillBcastBots(botId);
   document.getElementById('bcastText').value='';
+  { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -4987,16 +4998,37 @@ document.getElementById('bcastBot').addEventListener('change', updateBcastRecip)
 
 function closeBcast() { document.getElementById('bcastMbg').classList.remove('show'); }
 
+// Парсит строки «Текст | URL» в массив инлайн-кнопок Telegram
+function parseInlineButtons(raw) {
+  const out = [];
+  (raw||'').split('\n').forEach(line=>{
+    line = line.trim();
+    if (!line) return;
+    const i = line.lastIndexOf('|');
+    if (i < 0) return;
+    const txt = line.slice(0,i).trim();
+    const url = line.slice(i+1).trim();
+    if (txt && /^https?:\/\//i.test(url)) out.push({text:txt, url});
+  });
+  return out;
+}
 async function sendBcast() {
   const botId = document.getElementById('bcastBot').value;
   const text = document.getElementById('bcastText').value.trim();
   const errEl = document.getElementById('bcastErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const btnsRaw = document.getElementById('bcastButtons')?.value || '';
+  const buttons = parseInlineButtons(btnsRaw);
+  if (btnsRaw.trim() && !buttons.length) {
+    errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
+  }
   const btn = document.getElementById('bcastBtn');
   btn.disabled=true; btn.textContent='⏳ Отправка...';
   try {
-    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify({bot_id:botId, text})});
+    const payload = {bot_id:botId, text};
+    if (buttons.length) payload.buttons = buttons;
+    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Рассылка запущена · '+num(d.total_users)+' получателей');
