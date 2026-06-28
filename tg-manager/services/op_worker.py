@@ -217,7 +217,7 @@ def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
 
     # Нормализация ok: разные exec-функции используют sent/ok/created
     if "ok" not in result:
-        for alias in ("sent", "created", "waves_completed"):
+        for alias in ("sent", "created", "waves_completed", "left", "deleted", "joined", "invited", "published"):
             if alias in result:
                 result["ok"] = result[alias]
                 break
@@ -6711,4 +6711,785 @@ async def _exec_niche_growth_post(
         "fail": err_count,
         "groups_found": total,
         "summary": summary,
+    }
+
+
+# ── Mini App handlers ─────────────────────────────────────────────────────────
+
+async def _exec_account_warmup(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Запустить/обновить план прогрева аккаунта.
+    params: {account_id, plan_type}
+    """
+    from services import account_warmer
+
+    account_id = params.get("account_id")
+    plan_type = params.get("plan_type", "standard")
+
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        account_id = int(account_id)
+    except (ValueError, TypeError):
+        return {"status": "failed", "summary": "⚠️ Неверный account_id"}
+
+    # Verify account belongs to owner
+    acc = await pool.fetchrow(
+        "SELECT id, phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        account_id, owner_id,
+    )
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или не принадлежит вам"}
+
+    name = acc.get("first_name") or acc.get("phone") or str(account_id)
+
+    try:
+        # If a plan already exists (created by the API before enqueuing this op),
+        # do NOT reset current_day/started_at — just confirm and return.
+        existing = await pool.fetchrow(
+            "SELECT id, status FROM account_warmup_plans WHERE account_id=$1 AND owner_id=$2",
+            account_id, owner_id,
+        )
+        if existing:
+            return {
+                "status": "done",
+                "plan_id": existing["id"],
+                "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
+            }
+        # Plan not yet created (op triggered from bot handler or legacy path) — create it.
+        plan_id = await account_warmer.create_warmup_plan(pool, owner_id, account_id, plan_type)
+        return {
+            "status": "done",
+            "plan_id": plan_id,
+            "summary": f"🌡️ Прогрев запущен для {name} (план: {plan_type}, план_id={plan_id})",
+        }
+    except Exception as exc:
+        log.exception("_exec_account_warmup op=%d acc=%d", op_id, account_id)
+        return {"status": "failed", "summary": f"⚠️ Ошибка запуска прогрева: {exc}"}
+
+
+async def _exec_parse_audience(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Парсинг аудитории канала/группы.
+    params: {source_ref, parse_type, limit}
+    """
+    from services import parser as _parser
+
+    source_ref = (params.get("source_ref") or "").strip()
+    parse_type = params.get("parse_type", "members")
+    limit = int(params.get("limit") or 500)
+
+    if not source_ref:
+        return {"status": "failed", "summary": "⚠️ source_ref не указан"}
+
+    if limit < 1 or limit > 50000:
+        limit = 500
+
+    try:
+        if parse_type == "active":
+            result = await _parser.parse_active_users(pool, owner_id, source_ref, limit=limit)
+        else:
+            result = await _parser.parse_members(pool, owner_id, source_ref, limit=limit)
+
+        total_found = result.get("total_found", 0)
+        total_saved = result.get("total_saved", 0)
+        status = result.get("status", "done")
+
+        if status == "error":
+            return {
+                "status": "failed",
+                "summary": f"⚠️ Парсинг {source_ref} не удался: {result.get('error', 'неизвестная ошибка')}",
+            }
+
+        await pool.execute(
+            "UPDATE operation_queue SET total_items=$1, done_items=$2 WHERE id=$3",
+            total_found, total_saved, op_id,
+        )
+        return {
+            "status": "done",
+            "total_found": total_found,
+            "total_saved": total_saved,
+            "summary": f"👥 Парсинг {source_ref}: найдено {total_found}, сохранено {total_saved}",
+        }
+    except Exception as exc:
+        log.exception("_exec_parse_audience op=%d source=%s", op_id, source_ref)
+        return {"status": "failed", "summary": f"⚠️ Ошибка парсинга: {exc}"}
+
+
+async def _exec_reg_check(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Проверка даты регистрации пользователя / создания канала / группы.
+    params: {target: "@username или ссылка"}
+    """
+    from services import registration_checker as _rc
+
+    target = (params.get("target") or "").strip()
+    if not target:
+        return {"status": "failed", "summary": "⚠️ target не указан"}
+
+    try:
+        info = await _rc.get_entity_full_info(pool, owner_id, target)
+        if not info:
+            return {"status": "failed", "summary": f"⚠️ Не удалось получить данные для {target} (нет аккаунтов или объект не найден)"}
+
+        await _rc.cache_result(pool, owner_id, info, info.get("name") or info.get("title"), info.get("username"))
+
+        entity_type = info.get("entity_type", "unknown")
+        name = info.get("name") or info.get("title") or target
+        reg_date = info.get("exact_date") or info.get("date")
+        method = info.get("method", "id_interpolation")
+
+        date_str = reg_date.strftime("%d.%m.%Y") if reg_date else "неизвестно"
+        return {
+            "status": "done",
+            "entity_type": entity_type,
+            "name": name,
+            "reg_date": reg_date.isoformat() if reg_date else None,
+            "method": method,
+            "summary": f"📅 {name} ({entity_type}): дата регистрации {date_str} [метод: {method}]",
+        }
+    except Exception as exc:
+        log.exception("_exec_reg_check op=%d target=%s", op_id, target)
+        return {"status": "failed", "summary": f"⚠️ Ошибка проверки: {exc}"}
+
+
+async def _exec_ad_intel_scan(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Сканирование канала на рекламные посты.
+    params: {channel: "username"}
+    """
+    from services import ad_intelligence as _ai
+
+    channel = (params.get("channel") or "").strip().lstrip("@")
+    if not channel:
+        return {"status": "failed", "summary": "⚠️ channel не указан"}
+
+    # Pick any active account for scanning
+    try:
+        acc_row = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
+            owner_id,
+        )
+        account_id = int(acc_row["id"]) if acc_row else 0
+    except Exception:
+        account_id = 0
+
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для сканирования"}
+
+    try:
+        result = await _ai.scan_channel_ads(pool, channel, account_id, owner_id)
+        if result.get("status") == "error":
+            return {"status": "failed", "summary": f"⚠️ Ошибка сканирования @{channel}: {result.get('error', 'неизвестная ошибка')}"}
+
+        ad_posts = result.get("ad_posts_found", 0)
+        return {
+            "status": "done",
+            "channel": channel,
+            "ad_posts_found": ad_posts,
+            "summary": f"🔍 Ad Intel @{channel}: найдено {ad_posts} рекламных постов",
+        }
+    except Exception as exc:
+        log.exception("_exec_ad_intel_scan op=%d channel=%s", op_id, channel)
+        return {"status": "failed", "summary": f"⚠️ Ошибка сканирования: {exc}"}
+
+
+async def _exec_self_promo_blast(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Рассылка self-promo шаблона подписчикам управляемых ботов.
+    params: {template_id: int}
+    """
+    import html as _html
+
+    template_id = params.get("template_id")
+    if not template_id:
+        return {"status": "failed", "summary": "⚠️ template_id не указан"}
+
+    try:
+        tpl = await pool.fetchrow(
+            "SELECT id, title, content, cta_text, cta_url FROM self_promo_templates "
+            "WHERE id=$1 AND is_active=TRUE AND (owner_id=$2 OR owner_id IS NULL)",
+            int(template_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения шаблона: {exc}"}
+
+    if not tpl:
+        return {"status": "failed", "summary": "⚠️ Шаблон не найден или неактивен"}
+
+    # Правильная реф-ссылка на системного бота (а не хардкод @BotMotherBot из сидов).
+    correct_link = None
+    try:
+        from database import db as _db
+        me = await bot.get_me()
+        code = await _db.get_or_create_referral_code(pool, owner_id)
+        if me and me.username:
+            correct_link = f"https://t.me/{me.username}?start={code}"
+    except Exception as exc:
+        log.warning("self_promo_blast: не удалось построить реф-ссылку: %s", exc)
+
+    def _fix_link(s):
+        """Заменить хардкод-ссылки на BotMother на реальную реф-ссылку бота."""
+        if not s or not correct_link:
+            return s
+        import re as _re
+        return _re.sub(
+            r"https?://t\.me/(?:BotMotherBot|botmother_bot|BotMother)\b[^\s\"<]*",
+            correct_link, s, flags=_re.IGNORECASE,
+        )
+
+    content = _fix_link(tpl["content"])
+    cta_url = _fix_link(tpl["cta_url"])
+    # Если в шаблоне вообще нет ссылки — добавим реальную реф-ссылку как CTA
+    if not cta_url and correct_link:
+        cta_url = correct_link
+
+    # Build message text
+    text_parts = []
+    if content:
+        text_parts.append(content)
+    if tpl["cta_text"] and cta_url:
+        text_parts.append(f'\n<a href="{_html.escape(cta_url)}">{_html.escape(tpl["cta_text"])}</a>')
+    elif tpl["cta_text"]:
+        text_parts.append(f"\n{_html.escape(tpl['cta_text'])}")
+    elif cta_url:
+        text_parts.append(f"\n{_html.escape(cta_url)}")
+    message_text = "\n".join(text_parts) or tpl["title"] or "Promo"
+
+    # Get all active bot_users across owner's bots
+    try:
+        users = await pool.fetch(
+            """SELECT bu.user_id, bu.bot_id, mb.token
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by = $1 AND bu.is_active = TRUE AND mb.is_active = TRUE
+               AND mb.token IS NOT NULL
+               ORDER BY bu.user_id
+               LIMIT 1000""",
+            owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
+
+    if not users:
+        return {"status": "done", "summary": "📢 Нет активных подписчиков для рассылки"}
+
+    total = len(users)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count = 0
+    fail_count = 0
+    # Group by bot_token to use the correct bot for each user
+    token_cache: dict[int, Bot] = {}
+
+    for idx, row in enumerate(users):
+        if await _is_cancelled(pool, op_id):
+            break
+        user_id = row["user_id"]
+        bot_id = row["bot_id"]
+        token = row["token"]
+
+        try:
+            if bot_id not in token_cache:
+                from aiogram import Bot as _Bot
+                token_cache[bot_id] = _Bot(token=token)
+            _b = token_cache[bot_id]
+            await _b.send_message(user_id, message_text, parse_mode="HTML")
+            ok_count += 1
+        except Exception as exc:
+            exc_s = str(exc).lower()
+            if "blocked" in exc_s or "deactivated" in exc_s or "not found" in exc_s:
+                try:
+                    await pool.execute(
+                        "UPDATE bot_users SET is_active=FALSE WHERE user_id=$1 AND bot_id=$2",
+                        user_id, bot_id,
+                    )
+                except Exception:
+                    pass
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx % 20 == 0 and idx > 0:
+            await asyncio.sleep(1)  # rate limit
+
+    # Close bot instances
+    for _b in token_cache.values():
+        try:
+            await _b.session.close()
+        except Exception:
+            pass
+
+    await pool.execute(
+        "UPDATE self_promo_templates SET use_count = COALESCE(use_count,0)+1 "
+        "WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
+        int(template_id), owner_id,
+    )
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "fail": fail_count,
+        "total": total,
+        "summary": f"📢 Self-promo рассылка: ✅ {ok_count}/{total}" + (f" ❌ {fail_count}" if fail_count else ""),
+    }
+
+
+async def _exec_phone_check(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Проверка номеров телефонов через Telegram ImportContacts.
+    params: {phones: list[str]}
+    """
+    from services import phone_checker_engine as _pce
+
+    phones = params.get("phones") or []
+    if not phones:
+        return {"status": "failed", "summary": "⚠️ Список номеров пуст"}
+
+    # Pick any active account
+    try:
+        acc_row = await pool.fetchrow(
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
+            owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+
+    if not acc_row:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для проверки"}
+
+    acc = dict(acc_row)
+    total = len(phones)
+    registered = 0
+    not_registered = 0
+    errors = 0
+
+    # Process in batches of 25 (Telegram limit)
+    batch_size = 25
+    for i in range(0, total, batch_size):
+        if await _is_cancelled(pool, op_id):
+            break
+        batch = phones[i:i + batch_size]
+        try:
+            results = await _pce.check_phones_batch(acc["session_str"], acc, batch)
+            for r in results:
+                if r.get("registered") is True:
+                    registered += 1
+                elif r.get("registered") is False:
+                    not_registered += 1
+                else:
+                    errors += 1
+        except Exception as exc:
+            log.warning("_exec_phone_check batch error: %s", exc)
+            errors += len(batch)
+
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+        if i + batch_size < total:
+            await asyncio.sleep(3)  # Anti-flood
+
+    return {
+        "status": "done",
+        "total": total,
+        "registered": registered,
+        "not_registered": not_registered,
+        "errors": errors,
+        "summary": f"📱 Проверено {total} номеров: ✅ {registered} зарегистрированы, ❌ {not_registered} нет" + (f", ⚠️ {errors} ошибок" if errors else ""),
+    }
+
+
+async def _exec_gift_scan(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Сканирование подарков во всех аккаунтах владельца.
+    params: {}
+    """
+    from services import gift_inventory as _gi
+
+    try:
+        accounts = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY id",
+            owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунтов: {exc}"}
+
+    if not accounts:
+        return {"status": "done", "summary": "📦 Нет активных аккаунтов для сканирования"}
+
+    total_accounts = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_accounts, op_id)
+
+    all_gifts: list[dict] = []
+    accounts_ok = 0
+
+    for idx, row in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            break
+        account_id = row["id"]
+        try:
+            gifts = await _gi.GiftInventoryService.scan_account_gifts(pool, account_id, owner_id)
+            all_gifts.extend(gifts)
+            accounts_ok += 1
+        except Exception as exc:
+            log.warning("_exec_gift_scan account=%d: %s", account_id, exc)
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx + 1 < total_accounts:
+            await asyncio.sleep(2)
+
+    saved = 0
+    if all_gifts:
+        try:
+            saved = await _gi.GiftInventoryService.sync_inventory_to_db(pool, owner_id, all_gifts)
+        except Exception as exc:
+            log.warning("_exec_gift_scan sync error: %s", exc)
+
+    failed_accounts = total_accounts - accounts_ok
+    return {
+        "status": "done" if accounts_ok else "failed",
+        "ok": accounts_ok,
+        "failed": failed_accounts,
+        "accounts_scanned": accounts_ok,
+        "gifts_found": len(all_gifts),
+        "gifts_saved": saved,
+        "summary": f"🎁 Сканирование подарков: {accounts_ok}/{total_accounts} аккаунтов, найдено {len(all_gifts)} подарков",
+    }
+
+
+async def _exec_report_peer(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Репортинг пользователя/канала через несколько аккаунтов.
+    params: {target: str, reason: str}
+    total_items в operation_queue = acc_count (сколько аккаунтов использовать)
+    """
+    from services import reporter_engine as rep
+
+    target = (params.get("target") or "").strip()
+    reason = params.get("reason", "spam")
+    if not target:
+        return {"status": "failed", "summary": "⚠️ target не указан"}
+
+    # acc_count from total_items
+    try:
+        total_items = await pool.fetchval(
+            "SELECT total_items FROM operation_queue WHERE id=$1", op_id
+        )
+        acc_count = int(total_items or 5)
+    except Exception:
+        acc_count = 5
+
+    try:
+        accounts = await pool.fetch(
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT $2",
+            owner_id, acc_count,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунтов: {exc}"}
+
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для репортинга"}
+
+    ok_count = 0
+    fail_count = 0
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await rep.report_peer(dict(acc)["session_str"], dict(acc), target, reason)
+            if res["ok"]:
+                ok_count += 1
+            else:
+                fail_count += 1
+                log.debug("report_peer acc=%d: %s", acc["id"], res.get("error"))
+        except Exception as exc:
+            log.warning("_exec_report_peer acc=%d: %s", acc["id"], exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx + 1 < len(accounts):
+            await asyncio.sleep(2.5)
+
+    return {
+        "status": "done" if ok_count else "failed",
+        "ok": ok_count,
+        "failed": fail_count,
+        "total": len(accounts),
+        "summary": f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно" + (f" ❌ {fail_count}" if fail_count else ""),
+    }
+
+
+async def _exec_leave_all_chats(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Выход из всех чатов/групп аккаунта.
+    params: {account_id: int}
+    """
+    from services import account_manager
+
+    account_id = params.get("account_id")
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            int(account_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+
+    client = account_manager._make_client(acc["session_str"], dict(acc))
+    left = 0
+    failed = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+        # Use high-level get_dialogs() which resolves entities automatically.
+        # Raw GetDialogsRequest returns Dialog TL types without .entity attribute,
+        # which caused the list comprehension to always produce an empty chats list.
+        # wait_for: мёртвый прокси/half-open сокет иначе подвешивает операцию навсегда.
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=200), timeout=60)
+        chats = [d.entity for d in dialogs if d.is_group or d.is_channel]
+        total = len(chats)
+        await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+        for entity in chats:
+            if await _is_cancelled(pool, op_id):
+                break
+            try:
+                await asyncio.wait_for(client.delete_dialog(entity), timeout=30)
+                left += 1
+            except Exception as exc:
+                log.debug("leave_all_chats: skip %s: %s", getattr(entity, "id", "?"), exc)
+                failed += 1
+            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await asyncio.sleep(1.5)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    return {
+        "status": "done",
+        "left": left,
+        "failed": failed,
+        "summary": f"🚪 Выход из чатов: ✅ {left} успешно" + (f" ❌ {failed}" if failed else ""),
+    }
+
+
+async def _exec_delete_contacts(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Удаление всех контактов аккаунта.
+    params: {account_id: int}
+    """
+    from services import account_manager
+    from telethon.tl.functions.contacts import GetContactsRequest, DeleteContactsRequest
+
+    account_id = params.get("account_id")
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            int(account_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+
+    client = account_manager._make_client(acc["session_str"], dict(acc))
+    deleted = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+        contacts = await asyncio.wait_for(client(GetContactsRequest(hash=0)), timeout=30)
+        users = getattr(contacts, "users", [])
+        total = len(users)
+        await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+        if users:
+            try:
+                await asyncio.wait_for(client(DeleteContactsRequest(id=users)), timeout=60)
+                deleted = total
+            except Exception as exc:
+                log.warning("delete_contacts bulk failed: %s — trying one by one", exc)
+                for u in users:
+                    if await _is_cancelled(pool, op_id):
+                        break
+                    try:
+                        await client(DeleteContactsRequest(id=[u]))
+                        deleted += 1
+                    except Exception:
+                        pass
+                    await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                    await asyncio.sleep(0.5)
+        await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", deleted, op_id)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    return {
+        "status": "done",
+        "deleted": deleted,
+        "summary": f"🗑 Удаление контактов: ✅ {deleted} из {total if users else 0} удалено",
+    }
+
+
+async def _exec_run_broadcast(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Запуск рассылки через broadcaster для одного бота.
+    params: {bot_id: int, broadcast_id: int, text: str}
+    """
+    from services import broadcaster
+
+    bot_id = params.get("bot_id")
+    broadcast_id = params.get("broadcast_id")
+    text = (params.get("text") or "").strip()
+
+    if not bot_id or not text:
+        return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
+
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT token, bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            int(bot_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения бота: {exc}"}
+
+    if not bot_row:
+        return {"status": "failed", "summary": "⚠️ Бот не найден"}
+
+    try:
+        user_ids = [r["user_id"] for r in await pool.fetch(
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", int(bot_id)
+        )]
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
+
+    if not user_ids:
+        return {"status": "done", "summary": "📭 Нет активных подписчиков для рассылки"}
+
+    total = len(user_ids)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    # Create/reuse broadcast record
+    if not broadcast_id:
+        from database import db as _db
+        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id)
+
+    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, None)
+    await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", total, op_id)
+
+    return {
+        "status": "done",
+        "broadcast_id": broadcast_id,
+        "total": total,
+        "summary": f"📢 Рассылка запущена: {total} получателей",
+    }
+
+
+async def _exec_clone_adapt(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Клонирование профиля бота: имя/описание/фото/команды.
+    params: {source_bot_id: int, target_bot_id: int, fields: str (comma-sep)}
+    """
+    import aiohttp as _aio
+    from services import bot_api as _bapi
+
+    source_bot_id = params.get("source_bot_id")
+    target_bot_id = params.get("target_bot_id")
+    fields_str = str(params.get("fields", "name,desc"))
+    fields = [f.strip() for f in fields_str.split(",") if f.strip()]
+
+    if not source_bot_id or not target_bot_id or not fields:
+        return {"status": "failed", "summary": "⚠️ Неверные параметры clone_adapt"}
+
+    src_row = await pool.fetchrow(
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        int(source_bot_id), owner_id,
+    )
+    tgt_row = await pool.fetchrow(
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        int(target_bot_id), owner_id,
+    )
+    if not src_row:
+        return {"status": "failed", "summary": "⚠️ Исходный бот не найден"}
+    if not tgt_row:
+        return {"status": "failed", "summary": "⚠️ Целевой бот не найден"}
+
+    src_token = src_row["token"]
+    tgt_token = tgt_row["token"]
+    src_name = src_row["username"] or src_row["first_name"] or f"id{source_bot_id}"
+    tgt_name = tgt_row["username"] or tgt_row["first_name"] or f"id{target_bot_id}"
+
+    errors = []
+    ok_count = 0
+
+    async with _aio.ClientSession() as http:
+        if "name" in fields:
+            me = await _bapi.get_my_name(http, src_token)
+            src_display_name = me.get("name", "") if me else ""
+            if src_display_name and await _bapi.set_name(http, tgt_token, src_display_name):
+                ok_count += 1
+            else:
+                errors.append("имя")
+
+        if "desc" in fields:
+            d = await _bapi.get_my_description(http, src_token)
+            src_desc = d.get("description", "") if d else ""
+            if await _bapi.set_description(http, tgt_token, src_desc):
+                ok_count += 1
+            else:
+                errors.append("описание")
+
+        if "short" in fields:
+            d = await _bapi.get_my_short_description(http, src_token)
+            src_short = d.get("short_description", "") if d else ""
+            if await _bapi.set_short_description(http, tgt_token, src_short):
+                ok_count += 1
+            else:
+                errors.append("краткое описание")
+
+        if "commands" in fields:
+            cmds = await _bapi.get_my_commands(http, src_token)
+            if cmds is not None and await _bapi.set_my_commands(http, tgt_token, cmds):
+                ok_count += 1
+            else:
+                errors.append("команды")
+
+    detail = f"Ошибки: {', '.join(errors)}" if errors else f"OK ({ok_count} полей)"
+    status = "failed" if errors and ok_count == 0 else "done"
+
+    await pool.execute(
+        """INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
+           VALUES ($1, $2, $3, $4, $5, $6)""",
+        owner_id, int(source_bot_id), int(target_bot_id),
+        fields_str, "ok" if status == "done" else "error", detail,
+    )
+
+    return {
+        "status": status,
+        "summary": f"🔄 Клон @{src_name} → @{tgt_name}: {detail}",
     }
