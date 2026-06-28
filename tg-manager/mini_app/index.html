@@ -3911,7 +3911,7 @@ async function loadBots() {
 function renderBots() {
   const wrap = document.getElementById('botList');
   if (!wrap) return;
-  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Нажмите «+ Бот» чтобы подключить бота'); return; }
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Подключите бота по токену от @BotFather',{label:'➕ Добавить бота',fn:'openBotAddModal()'}); return; }
   wrap.className = 'bot-cards';
   wrap.innerHTML = BOTS.map(b=>{
     const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
@@ -5827,7 +5827,7 @@ async function loadProxies() {
     const d = await api('/api/miniapp/proxies');
     const items = d.proxies||[];
     txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
-    if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси')); return; }
+    if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
     txt('proxyList', items.map(p=>{
       const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
       const type = (p.proxy_type||'socks5').toUpperCase();
@@ -6101,7 +6101,7 @@ async function loadDeeplinks() {
       <div class="kpi-card"><div class="kpi-val">${num(d.total_clicks)}</div><div class="kpi-lbl">Кликов</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.referrals)}</div><div class="kpi-lbl">Рефералов</div></div>
     `);
-    if (!links.length) { txt('dlList', empty('🔗','Нет ссылок','Создайте первую Deep Link')); return; }
+    if (!links.length) { txt('dlList', empty('🔗','Нет ссылок','Создайте первую Deep Link',{label:'➕ Создать ссылку',fn:'openDlModal()'})); return; }
     txt('dlList', links.map(l=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(139,92,246,.16)">🔗</div>
@@ -8275,7 +8275,7 @@ async function loadDeals() {
       return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:#aaa">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
     }).join(''));
     txt('m-deal-cnt', DEALS_DATA.length+' сделок');
-    if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку')); return; }
+    if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку',{label:'➕ Создать сделку',fn:'openDealModal()'})); return; }
     const STAGE_NEXT = {lead:'contact',contact:'proposal',proposal:'negotiation',negotiation:'won'};
     txt('dealList', DEALS_DATA.map(d2=>{
       const nextStage = STAGE_NEXT[d2.stage];
@@ -8899,7 +8899,7 @@ async function openEcosystems() {
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/ecosystems');
-    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Нажмите + Создать')); return; }
+    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
     txt('ecoList', rows.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${esc(r.name)}')">
         <div class="row-ico" style="background:rgba(34,197,94,.16)">${(ECO_TYPES[r.ecosystem_type]||'🌐').charAt(0)}</div>
@@ -9923,8 +9923,10 @@ function ago(ts) {
   if(s<86400) return Math.floor(s/3600)+' ч назад';
   return Math.floor(s/86400)+' дн назад';
 }
-function empty(ico,txt2,sub) {
-  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}</div>`;
+function empty(ico,txt2,sub,action) {
+  // action: {label, fn} — кнопка-призыв к действию (как в топовых приложениях)
+  const btn = action ? `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>` : '';
+  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}${btn}</div>`;
 }
 function txt(id, html) {
   const el=document.getElementById(id);
