@@ -1471,6 +1471,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("account_delete uid=%d acc=%d", uid, acc_id)
             return _err(str(exc), 500)
 
+    async def account_action(request: web.Request) -> web.Response:
+        """Операция от имени одного аккаунта: scan | leave_all.
+        Маппится на существующие op_type (scan_owned_resources / leave_all_chats)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            act = request.match_info["act"]
+        except (KeyError, ValueError):
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        if act == "scan":
+            op_type, params, label = "scan_owned_resources", {"account_ids": [acc_id]}, "Скан ресурсов аккаунта"
+        elif act == "leave_all":
+            op_type, params, label = "leave_all_chats", {"account_id": acc_id}, "Выход из всех чатов"
+        else:
+            return _err("Неизвестное действие", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
+                uid, op_type, _json.dumps(params), label)
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
+            return _err(str(exc), 500)
+
     async def account_check_one(request: web.Request) -> web.Response:
         """Проверить один аккаунт (с реактивацией если рабочий)."""
         uid = _get_uid(request)
@@ -6427,6 +6458,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
+    app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)

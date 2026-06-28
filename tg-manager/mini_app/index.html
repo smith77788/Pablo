@@ -3987,6 +3987,13 @@ async function removeChannel(chId) {
     back(); loadAccounts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
+async function accAction(id, act, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try {
+    const r = await api(`/api/miniapp/account/${id}/action/${act}`, {method:'POST'});
+    toast(`✅ Поставлено в очередь (#${r.op_id})`);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function checkAccount(id) {
   try {
     const r = await api(`/api/miniapp/account/${id}/check`, {method:'POST'});
@@ -4244,9 +4251,13 @@ function buildAccDetail(d) {
     </div>
 
     <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
-      <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:90px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
-      <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1;min-width:90px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
-      <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:90px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
+      <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
+      <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
+      <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
+      <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
+      <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
     </div>
 
     <div class="sec">Профиль</div>
