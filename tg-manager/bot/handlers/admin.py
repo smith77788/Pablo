@@ -1696,6 +1696,11 @@ async def handle_admin_message(
         sent = 0
         failed = 0
         bots_done = 0
+        # Разбивка ошибок по причинам — иначе «786 отправлено / 829 ошибок»
+        # выглядит необъяснимо. Большинство «ошибок» при рассылке через ботов —
+        # это пользователи, заблокировавшие бота или удалившие аккаунт.
+        err_cats = {"blocked": 0, "deactivated": 0, "not_started": 0, "flood": 0, "other": 0}
+        dead_to_mark: list[tuple[int, int]] = []  # (bot_id, user_id) для деактивации
         for b in bots:
             try:
                 audience = await pool.fetch(
@@ -1708,18 +1713,23 @@ async def handle_admin_message(
                 audience = []
                 log_exc_swallow(log, "broadcast_bots fetch audience failed")
             for u in audience:
-                ok, retry = await bot_api.send_message(
+                ok, retry, cat = await bot_api.send_message_classified(
                     http, b["token"], u["user_id"], text
                 )
                 if not ok and retry:
                     await asyncio.sleep(min(retry, 30))
-                    ok, _ = await bot_api.send_message(
+                    ok, _, cat = await bot_api.send_message_classified(
                         http, b["token"], u["user_id"], text
                     )
                 if ok:
                     sent += 1
                 else:
                     failed += 1
+                    err_cats[cat if cat in err_cats else "other"] += 1
+                    # «Мёртвые» подписчики (заблокировали/удалились) — деактивируем,
+                    # чтобы следующие рассылки их не били и статистика очистилась.
+                    if cat in ("blocked", "deactivated"):
+                        dead_to_mark.append((b["bot_id"], u["user_id"]))
                 await asyncio.sleep(0.05)
             bots_done += 1
             try:
@@ -1731,11 +1741,32 @@ async def handle_admin_message(
                 )
             except Exception:
                 pass
+        # Деактивируем мёртвых подписчиков пачкой
+        cleaned = 0
+        if dead_to_mark:
+            try:
+                await pool.executemany(
+                    "UPDATE bot_users SET is_active=FALSE WHERE bot_id=$1 AND user_id=$2",
+                    dead_to_mark,
+                )
+                cleaned = len(dead_to_mark)
+            except Exception:
+                log_exc_swallow(log, "broadcast_bots: deactivate dead users failed")
+        breakdown = (
+            f"   • заблокировали бота: <b>{err_cats['blocked']}</b>\n"
+            f"   • удалённые аккаунты: <b>{err_cats['deactivated']}</b>\n"
+            f"   • не начинали диалог: <b>{err_cats['not_started']}</b>\n"
+            + (f"   • флуд-лимит: <b>{err_cats['flood']}</b>\n" if err_cats['flood'] else "")
+            + (f"   • прочее: <b>{err_cats['other']}</b>\n" if err_cats['other'] else "")
+        )
         await message.answer(
             f"✅ <b>Рассылка через ботов завершена</b>\n\n"
             f"Ботов: <b>{len(bots)}</b>\n"
-            f"✅ Отправлено: <b>{sent}</b>\n"
-            f"❌ Ошибок: <b>{failed}</b>",
+            f"✅ Доставлено: <b>{sent}</b>\n"
+            f"❌ Не доставлено: <b>{failed}</b>\n{breakdown}"
+            + (f"\n🧹 Очищено мёртвых подписчиков: <b>{cleaned}</b>" if cleaned else "")
+            + "\n\n<i>«Не доставлено» — это в основном пользователи, "
+            "заблокировавшие бота или удалившие аккаунт. Это нормально.</i>",
             parse_mode="HTML",
             reply_markup=_admin_main_kb(),
         )

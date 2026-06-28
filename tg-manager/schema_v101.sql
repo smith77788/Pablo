@@ -1,4 +1,4 @@
--- v101: Self-promo system (самопиар платформы BotMother)
+-- v101: Self-promo system (самопиар платформы Infragram)
 
 CREATE TABLE IF NOT EXISTS self_promo_templates (
     id          SERIAL PRIMARY KEY,
@@ -30,12 +30,12 @@ CREATE INDEX IF NOT EXISTS self_promo_runs_user_idx        ON self_promo_runs(in
 
 INSERT INTO self_promo_templates (style, title, content, cta_text, cta_url, add_referral)
 SELECT style, title, content, cta_text, cta_url, add_referral FROM (VALUES
-    ('direct'::text, '🚀 BotMother — прямая реклама',
-     E'🚀 <b>BotMother</b> — Telegram-автоматизация нового уровня\n\n✅ Управление 100+ каналами из одного места\n✅ Массовые рассылки, прогрев аккаунтов, DM-кампании\n✅ Strike-зачистка, SEO, аналитика\n✅ Работает 24/7 без вашего участия\n\nЗапустите бесплатно →',
-     '🤖 Запустить BotMother', '', TRUE),
+    ('direct'::text, '🚀 Infragram — прямая реклама',
+     E'🚀 <b>Infragram</b> — Telegram-автоматизация нового уровня\n\n✅ Управление 100+ каналами из одного места\n✅ Массовые рассылки, прогрев аккаунтов, DM-кампании\n✅ Strike-зачистка, SEO, аналитика\n✅ Работает 24/7 без вашего участия\n\nЗапустите бесплатно →',
+     '🤖 Запустить Infragram', '', TRUE),
 
-    ('direct'::text, '💡 BotMother — экономия времени',
-     E'💡 Сколько часов вы тратите на рутину в Telegram?\n\nПубликации, ответы, аналитика, прогрев — всё это можно автоматизировать.\n\n<b>BotMother</b> делает это за вас:\n• Авто-публикации по расписанию\n• Умная DM-рассылка по аудитории\n• Прогрев аккаунтов в автопилоте\n• Полная аналитика каналов\n\nПопробуйте →',
+    ('direct'::text, '💡 Infragram — экономия времени',
+     E'💡 Сколько часов вы тратите на рутину в Telegram?\n\nПубликации, ответы, аналитика, прогрев — всё это можно автоматизировать.\n\n<b>Infragram</b> делает это за вас:\n• Авто-публикации по расписанию\n• Умная DM-рассылка по аудитории\n• Прогрев аккаунтов в автопилоте\n• Полная аналитика каналов\n\nПопробуйте →',
      '⚡ Попробовать бесплатно', '', TRUE),
 
     ('native'::text, '📊 Нативный: рост Telegram-канала',
