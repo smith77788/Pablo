@@ -87,38 +87,51 @@ async def _activate_subscription(
     # Без этого подписка активируется без платёжной записи → финансовые данные теряются безвозвратно.
     # reference = tx_ref (уникален для каждой транзакции); wallet_address='webhook' — заглушка для NOT NULL
     safe_ref = (tx_ref or "")[:200] or f"wh_{user_id}_{plan}"
-    await pool.execute(
-        """INSERT INTO payments(user_id, amount_usd, amount_crypto, currency, tx_hash,
-                                plan, period_months, status, wallet_address, reference)
-           VALUES($1,$2,$2,$3,$4,$5,$6,'confirmed','webhook',$4)
-           ON CONFLICT (reference) DO UPDATE
-           SET status='confirmed', tx_hash=EXCLUDED.tx_hash""",
-        user_id,
-        amount,
-        currency,
-        safe_ref,
-        plan,
-        months,
-    )
-    await pool.execute(
-        """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-           VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-           ON CONFLICT(user_id) DO UPDATE
-           SET plan        = EXCLUDED.plan,
-               is_active   = true,
-               expires_at  = CASE
-                   WHEN subscriptions.expires_at > now()
-                       THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                   ELSE now() + ($3 || ' months')::INTERVAL
-               END,
-               started_at  = CASE
-                   WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
-                   ELSE now()
-               END""",
-        user_id,
-        plan,
-        str(months),
-    )
+    # Идемпотентность: повторная доставка вебхука (частое явление у платёжных
+    # систем) НЕ должна повторно продлевать подписку. Продлеваем только если
+    # этот платёж реально новый/перешёл в confirmed (RETURNING id; иначе дубль).
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            payment_id = await conn.fetchval(
+                """INSERT INTO payments(user_id, amount_usd, amount_crypto, currency, tx_hash,
+                                        plan, period_months, status, wallet_address, reference)
+                   VALUES($1,$2,$2,$3,$4,$5,$6,'confirmed','webhook',$4)
+                   ON CONFLICT (reference) DO UPDATE
+                   SET status='confirmed', tx_hash=EXCLUDED.tx_hash
+                   WHERE payments.status <> 'confirmed'
+                   RETURNING id""",
+                user_id, amount, currency, safe_ref, plan, months,
+            )
+            if payment_id is None:
+                # Дубликат уже подтверждённого платежа — не продлеваем повторно.
+                log.info("payment webhook: дубликат подтверждённого платежа ref=%s — продление пропущено", safe_ref)
+                return
+            await conn.execute(
+                """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+                   VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+                   ON CONFLICT(user_id) DO UPDATE
+                   SET plan        = EXCLUDED.plan,
+                       is_active   = true,
+                       expires_at  = CASE
+                           WHEN subscriptions.expires_at > now()
+                               THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                           ELSE now() + ($3 || ' months')::INTERVAL
+                       END,
+                       started_at  = CASE
+                           WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
+                           ELSE now()
+                       END""",
+                user_id, plan, str(months),
+            )
+            # Синхронизируем platform_users.current_plan — часть кода читает его
+            # напрямую (brand_injection и др.), иначе платящий клиент видит free.
+            try:
+                await conn.execute(
+                    "UPDATE platform_users SET current_plan=$2 WHERE user_id=$1",
+                    user_id, plan,
+                )
+            except Exception:
+                log.warning("payment webhook: не удалось синхронизировать current_plan user=%s", user_id)
     expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     try:

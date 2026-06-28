@@ -2522,11 +2522,19 @@ async def add_tg_account(
 
 
 async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> bool:
-    result = await pool.execute(
-        "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        owner_id,
-    )
+    # managed_channels.acc_id не имеет FK ON DELETE CASCADE — чистим вручную в
+    # одной транзакции, иначе каналы удалённого аккаунта остаются «фантомами»
+    # и продолжают засчитываться в лимит каналов.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
+                owner_id, acc_id,
+            )
+            result = await conn.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id, owner_id,
+            )
     return result != "DELETE 0"
 
 
@@ -6013,12 +6021,12 @@ async def count_bots_across_linked(pool: asyncpg.Pool, owner_id: int) -> int:
     all_ids = [owner_id] + linked
     try:
         return await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_bots WHERE added_by = ANY($1::bigint[])",
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by = ANY($1::bigint[]) AND is_active=TRUE",
             all_ids,
         ) or 0
     except Exception:
         return await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1",
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
             owner_id,
         ) or 0
 

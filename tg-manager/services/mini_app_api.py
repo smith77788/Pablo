@@ -20,6 +20,39 @@ def _bot_token() -> str:
     return os.getenv("BOT_TOKEN", os.getenv("MANAGER_BOT_TOKEN", ""))
 
 
+_bot_username_cache: str | None = None
+
+
+async def _resolve_bot_username() -> str:
+    """Реальный username системного бота. Сначала env BOT_USERNAME, иначе get_me()
+    (с кэшем), чтобы фронт не подставлял хардкод вроде @botmother_bot."""
+    global _bot_username_cache
+    env_u = os.getenv("BOT_USERNAME", "").lstrip("@").strip()
+    if env_u:
+        return env_u
+    if _bot_username_cache is not None:
+        return _bot_username_cache
+    token = _bot_token()
+    if not token:
+        _bot_username_cache = ""
+        return ""
+    try:
+        from aiogram import Bot as _Bot
+        _b = _Bot(token=token)
+        try:
+            me = await _b.get_me()
+            _bot_username_cache = (me.username or "").lstrip("@")
+        finally:
+            try:
+                await _b.session.close()
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning("_resolve_bot_username failed: %s", e)
+        _bot_username_cache = ""
+    return _bot_username_cache
+
+
 def _json_resp(data: Any, status: int = 200) -> web.Response:
     return web.Response(
         text=json.dumps(data, ensure_ascii=False, default=str),
@@ -44,10 +77,40 @@ def _get_uid(request: web.Request) -> int | None:
     return parse_token(token, _bot_token())
 
 
+def _admin_ids() -> set[int]:
+    raw = os.getenv("ADMIN_IDS", "")
+    return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+
+
+def _is_admin(uid: int | None) -> bool:
+    return bool(uid) and uid in _admin_ids()
+
+
+def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    buf.write("﻿")  # BOM для корректного Excel UTF-8
+    w = _csv.writer(buf)
+    w.writerow(header)
+    for r in rows:
+        w.writerow(["" if c is None else c for c in r])
+    return web.Response(
+        text=buf.getvalue(),
+        content_type="text/csv",
+        charset="utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
     try:
         return int(await pool.fetchval(query, *args) or 0)
-    except Exception:
+    except Exception as e:
+        log.warning("_safe_count error: %s | query=%.120s", e, query)
         return 0
 
 
@@ -55,7 +118,8 @@ async def _safe_fetch(pool: asyncpg.Pool, query: str, *args) -> list:
     try:
         rows = await pool.fetch(query, *args)
         return [dict(r) for r in rows]
-    except Exception:
+    except Exception as e:
+        log.warning("_safe_fetch error: %s | query=%.120s", e, query)
         return []
 
 
@@ -84,19 +148,14 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
     ops_running = await _safe_count(pool,
         "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'", uid)
     try:
+        # funnels.bot_id → managed_bots.added_by = owner
         funnels_active = int(await pool.fetchval(
             """SELECT COUNT(*) FROM funnel_subscriptions fs
                JOIN funnels f ON f.id=fs.funnel_id
-               WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL
-                 AND COALESCE(fs.dropped, false)=false""", uid) or 0)
+               JOIN managed_bots mb ON mb.bot_id=f.bot_id
+               WHERE mb.added_by=$1 AND COALESCE(fs.completed, false)=false""", uid) or 0)
     except Exception:
-        try:
-            funnels_active = int(await pool.fetchval(
-                """SELECT COUNT(*) FROM funnel_subscriptions fs
-                   JOIN funnels f ON f.id=fs.funnel_id
-                   WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL""", uid) or 0)
-        except Exception:
-            funnels_active = 0
+        funnels_active = 0
     return {
         "bots": bots,
         "channels": channels,
@@ -111,12 +170,87 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def _apply_inline_migrations(application: web.Application) -> None:
-        try:
-            await pool.execute(
-                "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT"
-            )
-        except Exception:
-            log.exception("inline migration failed")
+        stmts = [
+            "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
+            "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
+            # tg_accounts — добавляем поля если отсутствуют
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMPTZ",
+            # user_proxies — полная схема
+            """CREATE TABLE IF NOT EXISTS user_proxies (
+                id SERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                label TEXT DEFAULT '',
+                proxy_url TEXT NOT NULL,
+                proxy_type TEXT DEFAULT 'socks5',
+                is_active BOOLEAN DEFAULT true,
+                is_alive BOOLEAN DEFAULT true,
+                last_check TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE(owner_id, proxy_url)
+            )""",
+            # auto_funnels — создаём если нет
+            """CREATE TABLE IF NOT EXISTS auto_funnels (
+                id SERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                bot_id BIGINT,
+                name TEXT NOT NULL,
+                target_segment TEXT DEFAULT 'all',
+                enabled BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "ALTER TABLE auto_funnels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
+            """CREATE TABLE IF NOT EXISTS auto_funnel_steps (
+                id SERIAL PRIMARY KEY,
+                funnel_id INTEGER NOT NULL,
+                step_num INTEGER DEFAULT 1,
+                message_text TEXT,
+                delay_hours INTEGER DEFAULT 0,
+                completed BOOLEAN DEFAULT false
+            )""",
+            "ALTER TABLE auto_funnel_steps ADD COLUMN IF NOT EXISTS step_num INTEGER DEFAULT 1",
+            """CREATE TABLE IF NOT EXISTS auto_funnel_runs (
+                id SERIAL PRIMARY KEY,
+                funnel_id INTEGER NOT NULL,
+                user_id BIGINT,
+                status TEXT DEFAULT 'active',
+                started_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            # platform_users — settings_json column
+            "ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS settings_json TEXT",
+            # account_warmup_plans — создаём если нет
+            """CREATE TABLE IF NOT EXISTS account_warmup_plans (
+                id             BIGSERIAL PRIMARY KEY,
+                owner_id       BIGINT NOT NULL,
+                account_id     BIGINT NOT NULL,
+                plan_type      TEXT NOT NULL DEFAULT 'standard',
+                current_day    INT  DEFAULT 0,
+                target_days    INT  DEFAULT 14,
+                daily_actions  INT  DEFAULT 5,
+                status         TEXT DEFAULT 'active',
+                started_at     TIMESTAMPTZ DEFAULT now(),
+                completed_at   TIMESTAMPTZ,
+                last_action_at TIMESTAMPTZ,
+                meta           JSONB DEFAULT '{}'
+            )""",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_warmup_account ON account_warmup_plans(account_id)",
+            # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
+            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
+            # crm_deals: fix stage CHECK constraint (schema had 'new/contacted/qualified',
+            # API and JS use 'lead/contact/proposal/negotiation')
+            "ALTER TABLE crm_deals ALTER COLUMN stage SET DEFAULT 'lead'",
+            "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
+            "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
+            "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
+        ]
+        for stmt in stmts:
+            try:
+                await pool.execute(stmt)
+            except Exception:
+                log.exception("inline migration failed: %.80s", stmt[:80])
 
     app.on_startup.append(_apply_inline_migrations)
 
@@ -155,20 +289,78 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                      "campaigns_active": 0, "funnels_active": 0,
                      "accounts": 0, "ops_running": 0}
         try:
+            # План — из того же источника, что и у бота (subscriptions/get_plan),
+            # иначе дашборд показывал «free» при оплаченном тарифе.
+            try:
+                from bot.utils.subscription import get_plan as _gp
+                stats["plan"] = await _gp(pool, uid)
+            except Exception:
+                stats["plan"] = None
             plan_row = await pool.fetchrow(
                 "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid)
-            stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
-            stats["plan_expires_at"] = str(plan_row["plan_expires_at"]) if plan_row and plan_row["plan_expires_at"] else None
+            if not stats.get("plan"):
+                stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
+            try:
+                from bot.utils.subscription import coerce_plan as _cp
+                stats["plan"] = _cp(stats["plan"])
+            except Exception:
+                pass
+            # Срок — из активной подписки, иначе из platform_users.
+            _exp_row = await pool.fetchrow(
+                "SELECT expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
+                "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid)
+            if _exp_row:
+                stats["plan_expires_at"] = str(_exp_row["expires_at"])
+            else:
+                stats["plan_expires_at"] = str(plan_row["plan_expires_at"]) if plan_row and plan_row["plan_expires_at"] else None
         except Exception:
             stats["plan"] = "free"
             stats["plan_expires_at"] = None
         try:
             activity = await pool.fetch(
-                "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10",
+                """SELECT COALESCE(label, op_type) AS action,
+                          status, created_at,
+                          done_items, total_items, error_msg
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 10""",
                 uid)
-            stats["recent_activity"] = [dict(r) for r in activity]
+            def _op_action(row):
+                s = row["status"]
+                return ("completed" if s == "done" else
+                        "running" if s == "running" else
+                        "error" if s == "failed" else s)
+            stats["recent_activity"] = [
+                {
+                    "action": r["action"],
+                    "status": _op_action(r),
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                    "detail": (f'{r["done_items"]}/{r["total_items"]}' if (r["total_items"] or 0) > 0 else None),
+                }
+                for r in activity
+            ]
         except Exception:
             stats["recent_activity"] = []
+        try:
+            acc_health = await pool.fetchval(
+                "SELECT ROUND(AVG(COALESCE(trust_score, 100))) FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+                uid)
+            stats["acc_health"] = int(acc_health) if acc_health is not None else 100
+        except Exception:
+            stats["acc_health"] = 100
+        try:
+            queue_backlog = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'",
+                uid)
+            stats["queue_backlog"] = int(queue_backlog or 0)
+        except Exception:
+            stats["queue_backlog"] = 0
+        try:
+            ops_failed = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='failed' AND created_at > NOW() - INTERVAL '24 hours'",
+                uid)
+            stats["ops_failed"] = int(ops_failed or 0)
+        except Exception:
+            stats["ops_failed"] = 0
         return _json_resp(stats)
 
     # ── Bots ─────────────────────────────────────────────────────────────────
@@ -376,9 +568,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
             return _err("Invalid bot_id")
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
-        if not owns:
+        bot_row = await _safe_fetchrow(pool,
+            "SELECT bot_id, token, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id_int, uid)
+        if not bot_row:
             return _err("Bot not found", 404)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
@@ -386,7 +579,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             row = await pool.fetchrow(
                 "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
                 bot_id_int, text, total, uid)
-            return _json_resp({"ok": True, "broadcast_id": row["id"], "total_users": total})
+            broadcast_id = row["id"]
+            # Create op_queue entry so user can track progress
+            bot_label = bot_row.get("username") or bot_id_int
+            label = f"Рассылка боту @{bot_label}: {text[:40]}…" if len(text) > 40 else f"Рассылка: {text[:60]}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"bot_id": bot_id_int, "broadcast_id": broadcast_id, "text": text}),
+                total, label,
+            )
+            return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id, "total_users": total})
         except Exception:
             log.exception("create_broadcast bot=%d uid=%d", bot_id_int, uid)
             return _err("Failed to create broadcast", 500)
@@ -551,10 +754,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if target_type == "bot_users" and target_id:
             try:
                 bot_id_int = int(target_id)
-                total_targets = await _safe_count(pool,
-                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
             except (TypeError, ValueError):
-                pass
+                return _err("Invalid target_id", 400)
+            # IDOR-защита: бот должен принадлежать пользователю, иначе можно
+            # разослать DM подписчикам чужого бота и узнать их число.
+            owns_bot = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
+            if not owns_bot:
+                return _err("Бот не найден", 404)
+            total_targets = await _safe_count(pool,
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
         elif target_type == "all_bots":
             total_targets = await _safe_count(pool,
                 """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
@@ -586,7 +795,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if len(text) > 4096:
             return _err("Message too long (max 4096 chars)")
         ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
             ch_id, uid)
         if not ch:
             return _err("Channel not found", 404)
@@ -594,10 +803,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("No linked account for this channel", 400)
         try:
             from services.operation_bus import submit
+            # Контракт _exec_bulk_post_to_channel: account_ids[], channel_ref (числовой
+            # channel_id), text_to_post, bulk_access_hash. Раньше слали channel_id/
+            # account_id/text — воркер их не читал и пост в канал ничего не делал.
             op_id = await submit(pool, uid, "bulk_post_to_channel", {
-                "channel_id": ch_id,
-                "account_id": ch["acc_id"],
-                "text": text,
+                "account_ids": [int(ch["acc_id"])],
+                "channel_ref": int(ch_id),
+                "text_to_post": text,
+                "bulk_access_hash": int(ch.get("access_hash") or 0),
             }, total_items=1)
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception:
@@ -645,12 +858,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             status_filter = None
         if status_filter:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, total_items, done_items, error_msg, created_at, started_at, finished_at
+                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
                    FROM operation_queue WHERE owner_id=$1 AND status=$2
                    ORDER BY created_at DESC LIMIT 30""", uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, total_items, done_items, error_msg, created_at, started_at, finished_at
+                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
                    FROM operation_queue WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 30""", uid)
         return _json_resp({"operations": rows})
@@ -674,6 +887,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception:
             return _err("Failed to cancel", 500)
+
+    async def retry_operation(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid op_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id FROM operation_queue WHERE id=$1 AND owner_id=$2 AND status='failed'",
+                op_id, uid)
+            if not row:
+                return _err("Not found or not failed", 404)
+            # Carry over total_items so the retried op shows a real progress bar;
+            # done_items resets to 0 (fresh run). Executors that recompute
+            # total_items themselves will simply overwrite it.
+            new_id = await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
+                   SELECT owner_id, op_type, params, 'pending', label, total_items
+                   FROM operation_queue WHERE id=$1
+                   RETURNING id""",
+                op_id)
+            return _json_resp({"ok": True, "new_id": new_id})
+        except Exception:
+            log.exception("retry_operation op_id=%d uid=%d", op_id, uid)
+            return _err("Failed to retry", 500)
 
     # ── Deeplinks ────────────────────────────────────────────────────────────
 
@@ -1105,12 +1346,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             accs = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)
             channels = await pool.fetchval("SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
             bots = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
-            # Channel-to-account links via joined_channels (table may not exist)
+            # Channel-to-account links: managed_channels rows with an assigned account
             try:
                 links = await pool.fetchval(
-                    """SELECT COUNT(*) FROM joined_channels jc
-                       JOIN tg_accounts ta ON ta.id=jc.account_id
-                       WHERE ta.owner_id=$1""",
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id IS NOT NULL",
                     uid,
                 )
             except Exception:
@@ -1201,6 +1440,692 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Reporter (Report users) ────────────────────────────────────────────────
 
+    async def new_users(request: web.Request) -> web.Response:
+        """Лента новых подписчиков по всем ботам владельца (надёжный фид —
+        не зависит от доставки push-уведомлений)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
+                      mb.username AS bot_username
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by = $1 AND bu.user_id > 0
+               ORDER BY bu.first_seen DESC NULLS LAST
+               LIMIT 100""", uid)
+        return _json_resp({"users": rows or []})
+
+    async def new_users_export(request: web.Request) -> web.Response:
+        """Экспорт ленты новых подписчиков (CSV) по всем ботам владельца."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
+                      mb.username AS bot_username
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by = $1 AND bu.user_id > 0
+               ORDER BY bu.first_seen DESC NULLS LAST
+               LIMIT 10000""", uid)
+        data = [[r.get("user_id"), r.get("username"), r.get("first_name"),
+                 r.get("first_seen"), r.get("bot_username")] for r in (rows or [])]
+        return _csv_resp("subscribers.csv",
+                         ["user_id", "username", "first_name", "first_seen", "bot"], data)
+
+    async def platform_new_users(request: web.Request) -> web.Response:
+        """Лента новых пользователей системного бота @MEXAHI3MBOT (платформа).
+        Только для администраторов платформы (ADMIN_IDS)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not _is_admin(uid):
+            return _err("Только для администраторов платформы", 403)
+        rows = await _safe_fetch(pool,
+            """SELECT user_id, username, first_name,
+                      COALESCE(current_plan,'free') AS plan,
+                      COALESCE(registered_at, first_seen, last_seen) AS joined_at,
+                      last_seen
+               FROM platform_users
+               WHERE user_id > 0
+               ORDER BY COALESCE(registered_at, first_seen, last_seen) DESC NULLS LAST
+               LIMIT 200""", uid)
+        total = await _safe_count(pool, "SELECT COUNT(*) FROM platform_users WHERE user_id > 0")
+        today = await _safe_count(pool,
+            "SELECT COUNT(*) FROM platform_users WHERE COALESCE(registered_at, first_seen, last_seen) >= CURRENT_DATE")
+        return _json_resp({"users": rows or [], "total": total, "today": today})
+
+    async def platform_new_users_export(request: web.Request) -> web.Response:
+        """Экспорт пользователей платформы (CSV). Только для администраторов."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not _is_admin(uid):
+            return _err("Только для администраторов платформы", 403)
+        rows = await _safe_fetch(pool,
+            """SELECT user_id, username, first_name,
+                      COALESCE(current_plan,'free') AS plan,
+                      COALESCE(registered_at, first_seen, last_seen) AS joined_at,
+                      last_seen
+               FROM platform_users
+               WHERE user_id > 0
+               ORDER BY COALESCE(registered_at, first_seen, last_seen) DESC NULLS LAST
+               LIMIT 50000""", uid)
+        data = [[r.get("user_id"), r.get("username"), r.get("first_name"),
+                 r.get("plan"), r.get("joined_at"), r.get("last_seen")] for r in (rows or [])]
+        return _csv_resp("platform_users.csv",
+                         ["user_id", "username", "first_name", "plan", "joined_at", "last_seen"], data)
+
+    async def accounts_check(request: web.Request) -> web.Response:
+        """Массовая проверка всех аккаунтов владельца (с реактивацией рабочих)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1", uid)
+        ids = [int(r["id"]) for r in (rows or [])]
+        if not ids:
+            return _err("Нет аккаунтов для проверки", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'check_accounts_health','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"account_ids": ids, "check_spambot": True}),
+                len(ids), f"Проверка {len(ids)} аккаунтов",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
+        except Exception as exc:
+            log.exception("accounts_check uid=%d", uid)
+            return _err(str(exc), 500)
+
+    def _build_profile_params(op: str, body: dict, ids: list) -> tuple:
+        """Собрать params для profile_setter. Возвращает (params, label) или (None, error)."""
+        params: dict = {"op": op, "account_ids": ids}
+        if op == "name":
+            fn = (body.get("first_name") or "").strip()
+            if not fn:
+                return None, "Укажите имя"
+            params["name_data"] = {
+                "first_name": fn,
+                "last_name": (body.get("last_name") or "").strip(),
+                "about": (body.get("about") or "").strip(),
+            }
+            return params, "Смена имени/bio"
+        if op == "avatar":
+            url = (body.get("avatar_url") or "").strip()
+            if not url:
+                return None, "Укажите ссылку на аватар"
+            params["avatar_url"] = url
+            return params, "Смена аватара"
+        if op == "2fa":
+            np = (body.get("new_password") or "").strip()
+            if not np:
+                return None, "Укажите новый пароль"
+            params["new_password"] = np
+            params["current_password"] = (body.get("current_password") or "").strip()
+            params["hint"] = (body.get("hint") or "").strip()
+            return params, "Смена 2FA"
+        return None, "Неизвестная операция"
+
+    async def accounts_mass(request: web.Request) -> web.Response:
+        """Массовое действие над выбранными аккаунтами.
+        body: {op: check|scan|leave_all|name|avatar|2fa, account_ids: [..], ...}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        op = body.get("op")
+        ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
+        if not ids_in:
+            return _err("Выберите аккаунты", 400)
+        owned = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            uid, ids_in)
+        ids = [int(r["id"]) for r in (owned or [])]
+        if not ids:
+            return _err("Аккаунты не найдены", 404)
+        n = len(ids)
+        try:
+            if op == "check":
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'check_accounts_health','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps({"account_ids": ids, "check_spambot": True}), n,
+                    f"Проверка {n} аккаунтов")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "scan":
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'scan_owned_resources','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps({"account_ids": ids}), n,
+                    f"Скан ресурсов: {n} акк.")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "leave_all":
+                # leave_all_chats — по одному аккаунту, ставим N операций
+                op_ids = []
+                for aid in ids:
+                    oid = await pool.fetchval(
+                        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                        "VALUES($1,'leave_all_chats','pending',$2,1,$3) RETURNING id",
+                        uid, _json.dumps({"account_id": aid}), f"Выход из всех чатов (акк. {aid})")
+                    op_ids.append(int(oid))
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            if op in ("name", "avatar", "2fa"):
+                params, label = _build_profile_params(op, body, ids)
+                if params is None:
+                    return _err(label, 400)
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'profile_setter','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps(params), n, f"{label}: {n} акк.")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            return _err("Неизвестная операция", 400)
+        except Exception as exc:
+            log.exception("accounts_mass uid=%d op=%s", uid, op)
+            return _err(str(exc), 500)
+
+    async def account_profile(request: web.Request) -> web.Response:
+        """Сменить профиль аккаунта: имя/bio | аватар | 2FA (op).
+        Маппится на op_type=profile_setter (контракт _exec_bulk_set_profile)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        op = body.get("op")
+        params: dict = {"op": op, "account_ids": [acc_id]}
+        if op == "name":
+            fn = (body.get("first_name") or "").strip()
+            if not fn:
+                return _err("Укажите имя", 400)
+            params["name_data"] = {
+                "first_name": fn,
+                "last_name": (body.get("last_name") or "").strip(),
+                "about": (body.get("about") or "").strip(),
+            }
+            label = "Смена имени/bio"
+        elif op == "avatar":
+            url = (body.get("avatar_url") or "").strip()
+            if not url:
+                return _err("Укажите ссылку на аватар", 400)
+            params["avatar_url"] = url
+            label = "Смена аватара"
+        elif op == "2fa":
+            np = (body.get("new_password") or "").strip()
+            if not np:
+                return _err("Укажите новый пароль", 400)
+            params["new_password"] = np
+            params["current_password"] = (body.get("current_password") or "").strip()
+            params["hint"] = (body.get("hint") or "").strip()
+            label = "Смена 2FA"
+        else:
+            return _err("Неизвестная операция", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'profile_setter','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps(params), label)
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("account_profile uid=%d acc=%d op=%s", uid, acc_id, op)
+            return _err(str(exc), 500)
+
+    async def channel_edit(request: web.Request) -> web.Response:
+        """Изменить описание/username канала (op: about|username).
+        Маппится на op_type=bulk_chan_exec (per-channel пара)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        op = body.get("op")
+        value = (body.get("value") or "").strip()
+        if op not in ("about", "username") or not value:
+            return _err("Укажите op (about|username) и значение", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта", 400)
+        worker_op = "chan_about" if op == "about" else "chan_uname"
+        params = {
+            "op": worker_op,
+            "value": value,
+            "base_uname": value,
+            "channel_acc_pairs": [{"channel_id": ch_id, "acc_id": int(ch["acc_id"]), "title": ch.get("title") or ""}],
+        }
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'bulk_chan_exec','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps(params), f"Канал: {op}")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("channel_edit uid=%d ch=%d op=%s", uid, ch_id, op)
+            return _err(str(exc), 500)
+
+    async def channel_promote(request: web.Request) -> web.Response:
+        """Назначить все аккаунты администраторами канала (promote_all_admins)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("bad ch_id", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта (создателя)", 400)
+        params = {"channel_id": ch_id, "owner_acc_id": int(ch["acc_id"])}
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'promote_all_admins','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps(params), "Назначение админов")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
+            return _err(str(exc), 500)
+
+    async def channels_mass(request: web.Request) -> web.Response:
+        """Массовое действие над выбранными каналами.
+        body: {op: post|about|username|promote, channel_ids: [..], value?/text?}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        op = body.get("op")
+        ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        if not ids_in:
+            return _err("Выберите каналы", 400)
+        chans = await _safe_fetch(pool,
+            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
+            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
+        chans = [c for c in (chans or []) if c.get("acc_id")]
+        if not chans:
+            return _err("Каналы не найдены или нет привязанного аккаунта", 404)
+        n = len(chans)
+        try:
+            if op in ("about", "username"):
+                value = (body.get("value") or "").strip()
+                if not value:
+                    return _err("Укажите значение", 400)
+                worker_op = "chan_about" if op == "about" else "chan_uname"
+                pairs = [{"channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
+                          "title": c.get("title") or ""} for c in chans]
+                params = {"op": worker_op, "value": value, "base_uname": value,
+                          "channel_acc_pairs": pairs}
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'bulk_chan_exec','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps(params), n, f"Каналы ({op}): {n}")
+                return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "post":
+                text = (body.get("text") or "").strip()
+                if not text:
+                    return _err("Введите текст поста", 400)
+                if len(text) > 4096:
+                    return _err("Слишком длинный текст (макс. 4096)", 400)
+                from services.operation_bus import submit
+                op_ids = []
+                for c in chans:
+                    oid = await submit(pool, uid, "bulk_post_to_channel", {
+                        "account_ids": [int(c["acc_id"])],
+                        "channel_ref": int(c["channel_id"]),
+                        "text_to_post": text,
+                        "bulk_access_hash": int(c.get("access_hash") or 0),
+                    }, total_items=1)
+                    op_ids.append(int(oid))
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            if op == "promote":
+                op_ids = []
+                for c in chans:
+                    oid = await pool.fetchval(
+                        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                        "VALUES($1,'promote_all_admins','pending',$2,1,$3) RETURNING id",
+                        uid, _json.dumps({"channel_id": int(c["channel_id"]),
+                                          "owner_acc_id": int(c["acc_id"])}),
+                        f"Админы: {c.get('title') or c['channel_id']}")
+                    op_ids.append(int(oid))
+                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+            return _err("Неизвестная операция", 400)
+        except Exception as exc:
+            log.exception("channels_mass uid=%d op=%s", uid, op)
+            return _err(str(exc), 500)
+
+    async def channel_remove(request: web.Request) -> web.Response:
+        """Убрать канал из управления (запись managed_channels)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("bad ch_id", 400)
+        try:
+            res = await pool.execute(
+                "DELETE FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+            if str(res).endswith(" 0"):
+                return _err("Канал не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
+            return _err(str(exc), 500)
+
+    async def account_toggle(request: web.Request) -> web.Response:
+        """Вкл/выкл аккаунта (is_active)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT is_active FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            if not row:
+                return _err("Аккаунт не найден", 404)
+            new_state = not bool(row["is_active"])
+            await pool.execute(
+                "UPDATE tg_accounts SET is_active=$1 WHERE id=$2 AND owner_id=$3",
+                new_state, acc_id, uid)
+            return _json_resp({"ok": True, "is_active": new_state})
+        except Exception as exc:
+            log.exception("account_toggle uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def account_delete(request: web.Request) -> web.Response:
+        """Удалить аккаунт."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        try:
+            res = await pool.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            if str(res).endswith(" 0"):
+                return _err("Аккаунт не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("account_delete uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def account_action(request: web.Request) -> web.Response:
+        """Операция от имени одного аккаунта: scan | leave_all.
+        Маппится на существующие op_type (scan_owned_resources / leave_all_chats)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            act = request.match_info["act"]
+        except (KeyError, ValueError):
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        if act == "scan":
+            op_type, params, label = "scan_owned_resources", {"account_ids": [acc_id]}, "Скан ресурсов аккаунта"
+        elif act == "leave_all":
+            op_type, params, label = "leave_all_chats", {"account_id": acc_id}, "Выход из всех чатов"
+        else:
+            return _err("Неизвестное действие", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
+                uid, op_type, _json.dumps(params), label)
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
+            return _err(str(exc), 500)
+
+    async def account_check_one(request: web.Request) -> web.Response:
+        """Проверить один аккаунт (с реактивацией если рабочий)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'check_accounts_health','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"account_ids": [acc_id], "check_spambot": True}),
+                "Проверка аккаунта")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("account_check_one uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def diag(request: web.Request) -> web.Response:
+        """Сквозная диагностика исполнения: креды/транспорт, аккаунты, очередь,
+        живой тест подключения одного аккаунта (тот же путь, что у операций)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        import time as _t
+        try:
+            from config import TG_API_ID, CF_RELAY_URL, TG_PROXY
+        except Exception:
+            TG_API_ID, CF_RELAY_URL, TG_PROXY = 0, "", ""
+        report: dict = {
+            "env": {
+                "api_configured": bool(TG_API_ID),
+                "cf_relay": bool(CF_RELAY_URL),
+                "tg_proxy": bool(TG_PROXY),
+            },
+            "accounts": {}, "queue": {}, "live_test": {},
+        }
+        try:
+            a = await pool.fetchrow(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE is_active) AS active, "
+                "COUNT(*) FILTER (WHERE session_str IS NOT NULL AND session_str<>'') AS with_session, "
+                "COUNT(*) FILTER (WHERE proxy_id IS NOT NULL) AS with_proxy "
+                "FROM tg_accounts WHERE owner_id=$1", uid)
+            report["accounts"] = {k: int(v or 0) for k, v in dict(a).items()} if a else {}
+        except Exception as e:
+            report["accounts"] = {"error": str(e)[:120]}
+        try:
+            q = await pool.fetchrow(
+                "SELECT COUNT(*) FILTER (WHERE status='pending') AS pending, "
+                "COUNT(*) FILTER (WHERE status='running') AS running, "
+                "COUNT(*) FILTER (WHERE status='done' AND finished_at>now()-interval '24 hours') AS done_24h, "
+                "COUNT(*) FILTER (WHERE status='failed' AND finished_at>now()-interval '24 hours') AS failed_24h "
+                "FROM operation_queue WHERE owner_id=$1", uid)
+            report["queue"] = {k: int(v or 0) for k, v in dict(q).items()} if q else {}
+        except Exception as e:
+            report["queue"] = {"error": str(e)[:120]}
+        try:
+            row = await pool.fetchrow(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, a.device_model, a.system_version, "
+                "a.app_version, a.lang_code, a.system_lang_code, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+                "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1", uid)
+            if not row:
+                report["live_test"] = {"ok": False, "reason": "Нет активного аккаунта с сессией для теста"}
+            else:
+                from services.account_manager import check_account_status_full
+                t0 = _t.monotonic()
+                res = await check_account_status_full(
+                    row["session_str"], _acc=dict(row), check_spambot=False)
+                report["live_test"] = {
+                    "ok": res.get("status") == "active",
+                    "account": str(row["first_name"] or row["phone"] or row["id"]),
+                    "status": res.get("status"),
+                    "reason": (res.get("reason") or "")[:200],
+                    "latency_ms": round((_t.monotonic() - t0) * 1000),
+                    "via_proxy": bool(row["proxy_url"]),
+                }
+        except Exception as e:
+            report["live_test"] = {"ok": False, "reason": f"Ошибка теста подключения: {str(e)[:160]}"}
+        return _json_resp(report)
+
+    async def boost_submit(request: web.Request) -> web.Response:
+        """Накрутка: просмотры / реакции / сторис через аккаунты владельца.
+        body: {type: views|reactions|stories, channel|target, msg_ids|msg_id, emoji, acc_count}
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        btype = (body.get("type") or "").strip()
+        if btype not in ("views", "reactions", "stories"):
+            return _err("Неверный тип накрутки", 400)
+        try:
+            acc_count = int(body.get("acc_count") or 0)
+        except (TypeError, ValueError):
+            acc_count = 0
+
+        # Подбор аккаунтов как в боте: активные, без кулдауна, по trust_score.
+        rows = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+            "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
+            "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
+            uid, acc_count if acc_count > 0 else 1000)
+        account_ids = [r["id"] for r in (rows or [])]
+        if not account_ids:
+            return _err("Нет доступных аккаунтов", 400)
+
+        def _parse_ids(raw: str) -> list[int]:
+            out: list[int] = []
+            for part in str(raw or "").replace(" ", "").split(","):
+                if not part:
+                    continue
+                if "-" in part:
+                    try:
+                        a, b = part.split("-", 1)
+                        a, b = int(a), int(b)
+                        if 0 < b - a <= 1000:
+                            out.extend(range(a, b + 1))
+                    except ValueError:
+                        continue
+                else:
+                    try:
+                        out.append(int(part))
+                    except ValueError:
+                        continue
+            # dedup, preserve order
+            seen: set[int] = set()
+            return [x for x in out if not (x in seen or seen.add(x))]
+
+        if btype == "views":
+            channel = (body.get("channel") or "").strip()
+            msg_ids = _parse_ids(body.get("msg_ids"))
+            if not channel or not msg_ids:
+                return _err("Укажите канал и ID сообщений", 400)
+            op_type = "boost_views"
+            params = {"channel": channel, "msg_ids": msg_ids, "account_ids": account_ids}
+            total = len(account_ids) * len(msg_ids)
+            label = f"Просмотры: {channel} × {len(msg_ids)} × {len(account_ids)} акк."
+        elif btype == "reactions":
+            channel = (body.get("channel") or "").strip()
+            try:
+                msg_id = int(body.get("msg_id") or 0)
+            except (TypeError, ValueError):
+                msg_id = 0
+            emoji = (body.get("emoji") or "👍").strip() or "👍"
+            if not channel or not msg_id:
+                return _err("Укажите канал и ID сообщения", 400)
+            op_type = "boost_reactions"
+            params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
+            total = len(account_ids)
+            label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
+        else:  # stories
+            target = (body.get("target") or "").strip()
+            if not target:
+                return _err("Укажите цель (@username)", 400)
+            op_type = "boost_stories"
+            params = {"target": target, "account_ids": account_ids}
+            total = len(account_ids)
+            label = f"Сторис: {target} × {len(account_ids)} акк."
+
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
+                uid, op_type, _json.dumps(params), total, label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "accounts": len(account_ids)})
+        except Exception as exc:
+            log.exception("boost_submit uid=%d type=%s", uid, btype)
+            return _err(str(exc), 500)
+
+    async def growth_submit(request: web.Request) -> web.Response:
+        """Growth Agent: постинг промо-текста в нишевых группах.
+        body: {niche, promo_text}
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        niche = (body.get("niche") or "").strip()
+        promo_text = (body.get("promo_text") or "").strip()
+        if not niche:
+            return _err("Укажите нишу", 400)
+        if not promo_text:
+            return _err("Укажите рекламный текст", 400)
+        # Нужен хотя бы один активный аккаунт с сессией.
+        has_acc = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            uid)
+        if not has_acc:
+            return _err("Нет активных аккаунтов", 400)
+        try:
+            label = f"Growth Agent: {niche[:40]}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'niche_growth_post','pending',$2,5,$3) RETURNING id",
+                uid, _json.dumps({"niche": niche, "promo_text": promo_text}), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("growth_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -1265,7 +2190,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """SELECT s.owner_id, s.chan_id, s.title, s.about, s.username, s.created_at,
                           c.title AS channel_title, c.username AS channel_username
                    FROM seo_ai_suggestions s
-                   LEFT JOIN managed_channels c ON c.id=s.chan_id
+                   LEFT JOIN managed_channels c ON c.channel_id=s.chan_id
                    WHERE s.owner_id=$1 ORDER BY s.created_at DESC LIMIT 20""",
                 uid,
             )
@@ -1308,6 +2233,84 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception as exc:
             log.exception("bot_factory_status uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def bot_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        token = str(data.get("token", "")).strip()
+        if not token:
+            return _err("token обязателен", 400)
+        import re as _re
+        if not _re.match(r'^\d+:[A-Za-z0-9_-]{30,}$', token):
+            return _err("Неверный формат токена. Пример: 1234567890:AAHxxxxxxxx...", 400)
+        try:
+            import aiohttp as _aio
+            async with _aio.ClientSession() as _http:
+                async with _http.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=_aio.ClientTimeout(total=10),
+                ) as _resp:
+                    me = await _resp.json()
+            if not me.get("ok"):
+                desc = me.get("description") or "неверный токен"
+                return _err(f"Telegram API: {desc}", 400)
+            bot_info = me["result"]
+            bot_id = bot_info["id"]
+            username = bot_info.get("username", "")
+            first_name = bot_info.get("first_name", "")
+            from database import db as _db
+            # Лимит тарифа: enforce только для нового бота (повторное добавление
+            # уже своего бота идемпотентно и не должно блокироваться).
+            already_owned = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            if not already_owned:
+                from bot.utils.subscription import get_bot_limit, get_effective_bot_count
+                _lim = await get_bot_limit(pool, uid)
+                if await get_effective_bot_count(pool, uid) >= _lim:
+                    return _err(f"Достигнут лимит ботов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
+            result = await _db.add_bot(pool, token, bot_id, username, first_name, uid)
+            if result == "taken":
+                return _err("Этот бот уже добавлен другим пользователем", 409)
+            already = (result is False)
+            if already:
+                return _json_resp({
+                    "ok": True, "already_exists": True,
+                    "bot_id": bot_id, "username": username, "first_name": first_name,
+                })
+            return _json_resp({
+                "ok": True, "already_exists": False,
+                "bot_id": bot_id, "username": username, "first_name": first_name,
+            })
+        except Exception as exc:
+            log.exception("bot_add uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def bot_remove(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+            )
+            if not row:
+                return _err("Бот не найден", 404)
+            await pool.execute(
+                "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("bot_remove uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
 
     # ── Persona Hub ───────────────────────────────────────────────────────────
@@ -1354,7 +2357,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_val = not row["is_active"]
             await pool.execute(
-                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2", new_val, persona_id
+                "UPDATE persona_profiles SET is_active=$1 WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
             )
             return _json_resp({"is_active": new_val})
         except Exception as exc:
@@ -1456,26 +2459,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Invalid JSON", 400)
-        count = int(body.get("count", 1))
-        country = body.get("country", "RU")
-        service = body.get("service", "smsactivate")
-        if count < 1 or count > 50:
-            return _err("Количество: от 1 до 50", 400)
-        try:
-            label = f"Авторег {count} аккаунт(ов) · {country}"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'auto_register','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"count": count, "country": country, "service": service}), count, label,
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
-        except Exception as exc:
-            log.exception("autoreg_submit uid=%d", uid)
-            return _err(str(exc), 500)
+        # Auto-registration requires interactive SMS verification and must be done
+        # through the bot (/reg command). The Mini App cannot handle this flow.
+        return _err(
+            "Авторегистрация выполняется только через бота: /reg\n"
+            "Введите /reg в диалоге с ботом и следуйте инструкциям.",
+            400,
+        )
 
     # ── Phone Checker ─────────────────────────────────────────────────────────
 
@@ -1656,7 +2646,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        node_id = int(request.match_info["node_id"])
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
         try:
             node = await pool.fetchrow(
                 "SELECT id, name FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2",
@@ -1678,6 +2671,56 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception as exc:
             log.exception("node_threads uid=%d node=%d", uid, node_id)
+            return _err(str(exc), 500)
+
+    async def node_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        tg_chat_id_raw = data.get("tg_chat_id")
+        node_type = str(data.get("node_type", "workspace")).strip()
+        name = str(data.get("name", "")).strip()
+        if not tg_chat_id_raw or not name:
+            return _err("tg_chat_id и name обязательны", 400)
+        if node_type not in ("proxies", "accounts", "tasks", "alerts", "workspace"):
+            node_type = "workspace"
+        try:
+            tg_chat_id = int(str(tg_chat_id_raw).replace("-100", "-100").strip())
+        except (ValueError, TypeError):
+            return _err("tg_chat_id должен быть числом (например -1001234567890)", 400)
+        try:
+            nid = await pool.fetchval(
+                """INSERT INTO bm_telegram_nodes (owner_id, tg_chat_id, node_type, name)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (owner_id, tg_chat_id, node_type) DO UPDATE
+                     SET name=EXCLUDED.name, is_active=TRUE
+                   RETURNING id""",
+                uid, tg_chat_id, node_type, name,
+            )
+            return _json_resp({"id": nid, "ok": True})
+        except Exception as exc:
+            log.exception("node_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def node_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2", node_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("node_delete uid=%d node=%d", uid, node_id)
             return _err(str(exc), 500)
 
     # ── Gift Transfer ──────────────────────────────────────────────────────────
@@ -1749,12 +2792,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not group:
             return _err("Укажите группу/канал", 400)
         source = body.get("source", "parsed")
+        account_ids = body.get("account_ids") or []
+        if account_ids:
+            req_ids = [int(x) for x in account_ids if str(x).isdigit()]
+            # Фильтруем по владельцу (как в accounts_mass) — не полагаемся только
+            # на повторный скоуп в executor.
+            owned = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                uid, req_ids)
+            account_ids = [int(r["id"]) for r in (owned or [])]
+            if not account_ids:
+                return _err("Аккаунты не найдены", 404)
         try:
             label = f"Mass Invite → {group}"
+            params = {"group": group, "source": source}
+            if account_ids:
+                params["account_ids"] = account_ids
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'mass_invite','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"group": group, "source": source}), label,
+                uid, _json.dumps(params), label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
@@ -1800,6 +2857,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("stars_overview uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def stars_experiment_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        bot_id = data.get("bot_id")
+        name = str(data.get("name", "")).strip()
+        content_type = data.get("content_type", "message")
+        price_a = int(data.get("price_a", 50))
+        price_b = int(data.get("price_b", 100))
+        if not bot_id or not name:
+            return _err("bot_id и name обязательны", 400)
+        if content_type not in ("message", "media", "subscription", "gift"):
+            content_type = "message"
+        if price_a < 1 or price_b < 1:
+            return _err("Цены должны быть > 0", 400)
+        try:
+            bot = await pool.fetchrow(
+                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", int(bot_id), uid
+            )
+            if not bot:
+                return _err("Бот не найден", 404)
+            eid = await pool.fetchval(
+                """INSERT INTO stars_experiments
+                   (bot_id, owner_id, name, content_type, price_a, price_b, status)
+                   VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING id""",
+                int(bot_id), uid, name, content_type, price_a, price_b,
+            )
+            return _json_resp({"id": eid, "ok": True})
+        except Exception as exc:
+            log.exception("stars_experiment_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def stars_experiment_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eid = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("bad exp_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT id, status FROM stars_experiments WHERE id=$1 AND owner_id=$2", eid, uid
+            )
+            if not row:
+                return _err("Не найдено", 404)
+            new_status = "paused" if row["status"] == "active" else "active"
+            await pool.execute(
+                "UPDATE stars_experiments SET status=$1 WHERE id=$2 AND owner_id=$3", new_status, eid, uid
+            )
+            return _json_resp({"status": new_status})
+        except Exception as exc:
+            log.exception("stars_experiment_toggle uid=%d exp=%d", uid, eid)
+            return _err(str(exc), 500)
+
     # ── Ghost Engine ───────────────────────────────────────────────────────────
 
     async def ghost_profiles(request: web.Request) -> web.Response:
@@ -1840,7 +2956,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             new_val = not row["enabled"]
             await pool.execute(
-                "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2", new_val, profile_id
+                "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2 AND owner_id=$3", new_val, profile_id, uid
             )
             return _json_resp({"enabled": new_val})
         except Exception as exc:
@@ -1862,6 +2978,51 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("ghost_delete uid=%d profile=%d", uid, profile_id)
+            return _err(str(exc), 500)
+
+    async def ghost_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        account_id = data.get("account_id")
+        personality = data.get("personality", "ghost")
+        active_hours_start = int(data.get("active_hours_start", 9))
+        active_hours_end = int(data.get("active_hours_end", 23))
+        daily_cap = int(data.get("daily_cap", 8))
+        cooldown_minutes = int(data.get("cooldown_minutes", 60))
+        if not account_id:
+            return _err("account_id обязателен", 400)
+        if personality not in ("ghost", "watcher", "active"):
+            return _err("personality: ghost|watcher|active", 400)
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", int(account_id), uid
+            )
+            if not acc:
+                return _err("Аккаунт не найден", 404)
+            pid = await pool.fetchval(
+                """INSERT INTO ghost_profiles
+                   (owner_id, account_id, personality, active_hours_start, active_hours_end,
+                    daily_cap, cooldown_minutes)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                   ON CONFLICT (owner_id, account_id) DO UPDATE
+                     SET personality=EXCLUDED.personality,
+                         active_hours_start=EXCLUDED.active_hours_start,
+                         active_hours_end=EXCLUDED.active_hours_end,
+                         daily_cap=EXCLUDED.daily_cap,
+                         cooldown_minutes=EXCLUDED.cooldown_minutes,
+                         updated_at=now()
+                   RETURNING id""",
+                uid, int(account_id), personality,
+                active_hours_start, active_hours_end, daily_cap, cooldown_minutes,
+            )
+            return _json_resp({"id": pid, "ok": True})
+        except Exception as exc:
+            log.exception("ghost_create uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Bot Webhook ────────────────────────────────────────────────────────────
@@ -2013,13 +3174,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         target_id = body.get("target_id")
         if not name or not text:
             return _err("Заполните название и текст", 400)
+        # IDOR-защита: при таргете на конкретного бота проверяем владение.
+        if target_type in ("bot_users", "cohort") and target_id:
+            try:
+                _bid = int(target_id)
+            except (TypeError, ValueError):
+                return _err("Invalid target_id", 400)
+            owns_bot = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", _bid, uid)
+            if not owns_bot:
+                return _err("Бот не найден", 404)
+        # Calculate total_targets depending on type
+        total_targets = 0
+        try:
+            if target_type == "bot_users" and target_id:
+                total_targets = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", int(target_id))
+            elif target_type == "all_bots":
+                total_targets = await _safe_count(pool,
+                    """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                       JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                       WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
+        except Exception:
+            total_targets = 0
         try:
             row = await pool.fetchrow(
-                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id)
-                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
-                uid, name, text, target_type, target_id,
+                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, total_targets)
+                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                uid, name, text, target_type, int(target_id) if target_id else None, total_targets,
             )
-            return _json_resp({"id": row["id"]})
+            return _json_resp({"id": row["id"], "total_targets": total_targets})
         except Exception as exc:
             log.exception("dm_campaign_create uid=%d", uid)
             return _err(str(exc), 500)
@@ -2034,7 +3218,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad campaign_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT id, name FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+                "SELECT id, name, status FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
                 campaign_id, uid,
             )
         except Exception as exc:
@@ -2042,6 +3226,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
         if not row:
             return _err("Не найдено", 404)
+        if row["status"] == "running":
+            return _err("Кампания уже выполняется", 409)
         try:
             label = f"DM-кампания: {row['name']}"
             op_id = await pool.fetchval(
@@ -2050,7 +3236,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, _json.dumps({"campaign_id": campaign_id}), label,
             )
             await pool.execute(
-                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1", campaign_id
+                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1 AND owner_id=$2", campaign_id, uid
             )
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception as exc:
@@ -2122,13 +3308,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("account_id обязателен", 400)
         try:
             acc = await pool.fetchrow(
-                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
+                "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
             )
         except Exception as exc:
             log.exception("warmup_create_plan fetchrow uid=%d", uid)
             return _err(str(exc), 500)
         if not acc:
             return _err("Аккаунт не найден", 404)
+        if not acc["session_str"]:
+            return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
         try:
             days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
             actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
@@ -2198,7 +3386,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        exp_id = int(request.match_info["exp_id"])
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("bad exp_id", 400)
         try:
             exp = await pool.fetchrow(
                 """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
@@ -2239,6 +3430,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("experiment_delete uid=%d exp=%d", uid, exp_id)
+            return _err(str(exc), 500)
+
+    async def experiment_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        bot_id = data.get("bot_id")
+        name = str(data.get("name", "")).strip()
+        experiment_type = data.get("experiment_type", "start_message")
+        variants = data.get("variants", [])
+        if not bot_id or not name:
+            return _err("bot_id и name обязательны", 400)
+        if experiment_type not in ("start_message", "auto_reply", "funnel"):
+            experiment_type = "start_message"
+        if not variants or len(variants) < 2:
+            return _err("Нужно минимум 2 варианта", 400)
+        try:
+            bot = await pool.fetchrow(
+                "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", int(bot_id), uid
+            )
+            if not bot:
+                return _err("Бот не найден", 404)
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    exp_id = await conn.fetchval(
+                        "INSERT INTO experiments (bot_id, name, experiment_type) VALUES ($1,$2,$3) RETURNING id",
+                        int(bot_id), name, experiment_type,
+                    )
+                    for v in variants[:4]:
+                        await conn.execute(
+                            "INSERT INTO experiment_variants (experiment_id, name, content, weight) VALUES ($1,$2,$3,$4)",
+                            exp_id,
+                            str(v.get("name", "Вариант"))[:100],
+                            str(v.get("content", ""))[:4000],
+                            min(100, max(1, int(v.get("weight", 50)))),
+                        )
+            return _json_resp({"id": exp_id, "ok": True})
+        except Exception as exc:
+            log.exception("experiment_create uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Health Dashboard ───────────────────────────────────────────────────────
@@ -2624,6 +3858,112 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("revoke_api_key uid=%d key=%d", uid, key_id)
             return _err(str(exc), 500)
 
+    async def create_api_key(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        name = (body.get("name") or "Mini App Key").strip()[:64]
+        import secrets, hashlib
+        raw_key = secrets.token_urlsafe(32)
+        prefix = raw_key[:8]
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO api_keys(user_id, key_hash, key_prefix, name)
+                   VALUES($1,$2,$3,$4) RETURNING id""",
+                uid, key_hash, prefix, name,
+            )
+            return _json_resp({"ok": True, "id": row["id"], "key": raw_key, "prefix": prefix, "name": name})
+        except Exception as exc:
+            log.exception("create_api_key uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Multigeo (per-language bot profile) ───────────────────────────────────
+
+    async def multigeo_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("bot not found", 404)
+        import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        langs = ["", "ru", "en", "de", "fr", "es", "it", "uk", "pt", "zh", "ar"]
+        result = []
+        try:
+            async with _aiohttp.ClientSession() as session:
+                for lc in langs:
+                    try:
+                        name = await _bapi.get_my_name(session, row["token"], lc)
+                        desc = await _bapi.get_my_description(session, row["token"], lc)
+                        short = await _bapi.get_my_short_description(session, row["token"], lc)
+                        if name or desc or short:
+                            result.append({"lang": lc or "default", "name": name, "description": desc, "short_description": short})
+                    except Exception:
+                        pass
+        except Exception as exc:
+            return _err(str(exc), 500)
+        return _json_resp({"profiles": result})
+
+    async def multigeo_set(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        lang = (body.get("lang") or "").strip()
+        name = (body.get("name") or "").strip()[:64]
+        description = (body.get("description") or "").strip()[:512]
+        short_description = (body.get("short_description") or "").strip()[:120]
+        if lang == "default":
+            lang = ""
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("bot not found", 404)
+        import aiohttp as _aiohttp
+        from services import bot_api as _bapi
+        errors = []
+        try:
+            async with _aiohttp.ClientSession() as session:
+                if name:
+                    ok = await _bapi.set_name(session, row["token"], name, lang)
+                    if not ok:
+                        errors.append("name")
+                if description:
+                    ok = await _bapi.set_description(session, row["token"], description, lang)
+                    if not ok:
+                        errors.append("description")
+                if short_description:
+                    ok = await _bapi.set_short_description(session, row["token"], short_description, lang)
+                    if not ok:
+                        errors.append("short_description")
+        except Exception as exc:
+            return _err(str(exc), 500)
+        if errors:
+            return _json_resp({"ok": False, "errors": errors})
+        return _json_resp({"ok": True})
+
     # ── Strike history ─────────────────────────────────────────────────────────
 
     async def strike_history(request: web.Request) -> web.Response:
@@ -2653,6 +3993,95 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             }
             for r in rows
         ]})
+
+    # ── Strike: status + launch ────────────────────────────────────────────────
+
+    async def strike_status(request: web.Request) -> web.Response:
+        """Проверяет доступ к Strike и возвращает список категорий."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            row = await pool.fetchrow(
+                "SELECT purchased_at, mode FROM strike_access WHERE user_id=$1", uid
+            )
+            from services.strike_engine import MINI_CATEGORIES
+            categories = [
+                {"key": k, "label": v["label"], "severity": v.get("severity", "MEDIUM")}
+                for k, v in MINI_CATEGORIES.items()
+            ]
+            return _json_resp({
+                "has_access": row is not None,
+                "mode": row["mode"] if row else None,
+                "purchased_at": row["purchased_at"].isoformat() if row and row["purchased_at"] else None,
+                "categories": categories,
+            })
+        except Exception as exc:
+            log.exception("strike_status uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def strike_launch(request: web.Request) -> web.Response:
+        """Создаёт Strike операцию и ставит её в очередь."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            target = (body.get("target") or "").strip()
+            category = (body.get("category") or "").strip()
+            if not target or len(target) < 3:
+                return _err("Укажите цель (username или ссылку)", 400)
+            if not category:
+                return _err("Выберите категорию нарушения", 400)
+
+            # Проверяем доступ
+            row = await pool.fetchrow(
+                "SELECT mode FROM strike_access WHERE user_id=$1", uid
+            )
+            if not row:
+                return _err("Нет доступа к Strike. Необходима лицензия.", 403)
+
+            from services.strike_engine import MINI_CATEGORIES
+            cat = MINI_CATEGORIES.get(category)
+            if not cat:
+                return _err("Неизвестная категория", 400)
+
+            # Нормализация target
+            from services.account_manager import normalize_telegram_join_ref
+            ref_kind, ref_value = normalize_telegram_join_ref(target)
+            normalized = f"+{ref_value}" if ref_kind == "invite" else ref_value.lstrip("@")
+            if not normalized or len(normalized) < 3:
+                return _err("Некорректный username или ссылка", 400)
+
+            # Подсчёт доступных аккаунтов
+            accs = await pool.fetch(
+                """SELECT id FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=true
+                     AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')
+                   LIMIT 50""",
+                uid,
+            )
+            if not accs:
+                return _err("Нет доступных активных аккаунтов для Strike", 400)
+
+            # Создаём операцию в очереди (op_type='strike' — воркер знает этот тип)
+            op_id = await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id, op_type, label, status, params, total_items)
+                   VALUES($1, 'strike', $2, 'pending', $3::jsonb, $4)
+                   RETURNING id""",
+                uid,
+                f"Strike: {normalized} [{cat['label']}]",
+                __import__("json").dumps({
+                    "target": normalized,
+                    "reason": cat["tg_reason"],
+                    "account_ids": [r["id"] for r in accs],
+                }),
+                len(accs),
+            )
+            return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs)})
+        except Exception as exc:
+            log.exception("strike_launch uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Audience Parser (read-only history) ───────────────────────────────────
 
@@ -2744,7 +4173,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if not source_ref:
             return _err("source_ref обязателен", 400)
-        if parse_type not in ("members", "active", "comments"):
+        if parse_type not in ("members", "active"):
             parse_type = "members"
         if limit < 1 or limit > 10000:
             limit = 500
@@ -3307,33 +4736,51 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("text required")
         if len(text) > 4096:
             return _err("text too long (max 4096)")
-        # Get all active bots with subscriber counts
-        bots = await _safe_fetch(pool,
-            """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
-               FROM managed_bots mb
-               LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
-               WHERE mb.added_by=$1 AND mb.is_active=true
-               GROUP BY mb.bot_id""", uid)
+        # Опциональный выбор ботов: bot_ids → рассылка только выбранным
+        sel_ids = [int(x) for x in (body.get("bot_ids") or []) if str(x).lstrip("-").isdigit()]
+        if sel_ids:
+            bots = await _safe_fetch(pool,
+                """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
+                   FROM managed_bots mb
+                   LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
+                   WHERE mb.added_by=$1 AND mb.is_active=true AND mb.bot_id = ANY($2::bigint[])
+                   GROUP BY mb.bot_id""", uid, sel_ids)
+        else:
+            bots = await _safe_fetch(pool,
+                """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
+                   FROM managed_bots mb
+                   LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
+                   WHERE mb.added_by=$1 AND mb.is_active=true
+                   GROUP BY mb.bot_id""", uid)
         if not bots:
             return _err("No active bots found")
         total_recipients = sum(b["active_subs"] or 0 for b in bots)
-        created_ids = []
-        for b in bots:
-            if not (b["active_subs"] or 0):
-                continue
-            try:
-                row = await pool.fetchrow(
-                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
-                    b["bot_id"], text, b["active_subs"], uid)
-                created_ids.append(row["id"])
-            except Exception:
-                log.warning("network_broadcast: failed bot=%d", b["bot_id"])
-        return _json_resp({
-            "ok": True,
-            "broadcasts_created": len(created_ids),
-            "total_recipients": total_recipients,
-            "broadcast_ids": created_ids,
-        })
+        lang = body.get("lang", "")
+        if sel_ids:
+            segment = "selected_bots"
+            op_params = {"text": text, "segment": segment, "lang": lang,
+                         "selected_bot_ids": [int(b["bot_id"]) for b in bots]}
+        else:
+            segment = body.get("segment", "all_each")
+            op_params = {"text": text, "segment": segment, "lang": lang}
+        label = f"Network Broadcast: {text[:40]}{'…' if len(text) > 40 else ''}"
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'network_broadcast','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps(op_params),
+                total_recipients, label,
+            )
+            return _json_resp({
+                "ok": True,
+                "op_id": op_id,
+                "total_recipients": total_recipients,
+                "broadcasts_created": len(bots),
+                "label": label,
+            })
+        except Exception:
+            log.exception("network_broadcast op_queue uid=%d", uid)
+            return _err("Failed to queue broadcast", 500)
 
     # ── CRM Contacts ─────────────────────────────────────────────────────────
 
@@ -3375,6 +4822,66 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT DISTINCT unnest(tags) AS tag FROM crm_contacts WHERE owner_id=$1 ORDER BY tag", uid)
         all_tags = [r["tag"] for r in tags_row]
         return _json_resp({"contacts": rows, "total": total, "offset": offset, "all_tags": all_tags})
+
+    async def crm_contact_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        first_name = str(data.get("first_name", "")).strip()
+        last_name = str(data.get("last_name", "")).strip() or None
+        username = str(data.get("username", "")).strip().lstrip("@") or None
+        phone = str(data.get("phone", "")).strip() or None
+        tg_user_id_raw = data.get("tg_user_id")
+        tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()]
+        notes = str(data.get("notes", "")).strip() or None
+        if not first_name and not username and not phone:
+            return _err("Укажите имя, @username или номер телефона", 400)
+        tg_user_id = int(tg_user_id_raw) if tg_user_id_raw else None
+        if not tg_user_id:
+            import random as _rand
+            tg_user_id = _rand.randint(2_000_000_000, 9_000_000_000)
+        try:
+            cid = await pool.fetchval(
+                """INSERT INTO crm_contacts
+                   (owner_id, tg_user_id, first_name, last_name, username, phone, tags, notes, source)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+                   ON CONFLICT (owner_id, tg_user_id) DO UPDATE
+                     SET first_name=EXCLUDED.first_name,
+                         last_name=EXCLUDED.last_name,
+                         username=EXCLUDED.username,
+                         phone=EXCLUDED.phone,
+                         tags=EXCLUDED.tags,
+                         notes=EXCLUDED.notes,
+                         updated_at=now()
+                   RETURNING id""",
+                uid, tg_user_id, first_name or None, last_name, username, phone,
+                tags, notes,
+            )
+            return _json_resp({"id": cid, "ok": True})
+        except Exception as exc:
+            log.exception("crm_contact_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def crm_contact_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            contact_id = int(request.match_info["contact_id"])
+        except (KeyError, ValueError):
+            return _err("bad contact_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", contact_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("crm_contact_delete uid=%d cid=%d", uid, contact_id)
+            return _err(str(exc), 500)
 
     async def bot_audience(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3496,21 +5003,38 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("standard", "gentle", "aggressive"):
             plan_type = "standard"
-        target_days = {"standard": 14, "gentle": 21, "aggressive": 7}[plan_type]
-        daily_actions = {"standard": 10, "gentle": 5, "aggressive": 20}[plan_type]
+        # Values must match account_warmer.create_warmup_plan() — aggressive capped at 12/day
+        target_days    = {"gentle": 21, "standard": 14, "aggressive": 10}[plan_type]
+        daily_actions  = {"gentle":  5, "standard": 10, "aggressive": 12}[plan_type]
+        # Require session_str so the worker doesn't fail immediately
+        has_session = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            acc_id, uid)
+        if not has_session:
+            return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
         # Cancel any active warmup first
         try:
             await pool.execute(
-                "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND status='active'",
-                acc_id)
+                "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND owner_id=$2 AND status='active'",
+                acc_id, uid)
             row = await pool.fetchrow(
                 """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT (account_id) DO UPDATE
+                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=NOW()
+                   RETURNING id""",
                 uid, acc_id, plan_type, target_days, daily_actions)
-            return _json_resp({"ok": True, "id": row["id"], "target_days": target_days})
-        except Exception:
+            # Also create op_queue entry so op_worker executes warmup logic
+            label = f"Прогрев аккаунта #{acc_id} ({plan_type})"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'account_warmup','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"account_id": acc_id, "plan_type": plan_type}), label,
+            )
+            return _json_resp({"ok": True, "id": row["id"], "op_id": op_id, "target_days": target_days})
+        except Exception as exc:
             log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
-            return _err("Failed to start warmup", 500)
+            return _err(f"Ошибка запуска прогрева: {exc}", 500)
 
     async def pause_warmup(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3804,23 +5328,106 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        # Источник истины — тот же, что у бота: активная не истёкшая подписка в
+        # subscriptions (get_plan). Раньше Mini App читал platform_users.current_plan,
+        # который часть платёжных путей не обновляет → приложение показывало «free»
+        # при реально оплаченном тарифе.
+        plan = None
         try:
-            row = await pool.fetchrow(
-                """SELECT p.current_plan, p.plan_expires_at,
-                          s.is_active, s.expires_at AS sub_expires
-                   FROM platform_users p
-                   LEFT JOIN subscriptions s ON s.user_id=p.user_id AND s.is_active=true
-                   WHERE p.user_id=$1
-                   ORDER BY s.expires_at DESC NULLS LAST LIMIT 1""", uid)
-            if row:
-                return _json_resp({
-                    "plan": row["current_plan"] or "free",
-                    "expires_at": str(row["plan_expires_at"]) if row["plan_expires_at"] else None,
-                    "is_active": bool(row["is_active"]),
-                })
+            from bot.utils.subscription import get_plan as _gp
+            plan = await _gp(pool, uid)
+        except Exception:
+            plan = None
+        expires = None
+        is_active = False
+        try:
+            srow = await pool.fetchrow(
+                "SELECT plan, expires_at FROM subscriptions "
+                "WHERE user_id=$1 AND is_active=true AND expires_at > now() "
+                "ORDER BY expires_at DESC LIMIT 1", uid)
+            if srow:
+                is_active = True
+                expires = str(srow["expires_at"])
+                if not plan or plan == "free":
+                    plan = srow["plan"] or plan
         except Exception:
             pass
-        return _json_resp({"plan": "free", "expires_at": None, "is_active": False})
+        # Фолбэк на platform_users только если источник истины недоступен.
+        if not plan:
+            try:
+                prow = await pool.fetchrow(
+                    "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid)
+                if prow:
+                    plan = prow["current_plan"] or "free"
+                    if not expires and prow["plan_expires_at"]:
+                        expires = str(prow["plan_expires_at"])
+            except Exception:
+                pass
+        # Нормализуем к бинарной модели (starter/pro/enterprise → paid),
+        # чтобы клиент корректно показал платный тариф.
+        try:
+            from bot.utils.subscription import coerce_plan as _cp
+            plan = _cp(plan or "free")
+        except Exception:
+            plan = plan or "free"
+        return _json_resp({
+            "plan": plan,
+            "expires_at": expires,
+            "is_active": is_active or plan != "free",
+        })
+
+    async def user_settings_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            row = await pool.fetchrow(
+                "SELECT settings_json FROM platform_users WHERE user_id=$1", uid)
+            if row and row["settings_json"]:
+                import json as _json
+                return _json_resp(_json.loads(row["settings_json"]))
+        except Exception:
+            pass
+        return _json_resp({
+            "notif_ops": True,
+            "notif_pay": True,
+            "notif_report": False,
+            "notif_error": True,
+            "utc_logs": False,
+            "lang": "ru",
+        })
+
+    async def user_settings_save(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            import json as _json
+            settings_json = _json.dumps(data)
+            await pool.execute(
+                """UPDATE platform_users SET settings_json=$1 WHERE user_id=$2""",
+                settings_json, uid)
+        except Exception:
+            pass
+        return _json_resp({"ok": True})
+
+    async def payments_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT plan, period_months, amount_usd, currency, status, created_at
+                   FROM payments
+                   WHERE user_id=$1
+                   ORDER BY created_at DESC
+                   LIMIT 20""",
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception:
+            return _json_resp([])
 
     async def referral(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3841,7 +5448,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def asset_templates_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         asset_type = request.rel_url.query.get("type")
         try:
             if asset_type:
@@ -3864,7 +5471,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def asset_template_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -3883,7 +5490,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def asset_template_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
@@ -3904,7 +5511,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def infra_health_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             alerts = await pool.fetch(
                 "SELECT id, alert_type, severity, title, description, target_type, "
@@ -3937,7 +5544,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def swarm_metrics(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -3963,7 +5570,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def presence_packs_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, name, description, target_url, target_label, bot_id "
@@ -3975,12 +5582,60 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("presence_packs_list uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def presence_pack_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        description = (body.get("description") or "").strip()
+        target_url = (body.get("target_url") or "").strip()
+        target_label = (body.get("target_label") or "").strip()
+        bot_id = body.get("bot_id") or None
+        if not name:
+            return _err("name required")
+        if bot_id:
+            try:
+                bot_id = int(bot_id)
+            except (TypeError, ValueError):
+                bot_id = None
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO presence_packs(owner_id, name, description, target_url, target_label, bot_id)
+                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                uid, name, description or None, target_url or None, target_label or None, bot_id,
+            )
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception as exc:
+            log.exception("presence_pack_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def presence_pack_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("presence_pack_delete uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Global Presence ───────────────────────────────────────────────────────
 
     async def global_presence_plans(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4006,7 +5661,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def global_presence_plan_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
@@ -4032,7 +5687,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def mass_ops_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4053,7 +5708,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def ecosystems_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4078,7 +5733,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def ecosystem_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             eco_id = int(request.match_info["eco_id"])
         except (KeyError, ValueError):
@@ -4111,12 +5766,54 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ecosystem_detail uid=%d eco=%d", uid, eco_id)
             return _err(str(exc), 500)
 
+    async def ecosystem_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        description = (body.get("description") or "").strip()
+        ecosystem_type = (body.get("ecosystem_type") or "custom").strip()
+        region = (body.get("region") or "").strip()
+        if not name:
+            return _err("name required")
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO ecosystems(owner_id, name, description, ecosystem_type, region)
+                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                uid, name, description or None, ecosystem_type, region or None,
+            )
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception as exc:
+            log.exception("ecosystem_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def ecosystem_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eco_id = int(request.match_info["eco_id"])
+        except (KeyError, ValueError):
+            return _err("bad eco_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("ecosystem_delete uid=%d eco=%d", uid, eco_id)
+            return _err(str(exc), 500)
+
     # ── Channel Factory ───────────────────────────────────────────────────────
 
     async def channel_factory_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -4135,6 +5832,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not acc:
                 return _err("Аккаунт не найден или неактивен", 404)
+            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+            _lim = await get_channel_limit(pool, uid)
+            if await get_effective_channel_count(pool, uid) >= _lim:
+                return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
                 "VALUES($1,'create_channel','pending',$2,1,$3) RETURNING id",
@@ -4149,7 +5850,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def channel_factory_recent(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, title, username, type, added_at FROM managed_channels "
@@ -4166,7 +5867,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def group_factory_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -4185,6 +5886,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not acc:
                 return _err("Аккаунт не найден или неактивен", 404)
+            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+            _lim = await get_channel_limit(pool, uid)
+            if await get_effective_channel_count(pool, uid) >= _lim:
+                return _err(f"Достигнут лимит каналов/групп ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
                 "VALUES($1,'create_group','pending',$2,1,$3) RETURNING id",
@@ -4201,7 +5906,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def physics_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4224,7 +5929,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def physics_account_telemetry(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             account_id = int(request.match_info["account_id"])
         except (KeyError, ValueError):
@@ -4255,17 +5960,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def graph_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
+            # Filter via owner's known channels (graph_nodes has no owner_id)
             stats = await pool.fetchrow(
                 """
                 SELECT
-                    (SELECT COUNT(*) FROM graph_nodes) AS nodes,
-                    (SELECT COUNT(*) FROM graph_edges) AS edges,
-                    (SELECT COUNT(*) FROM audience_overlaps WHERE overlap_pct > 0.1) AS strong_overlaps
-                """
+                    (SELECT COUNT(*) FROM graph_nodes gn
+                     WHERE EXISTS (
+                         SELECT 1 FROM managed_channels mc
+                         WHERE mc.owner_id=$1
+                           AND (mc.username = gn.username OR mc.channel_id::text = gn.entity_id)
+                     )) AS nodes,
+                    (SELECT COUNT(*) FROM graph_edges ge
+                     JOIN graph_nodes na ON na.id = ge.from_node
+                     WHERE EXISTS (
+                         SELECT 1 FROM managed_channels mc
+                         WHERE mc.owner_id=$1
+                           AND (mc.username = na.username OR mc.channel_id::text = na.entity_id)
+                     )) AS edges,
+                    (SELECT COUNT(*) FROM audience_overlaps ao
+                     JOIN graph_nodes na ON na.id = ao.node_a
+                     WHERE ao.overlap_pct > 0.1
+                       AND EXISTS (
+                           SELECT 1 FROM managed_channels mc
+                           WHERE mc.owner_id=$1
+                             AND (mc.username = na.username OR mc.channel_id::text = na.entity_id)
+                       )) AS strong_overlaps
+                """,
+                uid,
             )
-            return _json_resp(dict(stats) if stats else {})
+            return _json_resp(dict(stats) if stats else {"nodes": 0, "edges": 0, "strong_overlaps": 0})
         except Exception as exc:
             log.exception("graph_stats uid=%d", uid)
             return _err(str(exc), 500)
@@ -4273,7 +5998,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def graph_overlaps(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4284,8 +6009,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 JOIN graph_nodes na ON na.id = ao.node_a
                 JOIN graph_nodes nb ON nb.id = ao.node_b
                 WHERE ao.overlap_pct > 0.05
+                  AND EXISTS (
+                      SELECT 1 FROM managed_channels mc
+                      WHERE mc.owner_id=$1
+                        AND (mc.username = na.username OR mc.username = nb.username
+                             OR mc.channel_id::text = na.entity_id OR mc.channel_id::text = nb.entity_id)
+                  )
                 ORDER BY ao.overlap_pct DESC LIMIT 20
-                """
+                """,
+                uid,
             )
             return _json_resp([dict(r) for r in rows])
         except Exception as exc:
@@ -4297,7 +6029,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def compliance_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             totals = await pool.fetchrow(
                 """
@@ -4326,7 +6058,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_cloner_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, op_type, status, params, COALESCE(label, op_type) AS label, created_at FROM operation_queue "
@@ -4341,7 +6073,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_cloner_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             body = await request.json()
         except Exception:
@@ -4350,12 +6082,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not source:
             return _err("source required")
         account_id = body.get("account_id")
+        # Resolve the worker's contract here: _exec_content_clone expects source_ref,
+        # a list of target channels and an explicit account list. The Mini App only
+        # collects a source, so derive the rest — clone the source channel's recent
+        # posts into the user's own managed channels using an active account.
+        if account_id:
+            try:
+                account_ids = [int(account_id)]
+            except (TypeError, ValueError):
+                account_ids = []
+        else:
+            acc_rows = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+                "AND session_str IS NOT NULL "
+                "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "ORDER BY last_used DESC NULLS LAST LIMIT 1", uid)
+            account_ids = [r["id"] for r in acc_rows]
+        if not account_ids:
+            return _err("Нет активного аккаунта с сессией для клонирования", 400)
+        chan_rows = await _safe_fetch(pool,
+            "SELECT username, channel_id FROM managed_channels WHERE owner_id=$1", uid)
+        target_refs = [
+            ("@" + r["username"]) if r["username"] else r["channel_id"]
+            for r in chan_rows
+        ]
+        if not target_refs:
+            return _err("Нет управляемых каналов — добавьте канал, куда клонировать контент", 400)
         try:
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'content_clone','pending',$2,1,$3) RETURNING id",
-                uid, json.dumps({"source": source, "account_id": account_id}),
-                f"Клонировать контент: {source}",
+                "VALUES($1,'content_clone','pending',$2,$3,$4) RETURNING id",
+                uid, json.dumps({
+                    "source": source,          # kept for history display (JS reads payload.source)
+                    "source_ref": source,      # read by _exec_content_clone
+                    "target_refs": target_refs,
+                    "account_ids": account_ids,
+                    "mode": "forward",
+                    "msg_count": 10,
+                }),
+                len(target_refs),
+                f"Клонировать контент: {source} → {len(target_refs)} канал(ов)",
             )
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception as exc:
@@ -4367,7 +6133,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def clone_adapt_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4392,7 +6158,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_meshes_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4418,7 +6184,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def content_mesh_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             mesh_id = int(request.match_info["mesh_id"])
         except (KeyError, ValueError):
@@ -4431,11 +6197,88 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("not found", 404)
             new_state = not mesh["enabled"]
             await pool.execute(
-                "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, mesh_id
+                "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, mesh_id, uid
             )
             return _json_resp({"enabled": new_state})
         except Exception as exc:
             log.exception("content_mesh_toggle uid=%d mesh=%d", uid, mesh_id)
+            return _err(str(exc), 500)
+
+    async def clone_adapt_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        source_bot_id = data.get("source_bot_id")
+        target_bot_id = data.get("target_bot_id")
+        fields = data.get("fields", "name,desc")
+        if not source_bot_id or not target_bot_id:
+            return _err("source_bot_id и target_bot_id обязательны", 400)
+        if int(source_bot_id) == int(target_bot_id):
+            return _err("Источник и цель должны быть разными ботами", 400)
+        try:
+            src = await pool.fetchrow(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                int(source_bot_id), uid,
+            )
+            tgt = await pool.fetchrow(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                int(target_bot_id), uid,
+            )
+            if not src:
+                return _err("Исходный бот не найден", 404)
+            if not tgt:
+                return _err("Целевой бот не найден", 404)
+            src_name = src["username"] or src["first_name"] or f"id{src['bot_id']}"
+            tgt_name = tgt["username"] or tgt["first_name"] or f"id{tgt['bot_id']}"
+            op_id = await pool.fetchval(
+                """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label)
+                   VALUES($1,'clone_adapt','pending',$2,1,$3) RETURNING id""",
+                uid,
+                _json.dumps({
+                    "source_bot_id": int(source_bot_id),
+                    "target_bot_id": int(target_bot_id),
+                    "fields": fields,
+                }),
+                f"Clone: @{src_name} → @{tgt_name}",
+            )
+            return _json_resp({"op_id": op_id, "ok": True})
+        except Exception as exc:
+            log.exception("clone_adapt_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def content_mesh_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        name = str(data.get("name", "")).strip()
+        source_channel = str(data.get("source_channel", "")).strip() or None
+        source_account_id = data.get("source_account_id")
+        delay_minutes = int(data.get("delay_minutes", 30))
+        append_text = str(data.get("append_text", "")).strip() or None
+        if not name:
+            return _err("name обязателен", 400)
+        if delay_minutes < 1:
+            delay_minutes = 1
+        try:
+            mid = await pool.fetchval(
+                """INSERT INTO content_meshes
+                   (owner_id, name, source_channel, source_account_id, delay_minutes, append_text)
+                   VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+                uid, name, source_channel,
+                int(source_account_id) if source_account_id else None,
+                delay_minutes, append_text,
+            )
+            return _json_resp({"id": mid, "ok": True})
+        except Exception as exc:
+            log.exception("content_mesh_create uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Narrative Engine ──────────────────────────────────────────────────────
@@ -4443,7 +6286,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def narrative_campaigns_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
@@ -4458,7 +6301,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def narrative_campaign_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             cid = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
@@ -4479,36 +6322,129 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("narrative_campaign_detail uid=%d cid=%d", uid, cid)
             return _err(str(exc), 500)
 
+    async def narrative_campaign_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        topic = str(data.get("topic", "")).strip()
+        core_message = str(data.get("core_message", "")).strip()
+        campaign_type = data.get("campaign_type", "trend")
+        spread_hours = int(data.get("spread_hours", 4))
+        if not topic or not core_message:
+            return _err("topic и core_message обязательны", 400)
+        if campaign_type not in ("trend", "launch", "awareness", "counter"):
+            campaign_type = "trend"
+        if spread_hours < 1:
+            spread_hours = 1
+        try:
+            cid = await pool.fetchval(
+                """INSERT INTO narrative_campaigns
+                   (owner_id, topic, core_message, campaign_type, spread_hours, status)
+                   VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id""",
+                uid, topic, core_message, campaign_type, spread_hours,
+            )
+            return _json_resp({"id": cid, "ok": True})
+        except Exception as exc:
+            log.exception("narrative_campaign_create uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Self Promo ───────────────────────────────────────────────────────────
 
     async def self_promo_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
-                "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count "
-                "FROM self_promo_templates ORDER BY id"
+                "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count, "
+                "CASE WHEN owner_id=$1 THEN true ELSE false END AS is_mine "
+                "FROM self_promo_templates WHERE owner_id=$1 OR owner_id IS NULL ORDER BY id",
+                uid,
             )
             return _json_resp([dict(r) for r in rows])
         except Exception as exc:
             log.exception("self_promo_list uid=%d", uid)
             return _err(str(exc), 500)
 
-    async def self_promo_toggle(request: web.Request) -> web.Response:
+    async def self_promo_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        style = data.get("style", "direct")
+        title = str(data.get("title", "")).strip()
+        content = str(data.get("content", "")).strip()
+        cta_text = str(data.get("cta_text", "")).strip() or None
+        cta_url = str(data.get("cta_url", "")).strip() or None
+        add_referral = bool(data.get("add_referral", False))
+        if not title or not content:
+            return _err("title и content обязательны", 400)
+        if style not in ("direct", "native"):
+            style = "direct"
+        if len(content) > 4096:
+            return _err("content слишком длинный (макс 4096 символов)", 400)
+        try:
+            tid = await pool.fetchval(
+                """INSERT INTO self_promo_templates
+                   (owner_id, style, title, content, cta_text, cta_url, add_referral)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
+                uid, style, title, content, cta_text, cta_url, add_referral,
+            )
+            return _json_resp({"id": tid, "ok": True})
+        except Exception as exc:
+            log.exception("self_promo_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def self_promo_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
             return _err("bad tpl_id", 400)
         try:
-            tpl = await pool.fetchrow("SELECT is_active FROM self_promo_templates WHERE id=$1", tpl_id)
+            result = await pool.execute(
+                "DELETE FROM self_promo_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
+            )
+            if result == "DELETE 0":
+                return _err("Шаблон не найден или нельзя удалить системный шаблон", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("self_promo_delete uid=%d tpl=%d", uid, tpl_id)
+            return _err(str(exc), 500)
+
+    async def self_promo_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("bad tpl_id", 400)
+        try:
+            tpl = await pool.fetchrow(
+                "SELECT is_active, owner_id FROM self_promo_templates WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
+                tpl_id, uid,
+            )
             if not tpl:
                 return _err("not found", 404)
+            # Системные (общие) шаблоны нельзя переключать обычному пользователю —
+            # это влияло бы на всех. Меняем только свои.
+            if tpl["owner_id"] is None:
+                return _err("Системный шаблон нельзя переключать", 403)
             new_state = not tpl["is_active"]
-            await pool.execute("UPDATE self_promo_templates SET is_active=$1 WHERE id=$2", new_state, tpl_id)
+            await pool.execute(
+                "UPDATE self_promo_templates SET is_active=$1 WHERE id=$2 AND owner_id=$3",
+                new_state, tpl_id, uid,
+            )
             return _json_resp({"active": new_state})
         except Exception as exc:
             log.exception("self_promo_toggle uid=%d tpl=%d", uid, tpl_id)
@@ -4517,13 +6453,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def self_promo_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
             return _err("bad tpl_id", 400)
         try:
-            tpl = await pool.fetchrow("SELECT id, title FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
+            tpl = await pool.fetchrow(
+                "SELECT id, title FROM self_promo_templates "
+                "WHERE id=$1 AND is_active AND (owner_id=$2 OR owner_id IS NULL)",
+                tpl_id, uid,
+            )
             if not tpl:
                 return _err("Шаблон не найден или неактивен", 404)
             op_id = await pool.fetchval(
@@ -4542,7 +6482,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def semantic_memory_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4567,7 +6507,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def semantic_memory_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
@@ -4591,7 +6531,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def audience_dna_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4616,7 +6556,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def auto_funnels_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
                 """
@@ -4643,7 +6583,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def auto_funnel_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
@@ -4660,7 +6600,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         new_state = not funnel["enabled"]
         try:
             await pool.execute(
-                "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, fid
+                "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, fid, uid
             )
         except Exception as exc:
             log.exception("auto_funnel_toggle update uid=%d fid=%d", uid, fid)
@@ -4670,7 +6610,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def auto_funnel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
-            return _err("auth")
+            return _err("Unauthorized", 401)
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
@@ -4695,6 +6635,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("auto_funnel_detail uid=%d fid=%d", uid, fid)
             return _err(str(exc), 500)
 
+    async def auto_funnel_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        bot_id = body.get("bot_id")
+        target_segment = (body.get("target_segment") or "all").strip()
+        first_message = (body.get("first_message") or "").strip()
+        if not name:
+            return _err("name required")
+        if not bot_id:
+            return _err("bot_id required")
+        try:
+            bot_id = int(bot_id)
+        except (TypeError, ValueError):
+            return _err("invalid bot_id")
+        bot_row = await pool.fetchrow(
+            "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, uid,
+        )
+        if not bot_row:
+            return _err("bot not found", 404)
+        try:
+            row = await pool.fetchrow(
+                "INSERT INTO auto_funnels(owner_id, name, bot_id, target_segment) VALUES($1,$2,$3,$4) RETURNING id",
+                uid, name, bot_id, target_segment,
+            )
+            fid = row["id"]
+            if first_message:
+                await pool.execute(
+                    "INSERT INTO auto_funnel_steps(funnel_id, step_num, delay_hours, message_text) VALUES($1,1,0,$2)",
+                    fid, first_message,
+                )
+            return _json_resp({"ok": True, "id": fid})
+        except Exception as exc:
+            log.exception("auto_funnel_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def auto_funnel_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("bad funnel_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("auto_funnel_delete uid=%d fid=%d", uid, fid)
+            return _err(str(exc), 500)
+
     # ── SSE ──────────────────────────────────────────────────────────────────
 
     async def events(request: web.Request) -> web.StreamResponse:
@@ -4716,9 +6715,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         async def fetch_activity() -> list:
             try:
                 rows = await pool.fetch(
-                    "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10",
+                    """SELECT COALESCE(label, op_type) AS action,
+                              status, created_at, done_items, total_items
+                       FROM operation_queue WHERE owner_id=$1
+                       ORDER BY created_at DESC LIMIT 10""",
                     uid)
-                return [dict(r) for r in rows]
+                def _map(r):
+                    s = r["status"]
+                    return {
+                        "action": r["action"],
+                        "status": ("completed" if s == "done" else "running" if s == "running" else "error" if s == "failed" else s),
+                        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                        "detail": (f'{r["done_items"]}/{r["total_items"]}' if (r["total_items"] or 0) > 0 else None),
+                    }
+                return [_map(r) for r in rows]
             except Exception:
                 return []
 
@@ -4745,6 +6755,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     # Bots
     app.router.add_get("/api/miniapp/bots", bots)
+    app.router.add_post("/api/miniapp/bot/add", bot_add)
+    app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)
     app.router.add_get("/api/miniapp/bot/{bot_id}/auto_replies", bot_auto_replies)
     app.router.add_post("/api/miniapp/bot/{bot_id}/auto_reply", create_auto_reply)
@@ -4773,6 +6785,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
+    app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     # Bot toggle
     app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)
     # Funnel steps
@@ -4786,6 +6799,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/network_broadcast", network_broadcast)
     # CRM
     app.router.add_get("/api/miniapp/crm/contacts", crm_contacts)
+    app.router.add_post("/api/miniapp/crm/contact", crm_contact_create)
+    app.router.add_delete("/api/miniapp/crm/contact/{contact_id}", crm_contact_delete)
     # Audience
     app.router.add_get("/api/miniapp/bot/{bot_id}/audience", bot_audience)
     # Keywords / Search Rankings
@@ -4813,6 +6828,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/analytics", analytics)
     # Subscription
     app.router.add_get("/api/miniapp/subscription", subscription)
+    # Settings
+    app.router.add_get("/api/miniapp/settings", user_settings_get)
+    app.router.add_post("/api/miniapp/settings", user_settings_save)
+    # Payments history
+    app.router.add_get("/api/miniapp/payments", payments_history)
     app.router.add_get("/api/miniapp/referral", referral)
     # Deeplinks
     app.router.add_get("/api/miniapp/bot/{bot_id}/deeplinks", bot_deeplinks)
@@ -4845,9 +6865,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/bot/{bot_id}/relay/toggle", relay_toggle)
     # API Keys
     app.router.add_get("/api/miniapp/api_keys", api_keys_list)
+    app.router.add_post("/api/miniapp/api_key", create_api_key)
     app.router.add_delete("/api/miniapp/api_key/{key_id}", revoke_api_key)
+    app.router.add_get("/api/miniapp/bot/{bot_id}/multigeo", multigeo_get)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/multigeo", multigeo_set)
     # Strike history
     app.router.add_get("/api/miniapp/strike/history", strike_history)
+    app.router.add_get("/api/miniapp/strike/status", strike_status)
+    app.router.add_post("/api/miniapp/strike/launch", strike_launch)
     # Audience Parser
     app.router.add_get("/api/miniapp/parser/runs", parser_runs)
     app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
@@ -4883,6 +6908,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
     # A/B Experiments
     app.router.add_get("/api/miniapp/experiments", experiments_list)
+    app.router.add_post("/api/miniapp/experiment", experiment_create)
     app.router.add_get("/api/miniapp/experiment/{exp_id}", experiment_detail)
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
     # Health Dashboard
@@ -4892,6 +6918,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
+    app.router.add_get("/api/miniapp/diag", diag)
+    app.router.add_get("/api/miniapp/new_users", new_users)
+    app.router.add_get("/api/miniapp/new_users/export", new_users_export)
+    app.router.add_get("/api/miniapp/platform_users", platform_new_users)
+    app.router.add_get("/api/miniapp/platform_users/export", platform_new_users_export)
+    app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
+    app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
+    app.router.add_post("/api/miniapp/channels/mass", channels_mass)
+    app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
+    app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
+    app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
+    app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
+    app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
+    app.router.add_post("/api/miniapp/boost", boost_submit)
+    app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
@@ -4917,6 +6961,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/ai_memory/{mem_id}", ai_memory_delete)
     # Nodes Hub
     app.router.add_get("/api/miniapp/nodes", nodes_list)
+    app.router.add_post("/api/miniapp/node", node_create)
+    app.router.add_delete("/api/miniapp/node/{node_id}", node_delete)
     app.router.add_get("/api/miniapp/node/{node_id}/threads", node_threads)
     # Gift Transfer
     app.router.add_get("/api/miniapp/gifts", gift_inventory)
@@ -4925,8 +6971,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/mass_invite", mass_inviter_submit)
     # Stars Hub
     app.router.add_get("/api/miniapp/stars", stars_overview)
+    app.router.add_post("/api/miniapp/stars/experiment", stars_experiment_create)
+    app.router.add_put("/api/miniapp/stars/experiment/{exp_id}/toggle", stars_experiment_toggle)
     # Ghost Engine
     app.router.add_get("/api/miniapp/ghost", ghost_profiles)
+    app.router.add_post("/api/miniapp/ghost", ghost_create)
     app.router.add_put("/api/miniapp/ghost/{profile_id}/toggle", ghost_toggle)
     app.router.add_delete("/api/miniapp/ghost/{profile_id}", ghost_delete)
     # Bot Webhook
@@ -4937,6 +6986,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
     # Asset Templates
     app.router.add_get("/api/miniapp/asset_templates", asset_templates_list)
+    app.router.add_post("/api/miniapp/asset_template", create_template)
     app.router.add_get("/api/miniapp/asset_template/{tpl_id}", asset_template_detail)
     app.router.add_delete("/api/miniapp/asset_template/{tpl_id}", asset_template_delete)
     # Infra Health Center
@@ -4945,6 +6995,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/swarm", swarm_metrics)
     # Presence Packs
     app.router.add_get("/api/miniapp/presence_packs", presence_packs_list)
+    app.router.add_post("/api/miniapp/presence_pack", presence_pack_create)
+    app.router.add_delete("/api/miniapp/presence_pack/{pack_id}", presence_pack_delete)
     # Global Presence
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
@@ -4953,6 +7005,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Ecosystems
     app.router.add_get("/api/miniapp/ecosystems", ecosystems_list)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}", ecosystem_detail)
+    app.router.add_post("/api/miniapp/ecosystem", ecosystem_create)
+    app.router.add_delete("/api/miniapp/ecosystem/{eco_id}", ecosystem_delete)
     # Channel Factory
     app.router.add_post("/api/miniapp/channel_factory/submit", channel_factory_submit)
     app.router.add_get("/api/miniapp/channel_factory/recent", channel_factory_recent)
@@ -4971,14 +7025,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/content_cloner/submit", content_cloner_submit)
     # Clone Adapt
     app.router.add_get("/api/miniapp/clone_adapt/history", clone_adapt_history)
+    app.router.add_post("/api/miniapp/clone_adapt/submit", clone_adapt_submit)
     # Content Mesh
     app.router.add_get("/api/miniapp/content_meshes", content_meshes_list)
+    app.router.add_post("/api/miniapp/content_mesh", content_mesh_create)
     app.router.add_put("/api/miniapp/content_mesh/{mesh_id}/toggle", content_mesh_toggle)
     # Narrative Engine
     app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)
+    app.router.add_post("/api/miniapp/narrative", narrative_campaign_create)
     app.router.add_get("/api/miniapp/narrative/{campaign_id}", narrative_campaign_detail)
     # Self Promo
     app.router.add_get("/api/miniapp/self_promo", self_promo_list)
+    app.router.add_post("/api/miniapp/self_promo/template", self_promo_create)
+    app.router.add_delete("/api/miniapp/self_promo/{tpl_id}", self_promo_delete)
     app.router.add_put("/api/miniapp/self_promo/{tpl_id}/toggle", self_promo_toggle)
     app.router.add_post("/api/miniapp/self_promo/{tpl_id}/launch", self_promo_launch)
     # Semantic Memory
@@ -4988,10 +7047,55 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/audience_dna", audience_dna_list)
     # Auto Funnels
     app.router.add_get("/api/miniapp/auto_funnels", auto_funnels_list)
+    app.router.add_post("/api/miniapp/auto_funnel", auto_funnel_create)
     app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/toggle", auto_funnel_toggle)
     app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_detail)
+    app.router.add_delete("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_delete)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
+
+    # ── Diagnostics ──────────────────────────────────────────────────────────
+    async def api_health(request: web.Request) -> web.Response:
+        """Публичный health endpoint для диагностики — не требует токена."""
+        checks = {}
+        try:
+            await pool.fetchval("SELECT 1")
+            checks["db"] = "ok"
+        except Exception as e:
+            checks["db"] = f"error: {e}"
+        try:
+            n_accounts = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts")
+            n_ops = await pool.fetchval("SELECT COUNT(*) FROM operation_queue WHERE status IN ('pending','running')")
+            checks["accounts_total"] = int(n_accounts or 0)
+            checks["ops_active"] = int(n_ops or 0)
+        except Exception as e:
+            checks["stats"] = f"error: {e}"
+        checks["routes"] = len([r for r in request.app.router.routes()])
+        checks["status"] = "ok" if checks.get("db") == "ok" else "degraded"
+        return _json_resp(checks)
+    app.router.add_get("/api/miniapp/sys_health", api_health)
+
+    async def miniapp_config(request: web.Request) -> web.Response:
+        """Public config endpoint — no auth required. Returns bot info for frontend."""
+        bot_username = await _resolve_bot_username()
+        mini_app_url = os.getenv("MINI_APP_URL", "")
+        try:
+            from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
+            paid_price = int(PLAN_PRICES_USD.get("paid", 29))
+            period_discounts = {str(k): v for k, v in PERIOD_DISCOUNTS.items()}
+        except Exception:
+            paid_price = 29
+            period_discounts = {"1": 0, "3": 10, "6": 15, "12": 20}
+        return _json_resp({
+            "bot_username": bot_username,
+            "mini_app_url": mini_app_url,
+            "platform": "Infragram OS",
+            "version": "2.0",
+            "paid_price": paid_price,
+            "period_discounts": period_discounts,
+        })
+
+    app.router.add_get("/api/miniapp/config", miniapp_config)
 
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
     _index_path = os.path.join(_static_dir, "index.html")

@@ -164,11 +164,14 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
     }
 
     if target_type == "bot_users" and target_id:
-        # Fetch user_id + username so Telethon can resolve the entity reliably
+        # Fetch user_id + username so Telethon can resolve the entity reliably.
+        # JOIN managed_bots ... added_by — защита от IDOR: рассылка только по
+        # подписчикам бота, принадлежащего владельцу кампании.
         rows = await pool.fetch(
-            "SELECT DISTINCT ON (user_id) user_id, username "
-            "FROM bot_users WHERE bot_id=$1 AND user_id > 0",
-            target_id,
+            "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username "
+            "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
+            "WHERE bu.bot_id=$1 AND mb.added_by=$2 AND bu.user_id > 0",
+            target_id, campaign["owner_id"],
         )
         return [
             {"user_id": r["user_id"], "username": r["username"] or None}
@@ -207,9 +210,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         rows = await pool.fetch(
             f"SELECT ua.user_id, bu.username "
             f"FROM user_activity ua "
+            f"JOIN managed_bots mb ON mb.bot_id = ua.bot_id AND mb.added_by=$2 "
             f"LEFT JOIN bot_users bu ON bu.bot_id = ua.bot_id AND bu.user_id = ua.user_id "
             f"WHERE ua.bot_id=$1 AND {cohort_sql}",
-            target_id,
+            target_id, campaign["owner_id"],
         )
         return [
             {"user_id": r["user_id"], "username": r["username"] or None}
