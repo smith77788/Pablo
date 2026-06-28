@@ -2845,8 +2845,27 @@ async def notify_new_platform_user(
     """Call this when a new user starts the management bot for the first time."""
     raw = os.getenv("ADMIN_IDS", "")
     admin_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
-    if not _NOTIFY_NEW_USERS or not admin_ids:
+    # Также уведомляем сессионных админов (вход через ADMIN_SECRET без ADMIN_IDS),
+    # иначе владелец без заданного ADMIN_IDS не получает уведомлений вообще.
+    admin_ids |= set(_session_admins)
+    if not _NOTIFY_NEW_USERS:
+        log.info(
+            "new_platform_user: уведомления ВЫКЛ (toggle), пропуск user_id=%s", user_id
+        )
         return
+    if not admin_ids:
+        log.warning(
+            "new_platform_user: нет получателей (ADMIN_IDS пуст и нет сессионных админов) — "
+            "уведомление о user_id=%s не отправлено. Задайте ADMIN_IDS в окружении.",
+            user_id,
+        )
+        return
+    log.info(
+        "new_platform_user: отправка уведомления админам=%s о новом user_id=%s",
+        sorted(admin_ids),
+        user_id,
+    )
+    sent = 0
     try:
         total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
     except Exception:
@@ -2868,12 +2887,19 @@ async def notify_new_platform_user(
                 f"Всего пользователей: <b>{total}</b>",
                 parse_mode="HTML",
             )
+            sent += 1
         except Exception:
             log_exc_swallow(
                 log,
                 "Не удалось отправить уведомление о новом пользователе админу",
                 user_id=admin_id,
             )
+    log.info(
+        "new_platform_user: уведомление доставлено %d/%d админам (user_id=%s)",
+        sent,
+        len(admin_ids),
+        user_id,
+    )
 
 
 # ── Activity Logs Admin Screen ────────────────────────────────────────────────

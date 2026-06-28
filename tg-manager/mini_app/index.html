@@ -194,6 +194,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .seg{display:flex;background:var(--bg2);border-radius:10px;padding:2px;gap:2px;margin:8px 16px}
 .seg-opt{flex:1;padding:6px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:8px;transition:all .15s}
 .seg-opt.on{background:var(--bg);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.seg-btn{flex:1;padding:8px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:var(--bg2);transition:all .15s}
+.seg-btn.on{background:var(--btn);color:#fff;border-color:var(--btn)}
+.mini-btn{padding:6px 12px;font-size:12px;font-weight:600;color:var(--btn);background:rgba(59,130,246,.12);border:none;border-radius:9px;cursor:pointer;white-space:nowrap}
+.mini-btn:active{opacity:.7}
+.kpi-mini{flex:1;background:var(--bg2);border-radius:10px;padding:10px;text-align:center}
+.kpi-mini-v{font-size:20px;font-weight:700;color:var(--text)}
+.kpi-mini-l{font-size:11px;color:var(--hint);margin-top:2px}
 
 /* ─── Profile header (Telegram-style) ───────────────────── */
 .profile-hdr{display:flex;flex-direction:column;align-items:center;padding:24px 16px 16px;text-align:center}
@@ -1999,11 +2006,33 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-newusers">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">🆕 Новые подписчики</div>
+    <div class="hdr-title">🆕 Новые пользователи</div>
   </div>
   <div class="sub-sb">
-    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Последние пользователи, написавшие вашим ботам (по всем ботам). Обновляется автоматически — независимо от push-уведомлений.</div>
-    <div class="lst" id="newUsersList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <!-- Сегменты: платформа (@MEXAHI3MBOT) только для админов -->
+    <div class="seg" id="nuSeg" style="display:flex;gap:6px;margin:4px 0 10px">
+      <button class="seg-btn on" id="nuTabBots" onclick="nuSwitch('bots')">🤖 Подписчики ботов</button>
+      <button class="seg-btn" id="nuTabPlat" onclick="nuSwitch('plat')" style="display:none">👑 Платформа</button>
+    </div>
+
+    <!-- Вкладка: подписчики ботов -->
+    <div id="nuViewBots">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0 8px">
+        <div style="color:var(--hint);font-size:12px;flex:1">Пользователи, написавшие вашим ботам. Обновляется автоматически, независимо от push.</div>
+        <button class="mini-btn" onclick="exportCSV('/api/miniapp/new_users/export')">⬇️ CSV</button>
+      </div>
+      <div class="lst" id="newUsersList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+
+    <!-- Вкладка: пользователи платформы @MEXAHI3MBOT (админ) -->
+    <div id="nuViewPlat" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0 8px">
+        <div style="color:var(--hint);font-size:12px;flex:1">Новые пользователи системного бота <b>@MEXAHI3MBOT</b> — все клиенты платформы.</div>
+        <button class="mini-btn" onclick="exportCSV('/api/miniapp/platform_users/export')">⬇️ CSV</button>
+      </div>
+      <div id="platStats" style="display:flex;gap:8px;margin-bottom:8px"></div>
+      <div class="lst" id="platUsersList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
   </div>
 </div>
 
@@ -6176,15 +6205,34 @@ async function submitBoost() {
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
 }
 
-// ── Новые подписчики ─────────────────────────────────────
+// ── Новые пользователи ───────────────────────────────────
+// Экспорт CSV — открываем ссылку с токеном в внешнем браузере (надёжно в TMA)
+function exportCSV(path) {
+  const url = path + (path.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TK);
+  try { tg.openLink(url, {try_instant_view:false}); }
+  catch(_) { window.open(url, '_blank'); }
+  toast('Файл открывается для скачивания…');
+}
+
+function nuSwitch(which) {
+  const onBots = which==='bots';
+  document.getElementById('nuTabBots').classList.toggle('on', onBots);
+  document.getElementById('nuTabPlat').classList.toggle('on', !onBots);
+  document.getElementById('nuViewBots').style.display = onBots?'':'none';
+  document.getElementById('nuViewPlat').style.display = onBots?'none':'';
+  if (!onBots) loadPlatformUsers();
+}
+
 async function openNewUsers() {
   push('s-newusers');
+  nuSwitch('bots');
   txt('newUsersList','<div class="spin-wrap"><div class="spin"></div></div>');
+  // Подписчики ботов
   try {
     const d = await api('/api/miniapp/new_users');
     const us = d.users||[];
-    if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); return; }
-    txt('newUsersList', us.map(u=>{
+    if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); }
+    else txt('newUsersList', us.map(u=>{
       const nm = u.first_name || (u.username?'@'+u.username:'User #'+u.user_id);
       return `<div class="row">
         <div class="row-ico" style="background:rgba(34,197,94,.16)">👤</div>
@@ -6195,6 +6243,44 @@ async function openNewUsers() {
       </div>`;
     }).join(''));
   } catch(e) { txt('newUsersList', empty('⚠️','Ошибка',e.message)); }
+  // Проверяем доступ к ленте платформы (только админ) — показываем вкладку, если есть
+  try {
+    const p = await api('/api/miniapp/platform_users');
+    _platUsersCache = p;
+    document.getElementById('nuTabPlat').style.display='';
+  } catch(_) { /* не админ — вкладка скрыта */ }
+}
+
+let _platUsersCache = null;
+async function loadPlatformUsers() {
+  const listEl = document.getElementById('platUsersList');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = _platUsersCache || await api('/api/miniapp/platform_users');
+    _platUsersCache = null; // одноразовый кэш с openNewUsers
+    const st = document.getElementById('platStats');
+    if (st) st.innerHTML =
+      `<div class="kpi-mini"><div class="kpi-mini-v">${d.total||0}</div><div class="kpi-mini-l">всего</div></div>`+
+      `<div class="kpi-mini"><div class="kpi-mini-v" style="color:var(--green)">+${d.today||0}</div><div class="kpi-mini-l">сегодня</div></div>`;
+    const us = d.users||[];
+    if (!us.length) { listEl.innerHTML = empty('👑','Пока нет пользователей','Новые клиенты @MEXAHI3MBOT появятся здесь'); return; }
+    listEl.innerHTML = us.map(u=>{
+      const nm = u.first_name || (u.username?'@'+u.username:'User #'+u.user_id);
+      const plan = (u.plan||'free');
+      const planColor = plan==='free' ? 'var(--hint)' : 'var(--green)';
+      return `<div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">👤</div>
+        <div class="row-body">
+          <div class="row-name">${esc(nm)} ${u.username?`<span style="color:var(--hint);font-weight:400">@${esc(u.username)}</span>`:''}</div>
+          <div class="row-val" style="color:var(--hint)">ID ${u.user_id} · ${u.joined_at?ago(u.joined_at):''}</div>
+        </div>
+        <div class="row-right" style="color:${planColor};font-weight:600;text-transform:uppercase;font-size:11px">${esc(plan)}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = empty('⚠️','Ошибка',e.message);
+  }
 }
 
 // ── Диагностика ──────────────────────────────────────────

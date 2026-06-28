@@ -44,6 +44,35 @@ def _get_uid(request: web.Request) -> int | None:
     return parse_token(token, _bot_token())
 
 
+def _admin_ids() -> set[int]:
+    raw = os.getenv("ADMIN_IDS", "")
+    return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+
+
+def _is_admin(uid: int | None) -> bool:
+    return bool(uid) and uid in _admin_ids()
+
+
+def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    buf.write("﻿")  # BOM для корректного Excel UTF-8
+    w = _csv.writer(buf)
+    w.writerow(header)
+    for r in rows:
+        w.writerow(["" if c is None else c for c in r])
+    return web.Response(
+        text=buf.getvalue(),
+        content_type="text/csv",
+        charset="utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
     try:
         return int(await pool.fetchval(query, *args) or 0)
@@ -1387,6 +1416,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                ORDER BY bu.first_seen DESC NULLS LAST
                LIMIT 100""", uid)
         return _json_resp({"users": rows or []})
+
+    async def new_users_export(request: web.Request) -> web.Response:
+        """Экспорт ленты новых подписчиков (CSV) по всем ботам владельца."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
+                      mb.username AS bot_username
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by = $1 AND bu.user_id > 0
+               ORDER BY bu.first_seen DESC NULLS LAST
+               LIMIT 10000""", uid)
+        data = [[r.get("user_id"), r.get("username"), r.get("first_name"),
+                 r.get("first_seen"), r.get("bot_username")] for r in (rows or [])]
+        return _csv_resp("subscribers.csv",
+                         ["user_id", "username", "first_name", "first_seen", "bot"], data)
+
+    async def platform_new_users(request: web.Request) -> web.Response:
+        """Лента новых пользователей системного бота @MEXAHI3MBOT (платформа).
+        Только для администраторов платформы (ADMIN_IDS)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not _is_admin(uid):
+            return _err("Только для администраторов платформы", 403)
+        rows = await _safe_fetch(pool,
+            """SELECT user_id, username, first_name,
+                      COALESCE(current_plan,'free') AS plan,
+                      COALESCE(registered_at, first_seen, last_seen) AS joined_at,
+                      last_seen
+               FROM platform_users
+               WHERE user_id > 0
+               ORDER BY COALESCE(registered_at, first_seen, last_seen) DESC NULLS LAST
+               LIMIT 200""", uid)
+        total = await _safe_count(pool, "SELECT COUNT(*) FROM platform_users WHERE user_id > 0")
+        today = await _safe_count(pool,
+            "SELECT COUNT(*) FROM platform_users WHERE COALESCE(registered_at, first_seen, last_seen) >= CURRENT_DATE")
+        return _json_resp({"users": rows or [], "total": total, "today": today})
+
+    async def platform_new_users_export(request: web.Request) -> web.Response:
+        """Экспорт пользователей платформы (CSV). Только для администраторов."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not _is_admin(uid):
+            return _err("Только для администраторов платформы", 403)
+        rows = await _safe_fetch(pool,
+            """SELECT user_id, username, first_name,
+                      COALESCE(current_plan,'free') AS plan,
+                      COALESCE(registered_at, first_seen, last_seen) AS joined_at,
+                      last_seen
+               FROM platform_users
+               WHERE user_id > 0
+               ORDER BY COALESCE(registered_at, first_seen, last_seen) DESC NULLS LAST
+               LIMIT 50000""", uid)
+        data = [[r.get("user_id"), r.get("username"), r.get("first_name"),
+                 r.get("plan"), r.get("joined_at"), r.get("last_seen")] for r in (rows or [])]
+        return _csv_resp("platform_users.csv",
+                         ["user_id", "username", "first_name", "plan", "joined_at", "last_seen"], data)
 
     async def accounts_check(request: web.Request) -> web.Response:
         """Массовая проверка всех аккаунтов владельца (с реактивацией рабочих)."""
@@ -6573,6 +6663,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reporter
     app.router.add_get("/api/miniapp/diag", diag)
     app.router.add_get("/api/miniapp/new_users", new_users)
+    app.router.add_get("/api/miniapp/new_users/export", new_users_export)
+    app.router.add_get("/api/miniapp/platform_users", platform_new_users)
+    app.router.add_get("/api/miniapp/platform_users/export", platform_new_users_export)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
