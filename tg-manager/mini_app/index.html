@@ -1680,7 +1680,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="seg" id="ops-seg">
       <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
@@ -1689,6 +1691,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterOps('failed',this)">Ошибки</div>
     </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ СОЗДАТЬ ОПЕРАЦИЮ ══════════════════════ -->
+<div class="screen" id="s-opcreate">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">➕ Создать операцию</div></div>
+  <div class="sub-sb">
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Выберите тип операции — все они исполняются через ваши аккаунты и попадают в очередь.</div>
+    <div id="opCreateList"></div>
   </div>
 </div>
 
@@ -4999,6 +5010,59 @@ async function sendBcast() {
 // ── Operations ─────────────────────────────────────────
 let OPS_FILTER = null;
 function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
+
+// ── Создать операцию: категорийный лаунчер ──────────────
+const OP_CREATE_CATS = [
+  {title:'📢 Контент и публикация', items:[
+    {ico:'✍️', name:'Быстрый пост', sub:'Пост в выбранные каналы', fn:'openQuickPost'},
+    {ico:'📤', name:'Массовая публикация', sub:'Во все каналы сразу', fn:'openMassPub'},
+    {ico:'📋', name:'Контент-клонер', sub:'Копировать контент канала', fn:'openContentCloner'},
+  ]},
+  {title:'🚀 Продвижение', items:[
+    {ico:'🚀', name:'Накрутка', sub:'Просмотры, реакции, сторис', fn:'openBoost'},
+    {ico:'🌿', name:'Growth Agent', sub:'Органический рост', fn:'openGrowth'},
+    {ico:'📣', name:'Self Promo', sub:'Самопиар по аудитории', fn:'openSelfPromo'},
+    {ico:'⚔️', name:'Strike', sub:'Целевая зачистка', fn:'openStrike'},
+  ]},
+  {title:'👥 Аудитория', items:[
+    {ico:'🔍', name:'Парсер аудитории', sub:'Сбор участников', fn:'openParser'},
+    {ico:'👥', name:'Масс-инвайт', sub:'Приглашение в группу', fn:'openMassInvite'},
+    {ico:'📨', name:'DM-кампании', sub:'Личные сообщения', fn:'openDmCampaigns'},
+  ]},
+  {title:'🏭 Создание инфраструктуры', items:[
+    {ico:'📡', name:'Фабрика каналов', sub:'Создать каналы', fn:'openChannelFactory'},
+    {ico:'🤖', name:'Фабрика ботов', sub:'Создать ботов', fn:'openBotFactory'},
+  ]},
+  {title:'📱 Аккаунты', items:[
+    {ico:'🌱', name:'Прогрев', sub:'Прогрев аккаунтов', fn:'openWarmup'},
+    {ico:'🧹', name:'Чистка аккаунтов', sub:'Проверка и очистка', fn:'openCleaner'},
+    {ico:'📅', name:'Дата регистрации', sub:'Проверка возраста', fn:'openRegCheck'},
+    {ico:'🚩', name:'Репорты', sub:'Жалобы на цель', fn:'openReporter'},
+  ]},
+];
+function openOpCreate() {
+  push('s-opcreate');
+  const html = OP_CREATE_CATS.map(cat=>`
+    <div class="sec">${cat.title}</div>
+    <div class="lst">${cat.items.map(it=>`
+      <div class="row tap" onclick="closeOpCreateAnd('${it.fn}')">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">${it.ico}</div>
+        <div class="row-body">
+          <div class="row-name">${it.name}</div>
+          <div class="row-val" style="color:var(--hint)">${it.sub}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>`).join('')}</div>
+  `).join('');
+  txt('opCreateList', html);
+}
+function closeOpCreateAnd(fn) {
+  // Уходим с экрана создания и открываем выбранный лаунчер
+  if (STACK[STACK.length-1]==='s-opcreate') back();
+  const f = window[fn];
+  if (typeof f === 'function') f();
+  else toast('Модуль недоступен');
+}
 
 async function loadOps() {
   const url = OPS_FILTER ? '/api/miniapp/operations?status='+OPS_FILTER : '/api/miniapp/operations';
