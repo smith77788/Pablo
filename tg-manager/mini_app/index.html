@@ -208,6 +208,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .sel-bar-acts{display:flex;gap:6px;flex-wrap:wrap}
 .sel-bar-acts .mini-btn{flex:1;min-width:calc(50% - 3px);text-align:center;padding:9px 6px}
 .acc-row.sel{background:rgba(59,130,246,.14)}
+.bot-card.sel{outline:2px solid var(--btn);outline-offset:-2px}
+.li.tap.sel{background:rgba(59,130,246,.14)}
 .acc-check{width:22px;height:22px;border-radius:7px;border:2px solid var(--hint);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;flex-shrink:0;margin-right:2px}
 .acc-check.on{background:var(--btn);border-color:var(--btn)}
 
@@ -439,12 +441,41 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sb" id="botsBody">
     <!-- Массовые действия по ботам -->
-    <div style="display:flex;gap:8px;padding:0 0 10px">
+    <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1;font-size:13px;padding:10px 6px">📢 Рассылка</button>
       <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1;font-size:13px;padding:10px 6px">📣 Self Promo</button>
       <button class="btn btn-s" onclick="openBotFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
+    <div style="display:flex;gap:8px;padding:0 0 10px">
+      <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+    </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+  <!-- Плавающая панель: рассылка выбранным ботам -->
+  <div id="botSelBar" style="display:none">
+    <div class="sel-bar">
+      <div class="sel-bar-top">
+        <span id="botSelCount">Выбрано: 0</span>
+        <span class="sel-bar-link" onclick="botSelAll()">Все</span>
+        <span class="sel-bar-link" onclick="botSelClear()">Сброс</span>
+      </div>
+      <div class="sel-bar-acts">
+        <button class="mini-btn" onclick="openBotBroadcast()">📢 Рассылка выбранным</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: РАССЫЛКА ВЫБРАННЫМ БОТАМ ══════════════════════ -->
+<div class="mbg" id="mo-bot-broadcast" onclick="if(event.target===this)closeModal('mo-bot-broadcast')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-broadcast')">✕</div>
+    <div class="modal-title">📢 Рассылка выбранным ботам</div>
+    <div id="bbHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
+    <textarea id="bbText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:14px;resize:vertical"></textarea>
+    <textarea id="bbButtons" rows="2" placeholder="Кнопки: Текст | https://ссылка (по одной на строку)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid rgba(255,255,255,.08);font-size:13px;resize:vertical"></textarea>
+    <div id="bbErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
   </div>
 </div>
 
@@ -830,7 +861,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="mgmt-tile" onclick="openGlobalPresence()">
         <div class="mgmt-tile-ico">🌐</div>
-        <div class="mgmt-tile-lbl">Global Presence</div>
+        <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
         <div class="mgmt-tile-val" id="m-gp-val"></div>
       </div>
     </div>
@@ -969,8 +1000,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-val" id="m-stars-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openPresencePacks()">
-        <div class="mgmt-tile-ico">📦</div>
-        <div class="mgmt-tile-lbl">Presence Packs</div>
+        <div class="mgmt-tile-ico">🔗</div>
+        <div class="mgmt-tile-lbl">Связки (бот+каналы)</div>
         <div class="mgmt-tile-val" id="m-pp-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSettings()">
@@ -1048,20 +1079,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-presencepacks">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">📦 Presence Packs</div>
+    <div class="hdr-title">🔗 Связки (бот+каналы)</div>
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
-    <div class="sec">Пакеты присутствия</div>
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Объединяет ВАШИ существующие бота + каналы + группы в одну воронку: бот-админ, посевные посты, синхронная работа. Это <b>не</b> создание новых каналов.</div>
+    <div class="sec">Мои связки</div>
     <div class="lst" id="ppList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Global Presence</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div></div>
   <div class="sub-sb">
-    <div class="sec">Планы глобального присутствия</div>
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Бот <b>создаёт НОВЫЕ</b> каналы/группы/боты сразу по многим городам с локализованными названиями. Чтобы объединить уже существующие — раздел «🔗 Связки».</div>
+    <div class="sec">Мои планы гео-сети</div>
     <div class="lst" id="gpList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -1445,8 +1478,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="mbg" id="mo-presence-pack" onclick="if(event.target===this)closeModal('mo-presence-pack')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-presence-pack')">✕</div>
-    <div class="modal-title">📦 Новый Presence Pack</div>
-    <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Мой Pack" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="modal-title">🔗 Новая связка</div>
+    <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Моя связка" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Описание</label><input id="pp-desc" type="text" placeholder="Краткое описание..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Целевой URL / @username</label><input id="pp-url" type="text" placeholder="@mybot или https://t.me/..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Метка цели</label><input id="pp-label" type="text" placeholder="Мой бот" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
@@ -1648,7 +1681,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div class="seg" id="ops-seg">
       <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
@@ -1657,6 +1692,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterOps('failed',this)">Ошибки</div>
     </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ СОЗДАТЬ ОПЕРАЦИЮ ══════════════════════ -->
+<div class="screen" id="s-opcreate">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">➕ Создать операцию</div></div>
+  <div class="sub-sb">
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Выберите тип операции — все они исполняются через ваши аккаунты и попадают в очередь.</div>
+    <div id="opCreateList"></div>
   </div>
 </div>
 
@@ -2958,6 +3002,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст..."></textarea>
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
     </div>
+    <div class="field">
+      <label>Кнопки под сообщением (необязательно)</label>
+      <textarea id="bcastButtons" rows="2" placeholder="Текст кнопки | https://ссылка&#10;Вторая кнопка | https://..."></textarea>
+      <div class="field-note">По одной кнопке на строку: <code>Текст | URL</code></div>
+    </div>
     <div class="field-err" id="bcastErr"></div>
     <button class="btn btn-p" id="bcastBtn" onclick="sendBcast()" style="width:100%">📢 Отправить</button>
   </div>
@@ -3402,6 +3451,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 'use strict';
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
+// Нативная кнопка «Назад» Telegram управляет навигацией по STACK
+try { tg.BackButton?.onClick(() => back()); } catch(_) {}
 
 // ── State ──────────────────────────────────────────────
 let TK = null;         // auth token
@@ -3663,6 +3714,7 @@ function closeAllModals() {
 
 function goTab(tab) {
   closeAllModals();
+  try { tg.BackButton?.hide(); } catch(_) {}
   if (STACK.length) {
     STACK=[];
     document.querySelectorAll('.screen').forEach(s=>{
@@ -3681,11 +3733,20 @@ function goTab(tab) {
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
 }
 
+function _syncBackButton() {
+  try {
+    const bb = tg && tg.BackButton;
+    if (!bb) return;
+    if (STACK.length) bb.show(); else bb.hide();
+  } catch(_) {}
+}
+
 function push(sid) {
   closeAllModals();
   STACK.push(sid);
   document.getElementById(sid).classList.add('show');
   showTabbar(false);
+  _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
 }
 
@@ -3695,6 +3756,7 @@ function back() {
   const id = STACK.pop();
   document.getElementById(id).classList.remove('show');
   if (!STACK.length) showTabbar(true);
+  _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
 }
 
@@ -3856,29 +3918,89 @@ async function loadBots() {
     BOTS = d.bots||[];
     const cntEl = document.getElementById('bots-cnt');
     if (cntEl) cntEl.textContent = BOTS.length ? BOTS.length+' ботов' : '';
-    const wrap = document.getElementById('botsBody');
-    if (!BOTS.length) {
-      wrap.innerHTML = '<div id="botList">'+empty('🤖','Нет ботов','Нажмите «+ Бот» чтобы подключить бота')+'</div>';
-      return;
-    }
-    wrap.innerHTML = '<div class="bot-cards" id="botList">'+BOTS.map(b=>{
-      const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-      const initials = (b.first_name||name).replace('@','').slice(0,2).toUpperCase();
-      const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
-      const active = b.is_active;
-      const subs = b.subscriber_count||0;
-      return `<div class="bot-card" onclick="openBot(${b.bot_id})">
-        <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
+    renderBots();
+  } catch(e) {
+    const wrap = document.getElementById('botList');
+    if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); }
+  }
+}
+
+function renderBots() {
+  const wrap = document.getElementById('botList');
+  if (!wrap) return;
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Подключите бота по токену от @BotFather',{label:'➕ Добавить бота',fn:'openBotAddModal()'}); return; }
+  wrap.className = 'bot-cards';
+  wrap.innerHTML = BOTS.map(b=>{
+    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+    const initials = (b.first_name||name).replace('@','').slice(0,2).toUpperCase();
+    const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
+    const active = b.is_active;
+    const subs = b.subscriber_count||0;
+    const sel = BOT_SEL.has(b.bot_id);
+    if (BOT_SEL_MODE) {
+      return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id})">
         <div class="bot-card-ava" style="background:${grad}">${initials}</div>
         <div class="bot-card-name">${esc(name)}</div>
         <div class="bot-card-subs">${num(subs)}</div>
         <div class="bot-card-lbl">подписчиков</div>
-        <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
+        <span class="badge ${sel?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${sel?'✓ Выбран':'Выбрать'}</span>
       </div>`;
-    }).join('')+'</div>';
-  } catch(e) {
-    document.getElementById('botsBody').innerHTML=`<div id="botList">${errHtml(e.message,'loadBots()')}</div>`;
-  }
+    }
+    return `<div class="bot-card" onclick="openBot(${b.bot_id})">
+      <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
+      <div class="bot-card-ava" style="background:${grad}">${initials}</div>
+      <div class="bot-card-name">${esc(name)}</div>
+      <div class="bot-card-subs">${num(subs)}</div>
+      <div class="bot-card-lbl">подписчиков</div>
+      <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Режим выбора ботов и массовая рассылка ──────────────
+let BOT_SEL_MODE = false;
+let BOT_SEL = new Set();
+function toggleBotSelMode() {
+  BOT_SEL_MODE = !BOT_SEL_MODE;
+  BOT_SEL.clear();
+  const btn = document.getElementById('botSelToggle');
+  if (btn) btn.textContent = BOT_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
+  document.getElementById('botSelBar').style.display = BOT_SEL_MODE ? '' : 'none';
+  renderBots();
+  updateBotSelBar();
+}
+function toggleBotSel(id) {
+  if (BOT_SEL.has(id)) BOT_SEL.delete(id); else BOT_SEL.add(id);
+  renderBots();
+  updateBotSelBar();
+}
+function botSelAll() { BOTS.forEach(b=>BOT_SEL.add(b.bot_id)); renderBots(); updateBotSelBar(); }
+function botSelClear() { BOT_SEL.clear(); renderBots(); updateBotSelBar(); }
+function updateBotSelBar() {
+  const el = document.getElementById('botSelCount');
+  if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
+}
+function openBotBroadcast() {
+  if (!BOT_SEL.size) { toast('Выберите хотя бы одного бота'); return; }
+  document.getElementById('bbText').value='';
+  { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
+  document.getElementById('bbErr').textContent='';
+  document.getElementById('bbHint').textContent = `Сообщение получат подписчики ${BOT_SEL.size} выбранных ботов.`;
+  showModal('mo-bot-broadcast');
+}
+async function submitBotBroadcast() {
+  const errEl=document.getElementById('bbErr'); errEl.textContent='';
+  const text=document.getElementById('bbText').value.trim();
+  if(!text){ errEl.textContent='Введите текст рассылки'; return; }
+  const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
+  const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
+    const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify(_p)});
+    toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
+    closeModal('mo-bot-broadcast'); toggleBotSelMode();
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Запустить рассылку'; }
 }
 
 async function openBot(botId) {
@@ -3898,7 +4020,7 @@ async function openBot(botId) {
 }
 
 async function removeBotConfirm(botId, name) {
-  if (!confirm(`Отключить бота ${name}? Бот будет деактивирован.`)) return;
+  if (!await askConfirm(`Отключить бота ${name}? Бот будет деактивирован.`)) return;
   try {
     await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
     toast('🗑 Бот деактивирован');
@@ -4126,7 +4248,7 @@ async function toggleFunnel(id, el) {
 
 // ── Accounts ───────────────────────────────────────────
 async function removeChannel(chId) {
-  if (!confirm('Убрать канал из управления? (сам канал в Telegram не удаляется)')) return;
+  if (!await askConfirm('Убрать канал из управления? (сам канал в Telegram не удаляется)')) return;
   try {
     await api(`/api/miniapp/channel/${chId}`, {method:'DELETE'});
     toast('🗑 Канал убран из управления');
@@ -4199,14 +4321,14 @@ async function submitChanEdit() {
   finally { btn.disabled=false; btn.textContent='Применить'; }
 }
 async function promoteChannel(chId) {
-  if(!confirm('Назначить все аккаунты администраторами этого канала?')) return;
+  if(!await askConfirm('Назначить все аккаунты администраторами этого канала?')) return;
   try {
     const r=await api(`/api/miniapp/channel/${chId}/promote`,{method:'POST'});
     toast(`👑 Поставлено в очередь (#${r.op_id})`);
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function accAction(id, act, confirmMsg) {
-  if (confirmMsg && !confirm(confirmMsg)) return;
+  if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
     const r = await api(`/api/miniapp/account/${id}/action/${act}`, {method:'POST'});
     toast(`✅ Поставлено в очередь (#${r.op_id})`);
@@ -4226,7 +4348,7 @@ async function toggleAccount(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function deleteAccount(id) {
-  if (!confirm('Удалить аккаунт? Действие необратимо.')) return;
+  if (!await askConfirm('Удалить аккаунт? Действие необратимо.')) return;
   try {
     await api(`/api/miniapp/account/${id}`, {method:'DELETE'});
     toast('🗑 Аккаунт удалён');
@@ -4234,7 +4356,7 @@ async function deleteAccount(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function massCheckAccounts() {
-  if (!confirm('Проверить все аккаунты? Рабочие, ошибочно отключённые, будут восстановлены.')) return;
+  if (!await askConfirm('Проверить все аккаунты? Рабочие, ошибочно отключённые, будут восстановлены.')) return;
   try {
     const r = await api('/api/miniapp/accounts/check', {method:'POST'});
     toast(`🔍 Проверка ${r.count} аккаунтов запущена (#${r.op_id}). Результат придёт в бот.`);
@@ -4417,7 +4539,7 @@ async function runAccMass(op) {
     ? `Выйти из всех чатов на ${ids.length} аккаунтах? Действие необратимо.`
     : op==='scan' ? `Сканировать ресурсы на ${ids.length} аккаунтах?`
     : op==='check' ? `Проверить ${ids.length} аккаунтов?` : null;
-  if (confirmMsg && !confirm(confirmMsg)) return;
+  if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, account_ids:ids})});
     const cnt = r.count||ids.length;
@@ -4661,7 +4783,7 @@ async function submitChMass() {
 }
 async function runChMass(op) {
   if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
-  if (op==='promote' && !confirm(`Назначить аккаунты администраторами в ${CH_SEL.size} каналах?`)) return;
+  if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${CH_SEL.size} каналах?`)) return;
   try {
     const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify({op, channel_ids:[...CH_SEL]})});
     toast(`✅ Поставлено в очередь для ${r.count||CH_SEL.size} каналов`);
@@ -4828,6 +4950,7 @@ function openBcastPick() {
   if (!BOTS.length) { toast('Сначала загрузите список ботов'); goTab('bots'); return; }
   fillBcastBots(-1);
   document.getElementById('bcastText').value='';
+  { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -4841,6 +4964,7 @@ function openBcastForBot(botId, botName, recipCount) {
   if (!BOTS.length) BOTS = [{bot_id:botId, username:botName.replace('@',''), subscriber_count:recipCount}];
   fillBcastBots(botId);
   document.getElementById('bcastText').value='';
+  { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -4874,16 +4998,37 @@ document.getElementById('bcastBot').addEventListener('change', updateBcastRecip)
 
 function closeBcast() { document.getElementById('bcastMbg').classList.remove('show'); }
 
+// Парсит строки «Текст | URL» в массив инлайн-кнопок Telegram
+function parseInlineButtons(raw) {
+  const out = [];
+  (raw||'').split('\n').forEach(line=>{
+    line = line.trim();
+    if (!line) return;
+    const i = line.lastIndexOf('|');
+    if (i < 0) return;
+    const txt = line.slice(0,i).trim();
+    const url = line.slice(i+1).trim();
+    if (txt && /^https?:\/\//i.test(url)) out.push({text:txt, url});
+  });
+  return out;
+}
 async function sendBcast() {
   const botId = document.getElementById('bcastBot').value;
   const text = document.getElementById('bcastText').value.trim();
   const errEl = document.getElementById('bcastErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const btnsRaw = document.getElementById('bcastButtons')?.value || '';
+  const buttons = parseInlineButtons(btnsRaw);
+  if (btnsRaw.trim() && !buttons.length) {
+    errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
+  }
   const btn = document.getElementById('bcastBtn');
   btn.disabled=true; btn.textContent='⏳ Отправка...';
   try {
-    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify({bot_id:botId, text})});
+    const payload = {bot_id:botId, text};
+    if (buttons.length) payload.buttons = buttons;
+    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Рассылка запущена · '+num(d.total_users)+' получателей');
@@ -4897,6 +5042,59 @@ async function sendBcast() {
 // ── Operations ─────────────────────────────────────────
 let OPS_FILTER = null;
 function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
+
+// ── Создать операцию: категорийный лаунчер ──────────────
+const OP_CREATE_CATS = [
+  {title:'📢 Контент и публикация', items:[
+    {ico:'✍️', name:'Быстрый пост', sub:'Пост в выбранные каналы', fn:'openQuickPost'},
+    {ico:'📤', name:'Массовая публикация', sub:'Во все каналы сразу', fn:'openMassPub'},
+    {ico:'📋', name:'Контент-клонер', sub:'Копировать контент канала', fn:'openContentCloner'},
+  ]},
+  {title:'🚀 Продвижение', items:[
+    {ico:'🚀', name:'Накрутка', sub:'Просмотры, реакции, сторис', fn:'openBoost'},
+    {ico:'🌿', name:'Growth Agent', sub:'Органический рост', fn:'openGrowth'},
+    {ico:'📣', name:'Self Promo', sub:'Самопиар по аудитории', fn:'openSelfPromo'},
+    {ico:'⚔️', name:'Strike', sub:'Целевая зачистка', fn:'openStrike'},
+  ]},
+  {title:'👥 Аудитория', items:[
+    {ico:'🔍', name:'Парсер аудитории', sub:'Сбор участников', fn:'openParser'},
+    {ico:'👥', name:'Масс-инвайт', sub:'Приглашение в группу', fn:'openMassInvite'},
+    {ico:'📨', name:'DM-кампании', sub:'Личные сообщения', fn:'openDmCampaigns'},
+  ]},
+  {title:'🏭 Создание инфраструктуры', items:[
+    {ico:'📡', name:'Фабрика каналов', sub:'Создать каналы', fn:'openChannelFactory'},
+    {ico:'🤖', name:'Фабрика ботов', sub:'Создать ботов', fn:'openBotFactory'},
+  ]},
+  {title:'📱 Аккаунты', items:[
+    {ico:'🌱', name:'Прогрев', sub:'Прогрев аккаунтов', fn:'openWarmup'},
+    {ico:'🧹', name:'Чистка аккаунтов', sub:'Проверка и очистка', fn:'openCleaner'},
+    {ico:'📅', name:'Дата регистрации', sub:'Проверка возраста', fn:'openRegCheck'},
+    {ico:'🚩', name:'Репорты', sub:'Жалобы на цель', fn:'openReporter'},
+  ]},
+];
+function openOpCreate() {
+  push('s-opcreate');
+  const html = OP_CREATE_CATS.map(cat=>`
+    <div class="sec">${cat.title}</div>
+    <div class="lst">${cat.items.map(it=>`
+      <div class="row tap" onclick="closeOpCreateAnd('${it.fn}')">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">${it.ico}</div>
+        <div class="row-body">
+          <div class="row-name">${it.name}</div>
+          <div class="row-val" style="color:var(--hint)">${it.sub}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>`).join('')}</div>
+  `).join('');
+  txt('opCreateList', html);
+}
+function closeOpCreateAnd(fn) {
+  // Уходим с экрана создания и открываем выбранный лаунчер
+  if (STACK[STACK.length-1]==='s-opcreate') back();
+  const f = window[fn];
+  if (typeof f === 'function') f();
+  else toast('Модуль недоступен');
+}
 
 async function loadOps() {
   const url = OPS_FILTER ? '/api/miniapp/operations?status='+OPS_FILTER : '/api/miniapp/operations';
@@ -5725,7 +5923,7 @@ async function loadProxies() {
     const d = await api('/api/miniapp/proxies');
     const items = d.proxies||[];
     txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
-    if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси')); return; }
+    if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
     txt('proxyList', items.map(p=>{
       const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
       const type = (p.proxy_type||'socks5').toUpperCase();
@@ -5999,7 +6197,7 @@ async function loadDeeplinks() {
       <div class="kpi-card"><div class="kpi-val">${num(d.total_clicks)}</div><div class="kpi-lbl">Кликов</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.referrals)}</div><div class="kpi-lbl">Рефералов</div></div>
     `);
-    if (!links.length) { txt('dlList', empty('🔗','Нет ссылок','Создайте первую Deep Link')); return; }
+    if (!links.length) { txt('dlList', empty('🔗','Нет ссылок','Создайте первую Deep Link',{label:'➕ Создать ссылку',fn:'openDlModal()'})); return; }
     txt('dlList', links.map(l=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(139,92,246,.16)">🔗</div>
@@ -6038,7 +6236,7 @@ async function saveDl() {
   finally { btn.disabled=false; btn.textContent='➕ Создать'; }
 }
 async function deleteDl(linkId) {
-  if (!confirm('Удалить Deep Link?')) return;
+  if (!await askConfirm('Удалить Deep Link?')) return;
   try {
     await api('/api/miniapp/deeplink/'+linkId, {method:'DELETE'});
     toast('Удалено');
@@ -6149,7 +6347,7 @@ async function saveCmd() {
   finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
 }
 async function deleteCmd(idx) {
-  if (!confirm('Удалить команду /'+CMD_LIST[idx]?.command+'?')) return;
+  if (!await askConfirm('Удалить команду /'+CMD_LIST[idx]?.command+'?')) return;
   const newList = CMD_LIST.filter((_,i)=>i!==idx);
   try {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:newList})});
@@ -6158,7 +6356,7 @@ async function deleteCmd(idx) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function clearBotCommands() {
-  if (!confirm('Удалить все команды бота?')) return;
+  if (!await askConfirm('Удалить все команды бота?')) return;
   try {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:[]})});
     toast('🗑 Все команды удалены');
@@ -6357,7 +6555,7 @@ async function submitReporter() {
   const acc_count = parseInt(document.getElementById('reporterAccCount').value)||5;
   const errEl = document.getElementById('reporterErr');
   if (!target) { errEl.textContent='Укажите цель'; return; }
-  if (!confirm(`Отправить ${acc_count} репортов на "${target}"?`)) return;
+  if (!await askConfirm(`Отправить ${acc_count} репортов на "${target}"?`)) return;
   const btn = document.getElementById('reporterBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
@@ -6745,7 +6943,7 @@ async function togglePersona(id, active) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deletePersona(id) {
-  if (!confirm('Удалить персону?')) return;
+  if (!await askConfirm('Удалить персону?')) return;
   try {
     await api(`/api/miniapp/persona/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -6944,7 +7142,7 @@ async function openAiMemory() {
   }
 }
 async function deleteAiMem(id) {
-  if (!confirm('Удалить запись из AI-памяти?')) return;
+  if (!await askConfirm('Удалить запись из AI-памяти?')) return;
   try {
     await api(`/api/miniapp/ai_memory/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -7218,7 +7416,7 @@ async function toggleGhost(id, enabled) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deleteGhost(id) {
-  if (!confirm('Удалить Ghost-профиль?')) return;
+  if (!await askConfirm('Удалить Ghost-профиль?')) return;
   try {
     await api(`/api/miniapp/ghost/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -7286,7 +7484,7 @@ async function openBotWebhook(botId, botName) {
   }
 }
 async function deleteWebhook(botId) {
-  if (!confirm('Удалить вебхук? Очередь обновлений будет сброшена.')) return;
+  if (!await askConfirm('Удалить вебхук? Очередь обновлений будет сброшена.')) return;
   try {
     await api(`/api/miniapp/bot/${botId}/webhook`,{method:'DELETE'});
     toast('🗑 Вебхук удалён');
@@ -7399,7 +7597,7 @@ async function openDmCampaigns() {
   }
 }
 async function launchDm(id) {
-  if (!confirm('Запустить кампанию?')) return;
+  if (!await askConfirm('Запустить кампанию?')) return;
   try {
     await api(`/api/miniapp/dm_campaign/${id}/launch`,{method:'POST'});
     toast('▶️ Кампания запущена');
@@ -7407,7 +7605,7 @@ async function launchDm(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deleteDm(id) {
-  if (!confirm('Удалить кампанию?')) return;
+  if (!await askConfirm('Удалить кампанию?')) return;
   try {
     await api(`/api/miniapp/dm_campaign/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -7479,7 +7677,7 @@ async function openWarmup() {
   }
 }
 async function deleteWarmupPlan(id) {
-  if (!confirm('Удалить план прогрева?')) return;
+  if (!await askConfirm('Удалить план прогрева?')) return;
   try {
     await api(`/api/miniapp/warmup/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -7546,7 +7744,7 @@ async function openExpDetail(id, name) {
   }
 }
 async function deleteExp(id) {
-  if (!confirm('Удалить эксперимент?')) return;
+  if (!await askConfirm('Удалить эксперимент?')) return;
   try {
     await api(`/api/miniapp/experiment/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -7888,7 +8086,7 @@ async function openApiKeys() {
   } catch(e) { txt('apiKeyList', empty('⚠️','Ошибка',e.message)); }
 }
 async function revokeApiKey(keyId) {
-  if (!confirm('Отключить API ключ?')) return;
+  if (!await askConfirm('Отключить API ключ?')) return;
   try {
     await api('/api/miniapp/api_key/'+keyId, {method:'DELETE'});
     toast('🔑 Ключ отключён');
@@ -8173,7 +8371,7 @@ async function loadDeals() {
       return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:#aaa">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
     }).join(''));
     txt('m-deal-cnt', DEALS_DATA.length+' сделок');
-    if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку')); return; }
+    if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку',{label:'➕ Создать сделку',fn:'openDealModal()'})); return; }
     const STAGE_NEXT = {lead:'contact',contact:'proposal',proposal:'negotiation',negotiation:'won'};
     txt('dealList', DEALS_DATA.map(d2=>{
       const nextStage = STAGE_NEXT[d2.stage];
@@ -8228,7 +8426,7 @@ async function saveDeal() {
   finally { btn.disabled=false; btn.textContent='➕ Создать'; }
 }
 async function deleteDeal(dealId) {
-  if (!confirm('Удалить сделку?')) return;
+  if (!await askConfirm('Удалить сделку?')) return;
   try {
     await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
     toast('Удалено');
@@ -8293,7 +8491,7 @@ async function saveWorkspace() {
 }
 async function leaveWs(wsId, role) {
   const msg = role==='owner' ? 'Удалить пространство? Участники потеряют доступ.' : 'Покинуть пространство?';
-  if (!confirm(msg)) return;
+  if (!await askConfirm(msg)) return;
   try {
     await api('/api/miniapp/workspace/'+wsId, {method:'DELETE'});
     toast(role==='owner' ? '🗑 Пространство удалено' : '🚪 Вы покинули пространство');
@@ -8367,7 +8565,7 @@ function renderPromoTab(tab) {
   `).join(''));
 }
 async function cancelPromoOrder(orderId) {
-  if (!confirm('Отменить заказ?')) return;
+  if (!await askConfirm('Отменить заказ?')) return;
   try {
     await api('/api/miniapp/promo/order/'+orderId+'/cancel', {method:'POST'});
     toast('Заказ отменён');
@@ -8465,7 +8663,7 @@ function selectCleanerOp(op) {
 async function submitCleaner() {
   if (!CLEANER_ACC_ID) { document.getElementById('cleanerErr').textContent='Выберите аккаунт'; return; }
   const opLabels = {leave_all_chats:'выйти из всех чатов', delete_contacts:'удалить все контакты'};
-  if (!confirm(`Вы уверены? Аккаунт #${CLEANER_ACC_ID}: ${opLabels[CLEANER_OP]}.\nЭто необратимо!`)) return;
+  if (!await askConfirm(`Вы уверены? Аккаунт #${CLEANER_ACC_ID}: ${opLabels[CLEANER_OP]}.\nЭто необратимо!`)) return;
   const btn = document.getElementById('cleanerBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   document.getElementById('cleanerErr').textContent='';
@@ -8552,7 +8750,7 @@ async function loadAssetTpl(type) {
   } catch(e) { txt('atList', empty('⚠️','Ошибка',e.message)); }
 }
 async function deleteAssetTpl(id, btn) {
-  if (!confirm('Удалить шаблон?')) return;
+  if (!await askConfirm('Удалить шаблон?')) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/asset_template/${id}`,{method:'DELETE'});
@@ -8797,7 +8995,7 @@ async function openEcosystems() {
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/ecosystems');
-    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Нажмите + Создать')); return; }
+    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
     txt('ecoList', rows.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${esc(r.name)}')">
         <div class="row-ico" style="background:rgba(34,197,94,.16)">${(ECO_TYPES[r.ecosystem_type]||'🌐').charAt(0)}</div>
@@ -9454,7 +9652,7 @@ async function submitNodeCreate() {
   finally { btn.disabled = false; btn.textContent = '➕ Добавить ноду'; }
 }
 async function deleteNode(nodeId) {
-  if (!confirm('Удалить ноду?')) return;
+  if (!await askConfirm('Удалить ноду?')) return;
   try {
     await api('/api/miniapp/node/'+nodeId, {method:'DELETE'});
     toast('🗑 Нода удалена');
@@ -9497,7 +9695,7 @@ async function submitCrmContactCreate() {
   finally { btn.disabled = false; btn.textContent = '➕ Добавить контакт'; }
 }
 async function deleteCrmContact(contactId) {
-  if (!confirm('Удалить контакт?')) return;
+  if (!await askConfirm('Удалить контакт?')) return;
   try {
     await api('/api/miniapp/crm/contact/'+contactId, {method:'DELETE'});
     toast('🗑 Контакт удалён');
@@ -9536,7 +9734,7 @@ async function submitSelfPromoCreate() {
   finally { btn.disabled = false; btn.textContent = '📣 Создать шаблон'; }
 }
 async function deleteSelfPromoTemplate(id) {
-  if (!confirm('Удалить шаблон?')) return;
+  if (!await askConfirm('Удалить шаблон?')) return;
   try {
     await api('/api/miniapp/self_promo/'+id, {method:'DELETE'});
     toast('🗑 Шаблон удалён');
@@ -9724,7 +9922,7 @@ async function submitAutofunnelCreate() {
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deleteAutoFunnel(fid, btn) {
-  if (!confirm('Удалить авто-воронку?')) return;
+  if (!await askConfirm('Удалить авто-воронку?')) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/auto_funnel/${fid}`,{method:'DELETE'});
@@ -9752,13 +9950,13 @@ async function submitPresencePackCreate() {
   };
   try {
     await api('/api/miniapp/presence_pack',{method:'POST',body:JSON.stringify(body)});
-    toast('✅ Presence Pack создан');
+    toast('✅ Связка создана');
     closeModal('mo-presence-pack');
     openPresencePacks();
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deletePresencePack(id, btn) {
-  if (!confirm('Удалить Presence Pack?')) return;
+  if (!await askConfirm('Удалить связку?')) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/presence_pack/${id}`,{method:'DELETE'});
@@ -9793,7 +9991,7 @@ async function submitEcosystemCreate() {
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deleteEcosystem(id, btn) {
-  if (!confirm('Удалить экосистему?')) return;
+  if (!await askConfirm('Удалить экосистему?')) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/ecosystem/${id}`,{method:'DELETE'});
@@ -9821,8 +10019,10 @@ function ago(ts) {
   if(s<86400) return Math.floor(s/3600)+' ч назад';
   return Math.floor(s/86400)+' дн назад';
 }
-function empty(ico,txt2,sub) {
-  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}</div>`;
+function empty(ico,txt2,sub,action) {
+  // action: {label, fn} — кнопка-призыв к действию (как в топовых приложениях)
+  const btn = action ? `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>` : '';
+  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}${btn}</div>`;
 }
 function txt(id, html) {
   const el=document.getElementById(id);
@@ -9836,6 +10036,25 @@ function toast(msg) {
   const el=document.getElementById('toast');
   el.textContent=msg; el.classList.add('show');
   clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2800);
+  // Тактильный отклик (как в нативных Telegram Mini App)
+  try {
+    const h = tg && tg.HapticFeedback;
+    if (h) {
+      if (/⚠️|ошибк|Ошибк|не удал|❌/.test(msg)) h.notificationOccurred('error');
+      else if (/✅|🚀|📢|готов|запущен|создан|добавлен|сохран/i.test(msg)) h.notificationOccurred('success');
+      else h.impactOccurred('light');
+    }
+  } catch(_) {}
+}
+// Нативный диалог подтверждения Telegram (window.confirm часто блокируется
+// во встроенном браузере Telegram → деструктивные действия молча ломались).
+function askConfirm(msg) {
+  return new Promise(res => {
+    try {
+      if (tg && tg.showConfirm) { tg.showConfirm(msg, ok => res(!!ok)); return; }
+    } catch(_) {}
+    res(window.confirm(msg));
+  });
 }
 function showModal(id) {
   const el=document.getElementById(id);

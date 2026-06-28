@@ -568,6 +568,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
             return _err("Invalid bot_id")
+        # Инлайн-кнопки (необязательно): [{text, url}] — валидируем и ограничиваем.
+        buttons = []
+        for b in (body.get("buttons") or [])[:10]:
+            try:
+                bt = str(b.get("text") or "").strip()[:64]
+                bu = str(b.get("url") or "").strip()
+            except Exception:
+                continue
+            if bt and bu.lower().startswith(("http://", "https://")):
+                buttons.append({"text": bt, "url": bu})
         bot_row = await _safe_fetchrow(pool,
             "SELECT bot_id, token, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id_int, uid)
@@ -583,10 +593,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Create op_queue entry so user can track progress
             bot_label = bot_row.get("username") or bot_id_int
             label = f"Рассылка боту @{bot_label}: {text[:40]}…" if len(text) > 40 else f"Рассылка: {text[:60]}"
+            _op_params = {"bot_id": bot_id_int, "broadcast_id": broadcast_id, "text": text}
+            if buttons:
+                _op_params["buttons"] = buttons
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"bot_id": bot_id_int, "broadcast_id": broadcast_id, "text": text}),
+                uid, _json.dumps(_op_params),
                 total, label,
             )
             return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id, "total_users": total})
@@ -4756,6 +4769,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("No active bots found")
         total_recipients = sum(b["active_subs"] or 0 for b in bots)
         lang = body.get("lang", "")
+        # Инлайн-кнопки (необязательно)
+        _buttons = []
+        for b in (body.get("buttons") or [])[:10]:
+            try:
+                bt = str(b.get("text") or "").strip()[:64]
+                bu = str(b.get("url") or "").strip()
+            except Exception:
+                continue
+            if bt and bu.lower().startswith(("http://", "https://")):
+                _buttons.append({"text": bt, "url": bu})
         if sel_ids:
             segment = "selected_bots"
             op_params = {"text": text, "segment": segment, "lang": lang,
@@ -4763,6 +4786,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         else:
             segment = body.get("segment", "all_each")
             op_params = {"text": text, "segment": segment, "lang": lang}
+        if _buttons:
+            op_params["buttons"] = _buttons
         label = f"Network Broadcast: {text[:40]}{'…' if len(text) > 40 else ''}"
         try:
             op_id = await pool.fetchval(
