@@ -2375,7 +2375,7 @@ async def _exec_bulk_leave(
                         " VALUES($1,$2,$3,'error',$4)",
                         op_id, step, str(channel),
                         f"❌ Прокси недоступен — смена IP ломает auth key. Исправьте прокси.",
-                        log_ctx=f"[bulk_leave_proxy_skip op={op_id}]",
+                    log_ctx=f"[bulk_leave_proxy_skip op={op_id}]",
                     )
                     break  # stop all remaining channels for this account
                 if not res.get("ok"):
