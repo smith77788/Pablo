@@ -906,8 +906,23 @@ async def cb_clone_confirm(
     if "commands" in selected_fields:
         src_commands = await bot_api.get_my_commands(http, src_token)
 
+    # Guard: source has nothing to copy (empty getMy* responses)
+    if not any([src_name, src_desc, src_short, src_commands]):
+        await state.clear()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        await callback.message.edit_text(
+            "⚠️ <b>Нечего копировать</b>\n\n"
+            "У бота-источника выбранные поля пусты "
+            "(имя/описание/команды не заданы). Клонирование отменено.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     ok_count = 0
     fail_count = 0
+    skipped_count = 0
 
     for tgt_id in selected_targets:
         tgt_row = await db.get_bot(pool, tgt_id, callback.from_user.id)
@@ -915,31 +930,54 @@ async def cb_clone_confirm(
             fail_count += 1
             continue
         tgt_token = tgt_row["token"]
+        applied = 0  # фактически применённых полей для этого бота
+        had_error = False
         try:
             if "name" in selected_fields and src_name:
-                await bot_api.set_name(http, tgt_token, src_name)
+                if await bot_api.set_name(http, tgt_token, src_name):
+                    applied += 1
+                else:
+                    had_error = True
                 await asyncio.sleep(1)
             if "desc" in selected_fields and src_desc:
-                await bot_api.set_description(http, tgt_token, src_desc)
+                if await bot_api.set_description(http, tgt_token, src_desc):
+                    applied += 1
+                else:
+                    had_error = True
                 await asyncio.sleep(1)
             if "short_desc" in selected_fields and src_short:
-                await bot_api.set_short_description(http, tgt_token, src_short)
+                if await bot_api.set_short_description(http, tgt_token, src_short):
+                    applied += 1
+                else:
+                    had_error = True
                 await asyncio.sleep(1)
             if "commands" in selected_fields and src_commands:
-                await bot_api.set_my_commands(http, tgt_token, src_commands)
+                if await bot_api.set_my_commands(http, tgt_token, src_commands):
+                    applied += 1
+                else:
+                    had_error = True
                 await asyncio.sleep(1)
-            ok_count += 1
         except Exception as exc:
             log.warning("clone_confirm error for bot %s: %s", tgt_id, exc)
             fail_count += 1
+            continue
+
+        if applied > 0:
+            ok_count += 1
+        elif had_error:
+            fail_count += 1
+        else:
+            # Ни одно поле не отправлено (источник пуст по этим полям)
+            skipped_count += 1
 
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    skip_line = f"\nПропущено (нечего применять): <b>{skipped_count}</b>" if skipped_count else ""
     await callback.message.edit_text(
         f"✅ <b>Клонирование завершено</b>\n\n"
         f"Скопировано в: <b>{ok_count}</b> бот(ов)\n"
-        f"Ошибок: <b>{fail_count}</b>",
+        f"Ошибок: <b>{fail_count}</b>{skip_line}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -954,34 +992,25 @@ async def cb_factory_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     user_id = callback.from_user.id
 
     try:
+        # managed_bots schema: id, token, bot_id, username, first_name,
+        # is_active, added_by, added_at. Owner column = added_by.
+        # bot_users links via telegram bot_id (NOT the SERIAL pk).
         row = await pool.fetchrow(
             """
             SELECT
                 COUNT(*) AS total_bots,
-                COUNT(CASE WHEN is_active THEN 1 END) AS active_bots,
-                SUM(COALESCE(
-                    (SELECT COUNT(*) FROM bot_users WHERE bot_id = bots.id), 0
-                )) AS total_users
-            FROM managed_bots bots
-            WHERE owner_id = $1
+                COUNT(*) FILTER (WHERE is_active) AS active_bots,
+                COALESCE((
+                    SELECT COUNT(*) FROM bot_users bu
+                    WHERE bu.bot_id IN (
+                        SELECT bot_id FROM managed_bots WHERE added_by = $1
+                    )
+                ), 0) AS total_users
+            FROM managed_bots
+            WHERE added_by = $1
             """,
             user_id,
         )
-        # Fallback query using added_by if owner_id column doesn't exist
-        if row is None:
-            row = await pool.fetchrow(
-                """
-                SELECT
-                    COUNT(*) AS total_bots,
-                    COUNT(CASE WHEN is_active THEN 1 END) AS active_bots,
-                    COALESCE(SUM(
-                        (SELECT COUNT(*) FROM bot_users bu WHERE bu.bot_id = mb.bot_id)
-                    ), 0) AS total_users
-                FROM managed_bots mb
-                WHERE mb.added_by = $1
-                """,
-                user_id,
-            )
     except Exception as exc:
         log.warning("cb_factory_stats: DB error: %s", exc)
         row = None
