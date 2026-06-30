@@ -16,6 +16,48 @@ from services import resource_selector
 from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
+
+
+# ── Safe DB helpers ──────────────────────────────────────────────────────────
+# All DB calls in the worker must be wrapped to prevent a single query failure
+# from crashing the entire worker loop or losing operation state.
+
+async def _safe_execute(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> str:
+    """Execute a query, return result or 'ERROR' on failure. Never raises."""
+    try:
+        return await pool.execute(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB execute failed%s: %s — query: %.80s", log_ctx, e, query)
+        return "ERROR"
+
+
+async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> asyncpg.Record | None:
+    """Fetch a single row, return None on failure. Never raises."""
+    try:
+        return await pool.fetchrow(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB fetchrow failed%s: %s", log_ctx, e)
+        return None
+
+
+async def _safe_fetch(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> list[asyncpg.Record]:
+    """Fetch multiple rows, return empty list on failure. Never raises."""
+    try:
+        return await pool.fetch(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB fetch failed%s: %s", log_ctx, e)
+        return []
+
+
+async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args, log_ctx: str = ""):
+    """Fetch a single value, return None on failure. Never raises."""
+    try:
+        return await pool.fetchval(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB fetchval failed%s: %s", log_ctx, e)
+        return None
+
+
 _POLL_INTERVAL = 10  # секунд между проверками очереди
 _STALE_RUNNING_TIMEOUT_MIN = 60  # операции в running > N минут → reset в pending
 _MAX_PARALLEL = 8  # максимум параллельных операций глобально
@@ -252,7 +294,8 @@ async def _record_network_isolation(
     error_text: str,
     cooldown_s: int = 15 * 60,
 ) -> None:
-    await pool.execute(
+    await _safe_execute(
+        pool,
         """UPDATE tg_accounts
            SET cooldown_until = GREATEST(
                    COALESCE(cooldown_until, NOW()),
@@ -264,6 +307,7 @@ async def _record_network_isolation(
         account_id,
         cooldown_s,
         f"network/proxy failure ({action_type}): {error_text[:180]}",
+        log_ctx=f"[network_isolation acc={account_id}]",
     )
     try:
         from services import account_health
@@ -274,11 +318,13 @@ async def _record_network_isolation(
             log,
             f"op_worker: account_health network isolation failed for account_id={account_id}",
         )
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,0,$2,'error',$3)",
         operation_id,
         str(account_id),
         f"Аккаунт изолирован на {cooldown_s}s из-за сетевого/прокси сбоя: {error_text[:160]}",
+        log_ctx=f"[network_isolation_log op={operation_id}]",
     )
 
 
@@ -333,8 +379,11 @@ async def _maybe_requeue(
     if kind in ("fatal", "skip"):
         return False
 
-    row = await pool.fetchrow(
-        "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1", op_id
+    row = await _safe_fetchrow(
+        pool,
+        "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1",
+        op_id,
+        log_ctx=f"[maybe_requeue op={op_id}]",
     )
     if not row:
         return False
@@ -380,7 +429,8 @@ async def _maybe_requeue(
             penalty_exc,
         )
 
-    await pool.execute(
+    await _safe_execute(
+        pool,
         """UPDATE operation_queue
             SET status='pending',
                 retry_count=$1,
@@ -392,6 +442,7 @@ async def _maybe_requeue(
         str(exc)[:300],
         op_id,
         float(backoff),
+        log_ctx=f"[maybe_requeue_update op={op_id}]",
     )
     log.info(
         "op_worker: op %d queued for retry %d/%d in %ds",
@@ -646,7 +697,10 @@ async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
         result, checked_at = cached
         if now - checked_at < _CANCEL_CACHE_TTL:
             return result
-    row = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
+    row = await _safe_fetchrow(
+        pool, "SELECT status FROM operation_queue WHERE id=$1", op_id,
+        log_ctx=f"[is_cancelled op={op_id}]",
+    )
     result = bool(row and row["status"] == "cancelled")
     _cancel_cache[op_id] = (result, now)
     return result
@@ -666,7 +720,8 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # Атомарно захватить задачи с учетом реальной per-owner параллельности.
     # Иначе лишние задачи одного владельца получают status='running', но фактически
     # стоят внутри semaphore и выглядят для пользователя как зависшие.
-    rows = await pool.fetch(
+    rows = await _safe_fetch(
+        pool,
         """WITH owner_running AS (
                SELECT owner_id, COUNT(*)::int AS running_count
                FROM operation_queue
@@ -920,21 +975,28 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             # Не перезаписывать статус если операция была отменена в процессе
             if result.get("status") == "cancelled":
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET status='cancelled', finished_at=now() "
                     "WHERE id=$1 AND status NOT IN ('done','failed','cancelled')",
                     op_id,
+                    log_ctx=f"[run_op_cancelled op={op_id}]",
                 )
                 return
 
-            current = await pool.fetchrow(
-                "SELECT status FROM operation_queue WHERE id=$1", op_id
+            current = await _safe_fetchrow(
+                pool,
+                "SELECT status FROM operation_queue WHERE id=$1",
+                op_id,
+                log_ctx=f"[run_op_check_cancel op={op_id}]",
             )
             if current and current["status"] == "cancelled":
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET finished_at=now() "
                     "WHERE id=$1 AND status='cancelled' AND finished_at IS NULL",
                     op_id,
+                    log_ctx=f"[run_op_cancelled_finish op={op_id}]",
                 )
                 return
 
@@ -949,7 +1011,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 duration_seconds,
                 result.get("summary", ""),
             )
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
@@ -1078,10 +1141,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # Попытаться поставить на повтор перед тем как помечать как failed
             requeued = await _maybe_requeue(pool, op_id, e, params, op_type)
             if not requeued:
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
                     str(e)[:500],
                     op_id,
+                    log_ctx=f"[run_op_failed op={op_id}]",
                 )
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
@@ -1115,8 +1180,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     text="📋 Детали операции",
                     callback_data=BmCb(action="op_detail", op_id=op_id),
                 )
-                retry_row = await pool.fetchrow(
-                    "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1", op_id
+                retry_row = await _safe_fetchrow(
+                    pool,
+                    "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1",
+                    op_id,
+                    log_ctx=f"[run_op_retry_info op={op_id}]",
                 )
                 retry_info = ""
                 if retry_row:
@@ -1287,10 +1355,12 @@ async def _exec_dm_campaign(
         }
 
     # Verify campaign exists and belongs to this owner
-    campaign = await pool.fetchrow(
+    campaign = await _safe_fetchrow(
+        pool,
         "SELECT id, name, status, owner_id FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
         campaign_id,
         owner_id,
+        log_ctx=f"[dm_campaign_check op={op_id}]",
     )
     if not campaign:
         return {
