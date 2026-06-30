@@ -507,7 +507,28 @@ async def cb_narr_set_spread(
         log_exc_swallow(log, f"narrative_hub: AI generation error: {e}")
         posts = []
 
-    await state.update_data(generated_posts=posts)
+    # Детект заглушек: _call_ai возвращает текст в [...] когда AI недоступен.
+    # Такие посты НЕЛЬЗЯ публиковать в реальные каналы — блокируем запуск.
+    _ai_failed = (not posts) or any(
+        (p.get("content", "") or "").lstrip().startswith("[") for p in posts
+    )
+    await state.update_data(generated_posts=posts, ai_failed=_ai_failed)
+
+    if _ai_failed:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔁 Попробовать снова", callback_data=NarrCb(action="create"))
+        kb.button(text="◀️ В меню", callback_data=NarrCb(action="menu"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "⚠️ <b>AI не настроен или недоступен</b>\n\n"
+            "Не удалось сгенерировать реальные тексты постов — публиковать "
+            "посты-заглушки в каналы нельзя.\n\n"
+            "Добавьте API-ключ AI-провайдера (OpenRouter / Groq / Gemini) "
+            "в настройках и попробуйте снова.",
+            kb.as_markup(),
+        )
+        return
 
     # Показываем предпросмотр
     preview_lines = [
@@ -570,6 +591,25 @@ async def cb_narr_launch(
 
     providers = configured_providers()
     ai_provider = providers[0] if providers else None
+
+    # Guard: не запускаем кампанию с постами-заглушками или без AI-провайдера.
+    # Без ключей create_campaign сгенерирует те же [...] заглушки и зальёт их в каналы.
+    _has_placeholder = any(
+        (p.get("content", "") or "").lstrip().startswith("[") for p in generated_posts
+    )
+    if data.get("ai_failed") or _has_placeholder or (not generated_posts and ai_provider is None):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔁 Попробовать снова", callback_data=NarrCb(action="create"))
+        kb.button(text="◀️ В меню", callback_data=NarrCb(action="menu"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "⚠️ <b>AI не настроен или недоступен</b>\n\n"
+            "Запуск отменён: нельзя публиковать посты-заглушки. "
+            "Добавьте API-ключ AI-провайдера и сгенерируйте кампанию заново.",
+            kb.as_markup(),
+        )
+        return
 
     loading_kb = InlineKeyboardBuilder()
     loading_kb.button(text="⏳ Запуск...", callback_data=NarrCb(action="menu"))
