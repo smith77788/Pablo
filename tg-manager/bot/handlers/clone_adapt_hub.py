@@ -563,7 +563,11 @@ async def cb_ca_run(
 
     source = await db.get_bot(pool, source_bot_id, callback.from_user.id)
     if not source:
-        await callback.message.edit_text("❌ Источник не найден.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text("❌ Источник не найден.", reply_markup=kb.as_markup())
         return
 
     # Fetch source profile
