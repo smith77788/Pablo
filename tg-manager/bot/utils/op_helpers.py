@@ -120,3 +120,14 @@ async def safe_edit(
                 )
             except Exception:
                 pass
+
+
+async def safe_answer(callback: "CallbackQuery", text: str = "", show_alert: bool = False) -> None:
+    """Answer callback query, silently swallowing all Telegram errors.
+
+    Covers: expired callbacks (~30s), already-answered, deleted messages.
+    """
+    try:
+        await callback.answer(text=text, show_alert=show_alert)
+    except Exception:
+        pass

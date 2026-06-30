@@ -23,6 +23,7 @@ from bot.callbacks import StrikeCb, ChanCb, BmCb, AccCb
 from bot.states import MiniStrikeFSM, StrikeEmailFSM
 from bot.utils.subscription import require_feature
 from bot.utils.event_status import mark_handled_error
+from bot.utils.op_helpers import safe_answer
 from services import email_oauth
 from services.account_manager import (
     format_telegram_join_ref_display,
@@ -177,7 +178,7 @@ def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
 
 @router.callback_query(StrikeCb.filter(F.action == "menu"))
 async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         access = await _has_access(pool, callback.from_user.id)
     except Exception:
@@ -234,7 +235,7 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     if not access:
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         row = await pool.fetchrow(
@@ -344,7 +345,7 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if _already:
         await callback.answer("⚔️ Strike уже активен!", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     wallet = _tron_wallet()
     ref = _gen_ref()
@@ -413,7 +414,7 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(StrikeCb.filter(F.action == "check_pay"))
 async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         has_acc = await _has_access(pool, callback.from_user.id)
@@ -639,7 +640,7 @@ async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _show_strike_history(callback, pool)
 
 
@@ -670,7 +671,7 @@ async def cb_strike_rerun(
     if not row:
         await callback.answer("Запись не найдена.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     log.info("strike rerun: user=%s target=%s", callback.from_user.id, row["target"])
 
     target = row["target"]
@@ -812,7 +813,7 @@ async def cb_mini_strike_start(
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(MiniStrikeFSM.awaiting_target)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=StrikeCb(action="menu"))
@@ -887,7 +888,7 @@ async def cb_mini_strike_category(
         await state.clear()
         return
 
-    await callback.answer()
+    await safe_answer(callback)
 
     # Найти лучший активный аккаунт (учитывает кулдаун + risk score + infra_memory)
     from services import resource_selector
@@ -1230,7 +1231,7 @@ async def cb_strike_emails(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _show_email_list(callback, pool)
 
 
@@ -1319,7 +1320,7 @@ async def cb_email_oauth(
     kb.button(text=f"🔐 Подключить {provider.label}", url=url)
     kb.button(text="◀️ Email аккаунты", callback_data=StrikeCb(action="emails"))
     kb.adjust(1)
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         f"🔐 <b>{provider.label} OAuth</b>\n\n"
         "Нажмите кнопку ниже, войдите в почту и разрешите доступ для отправки SMTP. "
@@ -1336,7 +1337,7 @@ async def cb_email_add(
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(StrikeEmailFSM.awaiting_email)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=StrikeCb(action="emails"))

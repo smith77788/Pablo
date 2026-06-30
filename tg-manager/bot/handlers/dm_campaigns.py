@@ -21,8 +21,9 @@ from bot.states import DmCampaignFSM
 from services import intelligence_engine
 from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
-from bot.keyboards import subscription_locked_markup
+
 from bot.utils.event_status import mark_handled_error
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -72,14 +73,14 @@ async def cb_dm_menu(
     # Clear any lingering FSM state (e.g. user pressed "cancel" mid-wizard)
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await _edit(
             callback,
             locked_text("DM-кампании", "enterprise"),
             subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         campaigns = await pool.fetch(
@@ -159,14 +160,14 @@ async def cb_dm_new(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("DM-кампании", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(DmCampaignFSM.waiting_name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
@@ -256,7 +257,7 @@ async def cb_dm_target_bot(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(dm_target_type="bot_users")
     await state.set_state(DmCampaignFSM.choosing_bot)
 
@@ -292,7 +293,7 @@ async def cb_dm_target_bot_selected(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.campaign_id
     await state.update_data(dm_target_id=bot_id)
     await _show_dm_preview(callback, state, pool)
@@ -308,7 +309,7 @@ async def cb_dm_target_cohort_bot(
     pool: asyncpg.Pool,
 ) -> None:
     """Step 1: pick bot for cohort targeting."""
-    await callback.answer()
+    await safe_answer(callback)
     try:
         bots = await pool.fetch(
             "SELECT bot_id, first_name, username FROM managed_bots "
@@ -351,7 +352,7 @@ async def cb_dm_target_cohort_pick(
     pool: asyncpg.Pool,
 ) -> None:
     """Step 2: pick cohort type (hot/warm/cold/lost)."""
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.campaign_id
     await state.update_data(dm_target_type="cohort", dm_target_id=bot_id)
 
@@ -422,7 +423,7 @@ async def cb_dm_target_cohort_set(
     pool: asyncpg.Pool,
 ) -> None:
     """Step 3: cohort selected — store and go to preview."""
-    await callback.answer()
+    await safe_answer(callback)
     cohort_type = _COHORT_TYPES.get(callback_data.campaign_id, "warm")
     await state.update_data(dm_cohort_type=cohort_type)
     await _show_dm_preview(callback, state, pool)
@@ -437,7 +438,7 @@ async def cb_dm_target_crm(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(dm_target_type="crm", dm_target_id=None)
     await _show_dm_preview(callback, state, pool)
 
@@ -452,7 +453,7 @@ async def cb_dm_target_parsed(
     pool: asyncpg.Pool,
 ) -> None:
     """Show list of parser runs so user can pick one (or use all)."""
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         runs = await pool.fetch(
@@ -516,7 +517,7 @@ async def cb_dm_target_parsed_pick(
     pool: asyncpg.Pool,
 ) -> None:
     """Store parsed_audience target (run_id=0 means all) and go to preview."""
-    await callback.answer()
+    await safe_answer(callback)
     run_id = callback_data.campaign_id  # 0 = all, >0 = specific run
     await state.update_data(dm_target_type="parsed_audience", dm_target_id=run_id)
     await _show_dm_preview(callback, state, pool)
@@ -532,7 +533,7 @@ async def cb_dm_target_all_bots(
     pool: asyncpg.Pool,
 ) -> None:
     """Все подписчики всех ботов пользователя — агрегат."""
-    await callback.answer()
+    await safe_answer(callback)
     try:
         cnt = await pool.fetchval(
             """SELECT COUNT(DISTINCT bu.user_id)
@@ -566,7 +567,7 @@ async def cb_dm_target_import(
     state: FSMContext,
 ) -> None:
     """Импорт списка получателей (@username или Telegram ID)."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(DmCampaignFSM.waiting_import_text)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
@@ -673,7 +674,7 @@ async def cb_dm_import_confirm(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_dm_preview(callback, state, pool)
 
 
@@ -859,14 +860,14 @@ async def cb_dm_launch_or_draft(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("DM-кампании", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     name = sd.get("dm_name", "")
     text = sd.get("dm_text", "")
@@ -1086,7 +1087,7 @@ async def cb_dm_detail(
     if not c:
         await callback.answer("Кампания не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     status = c["status"]
     icon = _STATUS_EMOJI.get(status, "❓")
@@ -1180,7 +1181,7 @@ async def cb_dm_resume(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("DM-кампании", "enterprise"),
             parse_mode="HTML",
@@ -1200,7 +1201,7 @@ async def cb_dm_resume(
             {"campaign_id": campaign_id},
         )
     except Exception as exc:
-        await callback.answer()
+        await safe_answer(callback)
         import html as _h
         await callback.message.answer(
             f"⚠️ Ошибка постановки в очередь: {_h.escape(str(exc)[:200])}",

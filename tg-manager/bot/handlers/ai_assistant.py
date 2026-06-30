@@ -24,6 +24,7 @@ from bot.callbacks import AiCb, BmCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
+from bot.utils.op_helpers import safe_answer
 
 from services import ai_memory
 from services.ai_providers import configured_providers
@@ -967,7 +968,7 @@ async def cmd_forget(message: Message, pool: asyncpg.Pool) -> None:
 async def cb_ai_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             "🔒 <b>AI-ассистент — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
@@ -993,7 +994,7 @@ async def cb_ai_start(
 
 @router.callback_query(AiCb.filter(F.action == "stop"))
 async def cb_ai_stop(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Новая сессия", callback_data=AiCb(action="start"))
@@ -1030,7 +1031,7 @@ async def cb_ai_confirm_action(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     action_data = data.get("pending_action_data")
     if not action_data:
@@ -1094,7 +1095,7 @@ async def cb_ai_memory(
     pool: asyncpg.Pool,
 ) -> None:
     """Показать список последних 10 записей памяти пользователя."""
-    await callback.answer()
+    await safe_answer(callback)
     try:
         items = await ai_memory.search(pool, callback.from_user.id, "", limit=10)
     except Exception:
@@ -1142,7 +1143,7 @@ async def cb_ai_memory_delete(
     pool: asyncpg.Pool,
 ) -> None:
     """Удалить запись из памяти AI."""
-    await callback.answer()
+    await safe_answer(callback)
     memory_id = callback_data.memory_id
     if not memory_id:
         await callback.answer("❌ Некорректный ID записи", show_alert=True)
@@ -1200,7 +1201,7 @@ async def cb_ai_retry(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     messages: list = data.get("messages", [])
     if not messages:
