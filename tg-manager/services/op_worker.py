@@ -16,6 +16,48 @@ from services import resource_selector
 from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
+
+
+# ── Safe DB helpers ──────────────────────────────────────────────────────────
+# All DB calls in the worker must be wrapped to prevent a single query failure
+# from crashing the entire worker loop or losing operation state.
+
+async def _safe_execute(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> str:
+    """Execute a query, return result or 'ERROR' on failure. Never raises."""
+    try:
+        return await pool.execute(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB execute failed%s: %s — query: %.80s", log_ctx, e, query)
+        return "ERROR"
+
+
+async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> asyncpg.Record | None:
+    """Fetch a single row, return None on failure. Never raises."""
+    try:
+        return await pool.fetchrow(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB fetchrow failed%s: %s", log_ctx, e)
+        return None
+
+
+async def _safe_fetch(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> list[asyncpg.Record]:
+    """Fetch multiple rows, return empty list on failure. Never raises."""
+    try:
+        return await pool.fetch(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB fetch failed%s: %s", log_ctx, e)
+        return []
+
+
+async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args, log_ctx: str = ""):
+    """Fetch a single value, return None on failure. Never raises."""
+    try:
+        return await pool.fetchval(query, *args)
+    except Exception as e:
+        log.warning("op_worker DB fetchval failed%s: %s", log_ctx, e)
+        return None
+
+
 _POLL_INTERVAL = 10  # секунд между проверками очереди
 _STALE_RUNNING_TIMEOUT_MIN = 60  # операции в running > N минут → reset в pending
 _MAX_PARALLEL = 8  # максимум параллельных операций глобально
@@ -252,7 +294,8 @@ async def _record_network_isolation(
     error_text: str,
     cooldown_s: int = 15 * 60,
 ) -> None:
-    await pool.execute(
+    await _safe_execute(
+        pool,
         """UPDATE tg_accounts
            SET cooldown_until = GREATEST(
                    COALESCE(cooldown_until, NOW()),
@@ -264,6 +307,7 @@ async def _record_network_isolation(
         account_id,
         cooldown_s,
         f"network/proxy failure ({action_type}): {error_text[:180]}",
+        log_ctx=f"[network_isolation acc={account_id}]",
     )
     try:
         from services import account_health
@@ -274,11 +318,13 @@ async def _record_network_isolation(
             log,
             f"op_worker: account_health network isolation failed for account_id={account_id}",
         )
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,0,$2,'error',$3)",
         operation_id,
         str(account_id),
         f"Аккаунт изолирован на {cooldown_s}s из-за сетевого/прокси сбоя: {error_text[:160]}",
+        log_ctx=f"[network_isolation_log op={operation_id}]",
     )
 
 
@@ -333,8 +379,11 @@ async def _maybe_requeue(
     if kind in ("fatal", "skip"):
         return False
 
-    row = await pool.fetchrow(
-        "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1", op_id
+    row = await _safe_fetchrow(
+        pool,
+        "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1",
+        op_id,
+        log_ctx=f"[maybe_requeue op={op_id}]",
     )
     if not row:
         return False
@@ -380,7 +429,8 @@ async def _maybe_requeue(
             penalty_exc,
         )
 
-    await pool.execute(
+    await _safe_execute(
+        pool,
         """UPDATE operation_queue
             SET status='pending',
                 retry_count=$1,
@@ -392,6 +442,7 @@ async def _maybe_requeue(
         str(exc)[:300],
         op_id,
         float(backoff),
+        log_ctx=f"[maybe_requeue_update op={op_id}]",
     )
     log.info(
         "op_worker: op %d queued for retry %d/%d in %ds",
@@ -646,7 +697,10 @@ async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
         result, checked_at = cached
         if now - checked_at < _CANCEL_CACHE_TTL:
             return result
-    row = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
+    row = await _safe_fetchrow(
+        pool, "SELECT status FROM operation_queue WHERE id=$1", op_id,
+        log_ctx=f"[is_cancelled op={op_id}]",
+    )
     result = bool(row and row["status"] == "cancelled")
     _cancel_cache[op_id] = (result, now)
     return result
@@ -666,7 +720,8 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # Атомарно захватить задачи с учетом реальной per-owner параллельности.
     # Иначе лишние задачи одного владельца получают status='running', но фактически
     # стоят внутри semaphore и выглядят для пользователя как зависшие.
-    rows = await pool.fetch(
+    rows = await _safe_fetch(
+        pool,
         """WITH owner_running AS (
                SELECT owner_id, COUNT(*)::int AS running_count
                FROM operation_queue
@@ -712,6 +767,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         available_slots,
         _MAX_PARALLEL_PER_OWNER,
         candidate_window,
+        log_ctx="[_process_pending claim]",
     )
 
     for row in rows:
@@ -887,21 +943,28 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             # Не перезаписывать статус если операция была отменена в процессе
             if result.get("status") == "cancelled":
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET status='cancelled', finished_at=now() "
                     "WHERE id=$1 AND status NOT IN ('done','failed','cancelled')",
                     op_id,
+                    log_ctx=f"[run_op_cancelled op={op_id}]",
                 )
                 return
 
-            current = await pool.fetchrow(
-                "SELECT status FROM operation_queue WHERE id=$1", op_id
+            current = await _safe_fetchrow(
+                pool,
+                "SELECT status FROM operation_queue WHERE id=$1",
+                op_id,
+                log_ctx=f"[run_op_check_cancel op={op_id}]",
             )
             if current and current["status"] == "cancelled":
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET finished_at=now() "
                     "WHERE id=$1 AND status='cancelled' AND finished_at IS NULL",
                     op_id,
+                    log_ctx=f"[run_op_cancelled_finish op={op_id}]",
                 )
                 return
 
@@ -916,10 +979,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 duration_seconds,
                 result.get("summary", ""),
             )
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
+                log_ctx=f"[run_op_done op={op_id}]",
             )
             # Audit trail: write operation completion to operation_audit
             _op_summary = result.get("summary", "")
@@ -1045,10 +1110,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # Попытаться поставить на повтор перед тем как помечать как failed
             requeued = await _maybe_requeue(pool, op_id, e, params, op_type)
             if not requeued:
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
                     str(e)[:500],
                     op_id,
+                    log_ctx=f"[run_op_failed op={op_id}]",
                 )
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
@@ -1082,8 +1149,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     text="📋 Детали операции",
                     callback_data=BmCb(action="op_detail", op_id=op_id),
                 )
-                retry_row = await pool.fetchrow(
-                    "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1", op_id
+                retry_row = await _safe_fetchrow(
+                    pool,
+                    "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1",
+                    op_id,
+                    log_ctx=f"[run_op_retry_info op={op_id}]",
                 )
                 retry_info = ""
                 if retry_row:
@@ -1139,8 +1209,11 @@ async def _exec_bulk_bot_edit(
 
     ok_count = 0
     fail_count = 0
-    await pool.execute(
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(bots_rows), op_id
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        len(bots_rows), op_id,
+        log_ctx=f"[bulk_bot_edit total op={op_id}]",
     )
 
     field_to_method = {
@@ -1199,11 +1272,13 @@ async def _exec_bulk_bot_edit(
                 data_resp = await resp.json()
                 if data_resp.get("ok"):
                     ok_count += 1
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                         op_id,
                         ok_count + fail_count,
                         str(b["id"]),
+                        log_ctx=f"[bulk_bot_edit_log op={op_id}]",
                     )
                 else:
                     fail_count += 1
@@ -1221,8 +1296,11 @@ async def _exec_bulk_bot_edit(
                     field,
                     e,
                 )
-            await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
+                log_ctx=f"[bulk_bot_edit_progress2 op={op_id}]",
             )
             await asyncio.sleep(1)
 
@@ -1254,10 +1332,12 @@ async def _exec_dm_campaign(
         }
 
     # Verify campaign exists and belongs to this owner
-    campaign = await pool.fetchrow(
+    campaign = await _safe_fetchrow(
+        pool,
         "SELECT id, name, status, owner_id FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
         campaign_id,
         owner_id,
+        log_ctx=f"[dm_campaign_check op={op_id}]",
     )
     if not campaign:
         return {
@@ -1267,8 +1347,11 @@ async def _exec_dm_campaign(
 
     if await _is_cancelled(pool, op_id):
         # Cancelled before starting — mark campaign paused so user can resume later
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+        await _safe_execute(
+            pool,
+            "UPDATE dm_campaigns SET status='paused' WHERE id=$1",
+            campaign_id,
+            log_ctx=f"[dm_campaign_cancel op={op_id}]",
         )
         return {"status": "cancelled", "summary": "Operation cancelled before start"}
 
@@ -1279,17 +1362,22 @@ async def _exec_dm_campaign(
     except asyncio.CancelledError:
         # op_worker cancelled this asyncio task — mark campaign paused
         try:
-            await pool.execute(
-                "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+            await _safe_execute(
+                pool,
+                "UPDATE dm_campaigns SET status='paused' WHERE id=$1",
+                campaign_id,
+                log_ctx=f"[dm_campaign_cancel_error op={op_id}]",
             )
         except Exception:
             pass
         raise
 
     # Read final counts from dm_campaigns for the completion summary
-    final = await pool.fetchrow(
+    final = await _safe_fetchrow(
+        pool,
         "SELECT status, sent_count, fail_count, total_targets FROM dm_campaigns WHERE id=$1",
         campaign_id,
+        log_ctx=f"[dm_campaign_final op={op_id}]",
     )
     if final:
         sent = final["sent_count"] or 0
@@ -1491,8 +1579,11 @@ async def _exec_mass_publish(
 
     targets = list(target_map.values())
     total = len(targets)
-    await pool.execute(
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        total, op_id,
+        log_ctx=f"[mass_publish_total op={op_id}]",
     )
 
     # Pre-scan: for channels without access_hash AND without username,
@@ -1521,10 +1612,12 @@ async def _exec_mass_publish(
                     if not _d["access_hash"] and _cid in _dlg_map:
                         _d["access_hash"] = _dlg_map[_cid]
                         try:
-                            await pool.execute(
+                            await _safe_execute(
+                                pool,
                                 "UPDATE managed_channels SET access_hash=$1 "
                                 "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
                                 _dlg_map[_cid], owner_id, _cid,
+                                log_ctx=f"[mass_publish_hash op={op_id}]",
                             )
                         except Exception:
                             pass
@@ -1562,18 +1655,22 @@ async def _exec_mass_publish(
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
                 op_id,
                 idx,
                 str(dialog["id"]),
                 "Аккаунт временно изолирован после сетевого/прокси сбоя",
+                log_ctx=f"[mass_publish_log op={op_id}]",
             )
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
                 op_id,
                 remaining,
+                log_ctx=f"[mass_publish_skip op={op_id}]",
             )
             break
         flood_wait = 0
@@ -1609,9 +1706,11 @@ async def _exec_mass_publish(
                 _ch_title = str(dialog.get("title") or dialog.get("username") or dialog["id"])[:60]
                 published_to.append(_ch_title)
                 _infra_mem.record_account_op(acc["id"], "publish", success=True)
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                     op_id, idx, _ch_title,
+                    log_ctx=f"[mass_publish_ok op={op_id}]",
                 )
                 await _audit(
                     pool,
@@ -1632,10 +1731,12 @@ async def _exec_mass_publish(
                 _resolved_hash = result.get("resolved_access_hash", 0)
                 if _resolved_hash and not dialog.get("access_hash"):
                     try:
-                        await pool.execute(
+                        await _safe_execute(
+                            pool,
                             "UPDATE managed_channels SET access_hash=$1 "
                             "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
                             _resolved_hash, owner_id, int(dialog["id"]),
+                            log_ctx=f"[mass_publish_resolve op={op_id}]",
                         )
                         dialog["access_hash"] = _resolved_hash
                     except Exception:
@@ -1650,13 +1751,15 @@ async def _exec_mass_publish(
                     if _is_dead_session_error(err_str):
                         # Dead session — deactivate account immediately
                         try:
-                            await pool.execute(
+                            await _safe_execute(
+                                pool,
                                 """UPDATE tg_accounts
                                    SET is_active=FALSE, acc_status='session_expired',
                                        status_reason=$2
                                    WHERE id=$1 AND is_active=TRUE""",
                                 acc["id"],
                                 f"Dead session (mass_publish): {err_str[:180]}",
+                                log_ctx=f"[mass_publish_dead op={op_id}]",
                             )
                             log.warning(
                                 "mass_publish: deactivated dead session account_id=%d: %s",
@@ -1740,13 +1843,15 @@ async def _exec_mass_publish(
                                 isolated_accounts.add(fallback_acc["id"])
                                 if _is_dead_session_error(err_str):
                                     try:
-                                        await pool.execute(
+                                        await _safe_execute(
+                                            pool,
                                             """UPDATE tg_accounts
                                                SET is_active=FALSE, acc_status='session_expired',
                                                    status_reason=$2
                                                WHERE id=$1 AND is_active=TRUE""",
                                             fallback_acc["id"],
                                             f"Dead session (mass_publish fallback): {err_str[:160]}",
+                                            log_ctx=f"[mass_publish_fb_dead op={op_id}]",
                                         )
                                     except Exception:
                                         pass
@@ -1814,17 +1919,22 @@ async def _exec_mass_publish(
                     await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_flood failed")
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
                 op_id,
                 idx,
                 str(dialog["id"]),
                 err_str,
+                log_ctx=f"[mass_publish_err op={op_id}]",
             )
 
-        await pool.execute(
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        await _safe_execute(
+            pool,
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+            op_id,
+            log_ctx=f"[mass_publish_progress op={op_id}]",
         )
         if delay > 0 and idx < total:
             effective_delay = max(delay, float(flood_wait) + 5) if flood_wait else delay
@@ -1836,9 +1946,11 @@ async def _exec_mass_publish(
     goal_id_param = params.get("goal_id")
     if goal_id_param and ok_count > 0:
         try:
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE growth_goals SET current_value = current_value + $2, updated_at=NOW() WHERE id=$1",
                 int(goal_id_param), ok_count,
+                log_ctx=f"[mass_publish_goal op={op_id}]",
             )
         except Exception:
             pass
@@ -1917,8 +2029,11 @@ async def _exec_bulk_join_inner(
     proxy_mode = params.get("proxy_mode", "bound")
 
     total_steps = len(links) * len(accounts)
-    await pool.execute(
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_steps, op_id
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        total_steps, op_id,
+        log_ctx=f"[bulk_join_total op={op_id}]",
     )
 
     for acc_idx, acc in enumerate(accounts):
@@ -1928,11 +2043,13 @@ async def _exec_bulk_join_inner(
         else:
             acc_dict = dict(acc)
         try:
-            joins_today = await pool.fetchval(
+            joins_today = await _safe_fetchval(
+                pool,
                 "SELECT COUNT(*) FROM operation_audit "
                 "WHERE account_id=$1 AND action='join' AND result='success' "
                 "AND occurred_at > NOW() - INTERVAL '24 hours'",
                 acc["id"],
+                log_ctx=f"[bulk_join_daily op={op_id}]",
             )
         except Exception:
             joins_today = 0
@@ -1967,11 +2084,13 @@ async def _exec_bulk_join_inner(
                         "bulk_join: прокси недоступен acc=%s, повтор через CF relay",
                         acc_dict.get("phone", "?"),
                     )
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                         " VALUES($1,$2,$3,'warn',$4)",
                         op_id, step, link,
                         f"⚠️ Прокси недоступен — повтор через CF relay (acc={acc_dict.get('phone','?')})",
+                        log_ctx=f"[bulk_join_proxy op={op_id}]",
                     )
                     _acc_relay = {**acc_dict, "proxy_url": None, "enforce_proxy": False}
                     res = await account_manager.join_channel(
@@ -2005,13 +2124,15 @@ async def _exec_bulk_join_inner(
                     _infra_mem.record_account_op(
                         acc["id"], "join", success=False, error="PeerFlood"
                     )
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'error',$4)",
                         op_id,
                         step,
                         link,
                         err_str,
+                        log_ctx=f"[bulk_join_peerflood op={op_id}]",
                     )
                     await _audit(
                         pool,
@@ -2024,25 +2145,31 @@ async def _exec_bulk_join_inner(
                         error_msg=err_str,
                         flood_wait_s=_peer_flood_wait,
                     )
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                         op_id,
+                        log_ctx=f"[bulk_join_pf_progress op={op_id}]",
                     )
                     break  # stop all remaining links for this account
                 if res.get("error"):
                     raise Exception(str(res["error"]))
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','joined')",
                     op_id,
                     step,
                     link,
+                    log_ctx=f"[bulk_join_ok op={op_id}]",
                 )
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
+                    log_ctx=f"[bulk_join_progress op={op_id}]",
                 )
                 await _audit(
                     pool,
@@ -2077,10 +2204,12 @@ async def _exec_bulk_join_inner(
                 )
                 if _is_dead_session_error(err_str):
                     try:
-                        await pool.execute(
+                        await _safe_execute(
+                            pool,
                             """UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',
                                    status_reason=$2 WHERE id=$1 AND is_active=TRUE""",
                             acc["id"], f"Dead session (bulk_join): {err_str[:180]}",
+                            log_ctx=f"[bulk_join_dead op={op_id}]",
                         )
                         log.warning("op_worker bulk_join: deactivated dead session acc_id=%s", acc["id"])
                     except Exception:
@@ -2102,13 +2231,15 @@ async def _exec_bulk_join_inner(
                         acc_dict.get("phone"),
                         err_str,
                     )
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
                     op_id,
                     step,
                     link,
                     err_str,
+                    log_ctx=f"[bulk_join_err op={op_id}]",
                 )
                 await _audit(
                     pool,
@@ -2121,9 +2252,11 @@ async def _exec_bulk_join_inner(
                     error_msg=err_str,
                     flood_wait_s=flood_wait or None,
                 )
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
+                    log_ctx=f"[bulk_join_err_progress op={op_id}]",
                 )
             # Apply pacing based on delay_mode from params
             chaos = session_simulator.chaos_factor()
@@ -2214,9 +2347,11 @@ async def _exec_bulk_leave(
     _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
     day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
 
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
         len(channels) * len(accounts), op_id,
+        log_ctx=f"[bulk_leave_total op={op_id}]",
     )
 
     for acc_idx, acc in enumerate(accounts):
@@ -2225,11 +2360,13 @@ async def _exec_bulk_leave(
         else:
             acc_dict = dict(acc)
         try:
-            leaves_today = await pool.fetchval(
+            leaves_today = await _safe_fetchval(
+                pool,
                 "SELECT COUNT(*) FROM operation_audit "
                 "WHERE account_id=$1 AND action='leave' AND result='success' "
                 "AND occurred_at > NOW() - INTERVAL '24 hours'",
                 acc["id"],
+                log_ctx=f"[bulk_leave_daily op={op_id}]",
             )
         except Exception:
             leaves_today = 0
@@ -2265,11 +2402,13 @@ async def _exec_bulk_leave(
                         "bulk_leave: прокси недоступен acc=%s, повтор через CF relay",
                         acc_dict.get("phone", "?"),
                     )
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                         " VALUES($1,$2,$3,'warn',$4)",
                         op_id, step, str(channel),
                         f"⚠️ Прокси недоступен — повтор через CF relay (acc={acc_dict.get('phone','?')})",
+                        log_ctx=f"[bulk_leave_proxy op={op_id}]",
                     )
                     _acc_relay = {**acc_dict, "proxy_url": None, "enforce_proxy": False}
                     res = await account_manager.leave_channel(
@@ -2279,16 +2418,20 @@ async def _exec_bulk_leave(
                     raise Exception(res.get("error") or f"leave_channel failed for {channel}")
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','left')",
                     op_id,
                     step,
                     str(channel),
+                    log_ctx=f"[bulk_leave_ok op={op_id}]",
                 )
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
+                    log_ctx=f"[bulk_leave_progress op={op_id}]",
                 )
                 await _audit(
                     pool,
@@ -2339,17 +2482,21 @@ async def _exec_bulk_leave(
                         acc_dict.get("phone"),
                         err_str,
                     )
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
                     op_id,
                     step,
                     str(channel),
                     err_str,
+                    log_ctx=f"[bulk_leave_err op={op_id}]",
                 )
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
+                    log_ctx=f"[bulk_leave_err_progress op={op_id}]",
                 )
                 await _audit(
                     pool,
@@ -2418,10 +2565,12 @@ async def _exec_global_presence_channel(
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
 
-    plan = await pool.fetchrow(
+    plan = await _safe_fetchrow(
+        pool,
         "SELECT asset_type FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
         plan_id,
         owner_id,
+        log_ctx=f"[gp_plan op={op_id}]",
     )
     if not plan:
         return {"status": "failed", "reason": "План не найден"}
@@ -2429,20 +2578,26 @@ async def _exec_global_presence_channel(
     asset_type = plan.get("asset_type", "channel")
     is_group = asset_type == "group"
 
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1 AND owner_id=$2",
         plan_id,
         owner_id,
+        log_ctx=f"[gp_running op={op_id}]",
     )
 
-    targets = await pool.fetch(
+    targets = await _safe_fetch(
+        pool,
         "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
         plan_id,
+        log_ctx=f"[gp_targets op={op_id}]",
     )
     if not targets:
-        await pool.execute(
+        await _safe_execute(
+            pool,
             "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
             plan_id,
+            log_ctx=f"[gp_empty op={op_id}]",
         )
         return {
             "status": "done",
@@ -2466,15 +2621,20 @@ async def _exec_global_presence_channel(
     failed_count = 0
     total = len(targets)
     _gp_eco_id: int | None = None  # lazily loaded from plan
-    await pool.execute(
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        total, op_id,
+        log_ctx=f"[gp_total op={op_id}]",
     )
 
     for i, target in enumerate(targets):
         if await _is_cancelled(pool, op_id):
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
                 plan_id,
+                log_ctx=f"[gp_cancel op={op_id}]",
             )
             return {
                 "status": "cancelled",
@@ -2487,14 +2647,19 @@ async def _exec_global_presence_channel(
         acc = acc_by_id.get(acc_id)
 
         if not acc:
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
                 "Аккаунт недоступен",
                 target["id"],
+                log_ctx=f"[gp_no_acc op={op_id}]",
             )
             failed_count += 1
-            await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
+                log_ctx=f"[gp_no_acc_progress op={op_id}]",
             )
             continue
 
@@ -2520,24 +2685,30 @@ async def _exec_global_presence_channel(
                     break
 
             if not alt_acc:
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
                     f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})",
                     target["id"],
+                    log_ctx=f"[gp_low_trust op={op_id}]",
                 )
                 failed_count += 1
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
+                    log_ctx=f"[gp_low_trust_progress op={op_id}]",
                 )
                 continue
 
             acc = alt_acc
 
         # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
-        claimed = await pool.execute(
+        claimed = await _safe_execute(
+            pool,
             "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
             target["id"],
+            log_ctx=f"[gp_claim op={op_id}]",
         )
         if claimed == "UPDATE 0":
             log.info(
@@ -2597,7 +2768,8 @@ async def _exec_global_presence_channel(
             # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION ошибке
             if "AUTH_KEY" in err_str or "SESSION_REVOKED" in err_str:
                 try:
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         """UPDATE tg_accounts
                            SET is_active    = FALSE,
                                acc_status   = 'session_expired',
@@ -2605,6 +2777,7 @@ async def _exec_global_presence_channel(
                            WHERE id = $1 AND is_active = TRUE""",
                         acc["id"],
                         f"AUTH_KEY/SESSION dead (gp_channel): {err_str[:200]}",
+                        log_ctx=f"[gp_dead op={op_id}]",
                     )
                     log.warning(
                         "op_worker gp_channel: deactivated dead session account_id=%s",
@@ -2612,10 +2785,12 @@ async def _exec_global_presence_channel(
                     )
                 except Exception as _dbe:
                     log.warning("op_worker gp_channel: deactivate failed: %s", _dbe)
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
                 err_str[:500],
                 target["id"],
+                log_ctx=f"[gp_target_fail op={op_id}]",
             )
             failed_count += 1
             _infra_mem.record_account_op(
@@ -2637,8 +2812,11 @@ async def _exec_global_presence_channel(
                 if result.get("flood_wait")
                 else None,
             )
-            await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
+                log_ctx=f"[gp_target_fail_progress op={op_id}]",
             )
             await asyncio.sleep(
                 random.uniform(10, 25) * session_simulator.chaos_factor()
@@ -2807,9 +2985,11 @@ async def _exec_global_presence_channel(
 
         # Link to ecosystem if one exists for this owner
         try:
-            ecos = await pool.fetch(
+            ecos = await _safe_fetch(
+                pool,
                 "SELECT id FROM ecosystems WHERE owner_id=$1 AND ecosystem_type='global_presence' AND status='active' ORDER BY created_at DESC LIMIT 1",
                 owner_id,
+                log_ctx=f"[gp_ecos op={op_id}]",
             )
             if ecos and channel_id:
                 from services import ecosystem_brain as _eb
@@ -2825,9 +3005,11 @@ async def _exec_global_presence_channel(
         # Add created channel to ecosystem
         try:
             if _gp_eco_id is None:
-                _eco_row = await pool.fetchrow(
+                _eco_row = await _safe_fetchrow(
+                    pool,
                     "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
                     plan_id,
+                    log_ctx=f"[gp_eco_id op={op_id}]",
                 )
                 _gp_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
             if _gp_eco_id:
@@ -2838,16 +3020,21 @@ async def _exec_global_presence_channel(
         except Exception:
             pass
 
-        await pool.execute(
+        await _safe_execute(
+            pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
             op_id,
             created_count + failed_count,
             f"{target.get('city', '?')} → {title}",
             f"channel_id={channel_id}"
             + (f" | username_err={username_error}" if username_error else ""),
+            log_ctx=f"[gp_ok_log op={op_id}]",
         )
-        await pool.execute(
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        await _safe_execute(
+            pool,
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+            op_id,
+            log_ctx=f"[gp_ok_progress op={op_id}]",
         )
 
         if created_count > 0 and created_count % 10 == 0:
@@ -2894,10 +3081,12 @@ async def _exec_global_presence_channel(
     final_status = (
         "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
     )
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
         final_status,
         plan_id,
+        log_ctx=f"[gp_final op={op_id}]",
     )
 
     return {
@@ -2920,10 +3109,12 @@ async def _exec_global_presence_bot(
     if not plan_id:
         return {"status": "failed", "reason": "no plan_id in params"}
 
-    plan = await pool.fetchrow(
+    plan = await _safe_fetchrow(
+        pool,
         "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
         plan_id,
         owner_id,
+        log_ctx=f"[gp_bot_plan op={op_id}]",
     )
     if not plan:
         return {"status": "failed", "reason": f"plan {plan_id} not found"}
@@ -2947,9 +3138,11 @@ async def _exec_global_presence_bot(
     )
 
     if not accounts_rows:
-        await pool.execute(
+        await _safe_execute(
+            pool,
             "UPDATE global_presence_plans SET status='failed', updated_at=now() WHERE id=$1",
             plan_id,
+            log_ctx=f"[gp_bot_no_acc op={op_id}]",
         )
         return {"status": "failed", "reason": "no active accounts found"}
 
@@ -2958,20 +3151,26 @@ async def _exec_global_presence_bot(
     # Fallback list for round-robin when target has no selected_account_id
     accounts_list = list(accounts_rows)
 
-    targets = await pool.fetch(
+    targets = await _safe_fetch(
+        pool,
         "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
         plan_id,
+        log_ctx=f"[gp_bot_targets op={op_id}]",
     )
     if not targets:
-        await pool.execute(
+        await _safe_execute(
+            pool,
             "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
             plan_id,
+            log_ctx=f"[gp_bot_done op={op_id}]",
         )
         return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
 
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1",
         plan_id,
+        log_ctx=f"[gp_bot_running op={op_id}]",
     )
 
     created_count = 0
@@ -2979,15 +3178,20 @@ async def _exec_global_presence_bot(
     acc_rr_idx = 0  # round-robin index for fallback only
     total = len(targets)
     _gp_bot_eco_id: int | None = None  # lazily loaded from plan
-    await pool.execute(
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        total, op_id,
+        log_ctx=f"[gp_bot_total op={op_id}]",
     )
 
     for i, target in enumerate(targets):
         if await _is_cancelled(pool, op_id):
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
                 plan_id,
+                log_ctx=f"[gp_bot_cancel op={op_id}]",
             )
             return {
                 "status": "cancelled",
@@ -3010,9 +3214,11 @@ async def _exec_global_presence_bot(
             bot_username = bot_username + "_bot"
 
         # Atomic claim: skip if already claimed by another worker
-        claimed = await pool.execute(
+        claimed = await _safe_execute(
+            pool,
             "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
             target["id"],
+            log_ctx=f"[gp_bot_claim op={op_id}]",
         )
         if claimed == "UPDATE 0":
             log.info(
@@ -3033,9 +3239,11 @@ async def _exec_global_presence_bot(
                 "op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying",
                 wait_s,
             )
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE global_presence_targets SET status='pending' WHERE id=$1",
                 target["id"],
+                log_ctx=f"[gp_bot_flood_wait op={op_id}]",
             )
             await asyncio.sleep(wait_s)
             # Switch to next account for retry (use round-robin index over accounts_list)
@@ -3052,18 +3260,22 @@ async def _exec_global_presence_bot(
             _gp_bot_err = str(result["error"])
             if _is_dead_session_error(_gp_bot_err):
                 try:
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         """UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',
                                status_reason=$2 WHERE id=$1 AND is_active=TRUE""",
                         acc["id"], f"Dead session (gp_bot): {_gp_bot_err[:180]}",
+                        log_ctx=f"[gp_bot_dead op={op_id}]",
                     )
                     log.warning("op_worker gp_bot: deactivated dead session account_id=%s", acc["id"])
                 except Exception as _dbe:
                     log.warning("op_worker gp_bot: deactivate failed: %s", _dbe)
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
                 _gp_bot_err[:500],
                 target["id"],
+                log_ctx=f"[gp_bot_fail op={op_id}]",
             )
             failed_count += 1
             _infra_mem.record_account_op(
@@ -3082,8 +3294,11 @@ async def _exec_global_presence_bot(
                 target=bot_name[:100],
                 error_msg=_gp_bot_err[:200],
             )
-            await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
+                log_ctx=f"[gp_bot_fail_progress op={op_id}]",
             )
             await asyncio.sleep(random.uniform(30, 60))
             continue
@@ -3103,8 +3318,11 @@ async def _exec_global_presence_bot(
         except Exception as e:
             log.warning("op_worker gp_bot: managed_bots insert failed: %s", e)
 
-        await pool.execute(
-            "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
+        await _safe_execute(
+            pool,
+            "UPDATE global_presence_targets SET status='done' WHERE id=$1",
+            target["id"],
+            log_ctx=f"[gp_bot_done target={target['id']}]",
         )
         _infra_mem.record_account_op(
             acc["id"],
@@ -3126,9 +3344,11 @@ async def _exec_global_presence_bot(
         # Add created bot to ecosystem
         try:
             if _gp_bot_eco_id is None:
-                _eco_row = await pool.fetchrow(
+                _eco_row = await _safe_fetchrow(
+                    pool,
                     "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
                     plan_id,
+                    log_ctx=f"[gp_bot_eco_id op={op_id}]",
                 )
                 _gp_bot_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
             if _gp_bot_eco_id and token and ":" in token:
@@ -3144,15 +3364,20 @@ async def _exec_global_presence_bot(
         except Exception:
             pass
 
-        await pool.execute(
+        await _safe_execute(
+            pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
             op_id,
             created_count + failed_count + 1,
             f"{target.get('city', '?')} → @{actual_username}",
             f"bot created: @{actual_username}",
+            log_ctx=f"[gp_bot_log op={op_id}]",
         )
-        await pool.execute(
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        await _safe_execute(
+            pool,
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+            op_id,
+            log_ctx=f"[gp_bot_progress op={op_id}]",
         )
         created_count += 1
 
@@ -3178,10 +3403,12 @@ async def _exec_global_presence_bot(
     final_status = (
         "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
     )
-    await pool.execute(
+    await _safe_execute(
+        pool,
         "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
         final_status,
         plan_id,
+        log_ctx=f"[gp_bot_final op={op_id}]",
     )
     return {
         "status": "done",
@@ -3871,9 +4098,6 @@ async def _exec_bot_factory(
                         await pool.execute(
                             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
                             op_id, num, display_name, f"@{actual_uname} (retry ok)",
-                        )
-                        await pool.execute(
-                            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                         )
                         await asyncio.sleep(random.uniform(30, 60))
                         continue
