@@ -620,10 +620,12 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
     без реально работающей задачи. Сбрасываем их с очисткой started_at, чтобы
     они были подхвачены воркером заново.
     """
-    result = await pool.execute(
+    result = await _safe_execute(
+        pool,
         """UPDATE operation_queue
            SET status = 'pending', started_at = NULL
            WHERE status = 'running'""",
+        log_ctx="[_reset_stale_running]",
     )
     # asyncpg возвращает строку вида "UPDATE N"
     try:
@@ -1533,7 +1535,8 @@ async def _exec_mass_publish(
     fetch_params: list = [owner_id, acc_ids]
     if explicit_channel_ids:
         fetch_params.append(explicit_channel_ids)
-    db_pairs = await pool.fetch(
+    db_pairs = await _safe_fetch(
+        pool,
         f"SELECT "
         f"mc.channel_id AS id, mc.title, mc.username, mc.access_hash, mc.type, "
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
@@ -1545,6 +1548,7 @@ async def _exec_mass_publish(
         f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) AND {type_filter} {chan_filter} "
         f"ORDER BY mc.channel_id, a.id",
         *fetch_params,
+        log_ctx=f"[mass_publish_fetch op={op_id}]",
     )
 
     if not db_pairs:
