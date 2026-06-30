@@ -290,9 +290,10 @@ async def cmd_accounts(message: Message) -> None:
 
 @router.callback_query(AccCb.filter(F.action == "menu"))
 async def cb_accounts_menu(
-    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await safe_answer(callback)
+    await state.clear()
     # chat_id field used as status filter: 0=all, 1=active, 2=problem
     status_filter = {0: "all", 1: "active", 2: "problem"}.get(
         callback_data.chat_id, "all"

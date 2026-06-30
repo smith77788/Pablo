@@ -190,7 +190,11 @@ async def cb_exp_view(
     await callback.answer()
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
-        await callback.message.edit_text("❌ Эксперимент не найден.", parse_mode="HTML")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text("❌ Эксперимент не найден.", parse_mode="HTML", reply_markup=kb.as_markup())
         return
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
@@ -365,7 +369,11 @@ async def cb_exp_start(
     # Guard: don't start if already active
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
-        await callback.message.edit_text("❌ Эксперимент не найден.", parse_mode="HTML")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text("❌ Эксперимент не найден.", parse_mode="HTML", reply_markup=kb.as_markup())
         return
     if exp["status"] == "active":
         await callback.message.edit_text(
