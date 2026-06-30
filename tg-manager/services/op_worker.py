@@ -960,6 +960,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     "status": "done",
                     "summary": f"✅ Операция {op_type} принята к обработке фоновым сервисом",
                 }
+            elif op_type == "run_broadcast":
+                result = await _exec_run_broadcast(pool, bot, op_id, owner_id, params)
+            elif op_type == "leave_all_chats":
+                result = await _exec_leave_all_chats(pool, bot, op_id, owner_id, params)
+            elif op_type == "clone_adapt":
+                result = await _exec_clone_adapt(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6678,3 +6684,105 @@ async def _exec_parse_audience(
     except Exception as exc:
         log.exception("_exec_parse_audience op=%d source=%s", op_id, source_ref)
         return {"status": "failed", "summary": f"⚠️ Ошибка парсинга: {exc}"}
+
+
+# ── Missing op_type handlers ─────────────────────────────────────────────────
+
+async def _exec_run_broadcast(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Execute a broadcast via broadcaster service."""
+    try:
+        from services import broadcaster
+        broadcast_id = params.get("broadcast_id")
+        if not broadcast_id:
+            return {"status": "failed", "summary": "⚠️ broadcast_id missing"}
+        await broadcaster.run_broadcast(pool, bot, int(broadcast_id), op_id=op_id)
+        return {"status": "done", "summary": f"✅ Рассылка #{broadcast_id} выполнена"}
+    except Exception as e:
+        log.exception("_exec_run_broadcast op=%d", op_id)
+        return {"status": "failed", "summary": f"⚠️ Ошибка рассылки: {e}"}
+
+
+async def _exec_leave_all_chats(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Leave all chats for an account."""
+    try:
+        from services import account_cleaner
+        account_id = int(params.get("account_id", 0))
+        if not account_id:
+            return {"status": "failed", "summary": "⚠️ account_id missing"}
+        acc = await _safe_fetchrow(
+            pool,
+            "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            account_id, owner_id,
+            log_ctx=f"[leave_all_chats acc={account_id}]",
+        )
+        if not acc or not acc["session_str"]:
+            return {"status": "failed", "summary": "⚠️ Аккаунт не найден"}
+        result = await account_cleaner.leave_all_chats(pool, acc["session_str"], account_id)
+        left = result.get("left", 0) if isinstance(result, dict) else 0
+        return {"status": "done", "summary": f"✅ Вышли из {left} чатов"}
+    except Exception as e:
+        log.exception("_exec_leave_all_chats op=%d", op_id)
+        return {"status": "failed", "summary": f"⚠️ Ошибка: {e}"}
+
+
+async def _exec_clone_adapt(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Clone bot settings from source to target."""
+    try:
+        source_bot_id = int(params.get("source_bot_id", 0))
+        target_bot_id = int(params.get("target_bot_id", 0))
+        fields = params.get("fields", "name,desc")
+        if not source_bot_id or not target_bot_id:
+            return {"status": "failed", "summary": "⚠️ source/target bot_id missing"}
+        src = await _safe_fetchrow(
+            pool,
+            "SELECT bot_id, token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            source_bot_id, owner_id,
+            log_ctx=f"[clone_adapt_src op={op_id}]",
+        )
+        tgt = await _safe_fetchrow(
+            pool,
+            "SELECT bot_id, token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            target_bot_id, owner_id,
+            log_ctx=f"[clone_adapt_tgt op={op_id}]",
+        )
+        if not src or not tgt:
+            return {"status": "failed", "summary": "⚠️ Бот не найден"}
+        import aiohttp as _aio
+        from services.bot_api import get_my_name, get_my_description, get_my_short_description, set_name, set_description, set_short_description
+        from services.token_vault import decrypt_token as _dec
+        src_token = _dec(src["token"]) if src["token"] else ""
+        tgt_token = _dec(tgt["token"]) if tgt["token"] else ""
+        if not src_token or not tgt_token:
+            return {"status": "failed", "summary": "⚠️ Токены недоступны"}
+        field_list = [f.strip() for f in fields.split(",") if f.strip()]
+        ok_count, fail_count = 0, 0
+        async with _aio.ClientSession() as sess:
+            for field in field_list:
+                try:
+                    if field in ("name", "fname"):
+                        val = await get_my_name(sess, src_token, "")
+                        if val:
+                            ok = await set_name(sess, tgt_token, val, "")
+                            ok_count += ok; fail_count += (0 if ok else 1)
+                    elif field in ("desc", "description"):
+                        val = await get_my_description(sess, src_token, "")
+                        if val:
+                            ok = await set_description(sess, tgt_token, val, "")
+                            ok_count += ok; fail_count += (0 if ok else 1)
+                    elif field in ("short", "short_desc"):
+                        val = await get_my_short_description(sess, src_token, "")
+                        if val:
+                            ok = await set_short_description(sess, tgt_token, val, "")
+                            ok_count += ok; fail_count += (0 if ok else 1)
+                except Exception:
+                    fail_count += 1
+        return {"status": "done", "summary": f"🔄 Клонирование: {ok_count} полей скопировано, {fail_count} ошибок"}
+    except Exception as e:
+        log.exception("_exec_clone_adapt op=%d", op_id)
+        return {"status": "failed", "summary": f"⚠️ Ошибка клонирования: {e}"}
