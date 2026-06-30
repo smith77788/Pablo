@@ -1,4 +1,4 @@
-"""Provider selection for BotMother AI.
+"""Provider selection for Infragram AI.
 
 OpenRouter, Groq and Gemini expose OpenAI-compatible chat completions APIs, so
 the assistant can keep one tool-calling path while rotating providers.

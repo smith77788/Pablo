@@ -1,4 +1,4 @@
-"""Autonomous Operations Engine for BotMother Epoch V.
+"""Autonomous Operations Engine for Infragram Epoch V.
 
 This module is the coordination layer above Intent Planner, Infrastructure
 Orchestrator, and Operation Bus. It plans execution, resources, queue shape,

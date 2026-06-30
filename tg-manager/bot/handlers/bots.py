@@ -37,13 +37,13 @@ async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     bot_count = len(bots)
     if not bot_count:
         await callback.message.edit_text(
-            "👋 <b>BotMother OS</b>\n\nУ вас пока нет добавленных ботов.\nНажмите ➕ Добавить бота.",
+            "👋 <b>Infragram OS</b>\n\nУ вас пока нет добавленных ботов.\nНажмите ➕ Добавить бота.",
             parse_mode="HTML",
             reply_markup=main_menu(is_admin=admin),
         )
     else:
         await callback.message.edit_text(
-            f"👋 <b>BotMother OS</b>\n\n🤖 Ботов: <b>{bot_count}</b>\n\nВыберите раздел:",
+            f"👋 <b>Infragram OS</b>\n\n🤖 Ботов: <b>{bot_count}</b>\n\nВыберите раздел:",
             parse_mode="HTML",
             reply_markup=main_menu(is_admin=admin),
         )
@@ -215,7 +215,7 @@ async def msg_token(
 
         if added == "taken":
             err_text = (
-                f"🔒 Бот @{safe_uname} уже управляется другим аккаунтом BotMother.\n\n"
+                f"🔒 Бот @{safe_uname} уже управляется другим аккаунтом Infragram.\n\n"
                 "Каждый Telegram-бот может быть подключён только к одному аккаунту. "
                 "Если вы хотите перенести бота — сначала удалите его из другого аккаунта."
             )

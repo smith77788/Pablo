@@ -461,7 +461,7 @@ async def cb_import_save(
     await state.clear()
 
     # Configure newly saved bots via Bot API: delete any stale webhook so the
-    # bot works in polling/long-polling mode used by BotMother.  Also apply a
+    # bot works in polling/long-polling mode used by Infragram.  Also apply a
     # default command list so BotFather's menu is populated.
     _DEFAULT_COMMANDS = [
         {"command": "start", "description": "Запустить бота"},

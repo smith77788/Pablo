@@ -1,4 +1,4 @@
-"""BotMother — главное Telegram-native OS меню (9 секций)."""
+"""Infragram — главное Telegram-native OS меню (9 секций)."""
 
 from __future__ import annotations
 

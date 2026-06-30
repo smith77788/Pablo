@@ -75,7 +75,7 @@ After creation:
 
 ## Regional / Global Presence
 
-BotMother supports distributed regional infrastructure.
+Infragram supports distributed regional infrastructure.
 
 User can deploy presence across:
 - countries

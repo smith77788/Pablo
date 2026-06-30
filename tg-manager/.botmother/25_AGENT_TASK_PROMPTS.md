@@ -4,7 +4,7 @@ Use these as repeatable prompts for Claude Code / Codex.
 
 ## First repository audit
 
-Inspect the existing BotMother repository.
+Inspect the existing Infragram repository.
 
 Do not code yet.
 

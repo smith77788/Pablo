@@ -1,6 +1,6 @@
 # 28 — Global Presence Factory
 
-Global Presence Factory is a critical BotMother capability.
+Global Presence Factory is a critical Infragram capability.
 
 The user must be able to create Telegram presence across the world in a few guided clicks.
 

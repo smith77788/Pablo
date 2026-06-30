@@ -2,7 +2,7 @@
 
 ## Core principle
 
-BotMother must coordinate operations in a sustainable, balanced, stable way.
+Infragram must coordinate operations in a sustainable, balanced, stable way.
 
 The system should not behave like a rigid script.
 

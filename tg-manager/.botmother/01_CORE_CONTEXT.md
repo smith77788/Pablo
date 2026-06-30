@@ -1,8 +1,8 @@
-# BotMother — Core Context
+# Infragram — Core Context
 
 ## Existing project
 
-You are working on an existing project called BotMother.
+You are working on an existing project called Infragram.
 
 Your mission is to continue, extend, organize, harden, optimize, and complete the existing codebase.
 
@@ -10,24 +10,24 @@ Do not rebuild from scratch.
 
 ## Product vision
 
-BotMother is a Telegram-native infrastructure management and mass action operating system for Telegram.
+Infragram is a Telegram-native infrastructure management and mass action operating system for Telegram.
 
 Core philosophy:
 
 **Maximum Telegram capabilities. Minimum manual work.**
 
-BotMother should let users manage large Telegram infrastructure almost as easily as one object.
+Infragram should let users manage large Telegram infrastructure almost as easily as one object.
 
 The user should feel:
 - I can control huge Telegram infrastructure from one place.
 - I can do in a few actions what would normally take hours.
 - Everything works in bulk.
 - Everything is connected.
-- BotMother understands my infrastructure.
+- Infragram understands my infrastructure.
 
-## What BotMother is
+## What Infragram is
 
-BotMother is:
+Infragram is:
 - Telegram Infrastructure OS
 - Telegram Mass Operations System
 - Telegram Visibility Control Center
@@ -39,9 +39,9 @@ BotMother is:
 - Infrastructure discovery and synchronization layer
 - Infrastructure memory and repeatability system
 
-## What BotMother is not
+## What Infragram is not
 
-BotMother is not:
+Infragram is not:
 - a simple bot builder
 - a simple CRM
 - a generic dashboard
@@ -54,7 +54,7 @@ BotMother is not:
 
 ## Human action → mass action
 
-If a human can perform an allowed action manually inside Telegram, BotMother should support doing it:
+If a human can perform an allowed action manually inside Telegram, Infragram should support doing it:
 - on one object
 - on many objects
 - by tag
@@ -70,13 +70,13 @@ If a human can perform an allowed action manually inside Telegram, BotMother sho
 - with history
 - as reusable workflow
 
-BotMother transforms manual Telegram actions into infrastructure-scale operations.
+Infragram transforms manual Telegram actions into infrastructure-scale operations.
 
 ## Primary interface
 
-BotMother is Telegram-native.
+Infragram is Telegram-native.
 
-The primary interface is the BotMother Telegram management bot.
+The primary interface is the Infragram Telegram management bot.
 
 Everything important must work inside Telegram:
 - commands

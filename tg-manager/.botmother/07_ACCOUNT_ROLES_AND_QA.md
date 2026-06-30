@@ -44,7 +44,7 @@ For each account store:
 
 ## Controlled internal dialogues / workflows
 
-BotMother may support controlled role-based dialogues between connected accounts only for legitimate purposes:
+Infragram may support controlled role-based dialogues between connected accounts only for legitimate purposes:
 - testing bot flows
 - testing onboarding sequences
 - testing support workflows

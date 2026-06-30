@@ -1,6 +1,6 @@
-# BotMother — Agent Rules (v3.1)
+# Infragram — Agent Rules (v3.1)
 
-You are working on an existing project called BotMother.
+You are working on an existing project called Infragram.
 
 Do not rebuild from scratch.
 Do not code before repository inspection.
@@ -23,7 +23,7 @@ Before coding, read in order:
 
 ## Core principles
 
-BotMother is a Telegram-native infrastructure and mass-action operating system.
+Infragram is a Telegram-native infrastructure and mass-action operating system.
 
 Core principle:
 **Maximum Telegram capabilities. Minimum manual work.**
@@ -35,14 +35,14 @@ Preserve existing architecture, flows, database conventions, and working logic.
 
 ## Source of truth
 
-- Work in `tg-manager` for BotMother Telegram bot changes.
+- Work in `tg-manager` for Infragram Telegram bot changes.
 - Use the shared branch `claude/telegram-bot-services-xfAh6`.
 - Do not create a separate bot project outside `tg-manager`.
 
 ## Runtime contract
 
-- BotMother production runtime is Python 3.12.
-- Keep BotMother code Python 3.12-compatible even if your local agent runs a newer Python.
+- Infragram production runtime is Python 3.12.
+- Keep Infragram code Python 3.12-compatible even if your local agent runs a newer Python.
 - Do not use syntax newer than Python 3.12 in `tg-manager` (for example `except TypeError, ValueError:`).
 - Use `except (TypeError, ValueError):` for multiple exception types.
 - Do not inherit Python/runtime rules from neighboring projects or parent workspaces.
@@ -58,7 +58,7 @@ Preserve existing architecture, flows, database conventions, and working logic.
 
 ## Deploy discipline
 
-After any BotMother code change intended for production:
+After any Infragram code change intended for production:
 
 1. Run syntax check: `python3 -c "import ast; ast.parse(open('file.py').read())"`
 2. Commit only the intended files with a clear message.

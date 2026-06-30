@@ -50,7 +50,7 @@ async def clone_to_channel(
     Возвращает {"ok": int, "fail": int, "errors": [...]}.
     """
     device = {
-        "device_model":    acc.get("device_model", "BotMother"),
+        "device_model":    acc.get("device_model", "Infragram"),
         "system_version":  acc.get("system_version", "1.0"),
         "app_version":     acc.get("app_version", "1.0"),
         "lang_code":       acc.get("lang_code", "en"),
@@ -180,7 +180,7 @@ async def get_last_msg_ids(
 ) -> list[int]:
     """Возвращает ID последних count сообщений из канала-источника."""
     device = {
-        "device_model":    acc.get("device_model", "BotMother"),
+        "device_model":    acc.get("device_model", "Infragram"),
         "system_version":  acc.get("system_version", "1.0"),
         "app_version":     acc.get("app_version", "1.0"),
         "lang_code":       acc.get("lang_code", "en"),

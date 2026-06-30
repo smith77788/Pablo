@@ -2,15 +2,15 @@
 
 ## Core principle
 
-BotMother is not only a creator.
+Infragram is not only a creator.
 
-BotMother is a living registry and control layer.
+Infragram is a living registry and control layer.
 
-If a connected account owns/administers something, BotMother should detect it, register it, classify it, and make it manageable.
+If a connected account owns/administers something, Infragram should detect it, register it, classify it, and make it manageable.
 
 ## Auto-discovery
 
-After connecting accounts/bots, BotMother detects:
+After connecting accounts/bots, Infragram detects:
 - existing channels
 - existing groups
 - existing chats
@@ -42,7 +42,7 @@ After scan:
 
 ## Post-creation auto-linking
 
-Whenever BotMother creates anything, it must immediately:
+Whenever Infragram creates anything, it must immediately:
 1. Register it.
 2. Link creator account.
 3. Check permissions.
@@ -58,7 +58,7 @@ No created asset should remain invisible.
 
 ## Infrastructure graph
 
-BotMother understands:
+Infragram understands:
 - which account created which channel
 - which account owns which group
 - which account administers which channel

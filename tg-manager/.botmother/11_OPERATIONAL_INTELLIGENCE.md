@@ -1,6 +1,6 @@
 # Operational Intelligence
 
-BotMother should feel alive and aware.
+Infragram should feel alive and aware.
 
 ## Live Operational Center
 
@@ -54,7 +54,7 @@ Before execution, forecast:
 
 ## Infrastructure awareness
 
-BotMother should understand:
+Infragram should understand:
 - which accounts manage which channels
 - which channels belong to which ecosystem
 - which groups belong to which ecosystem

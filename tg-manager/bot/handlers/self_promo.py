@@ -1,4 +1,4 @@
-"""Self-promotion module — BotMother рекламирует себя через управляемые каналы и DM.
+"""Self-promotion module — Infragram рекламирует себя через управляемые каналы и DM.
 
 Функции:
   1. Библиотека шаблонов (прямая и нативная реклама) — CRUD (только admin)
@@ -148,7 +148,7 @@ async def cmd_self_promo(message: Message, state: FSMContext) -> None:
     await state.clear()
     text = (
         "🎯 <b>Самопиар & Реклама</b>\n\n"
-        "Система для продвижения BotMother через управляемые каналы и аудиторию.\n\n"
+        "Система для продвижения Infragram через управляемые каналы и аудиторию.\n\n"
         "• <b>Прямая реклама</b> — явные рекламные посты\n"
         "• <b>Нативная реклама</b> — полезный контент с упоминанием\n"
         "• <b>Реферальная ссылка</b> — готовый текст для репоста"
@@ -162,7 +162,7 @@ async def cb_sp_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     text = (
         "🎯 <b>Самопиар & Реклама</b>\n\n"
-        "Система для продвижения BotMother через управляемые каналы и аудиторию.\n\n"
+        "Система для продвижения Infragram через управляемые каналы и аудиторию.\n\n"
         "• <b>Прямая реклама</b> — явные рекламные посты\n"
         "• <b>Нативная реклама</b> — полезный контент с упоминанием\n"
         "• <b>Реферальная ссылка</b> — готовый текст для репоста"
@@ -343,7 +343,7 @@ async def fsm_sp_add_content(message: Message, state: FSMContext) -> None:
     await state.update_data(content=content)
     await state.set_state(SelfPromoFSM.add_cta_text)
     await message.answer(
-        "Введите <b>текст CTA-кнопки</b> (например: «🤖 Попробовать BotMother»)\nИли пропустите:",
+        "Введите <b>текст CTA-кнопки</b> (например: «🤖 Попробовать Infragram»)\nИли пропустите:",
         parse_mode="HTML",
         reply_markup=_skip_back_kb("add_skip_cta"),
     )
@@ -369,7 +369,7 @@ async def fsm_sp_add_cta_text(message: Message, state: FSMContext) -> None:
     await state.update_data(cta_text=cta_text)
     await state.set_state(SelfPromoFSM.add_cta_url)
     await message.answer(
-        "Введите <b>URL для кнопки</b> (например: https://t.me/BotMotherBot):",
+        "Введите <b>URL для кнопки</b> (например: https://t.me/InfragramBot):",
         parse_mode="HTML",
         reply_markup=_skip_back_kb("add_skip_url"),
     )
@@ -591,9 +591,9 @@ async def cb_sp_share_link(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         code = await db.get_or_create_referral_code(pool, user_id)
         link = f"https://t.me/{me.username}?start={code}"
     except Exception:
-        link = "https://t.me/BotMotherBot"
+        link = "https://t.me/InfragramBot"
     ready_text = (
-        f"🚀 Пользуюсь BotMother — автоматизация Telegram на новом уровне. "
+        f"🚀 Пользуюсь Infragram — автоматизация Telegram на новом уровне. "
         f"Управление каналами, DM-кампании, прогрев аккаунтов — всё в одном месте.\n"
         f"Попробуй бесплатно: {link}"
     )

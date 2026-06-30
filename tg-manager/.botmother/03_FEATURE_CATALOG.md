@@ -1,4 +1,4 @@
-# BotMother Feature Catalog (compact)
+# Infragram Feature Catalog (compact)
 
 Reference for feature scope. Pick highest-priority gaps per CLAUDE.md priority order.
 

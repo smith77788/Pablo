@@ -63,7 +63,7 @@ BUILD_VERSION = "2026.06.06-r36"
 @router.message(Command("version"))
 async def cmd_version(message: Message) -> None:
     await message.answer(
-        f"🔖 <b>BotMother OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML"
+        f"🔖 <b>Infragram OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML"
     )
 
 
@@ -158,7 +158,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
     if not bot_count:
         await message.answer(
-            "👋 <b>Добро пожаловать в BotMother!</b>\n\n"
+            "👋 <b>Добро пожаловать в Infragram!</b>\n\n"
             "Это система управления Telegram-активами:\n"
             "боты, каналы, группы, аккаунты — всё в одном месте.\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -207,7 +207,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
 
     await message.answer(
-        f"👋 <b>BotMother OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
+        f"👋 <b>Infragram OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
         f"{summary}{extra}\n\n"
         f"ID: <code>{uid}</code>\n\n"
         f"💡 Нажмите на бота из списка → откроется меню управления",
@@ -233,7 +233,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
 
     text = (
-        f"❓ <b>Справка BotMother OS</b>\n\n"
+        f"❓ <b>Справка Infragram OS</b>\n\n"
         f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
         f"<b>📋 Команды:</b>\n"
         f"/start — главное меню\n"
@@ -273,7 +273,7 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     emoji = PLAN_EMOJIS.get(plan, "🆓")
 
     text = (
-        f"❓ <b>Справка BotMother OS</b>\n\n"
+        f"❓ <b>Справка Infragram OS</b>\n\n"
         f"Ваш план: <b>{emoji} {plan.upper()}</b>\n\n"
         f"<b>📋 Команды:</b>\n"
         f"/start — главное меню\n"
@@ -386,7 +386,7 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
         pressure_line = ""
 
     text = (
-        "📊 <b>Статистика BotMother OS</b>\n\n"
+        "📊 <b>Статистика Infragram OS</b>\n\n"
         f"📱 <b>Аккаунты:</b>\n"
         f"   Активных: <b>{acc_total}</b>"
         + (f"  |  Забанено/спам: <b>{acc_banned}</b>" if acc_banned else "")
@@ -498,7 +498,7 @@ async def cmd_find(message: Message) -> None:
 
 @router.message(Command("app"))
 async def cmd_app(message: Message) -> None:
-    """Открыть BotMother Mini App."""
+    """Открыть Infragram Mini App."""
     from config import MINI_APP_URL as _MINI_APP_URL
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from aiogram.types import WebAppInfo
@@ -508,7 +508,7 @@ async def cmd_app(message: Message) -> None:
 
     if not url:
         await message.answer(
-            "📱 <b>BotMother Mini App</b>\n\n"
+            "📱 <b>Infragram Mini App</b>\n\n"
             "Приложение не настроено. Добавьте в Railway:\n"
             "<code>MINI_APP_URL = https://ВАШ-СЕРВИС.up.railway.app</code>\n\n"
             "1. Railway → ваш сервис → Settings → Networking → Generate Domain\n"
@@ -523,7 +523,7 @@ async def cmd_app(message: Message) -> None:
     kb.button(text="🌐 Открыть приложение", web_app=WebAppInfo(url=url))
     kb.adjust(1)
     await message.answer(
-        "📱 <b>BotMother Mini App</b>\n\n"
+        "📱 <b>Infragram Mini App</b>\n\n"
         "Нажмите кнопку ниже чтобы открыть панель управления:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

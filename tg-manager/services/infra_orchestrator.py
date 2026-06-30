@@ -1,5 +1,5 @@
 """
-Infrastructure Orchestrator — центральный мозг инфраструктуры BotMother.
+Infrastructure Orchestrator — центральный мозг инфраструктуры Infragram.
 
 Единая точка входа для всех инфраструктурных запросов:
   - get_state()            → полный снимок состояния инфраструктуры

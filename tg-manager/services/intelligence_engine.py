@@ -1,5 +1,5 @@
 """
-Intelligence Engine — единый аналитический слой BotMother. EPOCH II.
+Intelligence Engine — единый аналитический слой Infragram. EPOCH II.
 
 Принцип: данные без решений — не интеллект.
 Система превращает данные в конкретные решения:

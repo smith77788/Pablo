@@ -55,7 +55,7 @@ User selects:
 Then selects:
 “Make others like this”
 
-BotMother compares:
+Infragram compares:
 - descriptions
 - usernames
 - avatars

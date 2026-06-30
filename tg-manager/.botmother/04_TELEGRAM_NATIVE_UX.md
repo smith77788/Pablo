@@ -2,7 +2,7 @@
 
 ## Primary interface
 
-The primary interface is the BotMother Telegram management bot.
+The primary interface is the Infragram Telegram management bot.
 
 Core interactions:
 - inline buttons
@@ -32,11 +32,11 @@ Bad:
 
 Good:
 - User selects desired result
-- BotMother asks only necessary questions
-- BotMother suggests defaults
-- BotMother previews result
+- Infragram asks only necessary questions
+- Infragram suggests defaults
+- Infragram previews result
 - User confirms
-- BotMother executes and reports
+- Infragram executes and reports
 
 ## Main menu example
 

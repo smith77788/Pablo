@@ -2,7 +2,7 @@
 
 This strengthens `04_TELEGRAM_NATIVE_UX.md`.
 
-BotMother should feel powerful but not chaotic.
+Infragram should feel powerful but not chaotic.
 
 ## Every screen must answer
 

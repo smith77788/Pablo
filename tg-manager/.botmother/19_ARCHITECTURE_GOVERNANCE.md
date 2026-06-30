@@ -1,6 +1,6 @@
 # Architecture Governance
 
-This file strengthens the original BotMother memory. It does not replace earlier files.
+This file strengthens the original Infragram memory. It does not replace earlier files.
 
 ## Core rule
 
@@ -45,7 +45,7 @@ Before implementation, answer internally:
 
 ## Preferred direction
 
-Build BotMother around reusable layers:
+Build Infragram around reusable layers:
 
 - Assets
 - Ecosystems
@@ -62,4 +62,4 @@ Build BotMother around reusable layers:
 - Billing / limits
 - Governance
 
-Do not build BotMother as a pile of unrelated buttons.
+Do not build Infragram as a pile of unrelated buttons.

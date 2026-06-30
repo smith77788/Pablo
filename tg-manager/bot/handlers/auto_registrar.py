@@ -83,7 +83,7 @@ async def _save_account(
            (owner_id, phone, session_str, tg_user_id, first_name, username,
             device_model, system_version, app_version, lang_code, system_lang_code,
             is_active, trust_score, acc_status, added_at)
-           VALUES ($1,$2,$3,$4,$5,$6,'BotMother','9.0','9.0','en','en-US',TRUE,1.0,'active',NOW())
+           VALUES ($1,$2,$3,$4,$5,$6,'Infragram','9.0','9.0','en','en-US',TRUE,1.0,'active',NOW())
            ON CONFLICT (owner_id, phone) DO UPDATE
              SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
                  is_active=TRUE, acc_status='active', status_reason=NULL,

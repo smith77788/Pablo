@@ -245,7 +245,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
         period_hint = "💰 Оплата на 12 мес — скидка 20%"
 
     text = (
-        f"💳 <b>Подписка BotMother</b>\n\n"
+        f"💳 <b>Подписка Infragram</b>\n\n"
         f"{plan_info}\n"
         f"{social_block}"
         f"{promo_banner}"
@@ -340,7 +340,7 @@ async def cb_sub_menu(
 
 _PLAN_HIGHLIGHTS: dict[str, str] = {
     "paid": (
-        "Полный доступ ко всем функциям BotMother: "
+        "Полный доступ ко всем функциям Infragram: "
         "неограниченное число ботов и каналов, CRM, воронки, фабрики каналов и групп, "
         "парсер аудитории, AI-ассистент, DM-кампании, Global Presence, "
         "поведенческая аналитика, Swarm-роутинг и многое другое."

@@ -1,4 +1,4 @@
-"""BotMother Nodes Engine — Telegram Forum Workspace management.
+"""Infragram Nodes Engine — Telegram Forum Workspace management.
 
 Architecture:
   bm_telegram_nodes  → root workspace (forum supergroup + node_type)
@@ -74,7 +74,7 @@ async def initialize_workspace(
     node_type: str,
     name: str | None = None,
 ) -> dict[str, Any]:
-    """Register a Telegram forum supergroup as a BotMother Node workspace.
+    """Register a Telegram forum supergroup as a Infragram Node workspace.
 
     Returns the node record dict. Raises ValueError on unknown node_type.
     The group must already be a forum supergroup (is_forum=True).

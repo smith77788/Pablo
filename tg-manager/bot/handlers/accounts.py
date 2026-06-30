@@ -270,7 +270,7 @@ def _cancel_markup():
     return kb.as_markup()
 
 
-# ── /accounts command (redirect to BotMother OS) ────────────────────────────
+# ── /accounts command (redirect to Infragram OS) ────────────────────────────
 
 
 @router.message(Command("accounts"))

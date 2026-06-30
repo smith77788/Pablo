@@ -1,4 +1,4 @@
-"""BotMother Nodes Hub — управление Telegram Forum Workspaces.
+"""Infragram Nodes Hub — управление Telegram Forum Workspaces.
 
 Flows:
   menu        → список воркспейсов
@@ -93,7 +93,7 @@ async def cb_nodes_menu(
 
     count = len(workspaces)
     text = (
-        "<b>📡 BotMother Nodes</b>\n\n"
+        "<b>📡 Infragram Nodes</b>\n\n"
         "Nodes — это форум-группы Telegram, где каждая инфраструктурная сущность "
         "(прокси, аккаунт, воркер) получает собственный топик-тред для логов и команд.\n\n"
         f"Активных воркспейсов: <b>{count}</b>"

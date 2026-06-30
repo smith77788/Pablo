@@ -29,7 +29,7 @@ from bot.middlewares.subscription_gate import (
     build_gate_text,
     build_gate_markup,
 )
-from bot.states import GateAddFSM, BotMotherChannelFSM
+from bot.states import GateAddFSM, InfragramChannelFSM
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -122,7 +122,7 @@ def _admin_main_kb(new_error_reports: int = 0):
     kb.button(text="⚙️ Операции", callback_data="adm:section_ops")
     kb.button(text="🧠 AI / провайдеры", callback_data="adm:section_ai")
     kb.button(text="🛠 Система", callback_data="adm:section_system")
-    kb.button(text="📢 Канал BotMother", callback_data="adm:bm_channel")
+    kb.button(text="📢 Канал Infragram", callback_data="adm:bm_channel")
     kb.button(text=err_label, callback_data="adm:error_reports")
     kb.button(text="🚪 Выйти", callback_data="adm:exit")
     kb.adjust(2, 2, 2, 2, 2, 1)
@@ -880,23 +880,23 @@ async def cb_admin(
         await _adm_bm_channel(callback, pool)
 
     elif action == "bm_channel_set_id":
-        await state.set_state(BotMotherChannelFSM.set_channel_id)
+        await state.set_state(InfragramChannelFSM.set_channel_id)
         await callback.message.edit_text(
-            "📢 <b>Настройка канала BotMother</b>\n\n"
+            "📢 <b>Настройка канала Infragram</b>\n\n"
             "Введите ID или @username канала:\n"
-            "<i>Примеры: @BotMotherChannel или -1001234567890</i>\n\n"
+            "<i>Примеры: @InfragramChannel или -1001234567890</i>\n\n"
             "Бот должен быть администратором канала с правом публикации.",
             parse_mode="HTML",
         )
 
     elif action == "bm_post_update":
-        await state.set_state(BotMotherChannelFSM.write_post)
+        await state.set_state(InfragramChannelFSM.write_post)
         await state.update_data(post_type="custom")
         kb2 = InlineKeyboardBuilder()
         kb2.button(text="❌ Отмена", callback_data="adm:bm_channel")
         kb2.adjust(1)
         await callback.message.edit_text(
-            "📝 <b>Новый пост в канал BotMother</b>\n\n"
+            "📝 <b>Новый пост в канал Infragram</b>\n\n"
             "Напишите текст поста (HTML поддерживается):\n\n"
             "<i>Совет: используйте <b>жирный</b>, <i>курсив</i>, <code>код</code>, "
             "ссылки через &lt;a href=&quot;...&quot;&gt;текст&lt;/a&gt;</i>",
@@ -3374,11 +3374,11 @@ async def cb_adm_gate_notify_all(
     )
 
 
-# ── BotMother Channel Management ─────────────────────────────────────────────
+# ── Infragram Channel Management ─────────────────────────────────────────────
 
 
 async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
-    """Показать раздел управления каналом BotMother."""
+    """Показать раздел управления каналом Infragram."""
     from services import botmother_channel as _bmc
 
     channel_id = await _bmc.get_channel_id(pool)
@@ -3388,13 +3388,13 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
     kb.button(text="⚙️ Задать ID канала", callback_data="adm:bm_channel_set_id")
     if channel_id:
         kb.button(text="🚀 Промо: Возможности системы", callback_data="adm:bm_post_feature")
-        kb.button(text="📣 Промо: Реклама в BotMother", callback_data="adm:bm_post_adoffer")
+        kb.button(text="📣 Промо: Реклама в Infragram", callback_data="adm:bm_post_adoffer")
         kb.button(text="📝 Пост: Произвольный текст", callback_data="adm:bm_post_update")
     kb.button(text="◀️ Админка", callback_data="adm:main")
     kb.adjust(1)
 
     text = (
-        "📢 <b>Канал BotMother</b>\n\n"
+        "📢 <b>Канал Infragram</b>\n\n"
         f"Канал: {ch_label}\n\n"
         "<b>Типы публикаций:</b>\n"
         "🚀 <b>Возможности</b> — показывает конкретную фичу (6 ротирующих вариантов)\n"
@@ -3410,7 +3410,7 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
         await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
-@router.message(BotMotherChannelFSM.set_channel_id)
+@router.message(InfragramChannelFSM.set_channel_id)
 async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     if not _is_admin(message.from_user.id):
         await state.clear()
@@ -3433,7 +3433,7 @@ async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: async
     )
 
 
-@router.message(BotMotherChannelFSM.write_post)
+@router.message(InfragramChannelFSM.write_post)
 async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     if not _is_admin(message.from_user.id):
         await state.clear()
@@ -3443,7 +3443,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
         await message.answer("⚠️ Текст не может быть пустым.")
         return
     await state.update_data(post_text=text)
-    await state.set_state(BotMotherChannelFSM.confirm_post)
+    await state.set_state(InfragramChannelFSM.confirm_post)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Опубликовать", callback_data="adm:bm_post_confirm")
@@ -3452,7 +3452,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
     kb.adjust(1)
     await message.answer(
         f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"
-        f"<i>Опубликовать в канал BotMother?</i>",
+        f"<i>Опубликовать в канал Infragram?</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

@@ -493,7 +493,7 @@ def _account_picker_kb(accounts: list, action: str) -> InlineKeyboardBuilder:
 
 
 
-# ── /ops entry point (redirect to BotMother OS) ────────────────────────────
+# ── /ops entry point (redirect to Infragram OS) ────────────────────────────
 
 
 @router.message(Command("ops"))
@@ -531,7 +531,7 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
     kb.button(text="📊 Отчёты по операциям", callback_data=BmCb(action="op_reports"))
     kb.button(text="📡 Аналитика инфраструктуры", callback_data=InfraCb(action="menu"))
-    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await message.answer(
         "⚡ <b>Операции и отчёты</b>\n\n"

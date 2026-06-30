@@ -1,10 +1,10 @@
-# BotMother Root Context Template
+# Infragram Root Context Template
 
 Add this to README.md / CLAUDE.md / AGENTS.md in the project root.
 
 ---
 
-# BotMother AI Working Rules
+# Infragram AI Working Rules
 
 This project has a persistent AI memory folder.
 
@@ -21,7 +21,7 @@ Do not rebuild the app from scratch.
 
 Do not write code before repository audit.
 
-BotMother is a Telegram-native infrastructure and mass-action operating system.
+Infragram is a Telegram-native infrastructure and mass-action operating system.
 
 Core philosophy:
 Maximum Telegram capabilities. Minimum manual work.

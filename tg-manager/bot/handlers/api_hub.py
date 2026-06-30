@@ -62,7 +62,7 @@ def _menu_text(keys: list[dict]) -> str:
     if not keys:
         lines.append(
             "<i>У вас нет активных API-ключей.</i>\n\n"
-            "Создайте ключ для программного доступа к BotMother:\n"
+            "Создайте ключ для программного доступа к Infragram:\n"
             "запускайте операции, проверяйте статус и управляйте "
             "инфраструктурой через REST API.\n\n"
             "<b>Базовый URL:</b> <code>/api/v1/</code>\n"
@@ -249,7 +249,7 @@ async def cb_api_docs(
 ) -> None:
     await callback.answer()
     text = (
-        "📖 <b>BotMother Compute API</b>\n\n"
+        "📖 <b>Infragram Compute API</b>\n\n"
         "<b>Аутентификация:</b>\n"
         "<code>X-Api-Key: bm_your_key</code>\n\n"
         "<b>Эндпоинты:</b>\n"

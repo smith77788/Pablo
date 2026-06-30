@@ -1,4 +1,4 @@
-"""Ecosystem Brain — управление экосистемами BotMother.
+"""Ecosystem Brain — управление экосистемами Infragram.
 
 EPOCH III: Экосистема как первичный объект.
 Каждая экосистема — живой объект с Health/Pressure/Risk/Memory/Drift.
@@ -101,7 +101,7 @@ async def cb_eco_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "Экосистема — это живой объект, объединяющий аккаунты, каналы, "
             "группы и ботов в единую управляемую структуру.\n\n"
             "У вас ещё нет ни одной экосистемы.\n"
-            "Создайте первую — и BotMother начнёт мыслить экосистемами."
+            "Создайте первую — и Infragram начнёт мыслить экосистемами."
         )
     else:
         total_health = sum((e.get("health_score") or 1.0) for e in ecosystems)

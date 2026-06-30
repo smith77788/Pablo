@@ -154,7 +154,7 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
     """Добавить REST API маршруты к существующему aiohttp-приложению."""
 
     async def api_health(request: web.Request) -> web.Response:
-        return web.json_response({"status": "ok", "service": "BotMother REST API v1"})
+        return web.json_response({"status": "ok", "service": "Infragram REST API v1"})
 
     async def api_accounts(request: web.Request) -> web.Response:
         if not _check_auth(request):

@@ -1,4 +1,4 @@
-"""Ecosystem Brain — центральный мозг экосистем BotMother.
+"""Ecosystem Brain — центральный мозг экосистем Infragram.
 
 BOTMOTHER ЭПОХА III: Ecosystem Brain Contract
 

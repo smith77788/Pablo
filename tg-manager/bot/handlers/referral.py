@@ -70,7 +70,7 @@ def _dashboard_keyboard(share_url: str | None = None) -> object:
     if share_url:
         kb.button(
             text="📤 Поделиться ссылкой",
-            url=f"https://t.me/share/url?url={share_url}&text=Присоединяйся+к+BotMother+по+моей+реферальной+ссылке!",
+            url=f"https://t.me/share/url?url={share_url}&text=Присоединяйся+к+Infragram+по+моей+реферальной+ссылке!",
         )
     kb.button(text="🏆 Топ рефереров", callback_data=RefCb(action="leaderboard"))
     kb.button(text="◀️ Настройки", callback_data=BmCb(action="settings"))
@@ -83,10 +83,10 @@ async def cmd_referral(message: Message) -> None:
     from bot.callbacks import BmCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))
     await message.answer(
         "👥 <b>Реферальная программа</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
+        "Откройте Infragram OS и перейдите в:\n"
         "<code>/menu → ⚙️ Настройки → 👥 Рефералы</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
