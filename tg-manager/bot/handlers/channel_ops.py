@@ -1424,7 +1424,12 @@ async def _show_bpchans_page(msg, state: FSMContext, edit: bool = False) -> None
 async def cb_bpchans_toggle(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     parts = callback.data.split(":")
-    ch_id = int(parts[3])
+    if len(parts) < 4:
+        return
+    try:
+        ch_id = int(parts[3])
+    except (ValueError, IndexError):
+        return
     data = await state.get_data()
     selected = list(data.get("bpchans_selected", []))
     if ch_id in selected:
@@ -1438,7 +1443,13 @@ async def cb_bpchans_toggle(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("chan:cppage:"))
 async def cb_bpchans_page(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
-    page = int(callback.data.split(":")[2])
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return
+    try:
+        page = int(parts[2])
+    except (ValueError, IndexError):
+        return
     await state.update_data(bpchans_page=page)
     await _show_bpchans_page(callback.message, state, edit=True)
 

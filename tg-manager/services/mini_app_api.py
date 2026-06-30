@@ -2341,7 +2341,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 """SELECT pp.id, pp.persona_name, pp.bio, pp.age, pp.speech_style,
-                          pp.tone, pp.niche, pp.is_active, pp.created_at,
+                          pp.tone, pp.niche, pp.is_active, pp.created_at, pp.interests,
                           ta.phone, ta.first_name, ta.username
                    FROM persona_profiles pp
                    LEFT JOIN tg_accounts ta ON ta.id=pp.account_id
@@ -3911,10 +3911,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("bad bot_id", 400)
-        row = await pool.fetchrow(
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-            bot_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+                bot_id, uid,
+            )
+        except Exception as e:
+            log.warning("multigeo_get db error: %s", e)
+            return _err("db error", 500)
         if not row:
             return _err("bot not found", 404)
         import aiohttp as _aiohttp
@@ -3954,10 +3958,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         short_description = (body.get("short_description") or "").strip()[:120]
         if lang == "default":
             lang = ""
-        row = await pool.fetchrow(
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-            bot_id, uid,
-        )
+        try:
+            row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+                bot_id, uid,
+            )
+        except Exception as e:
+            log.warning("multigeo_set db error: %s", e)
+            return _err("db error", 500)
         if not row:
             return _err("bot not found", 404)
         import aiohttp as _aiohttp
@@ -4138,8 +4146,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         source = request.rel_url.query.get("source", "")
-        limit = min(int(request.rel_url.query.get("limit", "50")), 200)
-        offset = int(request.rel_url.query.get("offset", "0"))
+        try:
+            limit = min(int(request.rel_url.query.get("limit", "50")), 200)
+        except (ValueError, TypeError):
+            limit = 50
+        try:
+            offset = int(request.rel_url.query.get("offset", "0"))
+        except (ValueError, TypeError):
+            offset = 0
         try:
             if source:
                 rows = await pool.fetch(
@@ -5439,9 +5453,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await pool.execute(
                 """UPDATE platform_users SET settings_json=$1 WHERE user_id=$2""",
                 settings_json, uid)
-        except Exception:
-            pass
-        return _json_resp({"ok": True})
+            return _json_resp({"ok": True})
+        except Exception as e:
+            log.warning("user_settings_save uid=%d: %s", uid, e)
+            return _err("save failed", 500)
 
     async def payments_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)

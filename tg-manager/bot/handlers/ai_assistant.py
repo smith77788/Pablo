@@ -970,10 +970,12 @@ async def cb_ai_start(
 ) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.message.edit_text(
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await safe_edit(callback,
             "🔒 <b>AI-ассистент — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
-            parse_mode="HTML",
-        )
+            kb.as_markup())
         return
     await state.set_state(AiChat.chatting)
     await state.update_data(messages=[], turns=0)

@@ -3547,7 +3547,7 @@ async function api(path, opts={}) {
                    : `Ошибка сервера (${r.status})`;
     throw new Error(msg);
   }
-  return r.json();
+  try { return await r.json(); } catch(_) { throw new Error('Ответ сервера не является JSON'); }
 }
 
 // ── SSE ────────────────────────────────────────────────

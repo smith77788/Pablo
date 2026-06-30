@@ -1812,13 +1812,21 @@ async def handle_post_text(
     chat_id: int = data.get("chat_id", 0)
 
     if not acc_id or not chat_id:
-        await message.answer("❌ Ошибка: не выбран аккаунт или канал. Начните заново.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Ошибка: не выбран аккаунт или канал. Начните заново.", reply_markup=kb.as_markup())
         await state.clear()
         return
 
     acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
     if not acc:
-        await message.answer("❌ Аккаунт не найден.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Аккаунт не найден.", reply_markup=kb.as_markup())
         await state.clear()
         return
 
@@ -2862,7 +2870,11 @@ async def handle_send_msg_text(
     chat_id = data.get("chat_id")
 
     if not acc_id or chat_id is None:
-        await message.answer("❌ Ошибка состояния. Начните заново.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Ошибка состояния. Начните заново.", reply_markup=kb.as_markup())
         await state.clear()
         return
 

@@ -1030,7 +1030,11 @@ async def cb_mini_strike_run(
     await state.clear()
 
     if not target or not acc_id:
-        await callback.message.edit_text("⚠️ Сессия истекла. Начните заново.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await safe_edit(callback, "⚠️ Сессия истекла. Начните заново.", kb.as_markup())
         return
 
     # Загрузить аккаунт
@@ -1047,7 +1051,11 @@ async def cb_mini_strike_run(
         acc_row = None
 
     if not acc_row or not acc_row["session_str"]:
-        await callback.message.edit_text("⚠️ Аккаунт не найден. Начните заново.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await safe_edit(callback, "⚠️ Аккаунт не найден. Начните заново.", kb.as_markup())
         return
 
     acc = dict(acc_row)
@@ -1057,34 +1065,50 @@ async def cb_mini_strike_run(
     from services import flood_engine as _fe
 
     if acc.get("is_active") is False:
-        await callback.message.edit_text(
-            "⛔️ Аккаунт неактивен (возможно, забанен). Выберите другой."
-        )
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await safe_edit(callback,
+            "⛔️ Аккаунт неактивен (возможно, забанен). Выберите другой.",
+            kb.as_markup())
         return
     try:
         _min_trust = _fe.min_trust_for_action("strike")
         _ts = float(acc.get("trust_score") or 0)
         if _ts < _min_trust:
-            await callback.message.edit_text(
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot.callbacks import BmCb
+            kb = InlineKeyboardBuilder()
+            kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+            await safe_edit(callback,
                 f"⛔️ Низкий trust_score аккаунта ({_ts:.2f} < {_min_trust:.2f}).\n"
-                "Сначала прогрейте аккаунт через 🌱 Разогрев — иначе он улетит в бан."
-            )
+                "Сначала прогрейте аккаунт через 🌱 Разогрев — иначе он улетит в бан.",
+                kb.as_markup())
             return
     except (TypeError, ValueError):
         pass
     if _fe.is_account_cooling(acc["id"]):
-        await callback.message.edit_text(
-            "⏳ Аккаунт на остывании после флуда/страйка. Попробуйте позже."
-        )
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await safe_edit(callback,
+            "⏳ Аккаунт на остывании после флуда/страйка. Попробуйте позже.",
+            kb.as_markup())
         return
 
     # Claim the account so warmup/op_worker won't drive the same session in parallel.
     from services import op_worker as _opw
 
     if _opw.is_account_in_use(acc["id"]):
-        await callback.message.edit_text(
-            "⏳ Аккаунт сейчас занят другой операцией. Попробуйте позже."
-        )
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await safe_edit(callback,
+            "⏳ Аккаунт сейчас занят другой операцией. Попробуйте позже.",
+            kb.as_markup())
         return
     await _opw.mark_accounts_in_use([acc["id"]])
 
