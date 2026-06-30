@@ -33,6 +33,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb
 from services import task_registry as _treg
+from bot.utils.op_helpers import safe_answer
 from bot.states import (
     BulkChanFSM,
     BulkCreateFSM,
@@ -602,7 +603,7 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
 @router.callback_query(ChanCb.filter(F.action == "menu"))
 async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         _lock_kb = InlineKeyboardBuilder()
         _lock_kb.button(text="💳 Оформить подписку", callback_data=SubCb(action="menu"))
@@ -639,7 +640,7 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
 
 @router.callback_query(ChanCb.filter(F.action == "bulk_menu"))
 async def cb_bulk_menu(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     try:
         await callback.message.edit_text(
@@ -667,7 +668,7 @@ async def cb_create_pick_account(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
             "🔒 <b>Создание каналов/групп — 💎 ПОДПИСКА</b>\n\n"
@@ -722,7 +723,7 @@ async def cb_create_account_chosen(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     is_group = callback_data.action == "create_group_acc"
     entity_type = "группу" if is_group else "канал"
     await state.update_data(
@@ -770,7 +771,7 @@ async def fsm_create_title(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(ChanCb.filter(F.action == "skip_about"))
 async def cb_skip_about(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(about="")
     await _show_create_confirm(callback.message, state, edit=True)
 
@@ -889,7 +890,7 @@ async def cb_do_create(
 async def cb_bulk_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
             "🔒 <b>Массовое создание — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
@@ -928,7 +929,7 @@ async def fsm_bulk_title(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(ChanCb.filter(F.action == "bulk_skip_about"))
 async def cb_bulk_skip_about(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(about="")
     await _bulk_choose_type(callback.message, state, edit=True)
 
@@ -967,7 +968,7 @@ async def cb_bulk_type_chosen(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     is_group = callback_data.action == "bulk_type_group"
     await state.update_data(is_group=is_group)
     await state.set_state(BulkCreateFSM.waiting_count)
@@ -1095,7 +1096,7 @@ async def _render_bulk_confirm(
 async def cb_bulk_name_mode(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mode_map = {
         "bulk_name_mode_none": "none",
         "bulk_name_mode_num": "num",
@@ -1276,7 +1277,7 @@ async def cb_do_bulk_create(
 async def cb_bulk_post_chans_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 <b>Пост в каналы — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
@@ -1421,7 +1422,7 @@ async def _show_bpchans_page(msg, state: FSMContext, edit: bool = False) -> None
 
 @router.callback_query(F.data.startswith("chan:cpsel:"))
 async def cb_bpchans_toggle(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     parts = callback.data.split(":")
     ch_id = int(parts[3])
     data = await state.get_data()
@@ -1436,7 +1437,7 @@ async def cb_bpchans_toggle(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("chan:cppage:"))
 async def cb_bpchans_page(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page = int(callback.data.split(":")[2])
     await state.update_data(bpchans_page=page)
     await _show_bpchans_page(callback.message, state, edit=True)
@@ -1449,7 +1450,7 @@ async def cb_bpchans_done(callback: CallbackQuery, state: FSMContext) -> None:
     if not selected:
         await callback.answer("Выберите хотя бы один канал.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkPostChansFSM.waiting_text)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
@@ -1504,7 +1505,7 @@ async def fsm_bpchans_text(
 async def cb_join_pick_account(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 <b>Вступление в каналы — 💎 ПОДПИСКА</b>\n\nОформить: /subscription",
@@ -1561,7 +1562,7 @@ async def cb_join_account_chosen(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(acc_id=acc["id"], session_str=acc["session_str"])
     await _start_join_fsm(callback.message, state, edit=True)
 
@@ -1598,7 +1599,7 @@ async def _start_join_fsm(msg, state: FSMContext, edit: bool = False) -> None:
 
 @router.callback_query(ChanCb.filter(F.action == "leave_pick"))
 async def cb_leave_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 /subscription", reply_markup=_back_kb().as_markup()
@@ -1718,7 +1719,7 @@ async def cb_do_leave(
 
 @router.callback_query(ChanCb.filter(F.action == "post_pick"))
 async def cb_post_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 /subscription", reply_markup=_back_kb().as_markup()
@@ -1801,7 +1802,7 @@ async def cb_post_show_dialogs(
 async def cb_post_channel_chosen(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         acc_id=callback_data.acc_id, channel_id=callback_data.channel_id
     )
@@ -1824,7 +1825,7 @@ async def cb_post_channel_chosen(
 
 @router.callback_query(ChanCb.filter(F.action == "manage_pick"))
 async def cb_manage_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
@@ -1852,7 +1853,7 @@ async def cb_manage_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) ->
 async def cb_manage_show_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     uid = callback.from_user.id
 
@@ -1956,7 +1957,7 @@ async def cb_manage_show_dialogs_live(
 async def cb_manage_channel_menu(
     callback: CallbackQuery, callback_data: ChanCb
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     ch_id = callback_data.channel_id
     kb = InlineKeyboardBuilder()
@@ -1997,7 +1998,7 @@ async def cb_manage_channel_menu(
 async def cb_edit_title(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditChannelFSM.waiting_value)
     await state.update_data(
         field="title", acc_id=callback_data.acc_id, channel_id=callback_data.channel_id
@@ -2015,7 +2016,7 @@ async def cb_edit_title(
 async def cb_edit_about(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditChannelFSM.waiting_value)
     await state.update_data(
         field="about", acc_id=callback_data.acc_id, channel_id=callback_data.channel_id
@@ -2033,7 +2034,7 @@ async def cb_edit_about(
 async def cb_edit_uname(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditChannelFSM.waiting_value)
     await state.update_data(
         field="username",
@@ -2141,7 +2142,7 @@ async def cb_manage_admins(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     """Show managed accounts and let owner promote them to admin in the channel."""
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     ch_id = callback_data.channel_id
     owner_id = callback.from_user.id
@@ -2276,7 +2277,7 @@ async def cb_promote_all(
         await callback.answer("Нет других аккаунтов для назначения.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     from services import operation_bus
 
     op_id = await operation_bus.submit(
@@ -2312,7 +2313,7 @@ async def cb_promote_all(
 async def cb_del_channel_confirm(
     callback: CallbackQuery, callback_data: ChanCb
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🗑 ДА, УДАЛИТЬ НАВСЕГДА",
@@ -2371,7 +2372,7 @@ async def cb_do_delete(
 
 @router.callback_query(ChanCb.filter(F.action == "members_pick"))
 async def cb_members_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 <b>Управление участниками — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
@@ -2456,7 +2457,7 @@ async def cb_members_dialogs(
 
 @router.callback_query(ChanCb.filter(F.action == "members_menu"))
 async def cb_members_menu(callback: CallbackQuery, callback_data: ChanCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id, ch_id = callback_data.acc_id, callback_data.channel_id
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -2550,7 +2551,7 @@ async def cb_members_invite(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # Получаем данные канала из БД для отображения
     channel_row = None
     if callback_data.channel_id:
@@ -2648,7 +2649,7 @@ async def cb_invite_acc_action(
 
     if action == "cancel":
         await state.clear()
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             "❌ Инвайт отменён.", reply_markup=_back_kb().as_markup()
         )
@@ -2662,7 +2663,7 @@ async def cb_invite_acc_action(
         if not selected:
             await callback.answer("Выберите хотя бы один аккаунт.", show_alert=True)
             return
-        await callback.answer()
+        await safe_answer(callback)
         await state.update_data(inv_selected_accounts=list(selected))
         await state.set_state(InviteUsersFSM.waiting_usernames)
         kb = InlineKeyboardBuilder()
@@ -2692,7 +2693,7 @@ async def cb_invite_acc_action(
         except ValueError:
             pass
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(inv_selected_accounts=list(selected))
     await _show_invite_acc_selector(
         callback.message, active, selected, channel_display, edit=True
@@ -2702,7 +2703,7 @@ async def cb_invite_acc_action(
 @router.callback_query(F.data == "invite:cancel_all")
 async def cb_invite_cancel_all(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "❌ Инвайт отменён.", reply_markup=_back_kb().as_markup()
     )
@@ -2794,7 +2795,7 @@ async def _show_invite_count_menu(
 async def cb_invite_count(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     action = callback.data.split("invite:count:")[1]
 
     if action == "cancel":
@@ -3119,7 +3120,7 @@ async def _run_invite_bg(
 async def cb_members_kick(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(InviteUsersFSM.waiting_channel_id)  # reuse state for kick
     await state.update_data(
         acc_id=callback_data.acc_id,
@@ -3173,7 +3174,7 @@ async def fsm_kick_user_id(
 
 @router.callback_query(ChanCb.filter(F.action == "profile_pick"))
 async def cb_profile_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 /subscription", reply_markup=_back_kb().as_markup()
@@ -3204,7 +3205,7 @@ async def cb_profile_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -
 
 @router.callback_query(ChanCb.filter(F.action == "profile_menu"))
 async def cb_profile_menu(callback: CallbackQuery, callback_data: ChanCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -3236,7 +3237,7 @@ for _prof_action, _prof_field, _prof_prompt in [
         async def _prof_handler(
             callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
         ):
-            await callback.answer()
+            await safe_answer(callback)
             await state.set_state(UpdateProfileFSM.waiting_value)
             await state.update_data(field=prof_field, acc_id=callback_data.acc_id)
             kb = InlineKeyboardBuilder()
@@ -3263,7 +3264,7 @@ for _prof_action, _prof_field, _prof_prompt in [
 async def cb_botfather_pick_account(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
             "🔒 <b>Создание бота — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
@@ -3376,7 +3377,7 @@ async def fsm_botfather_username(
 async def cb_add_bot_token(
     callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     token = callback.data.split(":", 1)[1]
     from database import db as _db
     from services import bot_api as _bot_api
@@ -3422,7 +3423,7 @@ async def cb_add_bot_token(
 
 @router.callback_query(ChanCb.filter(F.action == "react_pick"))
 async def cb_react_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 /subscription", reply_markup=_back_kb().as_markup()
@@ -3511,7 +3512,7 @@ async def cb_react_dialogs(
 async def cb_react_channel(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SendReactionFSM.waiting_msg_id)
     await state.update_data(
         acc_id=callback_data.acc_id, channel_id=callback_data.channel_id
@@ -3569,7 +3570,7 @@ async def fsm_react_msg_id(message: Message, state: FSMContext) -> None:
 async def cb_do_react(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     parts = callback.data.split(":", 2)
     emoji = parts[2] if len(parts) >= 3 else "👍"
     data = await state.get_data()
@@ -3603,7 +3604,7 @@ async def cb_do_react(
 
 @router.callback_query(ChanCb.filter(F.action == "report_pick"))
 async def cb_report_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
@@ -3631,7 +3632,7 @@ async def cb_report_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) ->
 async def cb_report_account_chosen(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ReportFSM.waiting_peer)
     await state.update_data(acc_id=callback_data.acc_id)
     kb = InlineKeyboardBuilder()
@@ -3664,7 +3665,7 @@ async def fsm_report_peer(message: Message, state: FSMContext) -> None:
 async def cb_report_reason(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     reason = callback.data.split(":", 2)[2] if ":" in callback.data else "spam"
     data = await state.get_data()
     await state.clear()
@@ -3705,7 +3706,7 @@ async def cb_report_reason(
 async def cb_bulk_report_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # Проверка доступа к Strike Module
     try:
         await pool.execute(
@@ -3778,7 +3779,7 @@ async def cb_br_mode_single(
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа к Strike Module.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkReportFSM.waiting_peer)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
@@ -3801,7 +3802,7 @@ async def cb_br_mode_batch(
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа к Strike Module.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkReportFSM.waiting_peers_batch)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
@@ -3906,7 +3907,7 @@ async def fsm_bulk_report_peers_batch(message: Message, state: FSMContext) -> No
 async def cb_br_preset(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     preset_key = callback.data.split(":", 2)[2]
     reason, _ = _REPORT_PRESETS.get(preset_key, ("other", ""))
     await state.update_data(reason=reason, preset=preset_key)
@@ -3932,7 +3933,7 @@ async def cb_br_preset(
 async def cb_bulk_report_reason(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     reason = callback.data.split(":", 2)[2]
     data = await state.get_data()
     await state.update_data(reason=reason)
@@ -4011,7 +4012,7 @@ async def _show_bulk_report_account_picker(
 async def cb_br_toggle(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = int(callback.data.split(":")[-1])
     data = await state.get_data()
     selected = list(data.get("selected_ids", []))
@@ -4040,7 +4041,7 @@ async def cb_br_toggle(
 async def cb_br_selall(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     selected = [a["id"] for a in active]
@@ -4064,7 +4065,7 @@ async def cb_br_selall(
 async def cb_br_selno(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     await state.update_data(selected_ids=[])
@@ -4097,7 +4098,7 @@ async def cb_br_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_br_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
 
@@ -4250,7 +4251,7 @@ async def cb_br_confirm(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
+    await safe_answer(callback)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -4348,7 +4349,7 @@ async def cb_bulk_start_op(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     op_map = {
         "bulk_dm": "dm",
         "bulk_join": "join",
@@ -4378,7 +4379,7 @@ async def cb_bulk_start_op(
 async def cb_bulk_toggle_acc(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     parts = callback.data.split(":")  # chan, bsel, op, acc_id
     if len(parts) < 4:
         return
@@ -4402,7 +4403,7 @@ async def cb_bulk_toggle_acc(
 async def cb_bulk_select_all(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     op = callback.data.split(":", 2)[2] if callback.data.count(":") >= 2 else ""
     try:
         accounts = await pool.fetch(
@@ -4421,7 +4422,7 @@ async def cb_bulk_select_all(
 async def cb_bulk_select_none(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     op = callback.data.split(":", 2)[2] if callback.data.count(":") >= 2 else ""
     await state.update_data(bulk_selected=[], bulk_op=op)
     await _show_bulk_select(callback, pool, op, set())
@@ -4438,7 +4439,7 @@ async def cb_bulk_confirm_selection(
     if not selected_ids:
         await callback.answer("⚠️ Не выбрано ни одного аккаунта.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     # Route to the appropriate input step
     if op == "create":
@@ -4807,7 +4808,7 @@ async def fsm_bulk_post_text(
 async def cb_bulk_join_proxy_mode(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mode = callback.data.split(":")[-1]  # "bound" or "relay"
     await state.update_data(bulk_proxy_mode=mode)
     await state.set_state(JoinChannelFSM.waiting_invite)
@@ -4832,7 +4833,7 @@ async def cb_bulk_join_proxy_mode(
 async def cb_bulk_leave_proxy_mode(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mode = callback.data.split(":")[-1]  # "bound" or "relay"
     await state.update_data(bulk_proxy_mode=mode)
     await state.set_state(PostToChannelFSM.waiting_channel_id)
@@ -5299,7 +5300,7 @@ async def fsm_bulk_chan_value(
 async def cb_bulk_chan_exec(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     op = data.get("bulk_op", "")
     selected_ids = data.get("bulk_selected", [])
@@ -5398,7 +5399,7 @@ _CHANS_PAGE_SIZE = 8
 async def cb_my_chans(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 <b>Мои каналы — 💎 ПОДПИСКА</b>\n\nОформить: /subscription",
@@ -5474,7 +5475,7 @@ async def cb_my_chans_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         my_chans_acc_id=acc["id"], my_chans_session=acc["session_str"]
     )
@@ -5498,7 +5499,7 @@ async def cb_my_chans_page(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     session = data.get("my_chans_session")
     acc_id = data.get("my_chans_acc_id")
@@ -5699,7 +5700,7 @@ async def cb_my_chans_item(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     ch_id = callback_data.channel_id
     acc_id = callback_data.acc_id
 
@@ -5734,7 +5735,7 @@ async def cb_my_chans_leave(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     acc = None
     session = data.get("my_chans_session")
@@ -5780,7 +5781,7 @@ async def cb_my_chans_leave(
 async def cb_my_chans_post(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         my_chans_post_ch_id=callback_data.channel_id,
         my_chans_post_acc_id=callback_data.acc_id,
@@ -5924,7 +5925,7 @@ def _cinv_acc_picker_kb(accounts: list, selected: set) -> InlineKeyboardBuilder:
 async def cb_contact_invite_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, _PRO):
         from bot.utils.subscription import locked_text
@@ -5959,7 +5960,7 @@ async def cb_cinv_chans_page(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     channels = await _get_managed_channels_cached(pool, callback.from_user.id)
     kb = _cinv_channel_picker_kb(channels, callback_data.page)
     await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
@@ -5967,7 +5968,7 @@ async def cb_cinv_chans_page(
 
 @router.callback_query(ContactInvCb.filter(F.action == "enter_channel"))
 async def cb_cinv_enter_channel(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ContactInviteFSM.entering_channel)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="contact_invite"))
@@ -6026,7 +6027,7 @@ async def cb_cinv_pick_channel(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     ch_id = callback_data.channel_id
     try:
         row = await pool.fetchrow(
@@ -6094,7 +6095,7 @@ async def cb_cinv_toggle_acc(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected = set(data.get("selected_accs", []))
     if callback_data.acc_id in selected:
@@ -6109,7 +6110,7 @@ async def cb_cinv_toggle_acc(
 async def cb_cinv_all_accs(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_accounts(pool, callback.from_user.id)
     selected = {a["id"] for a in accounts}
     await state.update_data(selected_accs=list(selected))
@@ -6120,7 +6121,7 @@ async def cb_cinv_all_accs(
 async def cb_cinv_deselect_all(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(selected_accs=[])
     await _cinv_refresh_acc_picker(callback, pool, state)
 
@@ -6139,7 +6140,7 @@ async def cb_cinv_proceed(
     if primary_acc_id and primary_acc_id not in selected_accs:
         selected_accs = [primary_acc_id, *selected_accs]
         await state.update_data(selected_accs=selected_accs)
-    await callback.answer()
+    await safe_answer(callback)
     msg = await callback.message.edit_text(
         f"⏳ Подсчёт контактов с {len(selected_accs)} аккаунт(ов)...",
         parse_mode="HTML",
@@ -6205,7 +6206,7 @@ async def cb_cinv_run(
     if not selected_accs or not channel_identifier:
         await callback.answer("Недостаточно данных. Начните заново.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     try:
         acc_rows = await pool.fetch(

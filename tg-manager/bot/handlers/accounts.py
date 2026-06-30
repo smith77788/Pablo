@@ -30,6 +30,7 @@ from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb, AutoRegCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils.event_status import mark_handled_error
+from bot.utils.op_helpers import safe_answer, safe_edit
 from config import TG_API_ID, TG_API_HASH
 from database import db
 from services.account_manager import (
@@ -291,7 +292,7 @@ async def cmd_accounts(message: Message) -> None:
 async def cb_accounts_menu(
     callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # chat_id field used as status filter: 0=all, 1=active, 2=problem
     status_filter = {0: "all", 1: "active", 2: "problem"}.get(
         callback_data.chat_id, "all"
@@ -511,7 +512,7 @@ async def cb_add_account(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     if not _api_configured():
         await callback.message.edit_text(
@@ -627,7 +628,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
 
 @router.callback_query(AccCb.filter(F.action == "resend_sms"))
 async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     phone: str = data.get("phone", "")
     phone_code_hash: str = data.get("phone_code_hash", "")
@@ -687,7 +688,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(AccCb.filter(F.action == "cancel_login"))
 async def cb_cancel_login(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
@@ -706,7 +707,7 @@ async def cb_qr_login(
     bot: Bot,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     user_id = callback.from_user.id
 
@@ -880,7 +881,7 @@ async def _qr_wait_task(
 
 @router.callback_query(AccCb.filter(F.action == "cancel_qr"))
 async def cb_cancel_qr(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     await cleanup_qr_pending(user_id)
     await state.clear()
@@ -1178,7 +1179,7 @@ async def cb_view_account(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     now = datetime.now(timezone.utc)
     name = escape(acc.get("first_name") or "")
@@ -1344,7 +1345,7 @@ async def cb_acc_op_history(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     name = escape(acc.get("first_name") or acc.get("phone") or f"ID {acc_id}")
 
@@ -1407,7 +1408,7 @@ async def cb_relog_account(
     state: FSMContext,
 ) -> None:
     if not _api_configured():
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             _api_missing_text(),
             parse_mode="HTML",
@@ -1419,7 +1420,7 @@ async def cb_relog_account(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     phone: str = acc.get("phone") or ""
     if not phone or not re.match(r"^\+\d{7,15}$", phone):
@@ -1495,7 +1496,7 @@ async def cb_set_proxy(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     try:
         proxies = await pool.fetch(
@@ -1609,7 +1610,7 @@ async def cb_channels(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -1705,7 +1706,7 @@ async def cb_post_choose_chat(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -1777,7 +1778,7 @@ async def cb_post_to(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await state.set_state(AccountPost.waiting_text)
     await state.update_data(acc_id=callback_data.acc_id, chat_id=callback_data.chat_id)
@@ -1871,7 +1872,7 @@ async def cb_remove_account(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     name = escape(acc.get("first_name") or "")
     phone = escape(acc.get("phone") or "")
@@ -1903,7 +1904,7 @@ async def cb_remove_confirm(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     # Check for active operations before deletion
     acc_id = callback_data.acc_id
@@ -1966,7 +1967,7 @@ async def cb_check_health(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -2032,7 +2033,7 @@ async def cb_check_all_accounts(
     callback: CallbackQuery,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
@@ -2073,7 +2074,7 @@ async def cb_check_all_accounts(
 @router.callback_query(AccCb.filter(F.action == "pools_view"))
 async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
@@ -2146,7 +2147,7 @@ async def cb_pools_bulk_assign(
     if not accounts:
         await callback.answer("Нет аккаунтов.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     existing_pools = await db.get_distinct_pools(pool, uid)
 
@@ -2206,7 +2207,7 @@ async def cb_bulk_pool_set(
 async def cb_bulk_pool_manual(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     _cancel_kb = InlineKeyboardBuilder()
     _cancel_kb.button(text="❌ Отмена", callback_data=AccCb(action="pools_view"))
     _cancel_kb.adjust(1)
@@ -2228,7 +2229,7 @@ async def cb_scan_all_resources(
     callback: CallbackQuery,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
@@ -2271,7 +2272,7 @@ async def cb_scan_all_resources(
 async def cb_reauth_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Переавторизатор: список аккаунтов с истёкшей сессией + кнопка Релог."""
     uid = callback.from_user.id
-    await callback.answer()
+    await safe_answer(callback)
 
     expired = await pool.fetch(
         """SELECT id, first_name, phone, username FROM tg_accounts
@@ -2325,7 +2326,7 @@ async def cb_purge_expired_sessions(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     uid = callback.from_user.id
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         expired = await pool.fetch(
@@ -2447,7 +2448,7 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not accounts:
         await callback.answer("Нет аккаунтов.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await callback.message.edit_text(
         "🔍 <b>Проверяю статус сессий...</b>\nЭто займёт ~30 сек.",
@@ -2527,7 +2528,7 @@ async def cb_dialogs_stats(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
 
@@ -2630,7 +2631,7 @@ async def cb_dialogs(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     session_str = acc.get("session_str") or acc.get("session_string") or ""
     page_offset = callback_data.chat_id  # используем chat_id как page offset
@@ -2749,7 +2750,7 @@ async def cb_toggle_account(
     if not updated:
         await callback.answer("Не удалось обновить статус.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     status_text = (
         "▶️ <b>Аккаунт включён.</b>" if new_status else "⏸ <b>Аккаунт отключён.</b>"
@@ -2791,7 +2792,7 @@ async def cb_send_msg_start(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await state.set_state(AccountSendMsg.waiting_chat_id)
     await state.update_data(acc_id=callback_data.acc_id)
@@ -2907,7 +2908,7 @@ async def handle_send_msg_text(
 async def cb_import_menu(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not _api_configured():
         await callback.message.edit_text(
             _api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup()
@@ -2972,7 +2973,7 @@ async def cb_import_menu(
 
 @router.callback_query(AccCb.filter(F.action == "import_string"))
 async def cb_import_string(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SessionImport.waiting_string_session)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
@@ -3011,7 +3012,7 @@ async def handle_import_string(
 
 @router.callback_query(AccCb.filter(F.action == "import_pyrogram"))
 async def cb_import_pyrogram(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SessionImport.waiting_pyrogram_json)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
@@ -3051,7 +3052,7 @@ async def handle_import_pyrogram(
 
 @router.callback_query(AccCb.filter(F.action == "import_tdata"))
 async def cb_import_tdata(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SessionImport.waiting_tdata_zip)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
@@ -3253,7 +3254,7 @@ async def handle_import_tdata_wrong_type(message: Message) -> None:
 
 @router.callback_query(AccCb.filter(F.action == "import_session_file"))
 async def cb_import_session_file(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SessionImport.waiting_session_file)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
@@ -3498,7 +3499,7 @@ async def _finalize_import(
 
 @router.callback_query(AccCb.filter(F.action == "import_batch"))
 async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SessionImport.waiting_batch_sessions)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
@@ -3959,7 +3960,7 @@ async def cb_confirm_batch_import(
     pool: asyncpg.Pool,
 ) -> None:
     """User confirmed batch import after pre-validation."""
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     pairs = data.get("batch_pairs", [])
 
@@ -3991,7 +3992,7 @@ async def cb_scan_assets(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await callback.message.edit_text(
         "⏳ <b>Сканирую активы аккаунта…</b>\n\n"
@@ -4216,7 +4217,7 @@ async def cb_tags_menu(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     tags = acc.get("tags") or []
     pool_name = acc.get("pool") or ""
@@ -4261,7 +4262,7 @@ async def cb_tags_menu(
 async def cb_edit_tags(
     callback: CallbackQuery, callback_data: AccCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     await state.set_state(AccountTagsPoolFSM.waiting_tags)
     await state.update_data(acc_id=acc_id)
@@ -4314,7 +4315,7 @@ async def cb_clear_tags(
 async def cb_edit_pool(
     callback: CallbackQuery, callback_data: AccCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
 
     # Show existing pools as quick pick
@@ -4434,7 +4435,7 @@ async def cb_crm_menu(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     labels = acc.get("labels") or []
     warnings = acc.get("warnings") or []
@@ -4485,7 +4486,7 @@ async def cb_crm_menu(
 async def cb_add_label(
     callback: CallbackQuery, callback_data: AccCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     await state.set_state(AccountTagsPoolFSM.waiting_label_add)
     await state.update_data(acc_id=acc_id)
@@ -4539,7 +4540,7 @@ async def cb_clear_labels(
 async def cb_add_warning(
     callback: CallbackQuery, callback_data: AccCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     await state.set_state(AccountTagsPoolFSM.waiting_warning_add)
     await state.update_data(acc_id=acc_id)
@@ -4593,7 +4594,7 @@ async def cb_clear_warnings(
 async def cb_edit_project(
     callback: CallbackQuery, callback_data: AccCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
     await state.set_state(AccountTagsPoolFSM.waiting_project)
     await state.update_data(acc_id=acc_id)
@@ -4639,7 +4640,7 @@ async def cb_account_assets(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.acc_id
 
     assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)

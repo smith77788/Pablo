@@ -1004,6 +1004,51 @@ async def cb_manage_recipients(callback: CallbackQuery, state: FSMContext, pool)
     )
 
 
+@router.callback_query(F.data.startswith("gt:edit_recipient:"))
+async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
+    """Карточка сохранённого получателя с возможностью удаления."""
+    await callback.answer()
+    try:
+        recipient_id = int(callback.data.split(":")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Некорректный получатель", show_alert=True)
+        return
+
+    recipients = await db.get_gift_recipients(pool, callback.from_user.id)
+    rec = next((r for r in recipients if r["id"] == recipient_id), None)
+    if not rec:
+        await callback.answer("Получатель не найден", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Удалить получателя", callback_data=f"gt:del_recipient:{recipient_id}")
+    kb.button(text="◀️ Назад", callback_data="gt:recipients")
+    kb.adjust(1)
+
+    main_admin = " · 👑 главный админ" if rec.get("is_main_admin") else ""
+    uid_line = f"\n🆔 user_id: <code>{rec['user_id']}</code>" if rec.get("user_id") else ""
+    await callback.message.edit_text(
+        f"👤 <b>{rec['name']}</b>{main_admin}\n"
+        f"📎 {rec['username'] or 'нет @username'}{uid_line}",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("gt:del_recipient:"))
+async def cb_del_recipient(callback: CallbackQuery, state: FSMContext, pool):
+    """Удалить сохранённого получателя."""
+    try:
+        recipient_id = int(callback.data.split(":")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Некорректный получатель", show_alert=True)
+        return
+
+    deleted = await db.delete_gift_recipient(pool, callback.from_user.id, recipient_id)
+    await callback.answer("🗑 Удалён" if deleted else "Не найден", show_alert=not deleted)
+    # Перерисовываем список получателей
+    await cb_manage_recipients(callback, state, pool)
+
+
 # ─── Reports ───────────────────────────────────────────────────────────────────
 
 
@@ -1016,9 +1061,14 @@ async def cb_view_reports(callback: CallbackQuery, state: FSMContext, pool):
     reports = await GiftTransferReportService.get_reports_for_user(pool, user_id)
 
     kb = InlineKeyboardBuilder()
+    lines: list[str] = []
 
     for r in reports[:10]:
-        date = r.get("created_at", "")[:10]
+        date = str(r.get("created_at", ""))[:10]
+        lines.append(
+            f"• {date} — ✅ {r.get('transferred', 0)} / ❌ {r.get('failed', 0)}"
+            f" ({r.get('recipient_name', '—')})"
+        )
         kb.button(
             text=f"📋 {date} — {r.get('transferred', 0)}✅ {r.get('failed', 0)}❌",
             callback_data=f"gt:report_detail:{r['id']}",
@@ -1027,10 +1077,50 @@ async def cb_view_reports(callback: CallbackQuery, state: FSMContext, pool):
     kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(1)
 
+    body = "\n".join(lines) if lines else "Пока нет отчётов о передачах."
     await callback.message.edit_text(
-        "📊 <b>Отчёты о передачах</b>\n\nПоследние отчёты о передаче подарков:",
+        f"📊 <b>Отчёты о передачах</b>\n\n{body}\n\n"
+        "Нажмите на отчёт ниже, чтобы открыть детали.",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(F.data.startswith("gt:report_detail:"))
+async def cb_report_detail(callback: CallbackQuery, state: FSMContext, pool):
+    """Детали конкретного отчёта о передаче подарков."""
+    await callback.answer()
+    try:
+        report_id = int(callback.data.split(":")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Некорректный отчёт", show_alert=True)
+        return
+
+    report = await GiftTransferReportService.get_report(pool, report_id)
+    if not report or report.get("owner_id") != callback.from_user.id:
+        await callback.answer("Отчёт не найден", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К списку отчётов", callback_data="gt:reports")
+    kb.button(text="🏠 Главное меню", callback_data="gt:main")
+    kb.adjust(1)
+
+    date = str(report.get("created_at", ""))[:19]
+    report_text = (
+        f"📊 <b>Отчёт о передаче</b>\n"
+        f"🕐 {date}\n\n"
+        f"👤 <b>Получатель:</b> {report.get('recipient_name', 'Неизвестно')}\n\n"
+        f"📦 <b>Подарки:</b>\n"
+        f"• Найдено: {report.get('total_gifts_found', 0)}\n"
+        f"• Выбрано: {report.get('total_selected', 0)}\n"
+        f"• Передано: ✅ {report.get('transferred', 0)}\n"
+        f"• Ошибок: ❌ {report.get('failed', 0)}\n"
+        f"• Пропущено: ⏭️ {report.get('skipped', 0)}\n"
+        f"• Ожидает подтверждения: ⏳ {report.get('pending_confirmation', 0)}\n\n"
+        f"💰 <b>Итоговая стоимость:</b> {report.get('total_cost', 0)}⭐"
+    )
+
+    await callback.message.edit_text(report_text, reply_markup=kb.as_markup())
 
 
 # ─── Help ─────────────────────────────────────────────────────────────────────

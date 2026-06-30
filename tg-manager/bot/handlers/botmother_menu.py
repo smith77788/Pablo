@@ -116,6 +116,7 @@ from bot.keyboards import subscription_locked_markup
 from database import db
 from services.logger import log_exc_swallow
 from services import operation_bus
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -419,7 +420,7 @@ async def cb_main(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     from bot.utils import menu_cache
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     # Check 30-second cache — serve instantly on repeat visits
@@ -491,7 +492,7 @@ async def cb_main(
 async def cb_assets(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     asyncio.create_task(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0)
     )
@@ -515,7 +516,7 @@ async def cb_assets(
 async def cb_infrastructure(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     asyncio.create_task(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0)
     )
@@ -539,7 +540,7 @@ async def cb_infrastructure(
 async def cb_analytics(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     asyncio.create_task(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "analytics", 0)
     )
@@ -568,7 +569,7 @@ async def cb_analytics(
 async def cb_visibility(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
@@ -591,7 +592,7 @@ async def cb_visibility(
 async def cb_operations(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     asyncio.create_task(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0)
     )
@@ -654,7 +655,7 @@ async def cb_ops_dashboard(
 ) -> None:
     """Operation dashboard: running count, recent history (last 5), quick actions."""
     try:
-        await callback.answer()
+        await safe_answer(callback)
     except Exception:
         pass
     user_id = callback.from_user.id
@@ -809,7 +810,7 @@ async def cb_ops_retry_all_failed(
 async def cb_comms(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "paid"):
         await _edit(
             callback,
@@ -838,7 +839,7 @@ async def cb_comms(
 async def cb_broadcasts(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "paid"):
         await _edit(
             callback,
@@ -867,7 +868,7 @@ async def cb_broadcasts(
 async def cb_inbox(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await _edit(
             callback,
@@ -890,7 +891,7 @@ async def cb_inbox(
 
 @router.callback_query(BmCb.filter(F.action == "monitoring"))
 async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _edit(
         callback,
         "🛡️ <b>Мониторинг & Защита — состояние, прокси, движки</b>\n\n"
@@ -914,7 +915,7 @@ async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
 async def cb_growth(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
@@ -937,7 +938,7 @@ async def cb_growth(
 async def cb_ai_assistant(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await _edit(
             callback,
@@ -961,7 +962,7 @@ async def cb_ai_assistant(
 
 @router.callback_query(BmCb.filter(F.action == "billing"))
 async def cb_billing(callback: CallbackQuery, callback_data: BmCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(text="💳 Управление подпиской", callback_data=SubCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
@@ -978,7 +979,7 @@ async def cb_billing(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 @router.callback_query(BmCb.filter(F.action == "referral"))
 async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Реферальная программа", callback_data=RefCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
@@ -997,7 +998,7 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
 async def cb_settings(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
@@ -1023,7 +1024,7 @@ async def cb_settings(
 async def cb_bulk_ops(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
@@ -1055,7 +1056,7 @@ async def cb_pick_bot_for(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sub = callback_data.sub or ""
     title, back_action = _PICK_META.get(sub, ("Выберите бота", "main"))
 
@@ -1101,7 +1102,7 @@ async def cb_alerts(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
     limit = 10
     offset = page * limit
@@ -1216,7 +1217,7 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(BmCb.filter(F.action == "vis_reports"))
 async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await _edit(
             callback,
@@ -1516,7 +1517,7 @@ async def cb_op_planner(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await _edit(
             callback,
@@ -1531,7 +1532,7 @@ async def cb_op_planner(
 
 @router.callback_query(BmCb.filter(F.action == "plan_new"))
 async def cb_plan_new(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     for op_type, label in _OP_TYPE_LABELS.items():
         kb.button(text=label, callback_data=BmCb(action="plan_type", sub=op_type))
@@ -1554,7 +1555,7 @@ async def cb_plan_type(
     if op_type not in _OP_TYPE_LABELS:
         await callback.answer("Неизвестный тип операции", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(op_type=op_type)
     kb_cancel = InlineKeyboardBuilder()
     kb_cancel.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
@@ -1791,7 +1792,7 @@ async def cb_plan_confirm(
             "Ошибка при создании задачи. Попробуйте снова.", show_alert=True
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await state.clear()
     label = _OP_TYPE_LABELS.get(op_type, op_type)
@@ -1848,7 +1849,7 @@ async def cb_plan_cancel(
 @router.callback_query(BmCb.filter(F.action == "capacity"))
 async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await _edit(
             callback,
             locked_text("Прогноз нагрузки", "starter"),
@@ -1857,7 +1858,7 @@ async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             ),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     from services.capacity_planner import plan_operation
     from services.geo_router import get_geo_distribution
@@ -1996,7 +1997,7 @@ async def cb_op_reports(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await _edit(
             callback,
             locked_text("Отчёты по операциям", "starter"),
@@ -2005,7 +2006,7 @@ async def cb_op_reports(
             ),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
     limit = 8
     offset = page * limit
@@ -2176,7 +2177,7 @@ async def cb_op_detail(
     if not op:
         await callback.answer("Операция не найдена.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     _retry_count = op["retry_count"] or 0
     _max_retries = op["max_retries"] or 3
@@ -2560,7 +2561,7 @@ async def cb_op_csv(
 
 @router.callback_query(BmCb.filter(F.action == "schedules"))
 async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
 
     if not bots:
@@ -2648,7 +2649,7 @@ def _notif_text(row: asyncpg.Record) -> str:
 
 @router.callback_query(BmCb.filter(F.action == "notifications"))
 async def cb_notifications(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     row = await _get_or_create_notif(pool, callback.from_user.id)
     await _edit(callback, _notif_text(row), _notif_kb(row))
 
@@ -2659,7 +2660,7 @@ async def cb_notif_toggle(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     field = callback_data.sub or ""
     toggle_expr = _NOTIF_SQL.get(field)
     if not toggle_expr:
@@ -2718,7 +2719,7 @@ async def cb_behavioral(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await _edit(
             callback,
             locked_text("Поведенческая аналитика", "enterprise"),
@@ -2727,7 +2728,7 @@ async def cb_behavioral(
             ),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     sub = callback_data.sub or "attention"
     user_id = callback.from_user.id
 
@@ -3033,7 +3034,7 @@ async def cb_mem_keyword_drilldown(
 ) -> None:
     """Drill-down по keyword: search_memory + behavioral_events + история позиций."""
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await _edit(
             callback,
             locked_text("Поведенческая аналитика", "enterprise"),
@@ -3042,7 +3043,7 @@ async def cb_mem_keyword_drilldown(
             ),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     keyword = callback_data.sub or ""
     user_id = callback.from_user.id
 
@@ -3170,7 +3171,7 @@ async def cb_mem_keyword_drilldown(
 async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Текстовая карта связей: кластеры → боты → каналы."""
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await _edit(
             callback,
             locked_text("Карта инфраструктуры", "starter"),
@@ -3283,4 +3284,4 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data == "bm:noop")
 async def cb_noop(callback: CallbackQuery) -> None:
     """Заглушка для кнопок-индикаторов (страница X/Y) — просто отвечаем без действий."""
-    await callback.answer()
+    await safe_answer(callback)
