@@ -2064,22 +2064,23 @@ async def _exec_bulk_join_inner(
                 res = await account_manager.join_channel(
                     acc["session_str"], link, _acc=acc_dict
                 )
-                # Proxy error → retry transparently via CF relay
+                # Proxy error → do NOT retry with different IP (causes auth key collision).
+                # Instead, mark account as proxy-broken and skip remaining links.
                 if res.get("proxy_error") and proxy_mode == "bound":
                     log.warning(
-                        "bulk_join: прокси недоступен acc=%s, повтор через CF relay",
+                        "bulk_join: прокси недоступен acc=%s — пропуск оставшихся ссылок (смена IP ломает auth key)",
                         acc_dict.get("phone", "?"),
                     )
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                        " VALUES($1,$2,$3,'warn',$4)",
+                        " VALUES($1,$2,$3,'error',$4)",
                         op_id, step, link,
-                        f"⚠️ Прокси недоступен — повтор через CF relay (acc={acc_dict.get('phone','?')})",
+                        f"❌ Прокси недоступен — смена IP ломает auth key. Исправьте прокси.",
+                        log_ctx=f"[bulk_join_proxy_skip op={op_id}]",
                     )
-                    _acc_relay = {**acc_dict, "proxy_url": None, "enforce_proxy": False}
-                    res = await account_manager.join_channel(
-                        acc["session_str"], link, _acc=_acc_relay
-                    )
+                    isolated_accounts.add(acc["id"])
+                    break  # stop all remaining links for this account
                 # peer_flood=True means account-level join rate-limit (PEER_FLOOD).
                 # This is NOT a channel ban — apply a cooldown and skip remaining
                 # links for this account to avoid escalation to a real spamblock.
@@ -2362,22 +2363,21 @@ async def _exec_bulk_leave(
                 res = await account_manager.leave_channel(
                     acc["session_str"], channel, _acc=acc_dict
                 )
-                # Proxy error → retry transparently via CF relay
+                # Proxy error → do NOT retry with different IP (causes auth key collision).
                 if res.get("proxy_error") and proxy_mode == "bound":
                     log.warning(
-                        "bulk_leave: прокси недоступен acc=%s, повтор через CF relay",
+                        "bulk_leave: прокси недоступен acc=%s — пропуск оставшихся (смена IP ломает auth key)",
                         acc_dict.get("phone", "?"),
                     )
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                        " VALUES($1,$2,$3,'warn',$4)",
+                        " VALUES($1,$2,$3,'error',$4)",
                         op_id, step, str(channel),
-                        f"⚠️ Прокси недоступен — повтор через CF relay (acc={acc_dict.get('phone','?')})",
+                        f"❌ Прокси недоступен — смена IP ломает auth key. Исправьте прокси.",
+                        log_ctx=f"[bulk_leave_proxy_skip op={op_id}]",
                     )
-                    _acc_relay = {**acc_dict, "proxy_url": None, "enforce_proxy": False}
-                    res = await account_manager.leave_channel(
-                        acc["session_str"], channel, _acc=_acc_relay
-                    )
+                    break  # stop all remaining channels for this account
                 if not res.get("ok"):
                     raise Exception(res.get("error") or f"leave_channel failed for {channel}")
                 ok_count += 1
