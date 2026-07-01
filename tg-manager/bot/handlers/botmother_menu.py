@@ -197,10 +197,11 @@ def _assets_kb():
     kb.button(text="🤖 Мои боты", callback_data=BotCb(action="list", page=0))
     kb.button(text="📡 Каналы", callback_data=ChanCb(action="menu"))
     kb.button(text="👥 Группы", callback_data=GroupFCb(action="menu"))
+    kb.button(text="🏭 Фабрика каналов", callback_data=ChanFactCb(action="menu"))
     kb.button(text="🔗 Кластеры акк.", callback_data=ClustMCb(action="menu"))
     kb.button(text="🌐 Экосистемы сетей", callback_data=EcoCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 

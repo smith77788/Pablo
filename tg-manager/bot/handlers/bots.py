@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import BotCb, SubCb
+from bot.callbacks import BotCb, SubCb, BotFactCb
 from bot.keyboards import bots_list, bot_menu, confirm_delete, main_menu
 from bot.states import AddBot
 from bot.utils.subscription import get_bot_limit
@@ -64,6 +64,7 @@ async def cb_list(
         "💡 <b>Как использовать:</b>\n"
         "• Нажмите на бота, чтобы открыть его меню\n"
         "• ➕ Добавить бота — подключите нового через токен BotFather\n"
+        "• 🏭 Создать через BotFather — бот сам создаст нового бота у @BotFather\n"
         "• Каждый бот управляется независимо"
     )
     if not bots:
@@ -71,12 +72,17 @@ async def cb_list(
 
         empty_kb = InlineKeyboardBuilder()
         empty_kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
+        empty_kb.button(
+            text="🏭 Создать через BotFather", callback_data=BotFactCb(action="menu")
+        )
         empty_kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
             "🤖 <b>Мои боты</b>\n\n"
             "У вас пока нет добавленных ботов.\n\n"
-            "💡 Нажмите <b>➕ Добавить бота</b> и вставьте токен от @BotFather." + hint,
+            "💡 Нажмите <b>➕ Добавить бота</b> и вставьте токен от @BotFather, "
+            "или <b>🏭 Создать через BotFather</b> — бот сам зарегистрирует "
+            "нового бота у @BotFather от имени вашего Telegram-аккаунта." + hint,
             parse_mode="HTML",
             reply_markup=empty_kb.as_markup(),
         )

@@ -30,6 +30,7 @@ from bot.callbacks import (
     RankCb,
     BmCb,
     TaskCb,
+    BotFactCb,
 )
 
 PAGE_SIZE = 5
@@ -205,7 +206,11 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
     kb.row(
         InlineKeyboardButton(
             text="➕ Добавить", callback_data=BotCb(action="add").pack()
-        )
+        ),
+        InlineKeyboardButton(
+            text="🏭 Создать через BotFather",
+            callback_data=BotFactCb(action="menu").pack(),
+        ),
     )
     return kb.as_markup()
 

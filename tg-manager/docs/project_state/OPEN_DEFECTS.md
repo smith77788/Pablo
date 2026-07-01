@@ -6,6 +6,40 @@ Last updated: 2026-07-01
 
 - [HIGH] Channel/Group/Bot Creation — BotFather dialog brittle; hard to fix without live interactive session
 
+## FIXED (2026-07-01 session #2 — Bot/Channel Factory unreachable from nav)
+User report: "нельзя даже ничего сделать" in Bot Factory / Global Presence / bulk
+creation. Root cause found by cross-referencing every CallbackData class's
+"menu"-entry action against every file that constructs it project-wide:
+
+- **BotFactCb (Bot Factory)** — the entire automated "create bot via @BotFather"
+  wizard (account → count → name template → username template → confirm →
+  submit) had ZERO entry points anywhere in the navigation. `BotFactCb(action=...)`
+  was only ever referenced inside `bot_factory.py` itself (back-buttons pointing
+  at its own screens) plus one unrelated `import_tokens` link from
+  `ecosystems.py`. The feature was fully built and wired to `op_worker`, just
+  completely unreachable — a dead module since some earlier refactor dropped its
+  menu link. Fixed: added "🏭 Создать через BotFather" button to both the bots
+  list (`bot/keyboards.py::bots_list`) and the empty-bots-list screen
+  (`bot/handlers/bots.py::cb_list`).
+- **ChanFactCb (Channel Factory)** — same pattern. Its rich menu (single/bulk
+  create, import existing channels, bulk edit, stats, invite-link generation)
+  was reachable only via one narrow sub-action (`seo_pick`) linked from
+  Analytics; the actual `ChanFactCb(action="menu")` entry point was never
+  linked from `botmother_menu.py`. Fixed: added "🏭 Фабрика каналов" button to
+  `_assets_kb()`; also updated its internal "back" screen
+  (`cb_chanf_back_ops`) to offer a route back to Assets, since it's no longer
+  only reachable from Operations.
+- Verified via full project-wide check (95 CallbackData classes, script
+  cross-referencing every construction site against every file) that no other
+  class is referenced from only one file — these were the only two orphaned
+  modules.
+- Global Presence (`GeoPresenceCb`) was re-verified end to end (menu → asset
+  type → template → name/username pattern → geo → **account selection** →
+  preview → confirm → launch → `op_worker._exec_global_presence_channel`) and
+  found fully wired and reachable via "⚡ Операции" → "🌍 Гео-сеть: создать";
+  it already has a full multi-select account-and-count step
+  (`_show_accounts_step` / `cb_gp_acc_*`), contrary to the report. Not touched.
+
 ## FIXED (2026-07-01 session — product audit)
 - content_safety._collapse: separator class only stripped `[\s._\-*]`, so obfuscation via
   `/ , | # +` etc between letters (e.g. "c/h/i/l/d p/o/r/n") bypassed the CSAM/terror filter
