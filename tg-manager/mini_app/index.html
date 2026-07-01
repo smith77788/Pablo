@@ -3666,6 +3666,7 @@ function modernizeIcons(root) {
   (root||document).querySelectorAll('.mgmt-tile-ico, .qa-tile-ico').forEach(el=>{
     if (el.dataset.svg) return;
     const t = (el.textContent||'').trim();
+    if (t) el.dataset.emoji = t;  // сохраняем эмодзи (для бокового меню и др.)
     const name = _EMOJI2ICON[t];
     if (name && _ICON_PATHS[name]) { el.innerHTML = _SVG(_ICON_PATHS[name]); el.dataset.svg='1'; }
   });
@@ -3824,7 +3825,9 @@ function buildDrawer() {
       if (!tiles.length) return;
       html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>`;
       tiles.forEach(tile=>{
-        const ico = ((tile.querySelector('.mgmt-tile-ico')||{}).textContent||'•').trim();
+        const icoEl = tile.querySelector('.mgmt-tile-ico');
+        // dataset.emoji переживает модернизацию иконок в SVG (textContent пустеет)
+        const ico = (icoEl && (icoEl.dataset.emoji || icoEl.textContent||'').trim()) || '•';
         const lbl = ((tile.querySelector('.mgmt-tile-lbl')||{}).textContent||'').trim();
         if (!lbl) return;
         const handler = (tile.getAttribute('onclick')||'').replace(/"/g,'&quot;');
