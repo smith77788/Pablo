@@ -114,7 +114,7 @@ async def cb_gp_menu(
     running_count = sum(1 for p in recent_plans if p["status"] in ("running", "queued"))
     plans_hint = ""
     if running_count:
-        plans_hint = f"\n⚡ <b>Активных операций: {running_count}</b> — <a href='tg://callback'>Мои планы ↓</a>\n"
+        plans_hint = f"\n⚡ <b>Активных операций: {running_count}</b> — откройте «📋 Мои планы» ниже\n"
     elif recent_plans:
         last = recent_plans[0]
         status_map = {
