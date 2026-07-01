@@ -3766,42 +3766,6 @@ function goTab(tab) {
 }
 
 // ── Боковая навигация (drawer) ──────────────────────────────
-const NAV_CATS = [
-  {cat:'Основное', items:[
-    {ico:'📊', lbl:'Дашборд',   tab:'home'},
-    {ico:'🤖', lbl:'Боты',       tab:'bots'},
-    {ico:'📱', lbl:'Аккаунты',   tab:'accounts'},
-    {ico:'📨', lbl:'Рассылки',   tab:'broadcasts'},
-    {ico:'🧩', lbl:'Все функции', tab:'more'},
-  ]},
-  {cat:'Инфраструктура', items:[
-    {ico:'🏗', lbl:'Инфраструктура', fn:'openInfra'},
-    {ico:'🗺', lbl:'Топология',       fn:'openTopology'},
-    {ico:'🌐', lbl:'Экосистемы',      fn:'openEcosystems'},
-    {ico:'🌍', lbl:'Мультигео',       fn:'openMultigeo'},
-  ]},
-  {cat:'Каналы и контент', items:[
-    {ico:'📢', lbl:'Channel Factory', fn:'openChannelFactory'},
-    {ico:'👥', lbl:'Group Factory',   fn:'openGroupFactory'},
-    {ico:'✍️', lbl:'Быстрый пост',    fn:'openQuickPost'},
-    {ico:'📤', lbl:'Массовая публикация', fn:'openMassPub'},
-    {ico:'📋', lbl:'Контент-клонер',  fn:'openContentCloner'},
-  ]},
-  {cat:'Рост и продвижение', items:[
-    {ico:'🌿', lbl:'Growth Agent', fn:'openGrowth'},
-    {ico:'🚀', lbl:'Накрутка',      fn:'openBoost'},
-    {ico:'📣', lbl:'Self Promo',    fn:'openSelfPromo'},
-    {ico:'⚔️', lbl:'Strike',        fn:'openStrike'},
-    {ico:'🔍', lbl:'Парсер аудитории', fn:'openParser'},
-  ]},
-  {cat:'Аналитика и AI', items:[
-    {ico:'🧬', lbl:'DNA аудитории', fn:'openAudienceDna'},
-    {ico:'🧠', lbl:'AI Память',     fn:'openAiMemory'},
-    {ico:'🔎', lbl:'Позиции в поиске', fn:'openKeywordsScreen'},
-    {ico:'🔀', lbl:'Авто-воронки',  fn:'openAutoFunnels'},
-    {ico:'💬', lbl:'Авто-ответы',   fn:'openArScreen'},
-  ]},
-];
 
 function buildDrawer() {
   const body = document.getElementById('navBody');
