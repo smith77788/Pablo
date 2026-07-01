@@ -29,7 +29,7 @@ from bot.middlewares.subscription_gate import (
     build_gate_text,
     build_gate_markup,
 )
-from bot.states import GateAddFSM, InfragramChannelFSM
+from bot.states import GateAddFSM, InfragramChannelFSM, AiKeyFSM
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -97,6 +97,7 @@ def _legacy_admin_main_kb(new_error_reports: int = 0):
     kb.button(text="🔍 Поиск юзера", callback_data="adm:find_user")
     kb.button(text="⚙️ Системный режим Swarm", callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
+    kb.button(text="🤖 AI-ключи (провайдеры)", callback_data="adm:ai_keys")
     kb.button(text="🔑 Переменные Railway", callback_data="adm:env_list")
     _err_label = (
         f"🐛 Отчёты об ошибках ({new_error_reports} новых)"
@@ -3206,6 +3207,139 @@ def _gate_text(gate_on: bool, channels: list) -> str:
         f"Каналы для обязательной подписки:\n{ch_lines}\n\n"
         "Нажмите «🗑 название» чтобы удалить канал.\n"
         "Бот должен быть участником каналов чтобы проверять подписку."
+    )
+
+
+# ── AI-ключи провайдеров (настройка из UI вместо env) ────────────────────────
+_AI_PROVIDERS = [
+    ("openrouter", "OpenRouter", "ai_openrouter_key", "OPENROUTER_API_KEY"),
+    ("groq", "Groq", "ai_groq_key", "GROQ_API_KEY"),
+    ("gemini", "Google Gemini", "ai_gemini_key", "GEMINI_API_KEY"),
+]
+
+
+async def _ai_keys_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    from services.ai_providers import configured_providers
+    active = {p.name for p in configured_providers()}
+    kb = InlineKeyboardBuilder()
+    lines = [
+        "🤖 <b>AI-ключи провайдеров</b>\n",
+        "Нужны для: Narrative, Growth Agent, AI-ассистент, SEO-AI, "
+        "AI-генерация шаблонов и постов.\n",
+    ]
+    for pid, plabel, skey, _env in _AI_PROVIDERS:
+        is_on = pid in active
+        lines.append(f"{'✅' if is_on else '⚪️'} <b>{plabel}</b> — {'настроен' if is_on else 'не задан'}")
+        kb.button(
+            text=f"{'🔄 Изменить' if is_on else '➕ Задать'} {plabel}",
+            callback_data=f"adm:ai_set:{pid}",
+        )
+    for pid, plabel, skey, _env in _AI_PROVIDERS:
+        if pid in active:
+            kb.button(text=f"🗑 Удалить {plabel}", callback_data=f"adm:ai_del:{pid}")
+    kb.button(text="◀️ Назад", callback_data="adm:main")
+    kb.adjust(1)
+    lines.append(
+        "\n<i>Ключи хранятся в БД в зашифрованном виде и имеют приоритет над "
+        "переменными окружения.</i>"
+    )
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(F.data == "adm:ai_keys")
+async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await _ai_keys_menu(callback, pool)
+
+
+@router.callback_query(F.data.startswith("adm:ai_set:"))
+async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    pid = callback.data.removeprefix("adm:ai_set:")
+    meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
+    if not meta:
+        await callback.answer("Неизвестный провайдер", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(AiKeyFSM.waiting_key)
+    await state.update_data(ai_provider=pid)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data="adm:ai_keys")
+    await callback.message.edit_text(
+        f"🔑 <b>Ключ {meta[1]}</b>\n\n"
+        f"Отправьте API-ключ одним сообщением.\n"
+        f"<i>Сообщение с ключом будет сразу удалено из чата в целях безопасности.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:ai_del:"))
+async def cb_adm_ai_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    pid = callback.data.removeprefix("adm:ai_del:")
+    meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
+    if not meta:
+        await callback.answer("Неизвестный провайдер", show_alert=True)
+        return
+    try:
+        await db.set_platform_setting(pool, meta[2], "")
+        from services.ai_providers import set_ai_keys
+        set_ai_keys({meta[3]: ""})
+    except Exception:
+        log_exc_swallow(log, "adm ai_del")
+    await callback.answer(f"{meta[1]} удалён", show_alert=True)
+    await _ai_keys_menu(callback, pool)
+
+
+@router.message(AiKeyFSM.waiting_key)
+async def msg_ai_key(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        await state.clear()
+        return
+    data = await state.get_data()
+    pid = data.get("ai_provider", "")
+    meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
+    key = (message.text or "").strip()
+    # Удаляем сообщение с секретом из чата
+    try:
+        await message.delete()
+    except Exception:
+        log_exc_swallow(log, "msg_ai_key: delete secret msg")
+    await state.clear()
+    if not meta or not key:
+        await message.answer("⚠️ Ключ не задан.", reply_markup=_back_kb().as_markup())
+        return
+    try:
+        from services.token_vault import encrypt_token
+        from services.ai_providers import set_ai_keys, configured_providers
+        await db.set_platform_setting(pool, meta[2], encrypt_token(key))
+        set_ai_keys({meta[3]: key})
+        n = len(configured_providers())
+    except Exception as exc:
+        log.warning("msg_ai_key save failed: %s", exc)
+        await message.answer(
+            "⚠️ Не удалось сохранить ключ.", reply_markup=_back_kb().as_markup()
+        )
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 AI-ключи", callback_data="adm:ai_keys")
+    kb.button(text="◀️ Админка", callback_data="adm:main")
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Ключ <b>{meta[1]}</b> сохранён (зашифрован).\n"
+        f"Активных AI-провайдеров: <b>{n}</b>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

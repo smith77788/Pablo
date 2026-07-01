@@ -499,6 +499,10 @@ class GateAddFSM(StatesGroup):
     waiting_username = State()  # ввод @username канала для подписки-гейта
 
 
+class AiKeyFSM(StatesGroup):
+    waiting_key = State()  # ввод AI API-ключа (провайдер в FSM data)
+
+
 class PromoOrderFSM(StatesGroup):
     keyword = State()           # ввод ключевого слова
     target_position = State()   # целевая позиция (1–10)

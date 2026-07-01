@@ -343,6 +343,26 @@ async def main() -> None:
     set_gate_channels(_gate_chs)
     log.info("Subscription gate on startup: %s (%d channels)", "ON" if _gate_val == "true" else "OFF", len(_gate_chs))
 
+    # AI-ключи из БД (настраиваются из админ-панели) — приоритет над env.
+    # Без них narrative/growth/ai-assistant/SEO-AI не работают.
+    try:
+        from services.ai_providers import set_ai_keys, configured_providers
+        from services.token_vault import decrypt_token
+        _ai_map = {}
+        for _env_name, _skey in (
+            ("OPENROUTER_API_KEY", "ai_openrouter_key"),
+            ("GROQ_API_KEY", "ai_groq_key"),
+            ("GEMINI_API_KEY", "ai_gemini_key"),
+        ):
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val:
+                _ai_map[_env_name] = decrypt_token(_val)  # хранится зашифрованным
+        if _ai_map:
+            set_ai_keys(_ai_map)
+        log.info("AI providers on startup: %d configured", len(configured_providers()))
+    except Exception:
+        log.warning("failed to load AI keys from DB", exc_info=True)
+
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)
     await op_worker.reset_stale_in_operation(pool)
