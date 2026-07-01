@@ -1690,6 +1690,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ AUDIENCE DNA — DETAIL ══════════════════════ -->
+<div class="screen" id="s-dna-detail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="dnaDetail-name">DNA</div>
+    <div class="hdr-meta">
+      <button class="btn btn-p" id="dnaRecomputeBtn" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="recomputeDna()">🔄 Пересчитать</button>
+    </div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="dnaDetailBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ AUTO FUNNELS ══════════════════════ -->
 <div class="screen" id="s-autofunnels">
   <div class="hdr">
@@ -6603,6 +6617,35 @@ async function openTopology() {
         <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Сложность инфраструктуры</div><div class="row-val">${d.accounts||0} аккаунтов → ${d.channels||0} каналов / ${d.bots||0} ботов</div></div></div>
         <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔗</div><div class="row-body"><div class="row-name">Межаккаунтные связи</div><div class="row-val">${d.channel_links||0} аккаунт↔канал · ${d.bot_users_total||0} пользователей ботов</div></div></div>
       </div>
+      <div class="sec">Карта связей</div>
+      <div class="lst" id="topoLinks"><div class="spin-wrap"><div class="spin"></div></div></div>
+    `);
+    const links = await api('/api/miniapp/topology/links');
+    const accs = (links.accounts||[]).filter(a => a.channels && a.channels.length);
+    const bots = links.bots||[];
+    if (!accs.length && !bots.length) {
+      txt('topoLinks', empty('🗺','Связей пока нет',''));
+      return;
+    }
+    txt('topoLinks', `
+      ${accs.map(a => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(59,130,246,.16)">📱</div>
+          <div class="row-body">
+            <div class="row-name">${esc(a.label)}</div>
+            <div class="row-val">${a.channels.map(c=>esc(c.username?'@'+c.username:c.title||('#'+c.channel_id))).join(', ')}</div>
+          </div>
+        </div>
+      `).join('')}
+      ${bots.map(b => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div>
+          <div class="row-body">
+            <div class="row-name">${esc(b.label)}</div>
+            <div class="row-val">${b.subscribers} подписчиков</div>
+          </div>
+        </div>
+      `).join('')}
     `);
   } catch(e) {
     txt('topoStats','');
@@ -9907,7 +9950,7 @@ async function openAudienceDna() {
   txt('dnaList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/audience_dna');
-    if (!rows.length) { txt('dnaList', empty('🔬','Данных ДНК нет','Запустите анализ аудитории в боте')); return; }
+    if (!rows.length) { txt('dnaList', empty('🔬','Данных ДНК нет','Откройте 🤖 Боты и нажмите на бота, чтобы запустить первый анализ')); return; }
     txt('dnaList', rows.map(r => {
       const er = r.avg_engagement_rate ? r.avg_engagement_rate.toFixed(1)+'%' : '—';
       const risk = r.churn_risk_pct||0;
@@ -9915,8 +9958,9 @@ async function openAudienceDna() {
       const peaks = (r.peak_hours||[]).slice(0,3).map(h=>h+':00').join(', ')||'—';
       const topics = (r.top_topics||[]).slice(0,3).join(', ')||'—';
       const types = (r.best_content_types||[]).slice(0,3).join(', ')||'—';
+      const botName = esc(r.first_name||r.username||'Бот');
       return `
-      <div class="row">
+      <div class="row tap" onclick="openDnaDetail(${r.bot_id},'${botName}')">
         <div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div>
         <div class="row-body">
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
@@ -9926,9 +9970,66 @@ async function openAudienceDna() {
           <div class="row-val">Темы: ${esc(topics)}</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
         </div>
+        <div class="row-right chev">›</div>
       </div>
     `}).join(''));
   } catch(e) { txt('dnaList', empty('⚠️','Ошибка',e.message)); }
+}
+
+let _dnaDetailBotId = null;
+function _renderDnaProfile(d) {
+  if (!d.computed) {
+    return empty('📭','DNA-профиль ещё не вычислен','Нажмите «🔄 Пересчитать» вверху для первичного анализа аудитории');
+  }
+  const er = d.avg_engagement_rate ? d.avg_engagement_rate.toFixed(1)+'%' : 'нет данных';
+  const risk = d.churn_risk_pct||0;
+  const riskE = risk>40?'🔴':risk>20?'🟡':'🟢';
+  const peaksH = (d.peak_hours||[]).map(h=>h+':00').join(', ')||'нет данных';
+  const peaksD = (d.peak_days||[]).join(', ')||'нет данных';
+  const topics = (d.top_topics||[]).join(', ')||'нет данных';
+  const types = (d.best_content_types||[]).join(', ')||'нет данных';
+  const recs = (d.recommendations||[]);
+  return `
+    <div class="row">
+      <div class="row-body">
+        <div class="row-val">⏰ <b>Пик активности (часы):</b> ${esc(peaksH)}</div>
+        <div class="row-val">📆 <b>Пик активности (дни):</b> ${esc(peaksD)}</div>
+        <div class="row-val">📝 <b>Лучшие форматы:</b> ${esc(types)}</div>
+        <div class="row-val">📈 <b>Вовлечённость:</b> ${er}</div>
+        <div class="row-val">⚠️ <b>Риск оттока:</b> ${riskE} ${risk.toFixed(0)}%</div>
+        <div class="row-val">🏷️ <b>Топ-темы:</b> ${esc(topics)}</div>
+        <div class="row-val">👥 <b>Проанализировано:</b> ${d.total_users_analyzed||0}</div>
+        <div class="row-val" style="color:var(--hint)">🕐 ${ago(d.computed_at)}</div>
+      </div>
+    </div>
+    ${recs.length ? `<div class="sec">💡 Рекомендации</div><div class="row"><div class="row-body">${recs.map(r=>`<div class="row-val">${esc(r)}</div>`).join('')}</div></div>` : ''}
+  `;
+}
+async function openDnaDetail(botId, botName) {
+  _dnaDetailBotId = botId;
+  push('s-dna-detail');
+  document.getElementById('dnaDetail-name').textContent = '🧬 ' + botName;
+  txt('dnaDetailBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/audience_dna/${botId}/profile`);
+    txt('dnaDetailBody', _renderDnaProfile(d));
+  } catch(e) { txt('dnaDetailBody', empty('⚠️','Ошибка',e.message)); }
+}
+async function recomputeDna() {
+  if (!_dnaDetailBotId) return;
+  const btn = document.getElementById('dnaRecomputeBtn');
+  btn.disabled = true; const oldTxt = btn.textContent; btn.textContent = '⏳ Считаю…';
+  txt('dnaDetailBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/audience_dna/${_dnaDetailBotId}/compute`, {method:'POST'});
+    txt('dnaDetailBody', _renderDnaProfile(d));
+    toast('✅ DNA обновлён');
+  } catch(e) {
+    txt('dnaDetailBody', empty('⚠️','Ошибка',e.message));
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
+  } finally {
+    btn.disabled = false; btn.textContent = oldTxt;
+  }
 }
 
 // ── Auto Funnels ───────────────────────────────────────
