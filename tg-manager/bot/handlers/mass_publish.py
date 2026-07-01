@@ -396,9 +396,15 @@ async def _show_preview(
     )
 
     kb = InlineKeyboardBuilder()
-    if not dry_run:
+    if not dry_run and total_channels > 0:
         kb.button(text="✅ Запустить", callback_data=MassPubCb(action="confirm_send"))
         kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+    elif not dry_run and total_channels == 0:
+        # Нет каналов — не даём запустить пустую операцию (0/0), ведём на импорт
+        from bot.callbacks import ChanFactCb
+
+        kb.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
+        kb.button(text="◀️ В меню публикации", callback_data=MassPubCb(action="menu"))
     else:
         kb.button(text="◀️ В меню публикации", callback_data=MassPubCb(action="menu"))
     kb.adjust(1)
@@ -485,6 +491,94 @@ async def cb_mpub_confirm_send(
         )
 
 
+@router.callback_query(MassPubCb.filter(F.action == "retry_failed"))
+async def cb_mpub_retry_failed(
+    callback: CallbackQuery, callback_data: MassPubCb, pool: asyncpg.Pool
+) -> None:
+    """Повторить публикацию ТОЛЬКО в каналы, где предыдущая операция дала ошибку.
+
+    Партиал-фейл → ретрай: берём исходный текст/медиа/аккаунты из операции и
+    список упавших channel_id из operation_log, ставим новую mass_publish
+    операцию, ограниченную этими каналами.
+    """
+    await callback.answer("⏳ Готовлю повтор...")
+    import json as _json
+    from services import operation_bus
+
+    src_op_id = callback_data.target_id
+    # 1) Исходная операция — параметры и владелец
+    op_row = await pool.fetchrow(
+        "SELECT owner_id, op_type, params FROM operation_queue WHERE id=$1",
+        src_op_id,
+    )
+    if not op_row or op_row["owner_id"] != callback.from_user.id or op_row["op_type"] != "mass_publish":
+        await callback.answer("Операция не найдена.", show_alert=True)
+        return
+
+    try:
+        params = op_row["params"] if isinstance(op_row["params"], dict) else _json.loads(op_row["params"] or "{}")
+    except (TypeError, ValueError):
+        params = {}
+
+    # 2) Упавшие каналы из operation_log (target = channel_id, только числовые)
+    failed_rows = await pool.fetch(
+        "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='error'",
+        src_op_id,
+    )
+    # Error-лог mass_publish пишет target=channel_id (числовой) — берём уникальные.
+    failed_ids: list[int] = []
+    for r in failed_rows:
+        t = (r["target"] or "").strip().lstrip("-")
+        if t.isdigit():
+            failed_ids.append(int(r["target"]))
+    failed_ids = list(dict.fromkeys(failed_ids))
+
+    if not failed_ids:
+        await callback.message.edit_text(
+            "✅ Неудавшихся каналов не осталось — повторять нечего.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    # 3) Новая операция только по упавшим каналам (channel_ids фильтр в _exec_mass_publish)
+    retry_params: dict = {
+        "text": params.get("text") or params.get("mp_text") or "",
+        "delay_seconds": int(params.get("delay_seconds") or params.get("delay") or 30),
+        "account_ids": params.get("account_ids") or [],
+        "channel_ids": failed_ids,
+    }
+    if params.get("media_file_id") and params.get("media_type"):
+        retry_params["media_file_id"] = params["media_file_id"]
+        retry_params["media_type"] = params["media_type"]
+
+    try:
+        new_op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            "mass_publish",
+            retry_params,
+            total_items=len(failed_ids),
+        )
+    except Exception as exc:
+        log.exception("mass_publish retry submit error: %s", exc)
+        await callback.message.edit_text(
+            f"⚠️ Не удалось поставить повтор в очередь: {html.escape(str(exc)[:200])}",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"🔁 <b>Повтор поставлен в очередь</b>\n\n"
+        f"Каналов для повтора: <b>{len(failed_ids)}</b>\n"
+        f"ID операции: <code>#{new_op_id}</code> (повтор #{src_op_id})\n\n"
+        f"Вы получите уведомление по мере выполнения.",
+        parse_mode="HTML",
+        reply_markup=_back_menu_kb().as_markup(),
+    )
+
+
 # NOTE: _mpub_bg was removed — it was dead code.
 # Actual publishing is executed by op_worker._exec_mass_publish via the operation queue.
 # The queue path: confirm_send → operation_bus.submit → op_worker picks up → _exec_mass_publish
@@ -549,10 +643,13 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     rows: list[asyncpg.Record] = []
     try:
         rows = await pool.fetch(
-            "SELECT id, status, total_items, done_items, created_at, finished_at, error_msg "
-            "FROM operation_queue "
-            "WHERE owner_id=$1 AND op_type='mass_publish' "
-            "ORDER BY created_at DESC LIMIT 10",
+            "SELECT oq.id, oq.status, oq.total_items, oq.done_items, oq.created_at, "
+            "       oq.finished_at, oq.error_msg, "
+            "       (SELECT COUNT(*) FROM operation_log ol "
+            "        WHERE ol.op_id = oq.id AND ol.status='error') AS err_cnt "
+            "FROM operation_queue oq "
+            "WHERE oq.owner_id=$1 AND oq.op_type='mass_publish' "
+            "ORDER BY oq.created_at DESC LIMIT 10",
             callback.from_user.id,
         )
     except Exception:
@@ -577,6 +674,8 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "skipped": "⏭",
     }
     lines = ["📋 <b>История публикаций (последние 10)</b>\n"]
+    kb = InlineKeyboardBuilder()
+    retry_btns = 0
     for r in rows:
         icon = _status_icon.get(r["status"], "❓")
         done = r["done_items"] or 0
@@ -585,14 +684,22 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         err_hint = (
             f" — {html.escape(r['error_msg'][:40])}" if r.get("error_msg") else ""
         )
-        lines.append(f"{icon} {created} — {done}/{total} каналов{err_hint}")
+        err_cnt = r["err_cnt"] or 0
+        fail_hint = f" · ❌ {err_cnt}" if err_cnt else ""
+        lines.append(f"{icon} {created} — {done}/{total} каналов{fail_hint}{err_hint}")
+        # Повтор неудавшихся — для завершённых операций с реальными ошибками каналов
+        if r["status"] in ("done", "failed") and err_cnt > 0:
+            kb.button(
+                text=f"🔁 Повторить #{r['id']} ({err_cnt})",
+                callback_data=MassPubCb(action="retry_failed", target_id=r["id"]),
+            )
+            retry_btns += 1
 
-    kb = InlineKeyboardBuilder()
     kb.button(
         text="📋 Открыть очередь", callback_data=MassOpCb(action="queue", op_type="all", page=0)
     )
     kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
-    kb.adjust(1)
+    kb.adjust(*([1] * retry_btns + [1, 1]))
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
