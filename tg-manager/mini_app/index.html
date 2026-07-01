@@ -460,6 +460,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ BOTS LIST ══════════════════════ -->
 <div class="screen" id="s-bots">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
       <span id="bots-cnt" style="font-size:12px;color:var(--hint)"></span>
@@ -544,6 +545,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
 <div class="screen" id="s-accounts">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
     <div class="hdr-meta"><div class="hdr-user" id="acc-cnt"></div></div>
   </div>
@@ -664,6 +666,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ BROADCASTS ══════════════════════ -->
 <div class="screen" id="s-broadcasts">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">📨 Рассылки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
@@ -679,7 +682,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ MORE ══════════════════════ -->
 <div class="screen" id="s-more">
-  <div class="hdr"><div class="hdr-title">⚙️ Ещё</div></div>
+  <div class="hdr"><div class="hdr-burger" onclick="openDrawer()">☰</div><div class="hdr-title">⚙️ Ещё</div></div>
   <div class="sb">
 
     <!-- Статус аккаунта -->
