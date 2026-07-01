@@ -699,8 +699,12 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         keyword_total = 0
 
     try:
+        # Таблица прокси — user_proxies (не 'proxies', которой не существует).
+        # Раньше запрос всегда падал → реестр показывал «Прокси: 0».
         proxy_total = (
-            await pool.fetchval("SELECT COUNT(*) FROM proxies WHERE owner_id=$1", uid)
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid
+            )
             or 0
         )
     except Exception:
