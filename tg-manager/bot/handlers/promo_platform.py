@@ -19,6 +19,7 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 
+import aiohttp
 import asyncpg
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -37,6 +38,7 @@ from bot.states import (
 from bot.utils.op_helpers import safe_edit
 from bot.utils.subscription import require_plan
 from database import db
+from services import bot_api
 from services import smm_panel as smm_svc
 from services.logger import log_exc_swallow
 
@@ -809,7 +811,12 @@ async def cb_bot_detail(callback: CallbackQuery, callback_data: PromoCb, pool: a
 
 
 @router.callback_query(PromoCb.filter(F.action == "bot_setstatus"))
-async def cb_bot_setstatus(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
+async def cb_bot_setstatus(
+    callback: CallbackQuery,
+    callback_data: PromoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
     new_status = callback_data.value
     if new_status not in ("ready", "working", "topped", "transferred", "banned"):
         await callback.answer("Недопустимый статус", show_alert=True)
@@ -818,6 +825,31 @@ async def cb_bot_setstatus(callback: CallbackQuery, callback_data: PromoCb, pool
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
         return
+
+    # banned → ready: не возвращаем забаненного бота в работу вслепую.
+    # Проверяем реальную доступность через getMe по токену.
+    if bot["status"] == "banned" and new_status == "ready":
+        token = ""
+        if bot.get("bot_token_enc"):
+            try:
+                from services.token_vault import decrypt_token
+                token = decrypt_token(bot["bot_token_enc"])
+            except Exception:
+                token = ""
+        if not token:
+            await callback.answer(
+                "Нет токена для проверки — нельзя подтвердить разблокировку.",
+                show_alert=True,
+            )
+            return
+        me = await bot_api.get_me(http, token)
+        if not me:
+            await callback.answer(
+                "❌ Бот всё ещё недоступен (getMe не отвечает) — статус не изменён.",
+                show_alert=True,
+            )
+            return
+
     await db.warehouse_update_bot(pool, bot["id"], callback.from_user.id, status=new_status)
     await db.promo_log(pool, callback.from_user.id, "scheduler",
                        f"Бот @{bot['bot_username']} → {new_status}")
