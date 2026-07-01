@@ -690,7 +690,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       cooldown_until
                FROM tg_accounts WHERE owner_id=$1
                ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", uid)
-        return _json_resp({"accounts": rows})
+        # Серверная агрегация KPI по ВСЕМ аккаунтам (список ограничен LIMIT 100 —
+        # иначе при >100 аккаунтах счётчики считались бы по обрезанному списку).
+        st = await _safe_fetchrow(pool,
+            """SELECT COUNT(*) AS total,
+                      COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
+                      COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
+                      COUNT(*) FILTER (
+                          WHERE is_active
+                            AND COALESCE(acc_status,'ok') <> 'banned'
+                            AND (cooldown_until IS NULL OR cooldown_until <= now())
+                      ) AS active
+               FROM tg_accounts WHERE owner_id=$1""", uid)
+        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "cooldown", "active")} if st else {}
+        return _json_resp({"accounts": rows, "stats": stats})
 
     async def account_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)

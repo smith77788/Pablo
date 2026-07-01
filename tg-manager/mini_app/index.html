@@ -4486,10 +4486,11 @@ async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
   api('/api/miniapp/accounts').then(ad => {
     CUR_ACCS = ad.accounts||[];
-    const cnt = CUR_ACCS.length;
+    // Истинное число из серверной агрегации (список ограничен LIMIT 100)
+    const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
-    updateAccKpi(CUR_ACCS);
+    updateAccKpi(CUR_ACCS, ad.stats);
     renderAccounts(CUR_ACCS);
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
@@ -4569,11 +4570,12 @@ function filterAcc(mode, btn) {
   renderAccounts(list);
 }
 
-function updateAccKpi(list) {
-  const all = list.length;
-  const active = list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned').length;
-  const cd = list.filter(a=>isOnCooldown(a)).length;
-  const banned = list.filter(a=>a.acc_status==='banned').length;
+function updateAccKpi(list, stats) {
+  // Предпочитаем серверную агрегацию (по всем аккаунтам); список ограничен LIMIT 100.
+  const all    = (stats && stats.total!=null)    ? stats.total    : list.length;
+  const active = (stats && stats.active!=null)   ? stats.active   : list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned').length;
+  const cd     = (stats && stats.cooldown!=null) ? stats.cooldown : list.filter(a=>isOnCooldown(a)).length;
+  const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
   const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
   el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-ban', banned);
 }
