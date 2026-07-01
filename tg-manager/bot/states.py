@@ -537,10 +537,15 @@ class BotTplCustomizeFSM(StatesGroup):
     operator = State()       # @username оператора (или /skip)
 
 
-class BotMotherChannelFSM(StatesGroup):
+class InfragramChannelFSM(StatesGroup):
     set_channel_id = State()   # ввод ID/username канала
     write_post = State()       # текст нового поста
     confirm_post = State()     # подтверждение перед публикацией
+
+
+# Обратная совместимость: старое имя после ребрендинга BotMother → Infragram.
+# Не удаляем — на него могут ссылаться прочие модули/сохранённые FSM-состояния.
+BotMotherChannelFSM = InfragramChannelFSM
 
 
 class GhostConfigFSM(StatesGroup):
