@@ -387,8 +387,7 @@ def _resolve_client_proxy(device: dict[str, Any]) -> Any:
         return proxy
     if TG_PROXY:
         return _parse_proxy(TG_PROXY)
-    pool_url = _get_pool_proxy_url()
-    return _parse_proxy(pool_url) if pool_url else None
+    return None
 
 
 def generate_device_fingerprint(country_code: str | None = None) -> dict[str, str]:
@@ -410,12 +409,13 @@ def _make_client(session_string: str = "", device: dict | None = None):
     Приоритет транспорта (от высшего к низшему):
     1. Аккаунт-bound прокси (proxy_url в device dict) — строгая изоляция,
        используется если у аккаунта назначен конкретный прокси.
-    2. CF_RELAY_URL env var — Cloudflare Worker WebSocket→TCP relay (бесплатный,
-       скрывает Railway IP за Cloudflare edge IP). Используется только если
-       аккаунт не имеет собственного прокси.
-    3. Глобальный TG_PROXY (socks5://...) — применяется если CF_RELAY_URL не задан.
-    4. Прямое подключение через ConnectionTcpObfuscated — если ни один из выше
-       не задан. Протокол обфускован, но Railway IP виден Telegram.
+    2. Глобальный TG_PROXY (socks5://...) — явно заданный оператором прокси.
+    3. CF_RELAY_URL env var — Cloudflare Worker WebSocket→TCP relay (бесплатный,
+       скрывает Railway IP за Cloudflare edge IP, контролируемый и стабильный).
+    4. Бесплатный пул прокси (proxy_scraper) — публичные SOCKS5-списки; ниже
+       CF relay по приоритету, т.к. заведомо менее надёжны, но лучше, чем ничего.
+    5. Прямое подключение через ConnectionTcpObfuscated — если ни один из выше
+       не задан/не сработал. Протокол обфускован, но Railway IP виден Telegram.
 
     Всегда используется обфускация (ConnectionTcpObfuscated или CF relay поверх неё),
     никогда ConnectionTcpFull — он легко детектится как Telethon/MTProto.
@@ -429,7 +429,7 @@ def _make_client(session_string: str = "", device: dict | None = None):
     # Определяем прокси (может поднять ProxyIsolationError если обязательный прокси не задан)
     proxy = _resolve_client_proxy(d)
 
-    # Выбор транспорта: если нет аккаунт-bound прокси И задан CF relay → используем relay
+    # Выбор транспорта: если нет аккаунт-bound/TG_PROXY И задан CF relay → используем relay
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
     if not has_bound_proxy and CF_RELAY_URL:
         from services.cf_relay import make_cf_relay_connection as _make_relay
@@ -437,6 +437,11 @@ def _make_client(session_string: str = "", device: dict | None = None):
         effective_proxy = None  # relay сам маршрутизирует
     else:
         connection_cls = ConnectionTcpObfuscated
+        if not has_bound_proxy:
+            # Нет аккаунт-прокси, TG_PROXY и CF relay не заданы — последний резерв:
+            # бесплатный пул публичных SOCKS5-прокси (populated by proxy_scraper).
+            pool_url = _get_pool_proxy_url()
+            proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
 
     return TelegramClient(
