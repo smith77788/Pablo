@@ -378,7 +378,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                WHERE mb.added_by=$1
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active
                ORDER BY subscriber_count DESC LIMIT 50""", uid)
-        return _json_resp({"bots": rows})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+        return _json_resp({"bots": rows, "total": int(total or 0)})
 
     async def bot_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)

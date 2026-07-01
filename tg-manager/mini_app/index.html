@@ -4033,8 +4033,9 @@ async function loadBots() {
   try {
     const d = await api('/api/miniapp/bots');
     BOTS = d.bots||[];
+    const botTotal = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = BOTS.length ? BOTS.length+' ботов' : '';
+    if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : '';
     renderBots();
   } catch(e) {
     const wrap = document.getElementById('botList');
@@ -4823,7 +4824,7 @@ async function openChannels() {
   try {
     const d = await api('/api/miniapp/channels');
     CUR_CHANNELS = d.channels||[];
-    txt('ch-cnt', CUR_CHANNELS.length+' каналов');
+    txt('ch-cnt', (d.total!=null?d.total:CUR_CHANNELS.length)+' каналов');
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Добавьте канал через меню в Telegram')); return; }
     renderChannels(CUR_CHANNELS);
   } catch(e) {
