@@ -6534,9 +6534,12 @@ async function openInfra() {
       <div class="row"><div class="row-body"><div class="row-name">Пул: ${esc(p.pool||'default')}</div></div><div class="row-right">${p.cnt} акк</div></div>
     `).join('') : empty('📦','Нет пулов',''));
     const audit = d.audit||[];
+    // operation_audit.result у успешных операций = 'success' (не 'ok'); также
+    // считаем зелёными 'ok'/'done'. Иначе успешные показывались красным ❌.
+    const _auditOk = r => r==='success' || r==='ok' || r==='done';
     txt('infraAudit', audit.length ? audit.map(a=>`
       <div class="row">
-        <div class="row-ico" style="background:rgba(${a.result==='ok'?'34,197,94':'239,68,68'},.16)">${a.result==='ok'?'✅':'❌'}</div>
+        <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'34,197,94':'239,68,68'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
         <div class="row-body">
           <div class="row-name">${esc(a.action||'action')}</div>
           <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru'):''}</div>
