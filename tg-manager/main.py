@@ -328,6 +328,15 @@ async def main() -> None:
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
 
+    # Тумблер уведомлений о новых пользователях — восстанавливаем из БД
+    try:
+        from bot.handlers.admin import set_notify_new_users
+        _nn = await _db.get_platform_setting(pool, "notify_new_users", "true")
+        set_notify_new_users(_nn == "true")
+        log.info("Notify-new-users on startup: %s", "ON" if _nn == "true" else "OFF")
+    except Exception:
+        log.warning("failed to load notify_new_users setting", exc_info=True)
+
     _gate_val = await _db.get_platform_setting(pool, "gate_enabled", "false")
     set_gate_enabled(_gate_val == "true")
     _gate_chs = await _db.get_subscription_gate_channels(pool)

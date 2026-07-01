@@ -38,7 +38,13 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 router = Router()
 
-_NOTIFY_NEW_USERS = True  # toggle via /admin toggle_notify
+_NOTIFY_NEW_USERS = True  # toggle via /admin toggle_notify; loaded from DB at startup
+
+
+def set_notify_new_users(enabled: bool) -> None:
+    """Обновить in-memory кэш тумблера уведомлений (вызывается при старте из БД)."""
+    global _NOTIFY_NEW_USERS
+    _NOTIFY_NEW_USERS = bool(enabled)
 
 # Пользователи, вошедшие через ADMIN_SECRET в текущей сессии бота
 _session_admins: set[int] = set()
@@ -480,6 +486,13 @@ async def cb_admin(
     elif action == "notify_toggle":
         global _NOTIFY_NEW_USERS
         _NOTIFY_NEW_USERS = not _NOTIFY_NEW_USERS
+        # Персист в platform_settings — иначе тумблер сбрасывался при каждом рестарте
+        try:
+            await db.set_platform_setting(
+                pool, "notify_new_users", "true" if _NOTIFY_NEW_USERS else "false"
+            )
+        except Exception:
+            log_exc_swallow(log, "notify_toggle: persist failed")
         await _show_admin_main(callback, pool, edit=True)
 
     elif action == "free_mode_toggle":
