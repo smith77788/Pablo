@@ -107,6 +107,7 @@ from bot.callbacks import (
     ReporterCb,
     ContentClonerCb,
     AutoRegCb,
+    GrowthCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -208,14 +209,14 @@ def _operations_kb(plan: str = "free"):
 
     kb = InlineKeyboardBuilder()
     kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Strike (зачистка)", callback_data=StrikeCb(action="menu"))
-    kb.button(text=f"{_lock(plan,'enterprise')}🌍 Глоб. присутствие", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'enterprise')}🌍 Гео-сеть: создать", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}📤 Публикация", callback_data=MassPubCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}✍️ Быстрый пост", callback_data=QuickPostCb(action="start"))
     kb.button(text="🚀 Накрутка", callback_data=BoostCb(action="menu"))
     kb.button(text="👥 Инвайтер", callback_data=InviterCb(action="menu"))
     kb.button(text="📋 Контент-клонер", callback_data=ContentClonerCb(action="menu"))
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
-    kb.button(text=f"{_lock(plan,'starter')}📦 Пакеты присутствия", callback_data=PackCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'starter')}🔗 Связки (бот+каналы)", callback_data=PackCb(action="menu"))
     kb.button(text="🎁 Подарки", callback_data="gt:main")
     kb.button(text="📋 Очередь задач", callback_data=MassOpCb(action="queue"))
     kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
@@ -306,8 +307,9 @@ def _growth_kb(plan: str = "free"):
     kb.button(text="⚡ Auto-Funnel", callback_data=AutoFunnelCb(action="menu"))
     kb.button(text="📖 Narrative Hub", callback_data=NarrCb(action="menu"))
     kb.button(text="🔀 Clone & Adapt", callback_data=CloneAdaptCb(action="menu"))
+    kb.button(text="🌱 Growth Agent", callback_data=GrowthCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -630,11 +632,11 @@ async def cb_operations(
         callback,
         "⚡ <b>Операции — Strike, публикация, массовые действия</b>\n\n"
         "⚔️ <b>Strike</b> — целевые зачистки по каналам/группам [enterprise]\n"
-        "🌍 <b>Присутствие</b> — Global Presence Factory [enterprise]\n"
+        "🌍 <b>Гео-сеть: создать</b> — массово СОЗДАЁТ новые каналы/группы/боты по городам [enterprise]\n"
         "📤 <b>Публикация</b> — массовая публикация во все каналы\n"
         "✍️ <b>Быстрый пост</b> — пошаговый мастер публикации\n"
         "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
-        "📦 <b>Пакеты присутствия</b> — подготовленные сценарии активности\n"
+        "🔗 <b>Связки (бот+каналы)</b> — объединяет ВАШИ бота+каналы+группы в одну воронку\n"
         "🎁 <b>Подарки</b> — перевод подарков между аккаунтами\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
         "⏱️ <b>Планировщик</b> — запустить операцию по расписанию" + infra_line,
@@ -918,14 +920,12 @@ async def cb_growth(
     await _edit(
         callback,
         "🚀 <b>Рост & Продвижение</b>\n\n"
-        "🌱 <b>Growth Agent</b> — постинг в чужие группы по нише\n"
-        "   <i>Находит группы → вступает → публикует ваш рекламный текст</i>\n\n"
-        "🚀 <b>Продвижение ботов</b> — SMM-панели, склад ботов, топ-чекер\n"
-        "   <i>Вывести бота в топ Telegram Search → накрутка через SMM-сервисы</i>\n\n"
-        "⭐ <b>Stars Optimizer</b> — монетизация через Telegram Stars\n"
-        "🕸️ <b>Content Mesh</b> — сетка контента для публикации по расписанию\n"
+        "🚀 <b>Продвижение ботов</b> — вывод в топ Telegram Search\n"
+        "   <i>Склад ботов → 21 день созревания → SMM-накрутка → топ</i>\n\n"
+        "⭐ <b>Stars Optimizer</b> — A/B тесты и монетизация через Stars\n"
+        "🕸️ <b>Content Mesh</b> — сетка контента по расписанию\n"
         "⚡ <b>Auto-Funnel</b> — автоматические воронки привлечения\n"
-        "📖 <b>Narrative Hub</b> — управление нарративами и кампаниями\n"
+        "📖 <b>Narrative Hub</b> — нарративные кампании\n"
         "🔀 <b>Clone & Adapt</b> — копирование и адаптация контента",
         _growth_kb(user_plan),
     )

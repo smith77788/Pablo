@@ -390,21 +390,45 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     return app
 
 
-async def run(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Запустить HTTP webhook-сервер. Вызывается как asyncio.create_task."""
+async def run(
+    pool: asyncpg.Pool,
+    bot: Bot,
+    dp=None,
+    webhook_path: str = "/webhook",
+    http=None,
+) -> None:
+    """Запустить HTTP-сервер (webhook + payment + mini_app_api).
+
+    Если передан dp — регистрирует Telegram webhook на том же порту,
+    чтобы не занимать PORT дважды.
+    """
     app = make_app(pool, bot)
+
+    if dp is not None:
+        try:
+            from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application as _sa
+            SimpleRequestHandler(
+                dispatcher=dp,
+                bot=bot,
+                pool=pool,
+                http=http,
+            ).register(app, path=webhook_path)
+            _sa(app, dp, bot=bot, pool=pool, http=http)
+            log.info("Telegram webhook registered at %s on the shared server", webhook_path)
+        except Exception:
+            log.exception("Failed to register aiogram webhook handler — falling back to polling")
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", _WEBHOOK_PORT)
     try:
         await site.start()
-        log.info("Payment webhook server started on port %d", _WEBHOOK_PORT)
-        # Держать живым
+        log.info("HTTP server started on port %d (webhook=%s)", _WEBHOOK_PORT, webhook_path if dp else "polling")
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        log.exception("Payment webhook server error: %s", e)
+        log.exception("HTTP server error: %s", e)
     finally:
         await runner.cleanup()

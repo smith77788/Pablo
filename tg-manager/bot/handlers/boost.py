@@ -382,32 +382,35 @@ async def cb_boost_confirm(
         return
 
     if sub == "views":
+        channel = data.get("channel", "")
+        msg_ids = data.get("msg_ids", [])
+        if not channel or not msg_ids:
+            await callback.answer("⚠️ Данные сессии потеряны. Начните заново.", show_alert=True)
+            return
         op_type = "boost_views"
-        params = {
-            "channel": data["channel"],
-            "msg_ids": data["msg_ids"],
-            "account_ids": account_ids,
-        }
-        total_items = len(account_ids) * len(data["msg_ids"])
-        label = f"Просмотры: {data['channel']} × {len(data['msg_ids'])} сообщений × {len(account_ids)} акк."
+        params = {"channel": channel, "msg_ids": msg_ids, "account_ids": account_ids}
+        total_items = len(account_ids) * len(msg_ids)
+        label = f"Просмотры: {channel} × {len(msg_ids)} сообщений × {len(account_ids)} акк."
     elif sub == "reactions":
+        channel = data.get("channel", "")
+        msg_id = data.get("msg_id")
+        emoji = data.get("emoji", "👍")
+        if not channel or not msg_id:
+            await callback.answer("⚠️ Данные сессии потеряны. Начните заново.", show_alert=True)
+            return
         op_type = "boost_reactions"
-        params = {
-            "channel": data["channel"],
-            "msg_id": data["msg_id"],
-            "emoji": data["emoji"],
-            "account_ids": account_ids,
-        }
+        params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
         total_items = len(account_ids)
-        label = f"Реакции {data['emoji']}: {data['channel']} × {len(account_ids)} акк."
+        label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
     else:  # stories
+        target = data.get("target", "")
+        if not target:
+            await callback.answer("⚠️ Данные сессии потеряны. Начните заново.", show_alert=True)
+            return
         op_type = "boost_stories"
-        params = {
-            "target": data["target"],
-            "account_ids": account_ids,
-        }
+        params = {"target": target, "account_ids": account_ids}
         total_items = len(account_ids)
-        label = f"Сторис: {data['target']} × {len(account_ids)} акк."
+        label = f"Сторис: {target} × {len(account_ids)} акк."
 
     import json
     op_id = await pool.fetchval(
@@ -417,7 +420,7 @@ async def cb_boost_confirm(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Детали операции", callback_data=f"bm:op_detail:{op_id}")
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
     kb.button(text="◀️ В меню", callback_data=BoostCb(action="menu"))
     kb.adjust(1)
     await _edit(

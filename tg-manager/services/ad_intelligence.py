@@ -277,7 +277,10 @@ async def scan_channel_ads(
     # Получаем аккаунт из пула
     async with pool.acquire() as conn:
         acc = await conn.fetchrow(
-            "SELECT id, session_str, proxy_url, dc_id FROM tg_accounts "
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts "
             "WHERE id = $1 AND owner_id = $2 AND is_active = TRUE",
             account_id,
             owner_id,
@@ -287,7 +290,10 @@ async def scan_channel_ads(
         # Пробуем любой активный аккаунт владельца
         async with pool.acquire() as conn:
             acc = await conn.fetchrow(
-                "SELECT id, session_str, proxy_url, dc_id FROM tg_accounts "
+                "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts "
                 "WHERE owner_id = $1 AND is_active = TRUE "
                 "ORDER BY RANDOM() LIMIT 1",
                 owner_id,

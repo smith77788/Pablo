@@ -31,7 +31,7 @@ async def _menu_text_kb(
                       r.risk_score, r.ban_probability, r.ops_24h, r.flood_rate_1h
                FROM tg_accounts a
                LEFT JOIN account_risk_scores r ON r.account_id = a.id
-               WHERE a.owner_id=$1 AND a.banned=FALSE
+               WHERE a.owner_id=$1 AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
                ORDER BY COALESCE(r.risk_score, 0) DESC, a.id
                LIMIT $2 OFFSET $3""",
             user_id,
@@ -39,7 +39,7 @@ async def _menu_text_kb(
             page * _PAGE_SIZE,
         )
         total = await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND banned=FALSE",
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
             user_id,
         )
     except Exception as e:
@@ -58,7 +58,7 @@ async def _menu_text_kb(
                COUNT(*) FILTER (WHERE risk_score >= 0.5 AND risk_score < 0.75) AS high
                FROM account_risk_scores
                WHERE account_id IN (
-                   SELECT id FROM tg_accounts WHERE owner_id=$1 AND banned=FALSE
+                   SELECT id FROM tg_accounts WHERE owner_id=$1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')
                )""",
             user_id,
         )

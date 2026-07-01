@@ -640,11 +640,14 @@ async def msg_fn_broadcast(
 
     user_ids = data["subscriber_ids"]
     bc_id = await db.create_broadcast(
-        pool, data["bot_id"], text, len(user_ids), message.from_user.id, None
+        pool, data["bot_id"], text, len(user_ids), message.from_user.id, None,
+        target_user_ids=user_ids,
     )
-    asyncio.create_task(
-        broadcaster.start(pool, http, bc_id, row["token"], data["bot_id"], text, None, user_ids),
-        name=f"fn-broadcast-{bc_id}",
+    # broadcaster.start — синхронная (внутри сама планирует asyncio.Task).
+    # Оборачивать её в asyncio.create_task нельзя: start() вернёт None, и
+    # create_task(None) бросит TypeError — рассылка не запускалась бы вовсе.
+    broadcaster.start(
+        pool, http, bc_id, row["token"], data["bot_id"], text, None, user_ids
     )
 
     await message.answer(

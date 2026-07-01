@@ -94,7 +94,29 @@ async def _process_bot(
         data = await bot_api._call(
             http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0
         )
-        updates = data.get("result", []) if data.get("ok") else []
+        if not data.get("ok"):
+            # Раньше ошибка getUpdates молча проглатывалась (updates=[]), из-за
+            # чего бот переставал видеть сообщения — и новые пользователи не
+            # детектировались — без единой записи в лог. Частая причина: на боте
+            # активен webhook (409 Conflict) или отозван токен.
+            err_desc = str(data.get("description") or data.get("error_code") or "unknown")
+            if "conflict" in err_desc.lower() or "webhook" in err_desc.lower():
+                # Webhook перехватывает апдейты → polling не нужен; снимаем webhook,
+                # чтобы вернуть бота на polling (managed-боты работают через polling).
+                try:
+                    # drop_pending_updates по умолчанию false — ожидающие апдейты
+                    # сохранятся и будут обработаны через polling.
+                    await bot_api._call(http, token, "deleteWebhook")
+                    log.warning(
+                        "auto_responder: bot=%d getUpdates конфликт с webhook — webhook снят, polling восстановлен",
+                        bot_id,
+                    )
+                except Exception:
+                    log.warning("auto_responder: bot=%d webhook-конфликт, deleteWebhook не удался", bot_id)
+            else:
+                log.warning("auto_responder: bot=%d getUpdates вернул ошибку: %s", bot_id, err_desc[:200])
+            return
+        updates = data.get("result", [])
         if not updates:
             return
 
@@ -159,6 +181,11 @@ async def _process_bot(
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
 
             # Notify bot owner about new user
+            if is_new_user:
+                log.info(
+                    "new_user: bot_id=%s chat_id=%s main_bot=%s added_by=%s",
+                    bot_id, chat_id, bool(main_bot), bot_row.get("added_by") if bot_row else None,
+                )
             if is_new_user and main_bot and bot_row and bot_row.get("added_by"):
                 owner_id = bot_row["added_by"]
                 bot_name = (
@@ -172,8 +199,14 @@ async def _process_bot(
                     or f"id{chat_id}"
                 )
                 note = f"👤 <b>Новый пользователь</b> @{user_name} подписался на @{bot_name}"
+                # dedup_key = (bot, новый юзер): каждый отдельный новый подписчик
+                # уведомляется, иначе кулдаун по (owner, "new_user") глушил всех
+                # новых юзеров со всех ботов владельца в одном слоте.
                 asyncio.create_task(
-                    db.notify_if_enabled(pool, main_bot, owner_id, "new_user", note)
+                    db.notify_if_enabled(
+                        pool, main_bot, owner_id, "new_user", note,
+                        dedup_key=f"{bot_id}:{chat_id}",
+                    )
                 )
 
             # Register in bot_users so the user appears in broadcast audience

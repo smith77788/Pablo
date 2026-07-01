@@ -3732,28 +3732,21 @@ async def _do_batch_import(
             # Assign cluster if provided
             if cluster and acc_id:
                 try:
-                    cl_row = await pool.fetchrow(
-                        "SELECT id FROM clusters WHERE owner_id=$1 AND name=$2",
+                    # Регистрируем имя кластера в реестре clusters (идемпотентно).
+                    await pool.execute(
+                        "INSERT INTO clusters(owner_id, name) VALUES($1,$2) ON CONFLICT DO NOTHING",
                         user_id,
                         cluster,
                     )
-                    if not cl_row:
-                        await pool.execute(
-                            "INSERT INTO clusters(owner_id, name) VALUES($1,$2) ON CONFLICT DO NOTHING",
-                            user_id,
-                            cluster,
-                        )
-                        cl_row = await pool.fetchrow(
-                            "SELECT id FROM clusters WHERE owner_id=$1 AND name=$2",
-                            user_id,
-                            cluster,
-                        )
-                    if cl_row:
-                        await pool.execute(
-                            "UPDATE tg_accounts SET cluster=$1 WHERE id=$2",
-                            cl_row["id"],
-                            acc_id,
-                        )
+                    # tg_accounts.cluster — TEXT и хранит ИМЯ кластера: именно так его
+                    # читает mass_ops (показывает как label и фильтрует по нему). Раньше
+                    # сюда писался числовой clusters.id, из-за чего кластер отображался
+                    # как "🗂 5" вместо имени и не совпадал с фильтром по имени.
+                    await pool.execute(
+                        "UPDATE tg_accounts SET cluster=$1 WHERE id=$2",
+                        cluster,
+                        acc_id,
+                    )
                 except Exception:
                     log_exc_swallow(
                         log,

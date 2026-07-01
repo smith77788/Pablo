@@ -116,7 +116,7 @@ async def check_bot_keywords(
                     truncated=len(search_results) >= 20,
                 )
 
-                await db.update_tg_account_used(pool, account["id"])
+                await db.update_tg_account_used(pool, account["id"], owner_id)
                 log.debug(
                     "check_bot_keywords: kw=%r bot=%r position=%s account=%s",
                     kw["keyword"],
@@ -256,7 +256,7 @@ async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
                     truncated=len(search_results) >= 20,
                 )
 
-                await db.update_tg_account_used(pool, account["id"])
+                await db.update_tg_account_used(pool, account["id"], kw["owner_id"])
                 log.debug(
                     "ranking_checker: kw=%r bot=%r position=%s account=%s",
                     kw["keyword"],

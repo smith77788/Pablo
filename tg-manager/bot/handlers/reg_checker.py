@@ -294,7 +294,7 @@ async def cb_reg_settings(
         all_accounts = await pool.fetch(
             """SELECT pool, COUNT(*) as cnt
                FROM tg_accounts
-               WHERE owner_id=$1 AND status='active' AND session_str IS NOT NULL
+               WHERE owner_id=$1 AND acc_status='active' AND session_str IS NOT NULL
                GROUP BY pool""",
             callback.from_user.id,
         )
