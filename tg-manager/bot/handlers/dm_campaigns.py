@@ -21,7 +21,7 @@ from bot.states import DmCampaignFSM
 from services import intelligence_engine
 from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
-
+from bot.keyboards import subscription_locked_markup
 from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer
 
