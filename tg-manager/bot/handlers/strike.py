@@ -23,7 +23,7 @@ from bot.callbacks import StrikeCb, ChanCb, BmCb, AccCb
 from bot.states import MiniStrikeFSM, StrikeEmailFSM
 from bot.utils.subscription import require_feature
 from bot.utils.event_status import mark_handled_error
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, safe_edit
 from services import email_oauth
 from services.account_manager import (
     format_telegram_join_ref_display,

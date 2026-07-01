@@ -24,7 +24,7 @@ from bot.callbacks import AiCb, BmCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, safe_edit
 
 from services import ai_memory
 from services.ai_providers import configured_providers

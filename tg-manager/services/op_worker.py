@@ -2030,7 +2030,13 @@ async def _exec_bulk_join_inner(
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_steps, op_id
     )
 
+    # Аккаунты, изолированные из-за сбоя bound-прокси (смена IP ломает auth key).
+    # Объявляем до цикла — иначе NameError при первом же proxy_error.
+    isolated_accounts: set[int] = set()
+
     for acc_idx, acc in enumerate(accounts):
+        if acc["id"] in isolated_accounts:
+            continue
         if proxy_mode == "relay":
             # Strip bound proxy — Telethon will use CF relay instead
             acc_dict = {**dict(acc), "proxy_url": None, "enforce_proxy": False}
