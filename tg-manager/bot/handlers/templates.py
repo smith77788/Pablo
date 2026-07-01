@@ -678,20 +678,22 @@ async def msg_edit_template_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(lambda c: c.data == "tpl_edit_keep_text_fsm")
+@router.callback_query(F.data == "tpl_edit_keep_text_fsm")
 async def cb_edit_keep_text_fsm(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     data = await state.get_data()
-    if not data.get("template_id"):
+    # Требуем и id, и исходный текст — иначе «оставить текущий текст» бессмысленно
+    if not data.get("template_id") or not data.get("old_text"):
         await callback.answer("Сессия истекла. Начните заново.", show_alert=True)
+        await state.clear()
         return
     await state.clear()
     ok = await db.update_template(
         pool,
         data["template_id"],
         callback.from_user.id,
-        data.get("new_name") or data["old_name"],
+        data.get("new_name") or data.get("old_name") or "",
         data["old_text"],
     )
     if ok:
