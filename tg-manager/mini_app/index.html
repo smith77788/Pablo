@@ -34,6 +34,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .back:active{opacity:.6}
 .hdr-title{flex:1;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-meta{text-align:right;flex-shrink:0}
+/* ── Боковая навигация (drawer) ── */
+.hdr-burger{flex-shrink:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,.06);cursor:pointer;color:var(--fg);font-size:19px;line-height:1;user-select:none}
+.hdr-burger:active{background:rgba(255,255,255,.14)}
+#navOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;visibility:hidden;transition:opacity .22s;z-index:120}
+#navOverlay.on{opacity:1;visibility:visible}
+#navDrawer{position:fixed;top:0;left:0;bottom:0;width:82%;max-width:340px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .24s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 24px rgba(0,0,0,.4)}
+#navDrawer.on{transform:translateX(0)}
+.nav-head{padding:calc(var(--safe-t) + 16px) 18px 14px;border-bottom:1px solid var(--sep);display:flex;align-items:center;gap:10px}
+.nav-head-t{font-size:18px;font-weight:800;letter-spacing:-.4px}
+.nav-body{flex:1;overflow-y:auto;padding:8px 0 24px}
+.nav-cat{padding:14px 18px 6px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--hint)}
+.nav-item{display:flex;align-items:center;gap:13px;padding:11px 18px;cursor:pointer;font-size:15px;font-weight:500;color:var(--fg)}
+.nav-item:active{background:rgba(255,255,255,.07)}
+.nav-item.on{background:rgba(88,133,240,.16);color:var(--blue,#5b8def);box-shadow:inset 3px 0 0 var(--blue,#5b8def)}
+.nav-item .ni-ico{font-size:19px;width:24px;text-align:center;flex-shrink:0}
 .hdr-user{font-size:13px;color:var(--hint);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-live{font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
 
@@ -376,12 +391,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </style>
 </head>
 <body>
+<!-- ══════════════════════ БОКОВАЯ НАВИГАЦИЯ ══════════════════════ -->
+<div id="navOverlay" onclick="closeDrawer()"></div>
+<nav id="navDrawer">
+  <div class="nav-head">
+    <div class="hdr-burger" onclick="closeDrawer()">✕</div>
+    <div class="nav-head-t">⚡ Infragram</div>
+  </div>
+  <div class="nav-body" id="navBody"><!-- заполняется buildDrawer() --></div>
+</nav>
 <div id="app">
 <div id="content">
 
 <!-- ══════════════════════ HOME ══════════════════════ -->
 <div class="screen show" id="s-home">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -3733,6 +3758,83 @@ function goTab(tab) {
   if (tab === 'more') buildMoreCategories();
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
+  try { markDrawerActive(); } catch(_) {}
+}
+
+// ── Боковая навигация (drawer) ──────────────────────────────
+const NAV_CATS = [
+  {cat:'Основное', items:[
+    {ico:'📊', lbl:'Дашборд',   tab:'home'},
+    {ico:'🤖', lbl:'Боты',       tab:'bots'},
+    {ico:'📱', lbl:'Аккаунты',   tab:'accounts'},
+    {ico:'📨', lbl:'Рассылки',   tab:'broadcasts'},
+    {ico:'🧩', lbl:'Все функции', tab:'more'},
+  ]},
+  {cat:'Инфраструктура', items:[
+    {ico:'🏗', lbl:'Инфраструктура', fn:'openInfra'},
+    {ico:'🗺', lbl:'Топология',       fn:'openTopology'},
+    {ico:'🌐', lbl:'Экосистемы',      fn:'openEcosystems'},
+    {ico:'🌍', lbl:'Мультигео',       fn:'openMultigeo'},
+  ]},
+  {cat:'Каналы и контент', items:[
+    {ico:'📢', lbl:'Channel Factory', fn:'openChannelFactory'},
+    {ico:'👥', lbl:'Group Factory',   fn:'openGroupFactory'},
+    {ico:'✍️', lbl:'Быстрый пост',    fn:'openQuickPost'},
+    {ico:'📤', lbl:'Массовая публикация', fn:'openMassPub'},
+    {ico:'📋', lbl:'Контент-клонер',  fn:'openContentCloner'},
+  ]},
+  {cat:'Рост и продвижение', items:[
+    {ico:'🌿', lbl:'Growth Agent', fn:'openGrowth'},
+    {ico:'🚀', lbl:'Накрутка',      fn:'openBoost'},
+    {ico:'📣', lbl:'Self Promo',    fn:'openSelfPromo'},
+    {ico:'⚔️', lbl:'Strike',        fn:'openStrike'},
+    {ico:'🔍', lbl:'Парсер аудитории', fn:'openParser'},
+  ]},
+  {cat:'Аналитика и AI', items:[
+    {ico:'🧬', lbl:'DNA аудитории', fn:'openAudienceDna'},
+    {ico:'🧠', lbl:'AI Память',     fn:'openAiMemory'},
+    {ico:'🔎', lbl:'Позиции в поиске', fn:'openKeywordsScreen'},
+    {ico:'🔀', lbl:'Авто-воронки',  fn:'openAutoFunnels'},
+    {ico:'💬', lbl:'Авто-ответы',   fn:'openArScreen'},
+  ]},
+];
+
+function buildDrawer() {
+  const body = document.getElementById('navBody');
+  if (!body || body.dataset.built) return;
+  let html = '';
+  NAV_CATS.forEach(c=>{
+    html += `<div class="nav-cat">${esc(c.cat)}</div>`;
+    c.items.forEach(it=>{
+      const arg = it.tab ? `'${it.tab}',null` : `null,'${it.fn}'`;
+      const dt = it.tab ? ` data-tab="${it.tab}"` : '';
+      html += `<div class="nav-item"${dt} onclick="navGo(${arg})"><span class="ni-ico">${it.ico}</span>${esc(it.lbl)}</div>`;
+    });
+  });
+  body.innerHTML = html;
+  body.dataset.built = '1';
+}
+function markDrawerActive() {
+  document.querySelectorAll('#navBody .nav-item[data-tab]').forEach(el=>{
+    el.classList.toggle('on', el.dataset.tab === (typeof CUR!=='undefined'?CUR:'home'));
+  });
+}
+function openDrawer() {
+  buildDrawer(); markDrawerActive();
+  document.getElementById('navOverlay')?.classList.add('on');
+  document.getElementById('navDrawer')?.classList.add('on');
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_) {}
+}
+function closeDrawer() {
+  document.getElementById('navOverlay')?.classList.remove('on');
+  document.getElementById('navDrawer')?.classList.remove('on');
+}
+function navGo(tab, fn) {
+  closeDrawer();
+  try {
+    if (tab) { goTab(tab); }
+    else if (fn && typeof window[fn] === 'function') { window[fn](); }
+  } catch(e) { try { toast('Не удалось открыть раздел'); } catch(_) {} }
 }
 
 function _syncBackButton() {
