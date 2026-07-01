@@ -639,7 +639,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       type, added_at
                FROM managed_channels WHERE owner_id=$1
                ORDER BY members_count DESC NULLS LAST LIMIT 50""", uid)
-        return _json_resp({"channels": rows})
+        # total — истинное число каналов (список ограничен LIMIT 50);
+        # иначе подпись «N каналов» показывала бы максимум 50 вместо реального.
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+        return _json_resp({"channels": rows, "total": int(total or 0)})
 
     # ── Campaigns / Funnels ──────────────────────────────────────────────────
 

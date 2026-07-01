@@ -4496,19 +4496,21 @@ async function loadAccounts() {
   });
   api('/api/miniapp/channels').then(cd => {
     CUR_CHANNELS = cd.channels||[];
-    txt('m-ch-cnt', CUR_CHANNELS.length+' каналов');
-    renderChPreview(CUR_CHANNELS);
+    // Истинное число каналов из cd.total (список ограничен 50) — иначе подпись врала
+    txt('m-ch-cnt', (cd.total!=null?cd.total:CUR_CHANNELS.length)+' каналов');
+    renderChPreview(CUR_CHANNELS, cd.total);
   }).catch(() => {
     txt('chPreview', '');
   });
 }
 
-function renderChPreview(list) {
+function renderChPreview(list, total) {
   const el = document.getElementById('chPreview');
   if (!el) return;
   if (!list.length) { el.innerHTML=empty('📡','Нет каналов','Добавьте канал через меню в Telegram'); return; }
+  const totalN = (total!=null ? total : list.length);
   const preview = list.slice(0,3);
-  const more = list.length - 3;
+  const more = totalN - 3;
   el.innerHTML = preview.map(c=>{
     const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
     const type = c.type==='supergroup'?'💬':c.type==='channel'?'📡':'💬';
@@ -4521,7 +4523,7 @@ function renderChPreview(list) {
       <span class="chev">›</span>
     </div>`;
   }).join('') + (more>0
-    ? `<div class="li tap" onclick="openChannels()"><div class="ava ava-purple">+${more}</div><div class="li-body"><div class="li-name">Показать все ${list.length} каналов</div></div><span class="chev">›</span></div>`
+    ? `<div class="li tap" onclick="openChannels()"><div class="ava ava-purple">+${more}</div><div class="li-body"><div class="li-name">Показать все ${totalN} каналов</div></div><span class="chev">›</span></div>`
     : '');
 }
 
