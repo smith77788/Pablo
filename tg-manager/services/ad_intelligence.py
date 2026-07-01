@@ -253,6 +253,48 @@ def _extract_advertiser(text: str) -> Optional[str]:
     return None
 
 
+# ── Определение ниш канала по ключевым словам ─────────────────────────────
+# Ключ — метка ниши, значение — подстроки-маркеры (lowercase, RU+EN).
+_NICHE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "крипта": ("крипт", "bitcoin", "btc", "эфир", "ethereum", "токен", "nft",
+               "блокчейн", "trading", "трейд", "биржа", "memecoin", "web3", "defi"),
+    "гемблинг": ("казино", "casino", "ставк", "беттинг", "betting", "слот",
+                 "покер", "poker", "1win", "букмекер"),
+    "финансы": ("инвест", "invest", "финанс", "займ", "кредит", "forex",
+                "форекс", "трейдинг", "дивиденд"),
+    "заработок": ("заработок", "пассивн", "доход", "схем", "млм", "referral",
+                  "реферал", "arbitrage", "арбитраж трафика"),
+    "обучение": ("курс", "обучени", "вебинар", "webinar", "школа", "урок", "менторств"),
+    "здоровье": ("здоров", "похуден", "фитнес", "fitness", "диет", "бад", "нутрициол"),
+    "недвижимость": ("недвижим", "квартир", "ипотек", "новостройк", "аренд жил"),
+    "авто": ("автомобил", "автосалон", "автоподбор", "запчаст"),
+    "бьюти": ("космет", "макияж", "маникюр", "визаж", "бьюти", "beauty"),
+    "IT": ("программир", "разработ", "нейросет", "chatbot", "чат-бот", "python",
+           "верстк", "backend", "frontend"),
+    "товарка": ("скидк", "распродаж", "маркетплейс", "wildberries", "ozon",
+                "доставк", "дропшип"),
+    "adult": ("эскорт", "интим", "18+", "adult", "onlyfans"),
+}
+
+
+def detect_niches(title: str, texts: list[str], max_niches: int = 5) -> list[str]:
+    """Определить ниши канала по заголовку и текстам постов.
+
+    Считает попадания маркеров; возвращает ниши, отсортированные по числу
+    совпадений (самые релевантные первыми). Возвращает [] если ничего не найдено.
+    """
+    haystack = (title + " " + " ".join(texts)).lower()
+    if not haystack.strip():
+        return []
+    scored: list[tuple[int, str]] = []
+    for niche, markers in _NICHE_KEYWORDS.items():
+        hits = sum(haystack.count(m) for m in markers)
+        if hits:
+            scored.append((hits, niche))
+    scored.sort(reverse=True)
+    return [niche for _, niche in scored[:max_niches]]
+
+
 # ── Сканирование рекламных постов ─────────────────────────────────────────
 
 
@@ -350,14 +392,21 @@ async def scan_channel_ads(
         quality_score = score_channel_quality(subscribers, views_avg, er_rate)
         ad_price_est = _estimate_ad_price(subscribers, er_rate)
 
+        # Определяем ниши канала по заголовку + текстам постов (было: всегда [])
+        niches = detect_niches(
+            channel_title or channel_username,
+            [m.text or "" for m in messages],
+        )
+
         placement_id = await _upsert_placement(
             pool, owner_id, channel_username, channel_title, subscribers,
-            views_avg, er_rate, ad_price_est, quality_score, [],
+            views_avg, er_rate, ad_price_est, quality_score, niches,
             len(ad_posts),
             ad_posts[0].date if ad_posts else None,
         )
 
         # Сохраняем рекламные посты
+        primary_niche = niches[0] if niches else ""
         for msg in ad_posts:
             advertiser = _extract_advertiser(msg.text or "")
             await _save_ad_post(
@@ -369,7 +418,8 @@ async def scan_channel_ads(
                 getattr(msg, "views", 0) or 0,
             )
             if advertiser:
-                await _upsert_advertiser(pool, owner_id, advertiser)
+                # Рекламодатель наследует нишу канала-размещения
+                await _upsert_advertiser(pool, owner_id, advertiser, niche=primary_niche)
 
         return {
             "status": "ok",
