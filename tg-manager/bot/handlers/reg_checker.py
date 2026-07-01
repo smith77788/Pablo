@@ -164,7 +164,7 @@ def _analyze_kb(entity_id: int, entity_type: str, current_page: int, is_followin
     )
     kb.button(
         text="🔄 Обновить",
-        callback_data=RegCb(action="analyze", entity_id=entity_id, entity_type=entity_type, page=current_page),
+        callback_data=RegCb(action="refresh", entity_id=entity_id, entity_type=entity_type, page=current_page),
     )
     kb.button(text="◀️ Назад", callback_data=RegCb(action="menu"))
     kb.adjust(3, 3, 2, 1, 1)
@@ -1161,6 +1161,16 @@ async def _get_or_fetch_analysis(
     if data:
         _analysis_cache[entity_id] = (data, time.time())
     return data
+
+
+@router.callback_query(RegCb.filter(F.action == "refresh"))
+async def cb_analyze_refresh(
+    callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
+) -> None:
+    """Кнопка «🔄 Обновить»: сбрасывает кэш и тянет свежие данные из Telegram.
+    Без сброса кэша (TTL=600s) кнопка перерисовывала те же данные 10 минут."""
+    _analysis_cache.pop(callback_data.entity_id, None)
+    await cb_analyze(callback, callback_data, pool)
 
 
 @router.callback_query(RegCb.filter(F.action == "analyze"))
