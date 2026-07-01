@@ -3806,14 +3806,32 @@ function buildDrawer() {
   const body = document.getElementById('navBody');
   if (!body || body.dataset.built) return;
   let html = '';
-  NAV_CATS.forEach(c=>{
-    html += `<div class="nav-cat">${esc(c.cat)}</div>`;
-    c.items.forEach(it=>{
-      const arg = it.tab ? `'${it.tab}',null` : `null,'${it.fn}'`;
-      const dt = it.tab ? ` data-tab="${it.tab}"` : '';
-      html += `<div class="nav-item"${dt} onclick="navGo(${arg})"><span class="ni-ico">${it.ico}</span>${esc(it.lbl)}</div>`;
-    });
+  // 1) Верхний блок — основные вкладки
+  html += '<div class="nav-cat">Навигация</div>';
+  [['home','📊','Дашборд'],['bots','🤖','Боты'],['accounts','📱','Аккаунты'],
+   ['broadcasts','📨','Рассылки'],['more','🧩','Все функции']].forEach(([tab,ico,lbl])=>{
+    html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
+  // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки).
+  //    Меню всегда полное и синхронно с каталогом функций, без дублирования списка.
+  const more = document.getElementById('s-more');
+  if (more) {
+    more.querySelectorAll('.sec').forEach(sec=>{
+      let grid = sec.nextElementSibling;
+      while (grid && !grid.classList.contains('mgmt-grid')) grid = grid.nextElementSibling;
+      if (!grid) return;
+      const tiles = grid.querySelectorAll('.mgmt-tile');
+      if (!tiles.length) return;
+      html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>`;
+      tiles.forEach(tile=>{
+        const ico = ((tile.querySelector('.mgmt-tile-ico')||{}).textContent||'•').trim();
+        const lbl = ((tile.querySelector('.mgmt-tile-lbl')||{}).textContent||'').trim();
+        if (!lbl) return;
+        const handler = (tile.getAttribute('onclick')||'').replace(/"/g,'&quot;');
+        html += `<div class="nav-item" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
+      });
+    });
+  }
   body.innerHTML = html;
   body.dataset.built = '1';
 }
