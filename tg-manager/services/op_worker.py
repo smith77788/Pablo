@@ -1103,9 +1103,16 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             summary = _op_summary
             from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb, StrikeCb
+            from bot.callbacks import BmCb, StrikeCb, MassPubCb
 
             kb = InlineKeyboardBuilder()
+            # Partial-fail → retry: для массовой публикации с ошибками даём кнопку
+            # повторить ТОЛЬКО неудавшиеся каналы (best-in-class mass-op).
+            if op_type == "mass_publish" and _failed > 0:
+                kb.button(
+                    text=f"🔁 Повторить неудавшиеся ({_failed})",
+                    callback_data=MassPubCb(action="retry_failed", target_id=op_id),
+                )
             kb.button(
                 text="📋 Детали операции",
                 callback_data=BmCb(action="op_detail", op_id=op_id),
