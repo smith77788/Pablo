@@ -180,12 +180,15 @@ async def _launch_campaign(
     await state.clear()
 
     try:
+        # op_worker._exec_niche_growth_post hard-caps at 5 groups per run
+        # regardless of what's submitted here (safety limit to reduce ban risk) —
+        # match that cap so the progress bar denominator isn't misleading.
         op_id = await operation_bus.submit(
             pool,
             callback.from_user.id,
             "niche_growth_post",
-            {"niche": niche, "promo_text": promo_text, "max_groups": 50},
-            total_items=50,
+            {"niche": niche, "promo_text": promo_text, "max_groups": 5},
+            total_items=5,
         )
     except Exception as exc:
         log.exception("growth_hub: submit failed: %s", exc)
