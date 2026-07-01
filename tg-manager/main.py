@@ -347,6 +347,15 @@ async def main() -> None:
     op_worker.init_op_worker_pool(pool)
     await op_worker.reset_stale_in_operation(pool)
 
+    # Финализируем «зависшие» парсер-раны (pending/running > 1ч): раньше сбой
+    # client.connect() оставлял их в вечном 'pending' — чистим сироты при старте.
+    try:
+        _stale = await _db.finalize_stale_parser_runs(pool)
+        if _stale:
+            log.info("startup: finalized %d stale parser_runs → failed", _stale)
+    except Exception:
+        log.warning("startup: failed to finalize stale parser_runs", exc_info=True)
+
     # Send deployment notification to admins on startup (detects new deploys)
     asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 

@@ -2886,6 +2886,27 @@ async def upsert_managed_channels(
     return len(channels)
 
 
+async def finalize_stale_parser_runs(pool: asyncpg.Pool, older_than_minutes: int = 60) -> int:
+    """Помечает зависшие parser_runs (pending/running дольше N минут) как failed.
+
+    Возвращает число обновлённых строк. Устраняет сироты, оставшиеся от сбоя
+    парсера (например, таймаут client.connect()) до фикса финализации.
+    """
+    result = await pool.execute(
+        """UPDATE parser_runs
+           SET status='failed',
+               error=COALESCE(error, 'Прервано: процесс завершился до финализации'),
+               finished_at=now()
+           WHERE status IN ('pending', 'running')
+             AND started_at < now() - ($1::int * interval '1 minute')""",
+        older_than_minutes,
+    )
+    try:
+        return int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 async def get_managed_channels(
     pool: asyncpg.Pool, owner_id: int, acc_id: int | None = None
 ) -> list[asyncpg.Record]:

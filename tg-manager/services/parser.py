@@ -246,6 +246,24 @@ async def parse_members(
                 log.warning("parser GetParticipants error: %s", e)
                 break
 
+    except Exception as e:
+        # Любой сбой вне внутренних try (например, client.connect() timeout при
+        # мёртвом прокси) НЕ должен оставлять run в вечном 'pending'.
+        log.warning("parse_members outer error run=%s: %s", run_id, e)
+        await _update_run(
+            pool, run_id, "failed", total_found, total_saved, error=str(e)[:300]
+        )
+        infra_memory.record_account_op(
+            acc["id"], "parse", False, str(e)[:100],
+            duration_s=time.monotonic() - t0_parse,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "run_id": run_id,
+            "total_found": total_found,
+            "total_saved": total_saved,
+        }
     finally:
         try:
             await client.disconnect()
@@ -371,6 +389,23 @@ async def parse_active_users(
                         log_exc_swallow(log, "Сбой progress_cb в parser (reactors)")
                 await asyncio.sleep(0.5)
 
+    except Exception as e:
+        # Не оставляем run в вечном 'pending' при сбое connect()/iter_messages.
+        log.warning("parse_active_users outer error run=%s: %s", run_id, e)
+        await _update_run(
+            pool, run_id, "failed", total_found, total_saved, error=str(e)[:300]
+        )
+        infra_memory.record_account_op(
+            acc["id"], "parse", False, str(e)[:100],
+            duration_s=time.monotonic() - t0_parse,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "run_id": run_id,
+            "total_found": total_found,
+            "total_saved": total_saved,
+        }
     finally:
         try:
             await client.disconnect()
