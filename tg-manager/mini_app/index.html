@@ -5246,7 +5246,7 @@ async function loadOps() {
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
             ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="cancelOp(${o.id})">Отмена</span>`:''}
-            ${o.status==='failed'?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="retryOp(${o.id})">↺ Повтор</span>`:''}
+            ${(o.status==='failed'||(o.op_type==='mass_publish'&&(o.err_cnt||0)>0&&o.status!=='running'&&o.status!=='pending'))?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="retryOp(${o.id})">↺ Повтор${o.op_type==='mass_publish'&&(o.err_cnt||0)>0?' ('+o.err_cnt+')':''}</span>`:''}
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}

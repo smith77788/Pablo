@@ -896,16 +896,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         status_filter = request.query.get("status")
         if status_filter and status_filter not in ("pending", "running", "done", "failed", "cancelled"):
             status_filter = None
+        # err_cnt — число упавших под-элементов (каналов) для показа кнопки
+        # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
+        _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
+                    "WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt")
         if status_filter:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1 AND status=$2
-                   ORDER BY created_at DESC LIMIT 30""", uid, status_filter)
+                f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
+                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at, {_err_sub}
+                   FROM operation_queue oq WHERE oq.owner_id=$1 AND oq.status=$2
+                   ORDER BY oq.created_at DESC LIMIT 30""", uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT 30""", uid)
+                f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
+                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at, {_err_sub}
+                   FROM operation_queue oq WHERE oq.owner_id=$1
+                   ORDER BY oq.created_at DESC LIMIT 30""", uid)
         return _json_resp({"operations": rows})
 
     async def cancel_operation(request: web.Request) -> web.Response:
@@ -938,13 +944,43 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid op_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT id FROM operation_queue WHERE id=$1 AND owner_id=$2 AND status='failed'",
+                "SELECT op_type, params, label, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
+                return _err("Not found", 404)
+
+            # Массовая публикация: повторяем ТОЛЬКО упавшие каналы (channel_ids из
+            # operation_log). Иначе успешные каналы получили бы пост повторно
+            # (дубликаты). Работает и для partial-success ('done' с ошибками) —
+            # паритет с ботом (retry_failed).
+            if row["op_type"] == "mass_publish":
+                import json as _json
+                failed = await pool.fetch(
+                    "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='error'",
+                    op_id)
+                failed_ids = [
+                    int(r["target"]) for r in failed
+                    if (r["target"] or "").strip().lstrip("-").isdigit()
+                ]
+                failed_ids = list(dict.fromkeys(failed_ids))
+                if not failed_ids:
+                    return _err("Нет неудавшихся каналов для повтора", 400)
+                try:
+                    base = row["params"] if isinstance(row["params"], dict) else _json.loads(row["params"] or "{}")
+                except (TypeError, ValueError):
+                    base = {}
+                base = dict(base)
+                base["channel_ids"] = failed_ids
+                new_id = await pool.fetchval(
+                    """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
+                       VALUES($1,$2,$3::jsonb,'pending',$4,$5) RETURNING id""",
+                    uid, row["op_type"], _json.dumps(base),
+                    f"Повтор неудавшихся ({len(failed_ids)})", len(failed_ids))
+                return _json_resp({"ok": True, "new_id": new_id, "channels": len(failed_ids)})
+
+            # Прочие операции — повтор целиком, только для проваленных.
+            if row["status"] != "failed":
                 return _err("Not found or not failed", 404)
-            # Carry over total_items so the retried op shows a real progress bar;
-            # done_items resets to 0 (fresh run). Executors that recompute
-            # total_items themselves will simply overwrite it.
             new_id = await pool.fetchval(
                 """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
                    SELECT owner_id, op_type, params, 'pending', label, total_items
