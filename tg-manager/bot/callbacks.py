@@ -598,10 +598,11 @@ class NodesCb(CallbackData, prefix="nd"):
 
 
 class BoostCb(CallbackData, prefix="bst"):
-    """Накрутка — просмотры, реакции, сторис."""
+    """Накрутка — просмотры, реакции, сторис, подписчики/участники, старты в ботах."""
 
-    action: str          # menu|views|reactions|stories|confirm
-    sub: str = ""        # views|reactions|stories (for confirm)
+    action: str          # menu|views|reactions|stories|subscribers|bot_starts|premium|confirm
+    sub: str = ""        # views|reactions|stories|subscribers|bot_starts (for confirm)
+                          # subs_yes|subs_no|bot_yes|bot_no (for premium)
 
 
 class InviterCb(CallbackData, prefix="inv"):

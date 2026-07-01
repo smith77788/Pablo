@@ -1965,6 +1965,96 @@ async def join_channel(
             log_exc_swallow(log, "Сбой в join_channel")
 
 
+async def is_premium_account(session_string: str, _acc: dict | None = None) -> bool:
+    """Проверить, является ли сам аккаунт (владелец сессии) Telegram Premium.
+
+    Используется для фильтрации аккаунтов в накрутке "только Premium".
+    Любая ошибка подключения/API трактуется как False — вызывающий код должен
+    просто пропустить такой аккаунт при фильтрации, а не валить всю операцию.
+    """
+    if not session_string:
+        return False
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        return bool(getattr(me, "premium", False))
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "premium_check")
+        return False
+    except (OSError, ConnectionError):
+        _record_proxy_fail(_acc, "premium_check")
+        return False
+    except Exception as e:
+        log.debug("is_premium_account error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в is_premium_account")
+
+
+async def send_bot_start(
+    session_string: str,
+    bot_username: str,
+    payload: str | None = None,
+    _acc: dict | None = None,
+) -> dict:
+    """Отправить боту команду /start (с опциональным deep-link payload).
+
+    Returns {"ok": True} on success or {"error": ..., ...} matching the same
+    shape used by join_channel (proxy_error/flood_wait/banned flags).
+    """
+    if not session_string:
+        return {"error": "session_str отсутствует — сессия недоступна"}
+    target = (bot_username or "").strip().lstrip("@")
+    if not target:
+        return {"error": "Не указан бот"}
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await asyncio.wait_for(client.get_entity(target), timeout=_OP_TIMEOUT)
+        text = f"/start {payload}" if payload else "/start"
+        await asyncio.wait_for(client.send_message(entity, text), timeout=_OP_TIMEOUT)
+        return {"ok": True}
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "bot_start")
+        return {
+            "error": "Timeout при подключении — прокси недоступен",
+            "proxy_error": True,
+        }
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "bot_start")
+        return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
+    except Exception as e:
+        from telethon.errors import (
+            FloodWaitError,
+            UserDeactivatedBanError,
+            UsernameNotOccupiedError,
+            UsernameInvalidError,
+        )
+
+        if isinstance(e, FloodWaitError):
+            return {
+                "error": f"FloodWait {e.seconds}с — подождите перед запуском бота",
+                "flood_wait": e.seconds,
+            }
+        if isinstance(e, UserDeactivatedBanError):
+            return {"error": f"Аккаунт заблокирован: {e}", "banned": True}
+        if isinstance(e, (UsernameNotOccupiedError, UsernameInvalidError)):
+            return {"error": "Бот не найден — проверьте username"}
+        log.exception("send_bot_start error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в send_bot_start")
+
+
 async def leave_channel(
     session_string: str, channel_id: int | str, _acc: dict | None = None
 ) -> dict:

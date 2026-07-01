@@ -917,6 +917,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_boost_reactions(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_stories":
                 result = await _exec_boost_stories(pool, bot, op_id, owner_id, params)
+            elif op_type == "boost_subscribers":
+                result = await _exec_boost_subscribers(pool, bot, op_id, owner_id, params)
+            elif op_type == "boost_bot_starts":
+                result = await _exec_boost_bot_starts(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_invite":
                 result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_set_profile":
@@ -6247,6 +6251,188 @@ async def _exec_boost_stories(
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
+async def _premium_filter_accounts(
+    pool: asyncpg.Pool, op_id: int, accounts: list, premium_only: bool
+) -> tuple[list, int]:
+    """Отфильтровать аккаунты по признаку Premium (если запрошено).
+
+    Не проваливает операцию, если часть аккаунтов не Premium — просто
+    исключает их из списка. Возвращает (отфильтрованные_аккаунты, пропущено_шт).
+    """
+    if not premium_only:
+        return accounts, 0
+    from services import account_manager
+
+    filtered = []
+    skipped = 0
+    for acc in accounts:
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            is_prem = await account_manager.is_premium_account(acc["session_str"], dict(acc))
+        except Exception:
+            is_prem = False
+        if is_prem:
+            filtered.append(acc)
+        else:
+            skipped += 1
+    return filtered, skipped
+
+
+async def _exec_boost_subscribers(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Накрутка подписчиков/участников: каждый аккаунт вступает в канал/группу.
+
+    Переиспользует account_manager.join_channel — уже умеет и публичные
+    @username, и приватные t.me/+hash инвайт-ссылки.
+    """
+    from services import account_manager
+
+    target = params.get("target", "")
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    premium_only = bool(params.get("premium_only"))
+
+    if not target or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры boost_subscribers"}
+
+    accounts = await pool.fetch(
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    accounts, skipped_premium = await _premium_filter_accounts(pool, op_id, accounts, premium_only)
+    if not accounts:
+        return {
+            "status": "failed",
+            "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
+        }
+    if skipped_premium:
+        # total_items учитывало все выбранные аккаунты; часть отсеяна фильтром
+        # Premium — подгоняем total_items, иначе прогресс-бар не дойдёт до 100%.
+        await pool.execute(
+            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
+        )
+
+    ok_count, fail_count = 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await account_manager.join_channel(acc["session_str"], target, _acc=dict(acc))
+            if res.get("error"):
+                fail_count += 1
+                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+            else:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+        except Exception as exc:
+            log.warning("boost_subscribers op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(random.uniform(3.0, 7.0))
+
+    summary = (
+        f"👥 Подписчики/участники: {target}\n"
+        f"✅ Вступили: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_boost_bot_starts(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Накрутка стартов в ботах: каждый аккаунт отправляет /start (с payload) боту."""
+    from services import account_manager
+
+    bot_username = (params.get("bot_username") or "").strip()
+    payload = (params.get("payload") or "").strip() or None
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    premium_only = bool(params.get("premium_only"))
+
+    if not bot_username or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры boost_bot_starts"}
+
+    accounts = await pool.fetch(
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    accounts, skipped_premium = await _premium_filter_accounts(pool, op_id, accounts, premium_only)
+    if not accounts:
+        return {
+            "status": "failed",
+            "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
+        }
+    if skipped_premium:
+        await pool.execute(
+            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
+        )
+
+    ok_count, fail_count = 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await account_manager.send_bot_start(
+                acc["session_str"], bot_username, payload, _acc=dict(acc)
+            )
+            if res.get("error"):
+                fail_count += 1
+                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+            else:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+        except Exception as exc:
+            log.warning("boost_bot_starts op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(random.uniform(2.5, 6.0))
+
+    summary = (
+        f"🚀 Старты в боте: @{bot_username}"
+        + (f" (payload: {payload})" if payload else "")
+        + f"\n✅ Стартов: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
 # ── Инвайтер ──────────────────────────────────────────────────────────────────
 
 async def _exec_mass_invite(
@@ -6733,6 +6919,12 @@ async def _exec_niche_growth_post(
         }
 
     if not groups:
+        # Correct total_items down from the submitted placeholder (bot handler
+        # submits total_items=50 regardless of the real 5-group cap) so the
+        # progress bar doesn't show a misleading "0/50" when nothing was found.
+        await pool.execute(
+            "UPDATE operation_queue SET total_items=0 WHERE id=$1", op_id
+        )
         return {
             "status": "done",
             "ok": 0,

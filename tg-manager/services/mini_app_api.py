@@ -132,6 +132,22 @@ async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args) -> dict | None:
         return None
 
 
+def _dna_to_dict(dna: Any) -> dict:
+    """Serialize an AudienceDNA dataclass instance to a JSON-friendly dict."""
+    return {
+        "bot_id": dna.bot_id,
+        "owner_id": dna.owner_id,
+        "peak_hours": list(dna.peak_hours),
+        "peak_days": list(dna.peak_days),
+        "best_content_types": list(dna.best_content_types),
+        "avg_engagement_rate": dna.avg_engagement_rate,
+        "churn_risk_pct": dna.churn_risk_pct,
+        "top_topics": list(dna.top_topics),
+        "total_users_analyzed": dna.total_users_analyzed,
+        "computed_at": dna.computed_at.isoformat() if dna.computed_at else None,
+    }
+
+
 async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
     bots = await _safe_count(pool,
         "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
@@ -1446,6 +1462,62 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception as exc:
             log.exception("topology_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def topology_links(request: web.Request) -> web.Response:
+        """Drill-down for the Topology Map: which account owns which channels/groups,
+        and per-bot subscriber counts — topology_overview only returns flat totals."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT a.id AS acc_id, a.phone, a.first_name,
+                          mc.id AS channel_pk, mc.channel_id, mc.title, mc.username
+                   FROM tg_accounts a
+                   LEFT JOIN managed_channels mc
+                       ON mc.acc_id = a.id AND mc.owner_id = a.owner_id
+                   WHERE a.owner_id=$1
+                   ORDER BY a.id, mc.title""",
+                uid,
+            )
+            by_acc: dict[int, dict] = {}
+            for r in rows:
+                acc = by_acc.setdefault(r["acc_id"], {
+                    "acc_id": r["acc_id"],
+                    "label": f"@{r['phone']}" if not r["first_name"] else r["first_name"],
+                    "channels": [],
+                })
+                if r["channel_pk"] is not None:
+                    acc["channels"].append({
+                        "id": r["channel_pk"],
+                        "channel_id": r["channel_id"],
+                        "title": r["title"] or "",
+                        "username": r["username"] or "",
+                    })
+            bot_rows = await pool.fetch(
+                """SELECT b.bot_id, b.username, b.first_name,
+                          COUNT(bu.user_id) FILTER (WHERE bu.is_active) AS subs
+                   FROM managed_bots b
+                   LEFT JOIN bot_users bu ON bu.bot_id = b.bot_id
+                   WHERE b.added_by=$1
+                   GROUP BY b.bot_id, b.username, b.first_name
+                   ORDER BY subs DESC NULLS LAST""",
+                uid,
+            )
+            return _json_resp({
+                "accounts": list(by_acc.values()),
+                "bots": [
+                    {
+                        "bot_id": r["bot_id"],
+                        "label": f"@{r['username']}" if r["username"] else (r["first_name"] or ""),
+                        "subscribers": r["subs"] or 0,
+                    }
+                    for r in bot_rows
+                ],
+            })
+        except Exception as exc:
+            log.exception("topology_links uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Infra Analytics ────────────────────────────────────────────────────────
@@ -6658,6 +6730,81 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("audience_dna_list uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def audience_dna_profile(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            from database import db as _db
+            from services import audience_dna as dna_svc
+
+            bot_row = await _db.get_bot(pool, bot_id, uid)
+            if not bot_row:
+                return _err("Not found", 404)
+
+            dna = await dna_svc.get_dna(pool, bot_id)
+            if not dna:
+                return _json_resp({"computed": False})
+
+            data = _dna_to_dict(dna)
+            data["computed"] = True
+            data["recommendations"] = dna_svc.generate_recommendations(dna)
+            return _json_resp(data)
+        except Exception as exc:
+            log.exception("audience_dna_profile uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
+    async def audience_dna_compute(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            from database import db as _db
+            from services import audience_dna as dna_svc
+
+            bot_row = await _db.get_bot(pool, bot_id, uid)
+            if not bot_row:
+                return _err("Not found", 404)
+
+            dna = await dna_svc.compute_dna(pool, bot_id, uid)
+            data = _dna_to_dict(dna)
+            data["computed"] = True
+            data["recommendations"] = dna_svc.generate_recommendations(dna)
+            return _json_resp(data)
+        except Exception as exc:
+            log.exception("audience_dna_compute uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
+    async def audience_dna_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            from database import db as _db
+            from services import audience_dna as dna_svc
+
+            bot_row = await _db.get_bot(pool, bot_id, uid)
+            if not bot_row:
+                return _err("Not found", 404)
+
+            history = await dna_svc.get_dna_history(pool, bot_id, limit=10)
+            return _json_resp([_dna_to_dict(snap) for snap in history])
+        except Exception as exc:
+            log.exception("audience_dna_history uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
     # ── Auto Funnels ──────────────────────────────────────────────────────────
 
     async def auto_funnels_list(request: web.Request) -> web.Response:
@@ -7022,6 +7169,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/health", health_overview)
     # Topology Map
     app.router.add_get("/api/miniapp/topology", topology_overview)
+    app.router.add_get("/api/miniapp/topology/links", topology_links)
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
@@ -7152,6 +7300,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/semantic_memory/{bot_id}", semantic_memory_bot)
     # Audience DNA
     app.router.add_get("/api/miniapp/audience_dna", audience_dna_list)
+    app.router.add_get("/api/miniapp/audience_dna/{bot_id}/profile", audience_dna_profile)
+    app.router.add_post("/api/miniapp/audience_dna/{bot_id}/compute", audience_dna_compute)
+    app.router.add_get("/api/miniapp/audience_dna/{bot_id}/history", audience_dna_history)
     # Auto Funnels
     app.router.add_get("/api/miniapp/auto_funnels", auto_funnels_list)
     app.router.add_post("/api/miniapp/auto_funnel", auto_funnel_create)

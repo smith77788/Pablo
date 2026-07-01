@@ -43,6 +43,17 @@ class BoostStories(StatesGroup):
     acc_count = State()
 
 
+class BoostSubscribers(StatesGroup):
+    target = State()
+    acc_count = State()
+
+
+class BoostBotStarts(StatesGroup):
+    bot_username = State()
+    payload = State()
+    acc_count = State()
+
+
 # ── Утилиты ──────────────────────────────────────────────────────────────────
 
 async def _edit(cb: CallbackQuery, text: str, markup=None):
@@ -90,11 +101,14 @@ async def cb_boost_menu(
     kb.button(text="👁 Просмотры", callback_data=BoostCb(action="views"))
     kb.button(text="❤ Реакции", callback_data=BoostCb(action="reactions"))
     kb.button(text="📖 Сторис", callback_data=BoostCb(action="stories"))
+    kb.button(text="👥 Подписчики/Участники", callback_data=BoostCb(action="subscribers"))
+    kb.button(text="🚀 Старты в ботах", callback_data=BoostCb(action="bot_starts"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
-    kb.adjust(3, 1)
+    kb.adjust(3, 2, 1)
     text = (
         "🚀 <b>Накрутка</b>\n\n"
-        "Массовые просмотры, реакции и просмотр сторис через ваши аккаунты.\n\n"
+        "Массовые просмотры, реакции, просмотр сторис, вступления и старты "
+        "в ботах через ваши аккаунты.\n\n"
         f"🔑 Доступно аккаунтов: <b>{total}</b>\n\n"
         "Выберите тип накрутки:"
     )
@@ -352,6 +366,200 @@ async def msg_stories_acc_count(
     )
 
 
+# ── Подписчики / Участники ───────────────────────────────────────────────────
+
+@router.callback_query(BoostCb.filter(F.action == "subscribers"))
+async def cb_boost_subscribers_start(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await state.set_state(BoostSubscribers.target)
+    await _edit(
+        callback,
+        "👥 <b>Накрутка подписчиков/участников</b>\n\n"
+        "Введите @username канала/группы или ссылку t.me/...\n"
+        "(поддерживаются и приватные ссылки вида t.me/+хэш)\n\n"
+        "<i>Каждый выбранный аккаунт вступит в указанный канал/группу.</i>",
+        _cancel_kb(),
+    )
+
+
+@router.message(BoostSubscribers.target)
+async def msg_subscribers_target(message: Message, state: FSMContext) -> None:
+    from services.boost_engine import parse_channel_ref
+    target = parse_channel_ref(message.text or "")
+    if not target:
+        await message.answer("⚠️ Не удалось распознать канал/группу. Введите @username или t.me/link")
+        return
+    await state.update_data(target=target)
+    await state.set_state(BoostSubscribers.acc_count)
+    await message.answer(
+        f"📌 Цель: <code>{html.escape(target)}</code>\n\n"
+        "Сколько аккаунтов использовать для вступления?\n"
+        "Введите число или <code>0</code> — все доступные:",
+        parse_mode="HTML",
+        reply_markup=_cancel_kb(),
+    )
+
+
+@router.message(BoostSubscribers.acc_count)
+async def msg_subscribers_acc_count(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    try:
+        n = int(message.text or "0")
+    except ValueError:
+        await message.answer("⚠️ Введите число")
+        return
+    total = await _get_acc_count(pool, message.from_user.id)
+    use = min(n, total) if n > 0 else total
+    if use == 0:
+        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты.")
+        return
+    await state.update_data(acc_count=use)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💎 Только Premium", callback_data=BoostCb(action="premium", sub="subs_yes"))
+    kb.button(text="👤 Все аккаунты", callback_data=BoostCb(action="premium", sub="subs_no"))
+    kb.button(text="❌ Отмена", callback_data=BoostCb(action="menu"))
+    kb.adjust(2, 1)
+    await message.answer(
+        f"🔑 Аккаунтов: <b>{use}</b>\n\n"
+        "Использовать только Premium-аккаунты (для эффекта премиум-подписчиков)?",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Старты в ботах ────────────────────────────────────────────────────────────
+
+@router.callback_query(BoostCb.filter(F.action == "bot_starts"))
+async def cb_boost_bot_starts_start(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await state.set_state(BoostBotStarts.bot_username)
+    await _edit(
+        callback,
+        "🚀 <b>Накрутка стартов в ботах</b>\n\n"
+        "Введите @username бота, которого нужно запустить:",
+        _cancel_kb(),
+    )
+
+
+@router.message(BoostBotStarts.bot_username)
+async def msg_bot_starts_username(message: Message, state: FSMContext) -> None:
+    from services.boost_engine import parse_channel_ref
+    bot_username = parse_channel_ref(message.text or "").lstrip("@")
+    if not bot_username:
+        await message.answer("⚠️ Не удалось распознать бота. Введите @username")
+        return
+    await state.update_data(bot_username=bot_username)
+    await state.set_state(BoostBotStarts.payload)
+    await message.answer(
+        f"📌 Бот: <code>@{html.escape(bot_username)}</code>\n\n"
+        "Введите deep-link payload для команды /start (например <code>ref_XXXX</code>),\n"
+        "или отправьте <code>-</code>, чтобы запустить бота без параметра:",
+        parse_mode="HTML",
+        reply_markup=_cancel_kb(),
+    )
+
+
+@router.message(BoostBotStarts.payload)
+async def msg_bot_starts_payload(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    text = (message.text or "").strip()
+    payload = None if text in ("-", "") else text
+    await state.update_data(payload=payload)
+    await state.set_state(BoostBotStarts.acc_count)
+    total = await _get_acc_count(pool, message.from_user.id)
+    await message.answer(
+        f"Доступно аккаунтов: <b>{total}</b>\n"
+        "Сколько использовать для запуска бота?\n"
+        "Введите число или <code>0</code> — все доступные:",
+        parse_mode="HTML",
+        reply_markup=_cancel_kb(),
+    )
+
+
+@router.message(BoostBotStarts.acc_count)
+async def msg_bot_starts_acc_count(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    try:
+        n = int(message.text or "0")
+    except ValueError:
+        await message.answer("⚠️ Введите число")
+        return
+    total = await _get_acc_count(pool, message.from_user.id)
+    use = min(n, total) if n > 0 else total
+    if use == 0:
+        await message.answer("⚠️ Нет доступных аккаунтов.")
+        return
+    await state.update_data(acc_count=use)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💎 Только Premium", callback_data=BoostCb(action="premium", sub="bot_yes"))
+    kb.button(text="👤 Все аккаунты", callback_data=BoostCb(action="premium", sub="bot_no"))
+    kb.button(text="❌ Отмена", callback_data=BoostCb(action="menu"))
+    kb.adjust(2, 1)
+    await message.answer(
+        f"🔑 Аккаунтов: <b>{use}</b>\n\n"
+        "Использовать только Premium-аккаунты для запуска?",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Общий выбор Premium-фильтра (для Подписчиков и Стартов в ботах) ─────────
+
+@router.callback_query(BoostCb.filter(F.action == "premium"))
+async def cb_boost_premium_choice(
+    callback: CallbackQuery,
+    callback_data: BoostCb,
+    state: FSMContext,
+) -> None:
+    try:
+        category, choice = callback_data.sub.rsplit("_", 1)
+    except ValueError:
+        await callback.answer("⚠️ Ошибка данных. Начните заново.", show_alert=True)
+        return
+    premium_only = choice == "yes"
+    await state.update_data(premium_only=premium_only)
+    data = await state.get_data()
+    prem_label = "💎 Только Premium" if premium_only else "👤 Все аккаунты"
+
+    if category == "subs":
+        target = data.get("target", "")
+        use = data.get("acc_count", 0)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✅ Запустить", callback_data=BoostCb(action="confirm", sub="subscribers"))
+        kb.button(text="❌ Отмена", callback_data=BoostCb(action="menu"))
+        kb.adjust(2)
+        await _edit(
+            callback,
+            "👥 <b>Подписчики/участники — подтверждение</b>\n\n"
+            f"📌 Цель: <code>{html.escape(target)}</code>\n"
+            f"🔑 Аккаунтов: <b>{use}</b>\n"
+            f"Фильтр: {prem_label}",
+            kb.as_markup(),
+        )
+    else:
+        bot_username = data.get("bot_username", "")
+        payload = data.get("payload")
+        use = data.get("acc_count", 0)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✅ Запустить", callback_data=BoostCb(action="confirm", sub="bot_starts"))
+        kb.button(text="❌ Отмена", callback_data=BoostCb(action="menu"))
+        kb.adjust(2)
+        await _edit(
+            callback,
+            "🚀 <b>Старты в ботах — подтверждение</b>\n\n"
+            f"📌 Бот: <code>@{html.escape(bot_username)}</code>\n"
+            + (f"🔗 Payload: <code>{html.escape(payload)}</code>\n" if payload else "")
+            + f"🔑 Аккаунтов: <b>{use}</b>\n"
+            f"Фильтр: {prem_label}",
+            kb.as_markup(),
+        )
+
+
 # ── Подтверждение и постановка в очередь ─────────────────────────────────────
 
 @router.callback_query(BoostCb.filter(F.action == "confirm"))
@@ -402,7 +610,7 @@ async def cb_boost_confirm(
         params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
         total_items = len(account_ids)
         label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
-    else:  # stories
+    elif sub == "stories":
         target = data.get("target", "")
         if not target:
             await callback.answer("⚠️ Данные сессии потеряны. Начните заново.", show_alert=True)
@@ -411,13 +619,56 @@ async def cb_boost_confirm(
         params = {"target": target, "account_ids": account_ids}
         total_items = len(account_ids)
         label = f"Сторис: {target} × {len(account_ids)} акк."
+    elif sub == "subscribers":
+        target = data.get("target", "")
+        premium_only = bool(data.get("premium_only"))
+        if not target:
+            await callback.answer("⚠️ Данные сессии потеряны. Начните заново.", show_alert=True)
+            return
+        op_type = "boost_subscribers"
+        params = {
+            "target": target,
+            "account_ids": account_ids,
+            "premium_only": premium_only,
+        }
+        total_items = len(account_ids)
+        prem_suffix = " (только Premium)" if premium_only else ""
+        label = f"Подписчики/участники: {target} × {len(account_ids)} акк.{prem_suffix}"
+    elif sub == "bot_starts":
+        bot_username = data.get("bot_username", "")
+        payload = data.get("payload")
+        premium_only = bool(data.get("premium_only"))
+        if not bot_username:
+            await callback.answer("⚠️ Данные сессии потеряны. Начните заново.", show_alert=True)
+            return
+        op_type = "boost_bot_starts"
+        params = {
+            "bot_username": bot_username,
+            "payload": payload,
+            "account_ids": account_ids,
+            "premium_only": premium_only,
+        }
+        total_items = len(account_ids)
+        prem_suffix = " (только Premium)" if premium_only else ""
+        label = f"Старты в боте: @{bot_username} × {len(account_ids)} акк.{prem_suffix}"
+    else:
+        await callback.answer("⚠️ Неизвестный тип накрутки", show_alert=True)
+        return
 
     import json
-    op_id = await pool.fetchval(
-        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-        "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
-        owner_id, op_type, json.dumps(params), total_items, label,
-    )
+    if op_type in ("boost_subscribers", "boost_bot_starts"):
+        # Новые op_type ставятся в очередь через operation_bus — прямой INSERT
+        # в новых handler'ах запрещён (AGENT_SYNC.md).
+        from services import operation_bus
+        op_id = await operation_bus.submit(
+            pool, owner_id, op_type, params, total_items=total_items
+        )
+    else:
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
+            owner_id, op_type, json.dumps(params), total_items, label,
+        )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
