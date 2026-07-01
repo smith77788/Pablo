@@ -106,7 +106,7 @@ async def _activate_subscription(
                 # Дубликат уже подтверждённого платежа — не продлеваем повторно.
                 log.info("payment webhook: дубликат подтверждённого платежа ref=%s — продление пропущено", safe_ref)
                 return
-            await conn.execute(
+            expires = await conn.fetchval(
                 """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
                    VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
                    ON CONFLICT(user_id) DO UPDATE
@@ -120,7 +120,8 @@ async def _activate_subscription(
                        started_at  = CASE
                            WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
                            ELSE now()
-                       END""",
+                       END
+                   RETURNING expires_at""",
                 user_id, plan, str(months),
             )
             # Синхронизируем platform_users.current_plan — часть кода читает его
@@ -132,7 +133,10 @@ async def _activate_subscription(
                 )
             except Exception:
                 log.warning("payment webhook: не удалось синхронизировать current_plan user=%s", user_id)
-    expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
+    if expires is None:
+        # RETURNING всегда должен вернуть строку при успешном upsert; запасной
+        # вариант на случай неожиданного None — не даёт уведомлению упасть.
+        expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     try:
         from bot.utils.subscription import invalidate_plan_cache

@@ -67,7 +67,10 @@ def test_core_revenue_features_require_paid_plan() -> None:
 
 
 def test_free_plan_is_demo_not_full_product() -> None:
-    assert BOT_LIMITS["free"] == 1
+    # Free tier allows up to 5 bots/channels (deliberately reverted from a
+    # stricter 1-bot demo cap in commit 6f8cf81c) but stays a demo because
+    # personal accounts and every core revenue feature stay paid-only below.
+    assert BOT_LIMITS["free"] == 5
     assert feature_required_plan("basic_broadcast") == "paid"
 
     accounts_source = (
@@ -145,7 +148,7 @@ def test_proxy_manager_actions_require_pro_plan() -> None:
 
     assert '_PROXY_PLAN = "pro"' in source
     assert 'locked_text("Управление прокси", _PROXY_PLAN)' in source
-    assert "subscription_locked_markup(_PROXY_PLAN)" in source
+    assert "subscription_locked_markup(\n            _PROXY_PLAN, back_callback=" in source
     assert 'require_plan(pool, callback.from_user.id, "starter")' not in source
 
     for handler in (

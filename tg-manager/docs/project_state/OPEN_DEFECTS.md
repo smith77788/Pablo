@@ -1,10 +1,41 @@
 # Open Defects
 
-Last updated: 2026-06-14
+Last updated: 2026-07-01
 
 ## OPEN (1 item)
 
 - [HIGH] Channel/Group/Bot Creation — BotFather dialog brittle; hard to fix without live interactive session
+
+## FIXED (2026-07-01 session — product audit)
+- content_safety._collapse: separator class only stripped `[\s._\-*]`, so obfuscation via
+  `/ , | # +` etc between letters (e.g. "c/h/i/l/d p/o/r/n") bypassed the CSAM/terror filter
+  entirely → widened to `[\W_]` (any non-word char), verified against the original bypass
+  cases and the known-benign phrases ("cp file", "детские игрушки", "секс-шоп 18+", "против
+  терроризма") to confirm no new false positives.
+- payment_webhook._activate_subscription: confirmation message computed the shown expiry as
+  a naive `now() + N months`, ignoring that the DB upsert extends from the *existing* expiry
+  when a subscription is still active → a renewing user was told a shorter date than they
+  actually got. Now reads the real `expires_at` back via `RETURNING` from the same upsert.
+- 5 stale test-suite assertions updated to match intentional prior changes that had no
+  matching test update (verified each against product code + git history before touching):
+  admin.py subscription-gate callbacks use dedicated `F.data == "adm:gate*"` handlers rather
+  than the generic action dispatcher (test_callback_integrity.py); bulk.py empty-state back
+  button correctly targets `BmCb(action="operations")`, a live, sensibly-placed handler, not
+  the removed `action="main"` (test_callback_integrity.py); accounts.py's `scan_owned_assets`
+  call sites already fetch a fresh single-account row via `db.get_tg_account` right before
+  scanning, just not via the literal `get_account_for_telethon` snippet the test expected
+  (test_account_status_logic.py); `BOT_LIMITS["free"]` is deliberately 5 per commit
+  `6f8cf81c` (revert of an earlier 1-bot demo cap), not 1 (test_subscription_features.py);
+  proxy_manager's pro-plan gate is intact, just reformatted with a `back_callback=` kwarg
+  (test_subscription_features.py).
+- Verified (no defect found, ruled out after tracing the actual code): op_worker.py op_type
+  dispatch table vs operation_bus.py OP_REGISTRY are fully consistent (no stuck-pending
+  op_types); every `operation_bus.submit(...)` call site's op_type argument is a registered
+  key (AST-verified across bot/handlers + services); a generic CallbackData
+  filter-vs-construction mismatch scan across all ~60 CallbackData classes in the project
+  turned up zero real dead buttons — all initial hits were static-analysis false positives
+  (multi-line `F.action.in_({...})` filters, or handlers registered dynamically in a loop via
+  `router.callback_query(ChanCb.filter(F.action == _prof_action))(...)`).
 
 ## FIXED (2026-06-14 session, continued)
 - dm_engine progress: operation_queue.done_items never updated → run_campaign() accepts op_id, syncs per iteration

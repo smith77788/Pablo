@@ -238,10 +238,14 @@ def test_accounts_handler_reloads_real_session_string_before_checks() -> None:
         "result = await check_account_status_full(\n                session_str,"
         in accounts_source
     )
+    # scan_owned_assets handlers fetch a fresh single-account row (db.get_tg_account,
+    # `SELECT a.*`) right before scanning rather than reusing a stale cached/list-loaded
+    # dict, so the session_str passed to Telethon is always current.
     assert (
-        "result = await account_manager.scan_owned_assets(\n                session_str,"
+        "acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)"
         in accounts_source
     )
+    assert "result = await scan_owned_assets(session_str, _acc=acc)" in accounts_source
 
 
 def test_spambot_status_flow_has_no_legacy_fallback_block() -> None:

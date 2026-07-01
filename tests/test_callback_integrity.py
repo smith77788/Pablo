@@ -15,7 +15,7 @@ def test_bulk_empty_state_does_not_use_dead_legacy_callbacks() -> None:
     assert 'callback_data="bots_list"' not in source
     assert 'callback_data="bm_main"' not in source
     assert 'BotCb(action="list"' in source
-    assert 'BmCb(action="main"' in source
+    assert 'BmCb(action="operations"' in source
 
 
 def test_intent_navigation_uses_registered_targets() -> None:
@@ -44,6 +44,19 @@ def test_admin_buttons_are_covered_by_admin_dispatcher() -> None:
     for tuple_body in re.findall(r"action in \(([^)]*)\)", dispatcher):
         exact_actions.update(re.findall(r'"([^"]+)"', tuple_body))
     prefix_actions = set(re.findall(r'action\.startswith\("([^"]+)"\)', dispatcher))
+
+    # Some admin callbacks bypass the generic action-string dispatcher and get
+    # their own dedicated @router.callback_query(F.data == "adm:...") handler
+    # instead (e.g. the subscription-gate feature). Those are equally valid
+    # coverage — count them too.
+    exact_actions.update(
+        m[len("adm:"):]
+        for m in re.findall(r'F\.data == "(adm:[^"]+)"', dispatcher)
+    )
+    prefix_actions.update(
+        m[len("adm:"):]
+        for m in re.findall(r'F\.data\.startswith\("(adm:[^"]+)"\)', dispatcher)
+    )
 
     missing: list[str] = []
     for raw_action in sorted(admin_callbacks):
