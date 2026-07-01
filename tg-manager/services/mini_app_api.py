@@ -659,7 +659,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       total_targets, created_at
                FROM dm_campaigns WHERE owner_id=$1
                ORDER BY created_at DESC LIMIT 20""", uid)
-        return _json_resp({"campaigns": rows})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1", uid)
+        return _json_resp({"campaigns": rows, "total": int(total or 0)})
 
     async def funnels_all(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3190,10 +3192,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    ORDER BY created_at DESC LIMIT 50""",
                 uid,
             )
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1", uid)
             return _json_resp({"campaigns": [
                 {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
                 for r in rows
-            ]})
+            ], "total": int(total or 0)})
         except Exception as exc:
             log.exception("dm_campaigns_list uid=%d", uid)
             return _err(str(exc), 500)
@@ -5211,7 +5215,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     r["template"] = _json.loads(r["template"])
                 except Exception:
                     r["template"] = {}
-        return _json_resp({"templates": rows})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type='post'", uid)
+        return _json_resp({"templates": rows, "total": int(total or 0)})
 
     async def create_template(request: web.Request) -> web.Response:
         uid = _get_uid(request)

@@ -5909,7 +5909,8 @@ async function loadTemplates() {
   try {
     const d = await api('/api/miniapp/templates');
     const items = d.templates||[];
-    txt('m-tpl-cnt', items.length ? items.length+' шаблонов' : '');
+    const tplTotal = (d.total!=null?d.total:items.length);
+    txt('m-tpl-cnt', tplTotal ? tplTotal+' шаблонов' : '');
     if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Нажмите + Создать')); return; }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
@@ -7702,14 +7703,15 @@ async function openDmCampaigns() {
   try {
     const d = await api('/api/miniapp/dm_campaigns');
     const cmp = d.campaigns||[];
+    const cmpTotal = (d.total!=null?d.total:cmp.length);
     const running = cmp.filter(c=>c.status==='running').length;
     const done = cmp.filter(c=>c.status==='done').length;
     txt('dmStats',`
-      <div class="kpi-card"><div class="kpi-val">${cmp.length}</div><div class="kpi-lbl">Всего</div></div>
+      <div class="kpi-card"><div class="kpi-val">${cmpTotal}</div><div class="kpi-lbl">Всего</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${running}</div><div class="kpi-lbl">Запущено</div></div>
       <div class="kpi-card"><div class="kpi-val">${done}</div><div class="kpi-lbl">Завершено</div></div>
     `);
-    txt('m-dm-cnt', cmp.length+' кампаний');
+    txt('m-dm-cnt', cmpTotal+' кампаний');
     if (!cmp.length) { txt('dmList', empty('✉️','Нет кампаний','Нажмите + Новая')); return; }
     txt('dmList', cmp.map(c=>`
       <div class="row">
