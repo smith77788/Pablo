@@ -1487,12 +1487,15 @@ async def fsm_panel_service_id(message: Message, state: FSMContext, pool: asyncp
     data = await state.get_data()
     await state.clear()
 
+    from services.token_vault import encrypt_token as _enc_smm_key
+
     panel_id = await db.smm_add_panel(
         pool,
         owner_id=message.from_user.id,
         name=data["name"],
         api_url=data["api_url"],
-        api_key_enc=data["api_key"],
+        # Шифруем API-ключ панели at-rest (правило CLAUDE.md: секреты — в зашифрованном виде)
+        api_key_enc=_enc_smm_key(data["api_key"]),
         service_id=svc_id,
     )
     await db.promo_log(pool, message.from_user.id, "booster",

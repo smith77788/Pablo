@@ -82,8 +82,14 @@ class SmmPanelClient:
 
 
 def make_client(api_url: str, api_key_enc: str) -> SmmPanelClient:
-    """Create client from potentially encrypted key (plaintext for now)."""
-    return SmmPanelClient(api_url, api_key_enc)
+    """Create client from an at-rest-encrypted API key.
+
+    decrypt_token прозрачно возвращает plaintext для старых (незашифрованных)
+    записей, поэтому обратная совместимость сохраняется без миграции.
+    """
+    from services.token_vault import decrypt_token
+
+    return SmmPanelClient(api_url, decrypt_token(api_key_enc))
 
 
 # ── Status normalization ───────────────────────────────────────────────────────
