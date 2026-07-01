@@ -20,7 +20,13 @@ def _TON_WALLET() -> str:
 
 
 def _TRON_WALLET() -> str:
-    return os.getenv("TRON_WALLET", "")
+    # Тот же источник, что и приём оплаты в UI (БД-override с fallback на env),
+    # чтобы автопроверка сверяла тот же кошелёк, что показан пользователю.
+    try:
+        from bot.handlers.subscription import _tron_wallet as _w
+        return _w()
+    except Exception:
+        return os.getenv("TRON_WALLET", "")
 
 
 def _TON_API_KEY() -> str:

@@ -363,6 +363,23 @@ async def main() -> None:
     except Exception:
         log.warning("failed to load AI keys from DB", exc_info=True)
 
+    # Платёжные кошельки из БД (настраиваются из UI) — приоритет над env.
+    try:
+        from bot.handlers.subscription import set_pay_config
+        _pay_map = {}
+        for _env_name, _skey in (
+            ("TRON_WALLET", "pay_tron_wallet"),
+            ("TON_WALLET", "pay_ton_wallet"),
+        ):
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val:
+                _pay_map[_env_name] = _val
+        if _pay_map:
+            set_pay_config(_pay_map)
+        log.info("Payment wallets on startup: %d configured from DB", len(_pay_map))
+    except Exception:
+        log.warning("failed to load payment wallets from DB", exc_info=True)
+
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)
     await op_worker.reset_stale_in_operation(pool)

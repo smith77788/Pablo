@@ -75,12 +75,30 @@ router = Router()
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
+# Кошельки/токены оплаты: приоритет БД (platform_settings, задаётся из UI) над env.
+# Иначе приём оплаты невозможен без правки переменных окружения.
+_PAY_OVERRIDES: dict[str, str] = {}
+
+
+def set_pay_config(mapping: dict[str, str]) -> None:
+    """Задать/обновить платёжные настройки из БД (env-имена: TRON_WALLET, TON_WALLET)."""
+    for k, v in (mapping or {}).items():
+        if v:
+            _PAY_OVERRIDES[k] = v
+        else:
+            _PAY_OVERRIDES.pop(k, None)
+
+
+def _pay_cfg(name: str) -> str:
+    return (_PAY_OVERRIDES.get(name) or os.getenv(name, "")).strip()
+
+
 def _ton_wallet() -> str:
-    return os.getenv("TON_WALLET", "")
+    return _pay_cfg("TON_WALLET")
 
 
 def _tron_wallet() -> str:
-    return os.getenv("TRON_WALLET", "")
+    return _pay_cfg("TRON_WALLET")
 
 
 def _get_ton_rate() -> float:
@@ -836,7 +854,7 @@ def _payment_settings_text() -> str:
 
     status_lines = [
         f"{'✅' if ton_ok else '❌'} TON кошелёк: {_mask(_ton_wallet())}",
-        f"{'✅' if tron_ok else '❌'} USDT (TRC-20): {_mask(os.getenv('TRON_WALLET', ''))}",
+        f"{'✅' if tron_ok else '❌'} USDT (TRC-20): {_mask(_tron_wallet())}",
         f"{'✅' if key_ok else '⚠️'} TON API ключ: {_mask(os.getenv('TON_API_KEY', ''))}",
         f"📊 Курс TON/USD: <b>${rate:.2f}</b>",
     ]
@@ -914,7 +932,7 @@ async def cb_pay_edit(
 
 @router.message(PaymentSettingsFSM.waiting_value, F.text)
 async def msg_payment_setting_value(
-    message: Message, state: FSMContext, http: aiohttp.ClientSession
+    message: Message, state: FSMContext, http: aiohttp.ClientSession, pool: asyncpg.Pool
 ) -> None:
     data = await state.get_data()
     key = data.get("key", "")
@@ -955,6 +973,22 @@ async def msg_payment_setting_value(
     # Apply immediately in process
     os.environ[key] = value
 
+    # Persist to platform_settings (переживает рестарт без Railway API) + применить
+    # override для кошельков, чтобы _tron_wallet/_ton_wallet сразу видели значение.
+    _DB_SETTING_KEYS = {
+        "TON_WALLET": "pay_ton_wallet",
+        "TRON_WALLET": "pay_tron_wallet",
+        "TON_API_KEY": "pay_ton_api_key",
+        "TON_RATE": "pay_ton_rate",
+    }
+    try:
+        from database.db import set_platform_setting
+        await set_platform_setting(pool, _DB_SETTING_KEYS[key], value)
+        if key in ("TON_WALLET", "TRON_WALLET"):
+            set_pay_config({key: value})
+    except Exception:
+        log_exc_swallow(log, "Ошибка сохранения платёжной настройки в БД")
+
     # Save to Railway if configured
     railway_saved = False
     try:
@@ -967,10 +1001,10 @@ async def msg_payment_setting_value(
         log_exc_swallow(log, "Ошибка сохранения платёжной настройки в Railway API")
 
     label = _PAY_SETTING_LABELS[key]
+    # Значение сохранено в БД (переживает рестарт). Railway-строка — доп. канал.
     note = (
-        ""
-        if railway_saved
-        else "\n\n⚠️ Railway API не настроен — значение активно до перезапуска бота. Настройте Railway Token в /admin для постоянного сохранения."
+        "\n\n💾 Сохранено в БД (переживёт перезапуск)."
+        + ("" if railway_saved else " Railway API не настроен — переменная окружения не обновлена, но это не требуется.")
     )
 
     kb = InlineKeyboardBuilder()
