@@ -2091,6 +2091,7 @@ async def _exec_bulk_join(
         owner_id,
         include_ids=account_ids or None,
         action_type="join",
+        respect_daily_budget=True,  # долговечность: щадим выжатые аккаунты
     )
 
     accounts = await _claim_available_accounts(op_id, accounts)
@@ -2427,6 +2428,7 @@ async def _exec_bulk_leave(
         owner_id,
         include_ids=account_ids or None,
         action_type="leave",
+        respect_daily_budget=True,  # долговечность: щадим выжатые аккаунты
     )
     accounts = await _claim_available_accounts(op_id, accounts_raw)
     used_acc_ids = [int(a["id"]) for a in accounts]
