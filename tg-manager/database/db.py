@@ -138,8 +138,24 @@ async def create_pool() -> asyncpg.Pool:
                 seen.add(bn)
                 schema_files.append(p)
 
+        # Таблица учёта миграций — наблюдаемость (какие файлы применились чисто,
+        # какие с ошибками). Не влияет на поведение, только фиксирует статус.
+        try:
+            await conn.execute(
+                """CREATE TABLE IF NOT EXISTS schema_migrations (
+                       filename    TEXT PRIMARY KEY,
+                       status      TEXT NOT NULL,        -- 'ok' | 'warnings'
+                       error_count INT  NOT NULL DEFAULT 0,
+                       last_error  TEXT,
+                       applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                   )"""
+            )
+        except Exception as _mig_exc:
+            log.warning("schema_migrations table create failed: %s", _mig_exc)
+
         applied = 0
         failed = 0
+        failed_files: list[str] = []
         for path in schema_files:
             with open(path, encoding="utf-8") as f:
                 sql = f.read().strip()
@@ -150,6 +166,8 @@ async def create_pool() -> asyncpg.Pool:
             # their own semicolons that must not be split).
             statements = _split_sql_statements(sql)
             file_ok = True
+            _err_count = 0
+            _last_error = None
             for stmt in statements:
                 try:
                     await conn.execute(stmt)
@@ -165,12 +183,36 @@ async def create_pool() -> asyncpg.Pool:
                         os.path.basename(path), exc, stmt,
                     )
                     file_ok = False
+                    _err_count += 1
+                    _last_error = err[:500]
+            _bn = os.path.basename(path)
             if file_ok:
                 applied += 1
             else:
                 failed += 1
+                failed_files.append(_bn)
+            # Фиксируем статус файла (best-effort)
+            try:
+                await conn.execute(
+                    """INSERT INTO schema_migrations(filename, status, error_count, last_error, applied_at)
+                       VALUES($1, $2, $3, $4, now())
+                       ON CONFLICT (filename) DO UPDATE
+                       SET status=EXCLUDED.status, error_count=EXCLUDED.error_count,
+                           last_error=EXCLUDED.last_error, applied_at=now()""",
+                    _bn, "ok" if file_ok else "warnings", _err_count, _last_error,
+                )
+            except Exception:
+                pass
 
-        log.info("Schema migration: %d files OK, %d with warnings", applied, failed)
+        if failed:
+            # Раньше это был log.info и терялось — теперь ERROR со списком файлов.
+            log.error(
+                "Schema migration: %d files OK, %d WITH ERRORS: %s "
+                "(детали в таблице schema_migrations)",
+                applied, failed, ", ".join(failed_files[:30]),
+            )
+        else:
+            log.info("Schema migration: %d files OK, 0 with errors", applied)
 
         # Verify critical tables exist after migration — log ERROR if missing
         _CRITICAL_TABLES = ["activity_log", "operation_audit", "operation_queue"]
