@@ -98,6 +98,7 @@ def _legacy_admin_main_kb(new_error_reports: int = 0):
     kb.button(text="⚙️ Системный режим Swarm", callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
     kb.button(text="🤖 AI-ключи (провайдеры)", callback_data="adm:ai_keys")
+    kb.button(text="📊 Лимит действий/сутки", callback_data="adm:budget")
     kb.button(text="🔑 Переменные Railway", callback_data="adm:env_list")
     _err_label = (
         f"🐛 Отчёты об ошибках ({new_error_reports} новых)"
@@ -3255,6 +3256,54 @@ async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
     await callback.answer()
     await _ai_keys_menu(callback, pool)
+
+
+# ── Дневной бюджет действий на аккаунт (долговечность) ───────────────────────
+@router.callback_query(F.data == "adm:budget")
+async def cb_adm_budget(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    from services.account_budget import get_daily_budget, DEFAULT_DAILY_BUDGET
+    cur = await get_daily_budget(pool)
+    kb = InlineKeyboardBuilder()
+    for n in (25, 50, 75, 100, 150):
+        mark = "✅ " if n == cur else ""
+        kb.button(text=f"{mark}{n}/сутки", callback_data=f"adm:budget_set:{n}")
+    kb.button(text=("✅ Без лимита" if cur <= 0 else "♾ Без лимита"), callback_data="adm:budget_set:0")
+    kb.button(text="◀️ Назад", callback_data="adm:main")
+    kb.adjust(2, 2, 1, 1, 1)
+    await callback.message.edit_text(
+        "📊 <b>Дневной лимит действий на аккаунт</b>\n\n"
+        f"Текущий: <b>{'без лимита' if cur <= 0 else str(cur) + '/сутки'}</b>\n"
+        f"По умолчанию: {DEFAULT_DAILY_BUDGET}\n\n"
+        "Аккаунты, исчерпавшие лимит за 24ч, исключаются из массовых операций "
+        "(публикация/вступление/выход) — это продлевает жизнь аккаунтов.\n"
+        "<i>Меньше действий = меньше риск спам-фильтра Telegram.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:budget_set:"))
+async def cb_adm_budget_set(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    try:
+        n = int(callback.data.removeprefix("adm:budget_set:"))
+    except (TypeError, ValueError):
+        await callback.answer("Некорректное значение", show_alert=True)
+        return
+    try:
+        await db.set_platform_setting(pool, "account_daily_action_budget", str(n))
+    except Exception:
+        log_exc_swallow(log, "adm budget_set")
+    await callback.answer(
+        "Лимит снят" if n <= 0 else f"Лимит: {n}/сутки", show_alert=True
+    )
+    await cb_adm_budget(callback, pool)
 
 
 @router.callback_query(F.data.startswith("adm:ai_set:"))
