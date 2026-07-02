@@ -1670,6 +1670,63 @@ async def check_account_status_full(
         }
 
 
+# ── Session Health Monitor (мониторинг сессий) ──────────────────────────────
+# Автоматическая проверка сессий и обновление статусов в БД.
+# Запускается как фоновый сервис каждые 6 часов.
+
+async def run_session_health_monitor(pool: "asyncpg.Pool") -> None:
+    """Фоновый сервис: проверяет все активные сессии и обновляет статусы."""
+    log.info("session_health_monitor: starting")
+    while True:
+        try:
+            await _check_all_sessions(pool)
+        except Exception as e:
+            log.error("session_health_monitor: error: %s", e)
+        await asyncio.sleep(6 * 3600)  # каждые 6 часов
+
+
+async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
+    """Проверить все активные сессии и обновить статусы."""
+    from database import db as _db
+    
+    accounts = await pool.fetch(
+        "SELECT id, owner_id, session_str, phone, acc_status "
+        "FROM tg_accounts WHERE is_active=TRUE AND session_str IS NOT NULL"
+    )
+    if not accounts:
+        return
+    
+    checked = 0
+    failed = 0
+    for acc in accounts:
+        if not acc["session_str"]:
+            continue
+        try:
+            result = await check_account_status_full(
+                acc["session_str"], check_spambot=False
+            )
+            new_status = result["status"]
+            old_status = acc["acc_status"] or "active"
+            
+            # Update status if changed
+            if new_status != old_status:
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, status_reason=$2 WHERE id=$3",
+                    new_status, result.get("reason", ""), acc["id"],
+                )
+                log.info(
+                    "session_health: acc=%d phone=%s status %s→%s: %s",
+                    acc["id"], acc.get("phone"), old_status, new_status,
+                    result.get("reason", "")[:80],
+                )
+            checked += 1
+        except Exception as e:
+            failed += 1
+            log.warning("session_health: acc=%d check failed: %s", acc["id"], e)
+    
+    log.info("session_health_monitor: checked=%d failed=%d total=%d", checked, failed, len(accounts))
+
+
 async def get_channel_members_count(
     session_string: str, channel_username: str, _acc: dict | None = None
 ) -> int:
