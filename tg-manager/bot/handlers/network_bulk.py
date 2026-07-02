@@ -1,0 +1,576 @@
+"""Bulk operations merged into the network module — apply changes to all bots at once."""
+
+from __future__ import annotations
+import asyncio
+import logging
+import aiohttp
+import asyncpg
+from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.callbacks import NetworkCb, BmCb
+from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup, LANGUAGES
+from bot.states import BulkEdit, ImportBots
+from bot.utils.subscription import require_plan, locked_text, is_platform_admin
+from database import db
+from services import bot_api
+from services.logger import log_exc_swallow
+
+router = Router()
+log = logging.getLogger(__name__)
+
+_GEO_LIMITS = {"name": 64, "short": 120, "desc": 512}
+
+
+def _geo_lang_kb(field: str) -> InlineKeyboardMarkup:
+    """Inline keyboard for GEO language selection (name/desc/short/cmd)."""
+    from aiogram.types import InlineKeyboardMarkup
+    kb = InlineKeyboardBuilder()
+    for code, flag, lang_name in LANGUAGES:
+        kb.button(text=f"{flag} {lang_name}", callback_data=f"netgeo:{field}:{code}")
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+async def _apply_all(
+    pool: asyncpg.Pool, user_id: int, http: aiohttp.ClientSession, method, *args
+) -> tuple[int, int, int]:
+    try:
+        bots = await db.get_bots(pool, user_id)
+    except Exception:
+        log_exc_swallow(log, "_apply_all: get_bots failed")
+        return 0, 0, 0
+    if not bots:
+        return 0, 0, 0
+
+    # Rate limiting: max 5 concurrent API calls (Bot API limit ~30/sec global)
+    semaphore = asyncio.Semaphore(5)
+
+    async def _throttled_call(http, token, *args):
+        async with semaphore:
+            try:
+                result = await method(http, token, *args)
+                # Small delay to respect rate limits
+                await asyncio.sleep(0.1)
+                return result
+            except Exception as e:
+                return e
+
+    results = await asyncio.gather(
+        *(_throttled_call(http, b["token"], *args) for b in bots),
+        return_exceptions=True,
+    )
+    ok = 0
+    for b, r in zip(bots, results):
+        if isinstance(r, Exception):
+            label = (
+                f"@{b['username']}" if b.get("username") else str(b.get("bot_id", "?"))
+            )
+            log.warning("network_bulk: %s failed for %s: %s", method.__name__, label, r)
+        elif r is True:
+            ok += 1
+    return ok, len(results) - ok, len(results)
+
+
+def _result_text(ok: int, fail: int, total: int, action: str) -> str:
+    return (
+        f"📦 <b>Результат массового применения</b>\n\n"
+        f"Действие: {action}\n"
+        f"Всего ботов: {total}\n✅ Успешно: {ok}\n❌ Ошибок: {fail}"
+    )
+
+
+async def _check_enterprise(callback: CallbackQuery, pool: asyncpg.Pool) -> bool:
+    if await require_plan(pool, callback.from_user.id, "enterprise"):
+        return True
+    await callback.answer()
+    await callback.message.edit_text(
+        locked_text("Массовые операции", "enterprise"),
+        parse_mode="HTML",
+        reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
+    )
+    return False
+
+
+# ── NetworkCb bulk actions ─────────────────────────────────────────────────────
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_check"))
+async def cb_bulk_check(
+    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    if not await _check_enterprise(callback, pool):
+        return
+    try:
+        bots = await db.get_bots(pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_bulk_check: get_bots failed")
+        await callback.answer("Ошибка загрузки ботов.", show_alert=True)
+        return
+    if not bots:
+        await callback.answer("Нет ботов для проверки.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
+    log.info(
+        "network_bulk: bulk_check user=%s bots=%d", callback.from_user.id, len(bots)
+    )
+    try:
+        tokens = [b["token"] for b in bots]
+        results = await bot_api.batch_get_me(http, tokens)
+    except Exception:
+        log_exc_swallow(log, "cb_bulk_check: batch_get_me failed")
+        await callback.message.edit_text(
+            "❌ Ошибка проверки токенов. Попробуйте позже.",
+            reply_markup=network_ops_menu(),
+        )
+        return
+    ok_labels, fail_labels = [], []
+    for b in bots:
+        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        (ok_labels if results.get(b["token"]) else fail_labels).append(
+            f"{'✅' if results.get(b['token']) else '❌'} {label}"
+        )
+    log.info("network_bulk: check done ok=%d fail=%d", len(ok_labels), len(fail_labels))
+    lines = ok_labels + fail_labels
+    text = (
+        f"🔍 <b>Проверка токенов</b>\n"
+        f"Активных: {len(ok_labels)} | Недоступных: {len(fail_labels)}\n\n"
+        + "\n".join(lines[:50])
+    )
+    if len(lines) > 50:
+        text += f"\n…и ещё {len(lines) - 50}"
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=network_ops_menu()
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_name"))
+async def cb_bulk_name(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    if not await _check_enterprise(callback, pool):
+        return
+    await state.set_state(BulkEdit.waiting_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkEdit.waiting_name, F.text)
+async def msg_bulk_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    name = message.text.strip()
+    if len(name) > 64:
+        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.")
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам...")
+    log.info("network_bulk: set_name user=%s", message.from_user.id)
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_name, name
+    )
+    log.info("network_bulk: set_name done ok=%d fail=%d total=%d", ok, fail, total)
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_name_lang"))
+async def cb_bulk_name_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _check_enterprise(callback, pool):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🌍 <b>Имя по GEO — выберите язык</b>\n\nКакому языку задать имя?",
+        parse_mode="HTML",
+        reply_markup=_geo_lang_kb("name"),
+    )
+
+
+@router.message(BulkEdit.waiting_localized_name, F.text)
+async def msg_bulk_localized_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    name = message.text.strip()
+    if len(name) > 64:
+        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.")
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "")
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам...")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_name, name, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_desc"))
+async def cb_bulk_desc(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    if not await _check_enterprise(callback, pool):
+        return
+    await state.set_state(BulkEdit.waiting_desc)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📄 <b>Описание для всех ботов</b>\n\nВведите новое описание:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkEdit.waiting_desc, F.text)
+async def msg_bulk_desc(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    desc = message.text.strip()
+    if len(desc) > 512:
+        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.")
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам...")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_description, desc
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, "Описание обновлено"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_desc_lang"))
+async def cb_bulk_desc_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _check_enterprise(callback, pool):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🌍 <b>Описание по GEO — выберите язык</b>\n\nКакому языку задать описание?",
+        parse_mode="HTML",
+        reply_markup=_geo_lang_kb("desc"),
+    )
+
+
+@router.message(BulkEdit.waiting_localized_desc, F.text)
+async def msg_bulk_localized_desc(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    desc = message.text.strip()
+    if len(desc) > 512:
+        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.")
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "")
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам...")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_description, desc, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Описание [{lang or 'default'}]"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_short"))
+async def cb_bulk_short(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    if not await _check_enterprise(callback, pool):
+        return
+    await state.set_state(BulkEdit.waiting_short)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkEdit.waiting_short, F.text)
+async def msg_bulk_short(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    short = message.text.strip()
+    if len(short) > 120:
+        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.")
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам...")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_short_description, short
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, "Краткое описание обновлено"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_short_lang"))
+async def cb_bulk_short_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _check_enterprise(callback, pool):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🌍 <b>Краткое описание по GEO — выберите язык</b>\n\nКакому языку задать краткое описание?",
+        parse_mode="HTML",
+        reply_markup=_geo_lang_kb("short"),
+    )
+
+
+@router.message(BulkEdit.waiting_localized_short, F.text)
+async def msg_bulk_localized_short(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    short = message.text.strip()
+    if len(short) > 120:
+        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.")
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "")
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам...")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_short_description, short, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Краткое [{lang or 'default'}]"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_commands"))
+async def cb_bulk_commands(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    if not await _check_enterprise(callback, pool):
+        return
+    await state.set_state(BulkEdit.waiting_commands)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🤖 <b>Команды для всех ботов</b>\n\n"
+        "Отправьте список команд, каждая с новой строки:\n\n"
+        "<code>start - Главное меню\nhelp - Помощь</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkEdit.waiting_commands, F.text)
+async def msg_bulk_commands(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    from bot.handlers.commands import _parse_commands
+
+    commands = _parse_commands(message.text or "")
+    if not commands:
+        await message.answer(
+            "❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>",
+            parse_mode="HTML",
+        )
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю команды ко всем ботам…")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_my_commands, commands, ""
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, "Команды установлены"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_commands_lang"))
+async def cb_bulk_commands_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _check_enterprise(callback, pool):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🌍 <b>Команды по GEO — выберите язык</b>\n\nДля какого языка задать команды?",
+        parse_mode="HTML",
+        reply_markup=_geo_lang_kb("cmd"),
+    )
+
+
+@router.callback_query(F.data.startswith("netgeo:"))
+async def cb_netgeo_lang_select(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    """Handle GEO language selection from inline keyboard (netgeo:field:lang_code)."""
+    parts = callback.data.split(":", 2)
+    if len(parts) != 3:
+        await callback.answer("Неверный формат.", show_alert=True)
+        return
+    _, field, code = parts
+    await callback.answer()
+    await state.update_data(lang=code)
+
+    _state_map = {
+        "name": (BulkEdit.waiting_localized_name, f"✏️ Введите <b>имя</b> для языка <code>{code.upper()}</code> (макс. 64 символа):"),
+        "desc": (BulkEdit.waiting_localized_desc, f"📄 Введите <b>описание</b> для языка <code>{code.upper()}</code> (макс. 512 символов):"),
+        "short": (BulkEdit.waiting_localized_short, f"📃 Введите <b>краткое описание</b> для языка <code>{code.upper()}</code> (макс. 120 символов):"),
+        "cmd": (BulkEdit.waiting_localized_commands, f"🤖 Введите <b>команды</b> для языка <code>{code.upper()}</code>:\n\n<code>start - Главное меню\nhelp - Помощь</code>"),
+    }
+    if field not in _state_map:
+        await callback.answer("Неизвестный тип поля.", show_alert=True)
+        return
+    next_state, prompt = _state_map[field]
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    await callback.message.edit_text(prompt, parse_mode="HTML", reply_markup=kb.as_markup())
+    await state.set_state(next_state)
+
+
+@router.message(BulkEdit.waiting_localized_commands, F.text)
+async def msg_bulk_localized_commands(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    from bot.handlers.commands import _parse_commands
+
+    data = await state.get_data()
+    lang = data.get("lang", "")
+    commands = _parse_commands(message.text or "")
+    if not commands:
+        await message.answer(
+            "❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>",
+            parse_mode="HTML",
+        )
+        return
+    await state.clear()
+    msg = await message.answer("⏳ Применяю ко всем ботам…")
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_my_commands, commands, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Команды [{lang or 'default'}]"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
+
+
+@router.callback_query(NetworkCb.filter(F.action == "bulk_import"))
+async def cb_bulk_import(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    # Import доступен без подписки
+    await state.set_state(ImportBots.waiting_tokens)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📥 <b>Массовый импорт ботов</b>\n\n"
+        "Отправьте токены ботов — по одному на строке:\n\n"
+        "<code>123456789:AAF...\n987654321:BBG...</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(ImportBots.waiting_tokens, F.text)
+async def msg_import_tokens(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    await state.clear()
+    lines = [l.strip() for l in (message.text or "").strip().splitlines() if l.strip()]
+    if not lines:
+        await message.answer(
+            "❌ Не найдено ни одного токена.",
+            reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
+        )
+        return
+    progress = await message.answer(f"⏳ Проверяю {len(lines)} токенов…")
+    log.info(
+        "network_bulk: import_tokens user=%s count=%d", message.from_user.id, len(lines)
+    )
+    try:
+        results = await asyncio.gather(
+            *(bot_api.get_me(http, t) for t in lines), return_exceptions=True
+        )
+    except Exception:
+        log_exc_swallow(log, "msg_import_tokens: gather failed")
+        await progress.edit_text(
+            "❌ Ошибка проверки токенов. Попробуйте позже.",
+            reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
+        )
+        return
+    added, skipped, failed = [], [], []
+    for token, info in zip(lines, results):
+        if isinstance(info, Exception) or not info:
+            log.warning("network_bulk: token check failed [REDACTED]: %s", info)
+            failed.append(f"❌ {token[:25]}…")
+            continue
+        try:
+            ok = await db.add_bot(
+                pool,
+                token=token,
+                bot_id=info["id"],
+                username=info.get("username", ""),
+                first_name=info.get("first_name", ""),
+                added_by=message.from_user.id,
+                bot=message.bot,
+            )
+        except Exception:
+            log_exc_swallow(log, "msg_import_tokens: add_bot failed")
+            ok = False
+        label = f"@{info.get('username') or info.get('first_name', str(info['id']))}"
+        (added if ok else skipped).append(f"{'✅' if ok else '⚠️'} {label}")
+    log.info(
+        "network_bulk: import done added=%d skipped=%d failed=%d",
+        len(added),
+        len(skipped),
+        len(failed),
+    )
+    parts = []
+    if added:
+        parts.append(f"✅ Добавлено: <b>{len(added)}</b>")
+    if skipped:
+        parts.append(f"⚠️ Уже были: <b>{len(skipped)}</b>")
+    if failed:
+        parts.append(f"❌ Ошибок: <b>{len(failed)}</b>")
+    detail = "\n".join((added + skipped + failed)[:30])
+    await progress.edit_text(
+        "📥 <b>Результат импорта</b>\n\n"
+        + "\n".join(parts)
+        + (f"\n\n{detail}" if detail else ""),
+        parse_mode="HTML",
+        reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
+    )

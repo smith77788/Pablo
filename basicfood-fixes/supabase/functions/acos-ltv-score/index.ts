@@ -122,14 +122,16 @@ Deno.serve(async (req) => {
     const toTag = [...(byPhone.data ?? []), ...(byEmail.data ?? [])];
     let vipTagged = 0;
     if (toTag.length > 0) {
-      const tagResults = await Promise.all(
+      // Use Promise.allSettled so a single update failure doesn't kill the batch,
+      // and individual errors are isolated.
+      const tagResults = await Promise.allSettled(
         toTag.map(async (c: any) => {
           const tags = Array.from(new Set([...(c.tags ?? []), "💎 VIP"]));
           const { error } = await supabase.from("customers").update({ tags }).eq("id", c.id);
           return error ? 0 : 1;
         }),
       );
-      vipTagged = tagResults.reduce((s, n) => s + n, 0);
+      vipTagged = tagResults.reduce((s, r) => s + (r.status === "fulfilled" ? r.value : 0), 0);
     }
 
     if (scores.length > 0) {

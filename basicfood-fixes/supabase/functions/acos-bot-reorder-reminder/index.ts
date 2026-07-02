@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
   const emailsOnly = [...new Set(candidates.filter((c) => !c.customer_phone && c.customer_email).map((c) => c.customer_email as string))];
 
   const [recentUserOrdersRes, recentPhoneOrdersRes, remindersRes, tokensRes, custByPhoneRes, custByEmailRes] =
-    await Promise.all([
+    (await Promise.allSettled([
       userIds.length > 0
         ? supabase.from("orders").select("user_id, created_at").in("user_id", userIds).gt("created_at", windowStart.toISOString())
         : Promise.resolve({ data: [] as { user_id: string; created_at: string }[] }),
@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
       emailsOnly.length > 0
         ? supabase.from("customers").select("email, telegram_chat_id").in("email", emailsOnly).not("telegram_chat_id", "is", null)
         : Promise.resolve({ data: [] as { email: string; telegram_chat_id: number }[] }),
-    ]);
+    ])).map((r) => (r.status === "fulfilled" ? r.value : { data: null }));
 
   // Build lookup maps
   const recentByUser = new Map<string, string[]>();

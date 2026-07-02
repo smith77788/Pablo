@@ -60,14 +60,15 @@ async function revenueForProduct(
   const chunkSize = 200;
   const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
-  const chunkResults = await Promise.all(
+  const chunkSettled = await Promise.allSettled(
     chunks.map((slice) =>
       sb.from("order_items").select("product_price, quantity").eq("product_id", productId).in("order_id", slice)
     ),
   );
   let revenue = 0;
-  for (const { data: items } of chunkResults) {
-    for (const it of items ?? []) {
+  for (const result of chunkSettled) {
+    const items = result.status === "fulfilled" ? (result.value.data ?? []) : [];
+    for (const it of items) {
       revenue += ((it.product_price as number) || 0) * ((it.quantity as number) || 1);
     }
   }
@@ -274,7 +275,7 @@ Deno.serve(async (req) => {
     }
 
     // Batch parallel writes instead of sequential per-action writes
-    await Promise.all(actionUpdateOps.map(u =>
+    await Promise.allSettled(actionUpdateOps.map(u =>
       sb.from("ai_actions").update(u.payload).eq("id", u.id)
     ));
     if (insightRows.length > 0) {

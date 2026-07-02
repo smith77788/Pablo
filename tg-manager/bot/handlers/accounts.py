@@ -1,0 +1,4706 @@
+"""Telegram personal account manager handler.
+
+Users connect their own Telegram accounts (phone + OTP + optional 2FA via Telethon)
+so the platform can list channels/groups, post messages, and track search rankings.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from datetime import datetime, timezone
+from html import escape
+
+from services.logger import log_exc_swallow
+
+import asyncpg
+from aiogram import Bot, F, Router
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+log = logging.getLogger(__name__)
+
+_DIALOGS_PAGE_SIZE = 10
+
+from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb, AutoRegCb
+from bot.keyboards import subscription_locked_markup
+from bot.utils.subscription import get_plan, locked_text
+from bot.utils.event_status import mark_handled_error
+from bot.utils.op_helpers import safe_answer, safe_edit
+from config import TG_API_ID, TG_API_HASH
+from database import db
+from services.account_manager import (
+    check_account_health,
+    check_account_status_full,
+    cleanup_pending,
+    cleanup_qr_pending,
+    confirm_2fa,
+    confirm_code,
+    confirm_qr_2fa,
+    generate_device_fingerprint,
+    get_account_dialogs_stats,
+    get_dialogs,
+    get_client_info_and_session,
+    import_from_pyrogram_json,
+    import_from_session_string,
+    resend_code as resend_login_code,
+    import_from_tdata,
+    scan_owned_assets,
+    send_message,
+    send_message_via_account,
+    effective_account_status,
+    should_persist_account_status,
+    start_login,
+    start_qr_login,
+    wait_qr_login,
+)
+
+router = Router()
+
+# ── Plan limits ────────────────────────────────────────────────────────────────
+
+ACC_LIMITS: dict[str, int] = {
+    "free": 0,
+    "paid": 9999,
+}
+
+
+def _next_account_plan(plan: str) -> str:
+    return "paid"
+
+
+_STATUS_EMOJI: dict[str, str] = {
+    "active": "✅",
+    "cooldown": "⏳",
+    "spamblock": "⚠️",
+    "banned": "❌",
+    "deactivated": "💀",
+    "session_expired": "🔑",
+    "archived": "📦",
+}
+
+# ── FSM States ─────────────────────────────────────────────────────────────────
+
+
+def _display_acc_status(acc: dict) -> str:
+    has_session = bool(acc.get("has_session")) or bool(
+        acc.get("session_str") or acc.get("session_string")
+    )
+    return effective_account_status(
+        acc.get("acc_status"),
+        has_session=has_session,
+        is_active=bool(acc.get("is_active", True)),
+    )
+
+
+def _display_acc_status_label(acc: dict) -> str:
+    status = _display_acc_status(acc)
+    labels = {
+        "active": "✅ Активен",
+        "cooldown": "⏳ FloodWait / cooldown",
+        "spamblock": "⚠️ Спам-ограничения",
+        "banned": "❌ Заблокирован",
+        "deactivated": "💀 Деактивирован",
+        "session_expired": "🔑 Сессия истекла",
+        "archived": "⏸ Отключён",
+    }
+    return labels.get(status, f"⚠️ {status}")
+
+
+class AccountLogin(StatesGroup):
+    waiting_phone = State()
+    waiting_code = State()  # state data: phone, phone_code_hash
+    waiting_2fa = State()  # state data: phone
+
+
+class SessionImport(StatesGroup):
+    waiting_string_session = State()
+    waiting_pyrogram_json = State()
+    waiting_tdata_zip = State()
+    waiting_session_file = State()  # загрузка .session файла
+    waiting_batch_sessions = State()
+    waiting_batch_confirm = State()
+
+
+class AccountPost(StatesGroup):
+    choosing_chat = State()  # unused in handler body; present for context
+    waiting_text = State()  # state data: acc_id, chat_id
+
+
+class AccountSendMsg(StatesGroup):
+    waiting_chat_id = State()  # state data: acc_id
+    waiting_text = State()  # state data: acc_id, chat_id
+
+
+class QrLogin2FA(StatesGroup):
+    waiting_password = State()  # state data: user_id (implicit from FSM context)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+
+def _api_configured() -> bool:
+    """Return True if Telethon credentials are set in config."""
+    try:
+        return bool(TG_API_ID and TG_API_HASH)
+    except Exception:
+        log_exc_swallow(log, "Ошибка проверки API-конфигурации")
+        return False
+
+
+def _api_missing_text() -> str:
+    return (
+        "⚙️ <b>API не настроен</b>\n\n"
+        "Для работы с личными аккаунтами необходимо задать переменные окружения:\n"
+        "<code>TG_API_ID</code> и <code>TG_API_HASH</code>\n\n"
+        'Получить их можно на <a href="https://my.telegram.org/apps">my.telegram.org/apps</a>.\n'
+        "После добавления — перезапустите бота."
+    )
+
+
+async def _get_account_limit(pool: asyncpg.Pool, user_id: int) -> tuple[str, int]:
+    """Return (plan, limit) for this user."""
+    plan = await get_plan(pool, user_id)
+    return plan, ACC_LIMITS.get(plan, 0)
+
+
+def _acc_menu_markup(acc_id: int, is_active: bool = True):
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📋 Каналы/группы", callback_data=AccCb(action="channels", acc_id=acc_id)
+    )
+    kb.button(
+        text="🔍 Сканировать активы",
+        callback_data=AccCb(action="scan_assets", acc_id=acc_id),
+    )
+    kb.button(text="📤 Написать", callback_data=AccCb(action="post", acc_id=acc_id))
+    kb.button(
+        text="🔍 Проверить", callback_data=AccCb(action="check_health", acc_id=acc_id)
+    )
+    kb.button(
+        text="📊 Диалоги", callback_data=AccCb(action="dialogs_stats", acc_id=acc_id)
+    )
+    kb.button(
+        text="📂 Список диалогов",
+        callback_data=AccCb(action="dialogs", acc_id=acc_id, chat_id=0),
+    )
+    kb.button(text="✉️ Отправить", callback_data=AccCb(action="send_msg", acc_id=acc_id))
+    kb.button(text="🌐 Прокси", callback_data=AccCb(action="set_proxy", acc_id=acc_id))
+    kb.button(text="🏷 Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="🗂 CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(
+        text="🆘 Активы аккаунта", callback_data=AccCb(action="assets", acc_id=acc_id)
+    )
+    toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
+    kb.button(text=toggle_text, callback_data=AccCb(action="toggle", acc_id=acc_id))
+    kb.button(text="🔄 Релог", callback_data=AccCb(action="relog", acc_id=acc_id))
+    kb.button(text="🗑 Удалить", callback_data=AccCb(action="remove", acc_id=acc_id))
+    kb.button(text="◀️ Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(2, 2, 2, 2, 2, 2, 1, 2, 1)
+    return kb.as_markup()
+
+
+def _acc_detail_markup(
+    acc_id: int, is_active: bool = True, warmup_level: str | None = None
+):
+    """Расширенный markup карточки аккаунта с быстрыми действиями."""
+    from bot.callbacks import WarmupCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📋 Каналы/группы", callback_data=AccCb(action="channels", acc_id=acc_id)
+    )
+    kb.button(
+        text="🔍 Сканировать активы",
+        callback_data=AccCb(action="scan_assets", acc_id=acc_id),
+    )
+    kb.button(text="📤 Написать", callback_data=AccCb(action="post", acc_id=acc_id))
+    kb.button(
+        text="🔍 Проверить", callback_data=AccCb(action="check_health", acc_id=acc_id)
+    )
+    kb.button(
+        text="📊 Диалоги", callback_data=AccCb(action="dialogs_stats", acc_id=acc_id)
+    )
+    kb.button(
+        text="📂 Список диалогов",
+        callback_data=AccCb(action="dialogs", acc_id=acc_id, chat_id=0),
+    )
+    kb.button(text="✉️ Отправить", callback_data=AccCb(action="send_msg", acc_id=acc_id))
+    kb.button(text="🌐 Прокси", callback_data=AccCb(action="set_proxy", acc_id=acc_id))
+    kb.button(text="🏷 Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="🗂 CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(
+        text="🆘 Активы аккаунта", callback_data=AccCb(action="assets", acc_id=acc_id)
+    )
+    toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
+    kb.button(text=toggle_text, callback_data=AccCb(action="toggle", acc_id=acc_id))
+    kb.button(text="🗑 Удалить", callback_data=AccCb(action="remove", acc_id=acc_id))
+    # ── Быстрые действия ──
+    _warmup_level_labels = {
+        "light": "🌱 light",
+        "medium": "🌿 medium",
+        "deep": "🔥 deep",
+    }
+    warmup_btn_text = "🌡 Прогрев"
+    if warmup_level:
+        warmup_btn_text = (
+            f"🌡 Прогрев [{_warmup_level_labels.get(warmup_level, warmup_level)}]"
+        )
+    kb.button(text=warmup_btn_text, callback_data=WarmupCb(action="create_list"))
+    kb.button(
+        text="🔄 Переподключить", callback_data=AccCb(action="relog", acc_id=acc_id)
+    )
+    kb.button(
+        text="📊 История операций",
+        callback_data=AccCb(action="op_history", acc_id=acc_id),
+    )
+    kb.button(text="◀️ Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(2, 2, 2, 2, 2, 1, 2, 3, 1)
+    return kb.as_markup()
+
+
+def _cancel_markup():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+# ── /accounts command (redirect to Infragram OS) ────────────────────────────
+
+
+@router.message(Command("accounts"))
+async def cmd_accounts(message: Message) -> None:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1)
+    await message.answer(
+        "📱 <b>TG-аккаунты</b>\n\n"
+        "Управление личными Telegram-аккаунтами для операций:\n"
+        "вступление, публикация, парсинг, воронки.",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "menu"))
+async def cb_accounts_menu(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    await state.clear()
+    # chat_id field used as status filter: 0=all, 1=active, 2=problem
+    status_filter = {0: "all", 1: "active", 2: "problem"}.get(
+        callback_data.chat_id, "all"
+    )
+    await _show_accounts_menu(
+        callback.message,
+        pool,
+        callback.from_user.id,
+        edit=True,
+        status_filter=status_filter,
+    )
+
+
+async def _show_accounts_menu(
+    message: Message,
+    pool: asyncpg.Pool,
+    user_id: int,
+    *,
+    edit: bool,
+    status_filter: str = "all",
+) -> None:
+    from aiogram.types import InlineKeyboardButton
+
+    (plan, limit), all_accounts = await asyncio.gather(
+        _get_account_limit(pool, user_id),
+        db.get_tg_accounts(pool, user_id),
+    )
+    total = len(all_accounts) if all_accounts else 0
+
+    if limit == 0 and total == 0:
+        await message.edit_text(
+            locked_text("Личные Telegram-аккаунты", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="assets")
+            ),
+        )
+        return
+
+    # Filter display
+    if status_filter == "active":
+        shown = [
+            a
+            for a in (all_accounts or [])
+            if _display_acc_status(a) == "active" and a.get("is_active", True)
+        ]
+    elif status_filter == "problem":
+        shown = [
+            a
+            for a in (all_accounts or [])
+            if _display_acc_status(a) != "active" or not a.get("is_active", True)
+        ]
+    else:
+        shown = list(all_accounts or [])
+
+    kb = InlineKeyboardBuilder()
+
+    # Count by status for header badge
+    _cnt = {}
+    for a in all_accounts or []:
+        s = _display_acc_status(a)
+        _cnt[s] = _cnt.get(s, 0) + 1
+    active_cnt = _cnt.get("active", 0)
+    expired_cnt = _cnt.get("session_expired", 0)
+    problem_cnt = sum(v for k, v in _cnt.items() if k not in ("active", "archived"))
+
+    # Account list buttons (1 per row)
+    if shown:
+        filter_label = {
+            "all": "Все",
+            "active": "Активные",
+            "problem": "Проблемные",
+        }.get(status_filter, "Все")
+        badge = f"✅{active_cnt}"
+        if problem_cnt:
+            badge += f" · ⚠️{problem_cnt}"
+        lines = [
+            f"📱 <b>Telegram-аккаунты</b> ({badge}) · {filter_label}: {len(shown)}\n"
+        ]
+        for acc in shown:
+            name = escape(acc["first_name"] or "")
+            uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
+            phone = escape(acc.get("phone", ""))
+            label = name or uname or phone or f"ID {acc['id']}"
+            display = f"{label} ({phone})" if phone and name else label
+            acc_status = _display_acc_status(acc)
+            st_emoji = _STATUS_EMOJI.get(acc_status, "✅")
+            pool_str = f" · 🏊 {escape(acc['pool'])}" if acc.get("pool") else ""
+            trust_score = acc.get("trust_score")
+            trust_str = (
+                f" · ⭐{float(trust_score):.2f}" if trust_score is not None else ""
+            )
+            lines.append(f"  {st_emoji} {display}{pool_str}{trust_str}")
+            kb.button(
+                text=f"{st_emoji} {display}",
+                callback_data=AccCb(action="view", acc_id=acc["id"]),
+            )
+        text = "\n".join(lines)
+    else:
+        if status_filter == "problem":
+            text = "📱 <b>Telegram-аккаунты</b>\n\n✅ Проблемных аккаунтов нет!"
+        elif status_filter == "active":
+            text = "📱 <b>Telegram-аккаунты</b>\n\n⚠️ Нет активных аккаунтов.\n\n<i>Переключитесь на «Все», чтобы увидеть неактивные аккаунты, или добавьте новый ↓</i>"
+        else:
+            text = (
+                "📱 <b>Личные Telegram-аккаунты</b>\n\n"
+                "Здесь подключаются личные аккаунты Telegram (не боты).\n"
+                "Они нужны для:\n"
+                "• Создания каналов и групп\n"
+                "• Вступления/выхода из каналов\n"
+                "• Публикации постов от имени аккаунта\n"
+                "• Создания ботов через @BotFather\n\n"
+                "Добавьте первый аккаунт ↓"
+            )
+
+    limit_label = "∞" if limit >= 9999 else str(limit)
+    text += f"\n\n<i>Использовано: {total} / {limit_label}</i>"
+
+    # All buttons so far are 1 per row
+    kb.adjust(1)
+
+    # Filter tabs in one explicit row
+    if total > 0:
+        kb.row(
+            InlineKeyboardButton(
+                text="📋 Все" + (" ◀" if status_filter == "all" else ""),
+                callback_data=AccCb(action="menu", chat_id=0).pack(),
+            ),
+            InlineKeyboardButton(
+                text="✅ Актив." + (" ◀" if status_filter == "active" else ""),
+                callback_data=AccCb(action="menu", chat_id=1).pack(),
+            ),
+            InlineKeyboardButton(
+                text="⚠️ Пробл." + (" ◀" if status_filter == "problem" else ""),
+                callback_data=AccCb(action="menu", chat_id=2).pack(),
+            ),
+        )
+
+    # Action buttons (1 per row)
+    if total < limit:
+        kb.row(
+            InlineKeyboardButton(
+                text="🔲 Добавить (QR-код)",
+                callback_data=AccCb(action="qr_login").pack(),
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="☎️ Добавить (номер)", callback_data=AccCb(action="add").pack()
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="📥 Импорт сессии",
+                callback_data=AccCb(action="import_menu").pack(),
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="🤖 Авторег (SMS API)",
+                callback_data=AutoRegCb(action="menu").pack(),
+            )
+        )
+
+    if total > 0:
+        kb.row(
+            InlineKeyboardButton(
+                text="🔍 Проверить все", callback_data=AccCb(action="check_all").pack()
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="🔎 Найти ресурсы в аккаунтах",
+                callback_data=AccCb(action="scan_all").pack(),
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="🏊 По пулам", callback_data=AccCb(action="pools_view").pack()
+            )
+        )
+        if expired_cnt > 0:
+            kb.row(
+                InlineKeyboardButton(
+                    text=f"🔄 Переавторизатор ({expired_cnt})",
+                    callback_data=AccCb(action="reauth_list").pack(),
+                ),
+                InlineKeyboardButton(
+                    text=f"🧹 Удалить expired ({expired_cnt})",
+                    callback_data=AccCb(action="purge_expired").pack(),
+                ),
+            )
+
+    kb.row(
+        InlineKeyboardButton(
+            text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu").pack()
+        )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="◀️ Главное меню", callback_data=BotCb(action="main").pack()
+        )
+    )
+
+    if edit:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    else:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Add account ────────────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "add"))
+async def cb_add_account(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await safe_answer(callback)
+
+    if not _api_configured():
+        await callback.message.edit_text(
+            _api_missing_text(),
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    plan, limit = await _get_account_limit(pool, callback.from_user.id)
+    if limit == 0:
+        await callback.message.edit_text(
+            locked_text("Личные аккаунты Telegram", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=AccCb(action="menu")
+            ),
+        )
+        return
+
+    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
+    if len(accounts) >= limit:
+        limit_label = "∞" if limit >= 9999 else str(limit)
+        upgrade_plan = _next_account_plan(plan)
+        await callback.message.edit_text(
+            f"⚠️ Достигнут лимит аккаунтов для вашего плана "
+            f"(<b>{plan.upper()}</b>: {limit_label} аккаунт{'ов' if limit != 1 else ''}).\n\n"
+            f"Обновите подписку, чтобы добавить больше аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                upgrade_plan, back_callback=AccCb(action="menu")
+            ),
+        )
+        return
+
+    await state.set_state(AccountLogin.waiting_phone)
+    await callback.message.edit_text(
+        "📱 <b>Добавление аккаунта</b>\n\n"
+        "Введите номер телефона в международном формате:\n"
+        "<code>+79001234567</code>",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+# ── Step 1: receive phone ──────────────────────────────────────────────────────
+
+
+@router.message(AccountLogin.waiting_phone)
+async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    phone = (message.text or "").strip()
+
+    if not re.match(r"^\+\d{7,15}$", phone):
+        await message.answer(
+            "❌ Неверный формат номера.\n"
+            "Введите номер в формате: <code>+79001234567</code>",
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    await message.answer("⏳ Отправляю код на " + escape(phone) + "…")
+
+    try:
+        phone_code_hash, delivery_hint = await start_login(phone)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await state.clear()
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        elif "TG_API_ID" in err or "TG_API_HASH" in err:
+            await state.clear()
+            await message.answer(
+                "⚙️ <b>API-ключи не настроены.</b>\n\n"
+                "Обратитесь к администратору платформы — "
+                "необходимо задать переменные <code>TG_API_ID</code> и <code>TG_API_HASH</code>.",
+                parse_mode="HTML",
+            )
+        else:
+            await state.clear()
+            await message.answer(
+                f"❌ Ошибка при отправке кода: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        return
+
+    await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
+    await state.set_state(AccountLogin.waiting_code)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Выслать SMS", callback_data=AccCb(action="resend_sms"))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+
+    await message.answer(
+        f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
+        f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
+        f"(не SMS) — проверьте на всех устройствах.\n\n"
+        f"Не пришёл? Нажмите <b>«Выслать SMS»</b>.\n\n"
+        f"Введите код (только цифры, например <code>12345</code>):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Resend code via SMS ────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "resend_sms"))
+async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    data = await state.get_data()
+    phone: str = data.get("phone", "")
+    phone_code_hash: str = data.get("phone_code_hash", "")
+
+    if not phone or not phone_code_hash:
+        await callback.message.answer("❌ Сессия истекла. Начните заново: /accounts")
+        await state.clear()
+        return
+
+    try:
+        new_hash, hint = await resend_login_code(phone, phone_code_hash)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            import re as _re
+
+            m = _re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await state.clear()
+            await callback.message.answer(
+                f"⏳ Слишком много запросов. Подождите <b>{wait} сек</b> и попробуйте снова.",
+                parse_mode="HTML",
+            )
+            return
+        # Code expired — restart login with a fresh SendCodeRequest
+        try:
+            new_hash, hint = await start_login(phone)
+            await state.update_data(phone_code_hash=new_hash)
+            kb = InlineKeyboardBuilder()
+            kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+            kb.adjust(1)
+            await callback.message.answer(
+                f"📱 Код запрошен заново.\n{hint} на <code>{escape(phone)}</code>.\n\nВведите код (только цифры):",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+        except Exception as exc2:
+            await state.clear()
+            await callback.message.answer(
+                f"❌ Не удалось выслать код: <code>{escape(str(exc2)[:200])}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+    await state.update_data(phone_code_hash=new_hash)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+    await callback.message.answer(
+        f"{hint} на <code>{escape(phone)}</code>.\n\nВведите код (только цифры):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "cancel_login"))
+async def cb_cancel_login(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text(
+        "❌ Авторизация отменена.", reply_markup=kb.as_markup()
+    )
+
+
+# ── QR Login ──────────────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "qr_login"))
+async def cb_qr_login(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    bot: Bot,
+    state: FSMContext,
+) -> None:
+    await safe_answer(callback)
+    await state.clear()
+    user_id = callback.from_user.id
+
+    try:
+        png = await start_qr_login(user_id)
+    except Exception as exc:
+        await callback.message.answer(
+            f"❌ Не удалось запустить QR-вход: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+    kb.adjust(1)
+
+    msg = await callback.message.answer_photo(
+        BufferedInputFile(png, filename="qr.png"),
+        caption=(
+            "🔲 <b>Войдите через QR-код</b>\n\n"
+            "1. Откройте Telegram на телефоне или ПК\n"
+            "2. <b>Настройки → Устройства → Подключить устройство</b>\n"
+            "3. Наведите камеру на QR-код выше\n\n"
+            "<i>Ожидаем сканирование (2 минуты)...</i>"
+        ),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+    asyncio.create_task(
+        _qr_wait_task(
+            bot,
+            user_id,
+            msg.chat.id,
+            msg.message_id,
+            pool,
+            state.storage,
+            state.key.bot_id,
+        ),
+        name=f"qr-wait-{user_id}",
+    )
+
+
+async def _qr_wait_task(
+    bot: Bot,
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    pool: asyncpg.Pool,
+    storage,
+    bot_id: int,
+) -> None:
+    """Background task: wait for QR scan and finalize account connection."""
+    from telethon.errors import SessionPasswordNeededError
+    from aiogram.fsm.storage.base import StorageKey
+    from aiogram.fsm.context import FSMContext as _FSMContext
+
+    try:
+        session_str, info = await wait_qr_login(user_id, timeout=120.0)
+    except asyncio.TimeoutError:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔄 Обновить QR", callback_data=AccCb(action="qr_login"))
+        kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption="⏰ QR-код истёк. Нажмите «Обновить QR» чтобы получить новый.",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            log_exc_swallow(log, "Ошибка обновления сообщения об истечении QR-кода")
+        await cleanup_qr_pending(user_id)
+        return
+    except SessionPasswordNeededError:
+        # Set FSM state so the password message handler catches the next input
+        key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
+        ctx = _FSMContext(storage=storage, key=key)
+        await ctx.set_state(QrLogin2FA.waiting_password)
+
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+        kb.adjust(1)
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=(
+                    "🔐 <b>Аккаунт защищён паролем 2FA</b>\n\n"
+                    "Введите пароль двухфакторной аутентификации:"
+                ),
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            log_exc_swallow(log, "Ошибка отображения запроса пароля 2FA")
+        # Client stays in _pending_qr — needed by confirm_qr_2fa()
+        return
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                chat_id,
+                f"❌ Ошибка QR-входа: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            log_exc_swallow(log, "Ошибка отправки сообщения об ошибке QR-входа")
+        await cleanup_qr_pending(user_id)
+        return
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone", f"id:{info['tg_user_id']}"),
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
+        )
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                chat_id,
+                f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            log_exc_swallow(
+                log, "Ошибка отправки сообщения о неудаче сохранения аккаунта"
+            )
+        await cleanup_qr_pending(user_id)
+        return
+
+    await cleanup_qr_pending(user_id)
+
+    display = escape(
+        info.get("first_name") or info.get("username") or f"id:{info['tg_user_id']}"
+    )
+    phone_str = escape(info.get("phone", ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=(
+                f"✅ <b>Аккаунт успешно подключён!</b>\n\n👤 {display}\n📱 {phone_str}"
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        await bot.send_message(
+            chat_id,
+            f"✅ <b>Аккаунт {display} подключён!</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+@router.callback_query(AccCb.filter(F.action == "cancel_qr"))
+async def cb_cancel_qr(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    await cleanup_qr_pending(user_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text("❌ QR-вход отменён.", reply_markup=kb.as_markup())
+
+
+@router.message(QrLogin2FA.waiting_password)
+async def handle_qr_2fa(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Handle 2FA password after QR scan."""
+    password = (message.text or "").strip()
+    user_id = message.from_user.id
+
+    try:
+        session_str, info = await confirm_qr_2fa(user_id, password)
+    except ValueError as exc:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+        kb.adjust(1)
+        await message.answer(
+            f"❌ {escape(str(exc))}\n\nВведите пароль ещё раз:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    except Exception as exc:
+        await message.answer(
+            f"❌ Ошибка: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        await cleanup_qr_pending(user_id)
+        return
+
+    await state.clear()
+    await cleanup_qr_pending(user_id)
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone", f"id:{info['tg_user_id']}"),
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    display = escape(
+        info.get("first_name") or info.get("username") or f"id:{info['tg_user_id']}"
+    )
+    phone_str = escape(info.get("phone", ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        f"✅ <b>Аккаунт успешно подключён!</b>\n\n👤 {display}\n📱 {phone_str}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Step 2: receive OTP code ───────────────────────────────────────────────────
+
+
+@router.message(AccountLogin.waiting_code)
+async def handle_code(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    code = (message.text or "").strip()
+    data = await state.get_data()
+    phone: str = data.get("phone", "")
+    phone_code_hash: str = data.get("phone_code_hash", "")
+
+    if not code.isdigit():
+        await message.answer(
+            "❌ Код должен содержать только цифры. Введите ещё раз:",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    try:
+        result = await confirm_code(phone, code, phone_code_hash)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        elif "SessionPasswordNeededError" in err or "need_2fa" in err.lower():
+            await state.set_state(AccountLogin.waiting_2fa)
+            await message.answer(
+                "🔐 Аккаунт защищён двухфакторной аутентификацией.\n\n"
+                "Введите ваш пароль 2FA:",
+                parse_mode="HTML",
+                reply_markup=_cancel_markup(),
+            )
+        else:
+            await state.clear()
+            await message.answer(
+                f"❌ Ошибка подтверждения кода: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        return
+
+    # confirm_code may signal "need_2fa" as a dict/string result instead of exception
+    if result == "need_2fa" or (isinstance(result, dict) and result.get("need_2fa")):
+        await state.set_state(AccountLogin.waiting_2fa)
+        await message.answer(
+            "🔐 Аккаунт защищён двухфакторной аутентификацией.\n\n"
+            "Введите ваш пароль 2FA:",
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    await _finalize_login(message, pool, state, phone)
+
+
+# ── Step 3: receive 2FA password ───────────────────────────────────────────────
+
+
+@router.message(AccountLogin.waiting_2fa)
+async def handle_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    password = (message.text or "").strip()
+    data = await state.get_data()
+    phone: str = data.get("phone", "")
+
+    try:
+        await confirm_2fa(phone, password)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+            return
+        if "PasswordHashInvalidError" in err or "invalid" in err.lower():
+            await message.answer("❌ Неверный пароль 2FA. Попробуйте снова:")
+            return
+        await state.clear()
+        await message.answer(
+            f"❌ Ошибка 2FA: <code>{escape(err[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await _finalize_login(message, pool, state, phone)
+
+
+# ── Login finalization ─────────────────────────────────────────────────────────
+
+
+async def _finalize_login(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+    phone: str,
+) -> None:
+    """Fetch session, save to DB, clean up pending login state."""
+    data = await state.get_data()
+    relog_acc_id: int | None = data.get("relog_acc_id")
+
+    try:
+        session_str, info = await get_client_info_and_session(phone)
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось получить сессию: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
+
+    # Check for duplicate phone before insert (ON CONFLICT will update, but warn user)
+    normalized_phone = info.get("phone") or phone
+    try:
+        existing = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND phone=$2",
+            message.from_user.id,
+            normalized_phone,
+        )
+    except Exception:
+        existing = None
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=message.from_user.id,
+            phone=normalized_phone,
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
+
+    await cleanup_pending(phone)
+    await state.clear()
+
+    # If phone already existed — it's a session update (relog), not a new account
+    if existing and not relog_acc_id:
+        relog_acc_id = existing["id"]
+
+    display_name = escape(info.get("first_name") or info.get("username") or phone)
+    kb = InlineKeyboardBuilder()
+
+    if relog_acc_id:
+        kb.button(
+            text="👤 Открыть аккаунт",
+            callback_data=AccCb(action="view", acc_id=relog_acc_id),
+        )
+        action_word = "переподключён"
+    else:
+        kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+        action_word = "добавлен"
+
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        f"✅ <b>Аккаунт успешно {action_word}!</b>\n\n"
+        f"👤 {display_name}\n"
+        f"📱 {escape(phone)}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── View account ───────────────────────────────────────────────────────────────
+
+
+def _fmt_cooldown_human(cooldown_until, now) -> str:
+    """Возвращает 'через 2ч 15м' или '' если кулдаун истёк."""
+    if cooldown_until is None:
+        return ""
+    cd_aware = (
+        cooldown_until
+        if cooldown_until.tzinfo
+        else cooldown_until.replace(tzinfo=timezone.utc)
+    )
+    if cd_aware <= now:
+        return ""
+    diff = cd_aware - now
+    total_secs = max(0, int(diff.total_seconds()))
+    hours = total_secs // 3600
+    minutes = (total_secs % 3600) // 60
+    if hours >= 24:
+        days = hours // 24
+        rem_h = hours % 24
+        return f"через {days}д {rem_h}ч" if rem_h else f"через {days}д"
+    if hours:
+        return f"через {hours}ч {minutes}м"
+    return f"через {minutes}м"
+
+
+@router.callback_query(AccCb.filter(F.action == "view"))
+async def cb_view_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    now = datetime.now(timezone.utc)
+    name = escape(acc.get("first_name") or "")
+    uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
+    phone = escape(acc.get("phone") or "")
+    tg_id = acc.get("tg_user_id") or ""
+    is_active = bool(acc.get("is_active", True))
+
+    proxy_url = acc.get("proxy_url") or ""
+    proxy_label = acc.get("proxy_label") or ""
+    proxy_line = (
+        f"🌐 {escape(proxy_label or proxy_url[:40])}" if proxy_url else "🌐 Без прокси"
+    )
+
+    # Trust score с визуальной полосой ████░░░░
+    trust_score = acc.get("trust_score")
+    if trust_score is not None:
+        ts = float(trust_score)
+        filled = round(ts * 8)
+        trust_bar = "█" * filled + "░" * (8 - filled)
+        trust_line = f"⭐ Trust: [{trust_bar}] {ts:.2f}"
+    else:
+        trust_line = "⭐ Trust: —"
+
+    # Health score из истории
+    health_score_line = "🩺 Health: —"
+    try:
+        h_row = await pool.fetchrow(
+            """SELECT ROUND(health_score::numeric, 1) AS hs
+               FROM account_health_history
+               WHERE account_id=$1
+               ORDER BY recorded_at DESC LIMIT 1""",
+            callback_data.acc_id,
+        )
+        if h_row and h_row["hs"] is not None:
+            hs = float(h_row["hs"])
+            hs_filled = int(hs / 10)
+            hs_bar = "█" * hs_filled + "░" * (10 - hs_filled)
+            health_score_line = f"🩺 Health: [{hs_bar}] {hs:.0f}/100"
+    except Exception:
+        log_exc_swallow(
+            log, f"accounts: health_score fetch failed acc_id={callback_data.acc_id}"
+        )
+
+    # Cooldown с человекочитаемым форматом
+    cooldown_until = acc.get("cooldown_until")
+    cooldown_line = ""
+    if cooldown_until:
+        cd_aware = (
+            cooldown_until
+            if cooldown_until.tzinfo
+            else cooldown_until.replace(tzinfo=timezone.utc)
+        )
+        if cd_aware > now:
+            human_cd = _fmt_cooldown_human(cd_aware, now)
+            cooldown_line = f"⏳ Кулдаун: <b>{cd_aware.strftime('%d.%m %H:%M')} UTC</b> ({human_cd})"
+
+    # Flood events 7d
+    flood_cnt = int(acc.get("flood_count_7d") or 0)
+    flood_line = (
+        f"🌊 Блокировок 7д: <b>{flood_cnt}</b>"
+        if flood_cnt
+        else "🌊 Блокировок 7д: <b>—</b>"
+    )
+
+    # Last operation (из operation_log если есть)
+    last_op_line = ""
+    try:
+        op_row = await pool.fetchrow(
+            """SELECT ol.step_num, ol.target, ol.status, ol.message,
+                      oq.op_type, oq.created_at
+               FROM operation_log ol
+               JOIN operation_queue oq ON oq.id = ol.op_id
+               WHERE oq.owner_id=$1
+               ORDER BY ol.id DESC LIMIT 1""",
+            callback.from_user.id,
+        )
+        if op_row:
+            op_type = op_row.get("op_type") or "операция"
+            op_dt = (
+                op_row["created_at"].strftime("%d.%m %H:%M")
+                if op_row.get("created_at")
+                else "—"
+            )
+            op_status = op_row.get("status") or ""
+            op_icon = (
+                "✅"
+                if op_status == "done"
+                else ("❌" if op_status == "error" else "⏳")
+            )
+            last_op_line = f"📋 Посл. операция: {op_icon} {escape(op_type)} ({op_dt})"
+    except Exception:
+        log_exc_swallow(
+            log, f"accounts: last_op fetch failed owner={callback.from_user.id}"
+        )
+
+    # Infrastructure fields (v60)
+    tags = acc.get("tags") or []
+    pool_name = acc.get("pool") or ""
+    labels = acc.get("labels") or []
+    warnings = acc.get("warnings") or []
+    project = acc.get("project") or ""
+
+    lines = ["👤 <b>Аккаунт</b>\n"]
+    if name:
+        lines.append(f"Имя: <b>{name}</b>")
+    if uname:
+        lines.append(f"Username: <b>{uname}</b>")
+    if phone:
+        lines.append(f"Телефон: <code>{phone}</code>")
+    if tg_id:
+        lines.append(f"Telegram ID: <code>{tg_id}</code>")
+    lines.append(f"Статус: {_display_acc_status_label(acc)}")
+    lines.append("")
+    lines.append(trust_line)
+    lines.append(health_score_line)
+    lines.append(flood_line)
+    if cooldown_line:
+        lines.append(cooldown_line)
+    if last_op_line:
+        lines.append(last_op_line)
+    lines.append("")
+    lines.append(f"Прокси: {proxy_line}")
+    if pool_name:
+        lines.append(f"🏊 Пул: <b>{escape(pool_name)}</b>")
+    else:
+        lines.append("🏊 Пул: <b>—</b>")
+    if tags:
+        lines.append(f"🏷 Теги: {', '.join(escape(t) for t in tags)}")
+    else:
+        lines.append("🏷 Теги: <b>—</b>")
+    if project:
+        lines.append(f"📁 Проект: <b>{escape(project)}</b>")
+    if labels:
+        lines.append(f"🏷 Метки: {', '.join(escape(lb) for lb in labels)}")
+    if warnings:
+        lines.append(f"⚠️ Предупреждения: <b>{len(warnings)}</b> шт.")
+
+    # Quick actions section
+    lines.append("")
+    lines.append("⚡ <i>Быстрые действия: Прогрев / Переподключить / История ↓</i>")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_acc_detail_markup(callback_data.acc_id, is_active=is_active),
+    )
+
+
+# ── Account operation history ─────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "op_history"))
+async def cb_acc_op_history(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """История операций для аккаунта (через operation_queue)."""
+    acc_id = callback_data.acc_id
+
+    acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    name = escape(acc.get("first_name") or acc.get("phone") or f"ID {acc_id}")
+
+    lines = [f"📊 <b>История операций: {name}</b>\n"]
+    try:
+        rows = await pool.fetch(
+            """SELECT oq.op_type, oq.status, oq.created_at,
+                      oq.total_items, oq.done_items
+               FROM operation_queue oq
+               WHERE oq.owner_id=$1
+               ORDER BY oq.created_at DESC LIMIT 15""",
+            callback.from_user.id,
+        )
+        if rows:
+            _op_icons = {
+                "running": "⏳",
+                "done": "✅",
+                "error": "❌",
+                "cancelled": "🚫",
+                "pending": "🕐",
+            }
+            for row in rows:
+                st = row.get("status") or "unknown"
+                icon = _op_icons.get(st, "•")
+                op_type = escape(row.get("op_type") or "операция")
+                dt_str = (
+                    row["created_at"].strftime("%d.%m %H:%M")
+                    if row.get("created_at")
+                    else "—"
+                )
+                done = row.get("done_items") or 0
+                total = row.get("total_items") or 0
+                progress = f" {done}/{total}" if total else ""
+                lines.append(f"{icon} <code>{dt_str}</code> {op_type}{progress}")
+        else:
+            lines.append("Операций не найдено.")
+    except Exception:
+        log_exc_swallow(log, f"op_history query error acc={acc_id}")
+        lines.append("<i>Не удалось загрузить историю операций.</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Relog (one-click re-authentication with stored phone) ─────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "relog"))
+async def cb_relog_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    if not _api_configured():
+        await safe_answer(callback)
+        await callback.message.edit_text(
+            _api_missing_text(),
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    phone: str = acc.get("phone") or ""
+    if not phone or not re.match(r"^\+\d{7,15}$", phone):
+        await callback.message.edit_text(
+            "❌ <b>Нет сохранённого номера</b>\n\n"
+            "Для этого аккаунта не сохранён номер телефона.\n"
+            "Используйте обычный вход: <b>Добавить → По номеру</b>.",
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"⏳ Отправляю SMS-код на <code>{escape(phone)}</code>…",
+        parse_mode="HTML",
+    )
+
+    try:
+        phone_code_hash, delivery_hint = await start_login(phone)
+    except Exception as exc:
+        err = str(exc)
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="◀️ Назад",
+            callback_data=AccCb(action="view", acc_id=callback_data.acc_id),
+        )
+        kb.adjust(1)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Ошибка отправки кода: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        return
+
+    await state.update_data(
+        phone=phone,
+        phone_code_hash=phone_code_hash,
+        relog_acc_id=callback_data.acc_id,
+    )
+    await state.set_state(AccountLogin.waiting_code)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Выслать SMS", callback_data=AccCb(action="resend_sms"))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
+        f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
+        f"(не SMS) — проверьте на всех устройствах.\n\n"
+        f"Не пришёл? Нажмите <b>«Выслать SMS»</b>.\n\n"
+        f"Введите код (только цифры, например <code>12345</code>):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Proxy assignment ──────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "set_proxy"))
+async def cb_set_proxy(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+    try:
+        proxies = await pool.fetch(
+            "SELECT id, label, proxy_url, is_alive FROM user_proxies "
+            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY label",
+            callback.from_user.id,
+        )
+    except Exception:
+        proxies = []
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🚫 Без прокси",
+        callback_data=AccCb(action="assign_proxy", acc_id=acc_id, page=0),
+    )
+    for px in proxies[:10]:
+        alive = "✅" if px["is_alive"] else ("❓" if px["is_alive"] is None else "❌")
+        label = px["label"] or px["proxy_url"][:30]
+        kb.button(
+            text=f"{alive} {escape(label)}",
+            callback_data=AccCb(action="assign_proxy", acc_id=acc_id, page=px["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    if not proxies:
+        text = (
+            "🌐 <b>Назначение прокси</b>\n\n"
+            "У вас нет добавленных прокси.\n"
+            "Добавьте прокси через <b>⚙️ Мониторинг → 🌐 Прокси</b>."
+        )
+    else:
+        text = (
+            f"🌐 <b>Назначение прокси для аккаунта #{acc_id}</b>\n\n"
+            f"Выберите прокси (✅ живой, ❌ мёртвый, ❓ не проверен):\n"
+            f"Текущий прокси будет сохранён немедленно."
+        )
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "assign_proxy"))
+async def cb_assign_proxy(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc_id = callback_data.acc_id
+    proxy_id = callback_data.page  # 0 = no proxy, >0 = proxy id
+    try:
+        if proxy_id == 0:
+            await pool.execute(
+                "UPDATE tg_accounts SET proxy_id=NULL WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                callback.from_user.id,
+            )
+            await callback.answer("✅ Прокси снят", show_alert=True)
+        else:
+            px = await pool.fetchrow(
+                "SELECT id FROM user_proxies WHERE id=$1 AND owner_id=$2",
+                proxy_id,
+                callback.from_user.id,
+            )
+            if not px:
+                await callback.answer("Прокси не найден", show_alert=True)
+                return
+            await pool.execute(
+                "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+                proxy_id,
+                acc_id,
+                callback.from_user.id,
+            )
+            await callback.answer("✅ Прокси назначен", show_alert=True)
+    except Exception as exc:
+        mark_handled_error(f"assign_proxy: {exc}")
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
+    # Refresh account view
+    acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
+    if acc:
+        is_active = bool(acc.get("is_active", True))
+        proxy_url = acc.get("proxy_url") or ""
+        proxy_label = acc.get("proxy_label") or ""
+        proxy_line = (
+            f"🌐 {escape(proxy_label or proxy_url[:40])}"
+            if proxy_url
+            else "🌐 Без прокси"
+        )
+        name = escape(acc.get("first_name") or "")
+        lines = ["👤 <b>Аккаунт</b>\n"]
+        if name:
+            lines.append(f"Имя: <b>{name}</b>")
+        lines.append(f"Статус: {_display_acc_status_label(acc)}")
+        lines.append(f"Прокси: {proxy_line}")
+        await callback.message.edit_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(acc_id, is_active=is_active),
+        )
+
+
+# ── Channels / groups list ─────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "channels"))
+async def cb_channels(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text(
+        "⏳ Загружаю список каналов и групп…",
+        parse_mode="HTML",
+    )
+
+    try:
+        dialogs = await get_dialogs(session_str, _acc=acc)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        elif any(
+            x in err.upper()
+            for x in ("AUTH_KEY", "SESSION_REVOKED", "USER_DEACTIVATED")
+        ) or any(
+            x in err.lower()
+            for x in ("auth_key", "registered in the system", "key is not registered")
+        ):
+            await db.update_acc_status(
+                pool, callback_data.acc_id, "session_expired",
+                "Ключ сессии отозван Telegram"
+            )
+            await callback.message.edit_text(
+                "🔑 <b>Сессия истекла</b>\n\n"
+                "Ключ аккаунта отозван Telegram — удалите и добавьте заново.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось получить список диалогов:\n"
+                f"<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    if not dialogs:
+        await callback.message.edit_text(
+            "📭 Каналов и групп не найдено.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    lines = ["📋 <b>Каналы и группы:</b>\n"]
+    for dialog in dialogs[:30]:
+        title = escape(dialog.get("title") or "Без названия")
+        members = dialog.get("members") or dialog.get("participants_count") or 0
+        chat_id = dialog.get("id") or 0
+        lines.append(f"  • {title}" + (f" — {members:,} участн." if members else ""))
+        kb.button(
+            text=f"📤 {title[:28]}",
+            callback_data=AccCb(
+                action="post_to",
+                acc_id=callback_data.acc_id,
+                chat_id=chat_id,
+            ),
+        )
+
+    kb.button(
+        text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id)
+    )
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Post: choose chat ──────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "post"))
+async def cb_post_choose_chat(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text("⏳ Загружаю список каналов…", parse_mode="HTML")
+
+    try:
+        dialogs = await get_dialogs(session_str, _acc=acc)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось загрузить каналы:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    if not dialogs:
+        await callback.message.edit_text(
+            "📭 Нет доступных каналов/групп для отправки.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for dialog in dialogs[:30]:
+        title = dialog.get("title") or "Без названия"
+        chat_id = dialog.get("id") or 0
+        kb.button(
+            text=f"📣 {title[:30]}",
+            callback_data=AccCb(
+                action="post_to",
+                acc_id=callback_data.acc_id,
+                chat_id=chat_id,
+            ),
+        )
+    kb.button(
+        text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id)
+    )
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "📤 <b>Выберите канал или группу для отправки сообщения:</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Post: set destination → ask for text ──────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "post_to"))
+async def cb_post_to(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    await state.set_state(AccountPost.waiting_text)
+    await state.update_data(acc_id=callback_data.acc_id, chat_id=callback_data.chat_id)
+
+    await callback.message.edit_text(
+        "✏️ <b>Введите текст сообщения</b>, которое нужно опубликовать:",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+# ── Post: receive message text and send ───────────────────────────────────────
+
+
+@router.message(AccountPost.waiting_text)
+async def handle_post_text(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer(
+            "❌ Сообщение не может быть пустым. Введите текст:",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    data = await state.get_data()
+    acc_id: int = data.get("acc_id", 0)
+    chat_id: int = data.get("chat_id", 0)
+
+    if not acc_id or not chat_id:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Ошибка: не выбран аккаунт или канал. Начните заново.", reply_markup=kb.as_markup())
+        await state.clear()
+        return
+
+    acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+    if not acc:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Аккаунт не найден.", reply_markup=kb.as_markup())
+        await state.clear()
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await message.answer("⏳ Отправляю сообщение…")
+
+    try:
+        await send_message(session_str, chat_id, text, _acc=acc)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await message.answer(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                f"❌ Не удалось отправить сообщение:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        await state.clear()
+        return
+
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        "✅ <b>Сообщение успешно отправлено!</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Remove account ─────────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "remove"))
+async def cb_remove_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    name = escape(acc.get("first_name") or "")
+    phone = escape(acc.get("phone") or "")
+    label = name or phone or f"ID {callback_data.acc_id}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Да, удалить",
+        callback_data=AccCb(action="remove_confirm", acc_id=callback_data.acc_id),
+    )
+    kb.button(
+        text="❌ Отмена",
+        callback_data=AccCb(action="view", acc_id=callback_data.acc_id),
+    )
+    kb.adjust(2)
+
+    await callback.message.edit_text(
+        f"🗑 <b>Удалить аккаунт?</b>\n\n"
+        f"👤 {label}\n\n"
+        f"<i>Сессия будет удалена из системы. Восстановить без повторного входа нельзя.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "remove_confirm"))
+async def cb_remove_confirm(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+
+    # Check for active operations before deletion
+    acc_id = callback_data.acc_id
+    try:
+        assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)
+        active_ops = assets.get("ops", [])
+    except Exception as _e:
+        await callback.message.edit_text(
+            f"❌ Ошибка при проверке операций: {escape(str(_e)[:200])}",
+            parse_mode="HTML",
+        )
+        return
+    if active_ops:
+        op_list = ", ".join(
+            escape(op.get("op_type") or "операция") for op in active_ops[:3]
+        )
+        suffix = f" и ещё {len(active_ops) - 3}" if len(active_ops) > 3 else ""
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            f"⚠️ <b>Нельзя удалить аккаунт</b>\n\n"
+            f"Есть активные операции: <b>{op_list}{suffix}</b>\n\n"
+            f"Дождитесь завершения или отмените операции, затем удалите аккаунт.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    try:
+        await db.remove_tg_account(pool, acc_id, callback.from_user.id)
+    except Exception as _e:
+        await callback.message.edit_text(
+            f"❌ Ошибка при удалении аккаунта: {escape(str(_e)[:200])}",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "✅ <b>Аккаунт удалён.</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Check account health ───────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "check_health"))
+async def cb_check_health(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text(
+        "🔍 <b>Проверяю аккаунт…</b>",
+        parse_mode="HTML",
+    )
+
+    try:
+        result = await check_account_health(session_str, _acc=acc)
+    except Exception as exc:
+        result = {"ok": False, "reason": f"Ошибка: {escape(str(exc)[:200])}"}
+
+    status = result.get("status", "")
+    if result.get("ok") or status == "active":
+        status_icon = "✅"
+        status_title = "Аккаунт в порядке"
+    elif status == "session_expired":
+        status_icon = "🔑"
+        status_title = "Сессия истекла"
+    elif status == "spamblock":
+        status_icon = "🚫"
+        status_title = "Спам-блокировка"
+    elif status == "cooldown":
+        status_icon = "⏳"
+        status_title = "FloodWait — временные ограничения"
+    elif status == "banned":
+        status_icon = "💀"
+        status_title = "Аккаунт заблокирован Telegram"
+    else:
+        status_icon = "❌"
+        status_title = "Проблема с аккаунтом"
+
+    reason = escape(result.get("reason", ""))
+    extra = ""
+    if status == "session_expired":
+        extra = "\n\n💡 <i>Нажмите «🔄 Релог» чтобы переавторизоваться без удаления аккаунта.</i>"
+
+    if status == "session_expired":
+        kb2 = InlineKeyboardBuilder()
+        kb2.button(text="🔄 Релог (переавторизация)", callback_data=AccCb(action="relog", acc_id=callback_data.acc_id))
+        kb2.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id))
+        kb2.adjust(1)
+        await callback.message.edit_text(
+            f"{status_icon} <b>{status_title}</b>\n\n{reason}{extra}",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+    else:
+        kb = _acc_menu_markup(callback_data.acc_id)
+        await callback.message.edit_text(
+            f"{status_icon} <b>{status_title}</b>\n\n{reason}{extra}",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+
+
+# ── Check all accounts status ─────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "check_all"))
+async def cb_check_all_accounts(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.message.edit_text(
+            "📱 Нет аккаунтов для проверки.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
+
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool,
+        uid,
+        "check_accounts_health",
+        {"account_ids": [int(a["id"]) for a in accounts], "check_spambot": True},
+        total_items=len(accounts),
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Статус проверки", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🔍 <b>Проверка аккаунтов поставлена в очередь</b>\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"⏱ Ожидаемое время: ~{len(accounts) * 5} сек.\n\n"
+        "Уведомление придёт по окончании. Статус: /ops",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Accounts by pool view ─────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "pools_view"))
+async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
+    await safe_answer(callback)
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+        await callback.message.edit_text(
+            "📱 Нет аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Group by pool
+    pool_groups: dict[str, list] = {}
+    for acc in accounts:
+        p = acc.get("pool") or "—"
+        pool_groups.setdefault(p, []).append(acc)
+
+    _POOL_ORDER = ["primary", "monitoring", "cooldown"]
+    _POOL_ICON = {"primary": "🟢", "monitoring": "🟡", "cooldown": "🔴", "—": "⚪"}
+
+    lines = ["🏊 <b>Аккаунты по пулам</b>\n"]
+    kb = InlineKeyboardBuilder()
+
+    sorted_pools = sorted(
+        pool_groups.keys(),
+        key=lambda x: (_POOL_ORDER.index(x) if x in _POOL_ORDER else 99, x),
+    )
+    for p_name in sorted_pools:
+        accs = pool_groups[p_name]
+        icon = _POOL_ICON.get(p_name, "⚪")
+        active_cnt = sum(1 for a in accs if a.get("is_active", True))
+        lines.append(
+            f"\n{icon} <b>{escape(p_name)}</b> ({len(accs)} акк., {active_cnt} активных):"
+        )
+        for acc in accs:
+            name = escape(acc.get("first_name") or "")
+            phone = escape(acc.get("phone") or "")
+            label = name or phone or f"ID {acc['id']}"
+            acc_status = _display_acc_status(acc)
+            st = _STATUS_EMOJI.get(acc_status, "✅")
+            trust = acc.get("trust_score")
+            trust_str = f" · {float(trust):.2f}" if trust is not None else ""
+            lines.append(f"  {st} {label}{trust_str}")
+            kb.button(
+                text=f"{st} {label[:20]}",
+                callback_data=AccCb(action="view", acc_id=acc["id"]),
+            )
+
+    kb.adjust(1)
+    kb.button(
+        text="🏊 Назначить пул аккаунтам",
+        callback_data=AccCb(action="pools_bulk_assign"),
+    )
+    kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "pools_bulk_assign"))
+async def cb_pools_bulk_assign(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Show all accounts and let user assign a pool to all of them at once."""
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.answer("Нет аккаунтов.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    existing_pools = await db.get_distinct_pools(pool, uid)
+
+    kb = InlineKeyboardBuilder()
+    for p in existing_pools[:6]:
+        kb.button(
+            text=f"🏊 {p[:25]}",
+            callback_data=AccCb(action="bulk_pool_set", page=existing_pools.index(p)),
+        )
+    kb.button(text="✏️ Ввести новое название", callback_data=AccCb(action="bulk_pool_manual"))
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="pools_view"))
+    kb.adjust(2)
+
+    acc_ids = [a["id"] for a in accounts if not a.get("pool")]
+    no_pool_cnt = len(acc_ids)
+    total_cnt = len(accounts)
+
+    await state.update_data(bulk_pool_acc_ids=acc_ids, existing_pools=existing_pools)
+    await state.set_state(AccountTagsPoolFSM.waiting_pool)
+
+    await callback.message.edit_text(
+        f"🏊 <b>Массовое назначение пула</b>\n\n"
+        f"Всего аккаунтов: <b>{total_cnt}</b>\n"
+        f"Без пула: <b>{no_pool_cnt}</b>\n\n"
+        f"Выберите существующий пул или введите новое название:\n"
+        f"<i>Пул будет назначен ТОЛЬКО аккаунтам без пула.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "bulk_pool_set"))
+async def cb_bulk_pool_set(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    existing_pools: list = sd.get("existing_pools") or []
+    acc_ids: list = sd.get("bulk_pool_acc_ids") or []
+    pool_idx = callback_data.page
+    if not (0 <= pool_idx < len(existing_pools)):
+        await callback.answer("Пул не найден.", show_alert=True)
+        return
+    pool_name = existing_pools[pool_idx]
+    await state.clear()
+    uid = callback.from_user.id
+    updated = 0
+    for acc_id in acc_ids:
+        acc = await db.get_tg_account(pool, acc_id, uid)
+        if acc and not acc.get("pool"):
+            await db.update_account_pool(pool, acc_id, uid, pool_name)
+            updated += 1
+    await callback.answer(f"✅ Назначен пул «{pool_name}» для {updated} аккаунтов", show_alert=True)
+    await cb_pools_view(callback, pool, state)
+
+
+@router.callback_query(AccCb.filter(F.action == "bulk_pool_manual"))
+async def cb_bulk_pool_manual(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    _cancel_kb = InlineKeyboardBuilder()
+    _cancel_kb.button(text="❌ Отмена", callback_data=AccCb(action="pools_view"))
+    _cancel_kb.adjust(1)
+    await callback.message.edit_text(
+        "✏️ <b>Введите название пула</b>\n\n"
+        "Например: <code>main</code>, <code>backup</code>, <code>strike</code>\n\n"
+        "<i>Пул будет назначен всем аккаунтам без пула.</i>",
+        parse_mode="HTML",
+        reply_markup=_cancel_kb.as_markup(),
+    )
+    await state.update_data(bulk_pool_mode=True)
+
+
+# ── Scan all accounts for owned resources ─────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "scan_all"))
+async def cb_scan_all_resources(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.message.edit_text(
+            "📱 Нет аккаунтов для сканирования.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
+
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool, uid, "scan_owned_resources",
+        {"account_ids": [int(a["id"]) for a in accounts]},
+        total_items=len(accounts),
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Статус операции", callback_data=MassOpCb(action="queue").pack())
+    kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🔎 <b>Сканирование ресурсов поставлено в очередь</b>\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"⏱ Ожидаемое время: ~{len(accounts) * 8} сек.\n\n"
+        "Уведомление придёт по окончании. Статус: /ops",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Reauth List — показывает expired аккаунты и кнопки Релог ─────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "reauth_list"))
+async def cb_reauth_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Переавторизатор: список аккаунтов с истёкшей сессией + кнопка Релог."""
+    uid = callback.from_user.id
+    await safe_answer(callback)
+
+    expired = await pool.fetch(
+        """SELECT id, first_name, phone, username FROM tg_accounts
+           WHERE owner_id=$1 AND acc_status='session_expired'
+           ORDER BY added_at DESC""",
+        uid,
+    )
+    if not expired:
+        await callback.message.edit_text(
+            "✅ <b>Нет аккаунтов с истёкшей сессией</b>\n\nВсе аккаунты активны.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
+
+    lines = [f"🔄 <b>Переавторизатор</b> — {len(expired)} аккаунт(ов)\n"]
+    lines.append("Нажмите <b>Релог</b> рядом с нужным аккаунтом:\n")
+
+    kb = InlineKeyboardBuilder()
+    for acc in expired[:20]:
+        label = escape(
+            acc.get("first_name") or acc.get("username") or acc.get("phone") or f"id{acc['id']}"
+        )
+        phone_str = acc.get("phone") or ""
+        display = f"🔑 {label}"
+        if phone_str:
+            display += f" ({phone_str})"
+        kb.button(
+            text=f"🔄 {label}",
+            callback_data=AccCb(action="relog", acc_id=acc["id"]),
+        )
+        lines.append(f"• {display}")
+
+    kb.button(text="◀️ Назад к аккаунтам", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Purge expired sessions (by DB status, no Telegram check) ─────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "purge_expired"))
+async def cb_purge_expired_sessions(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    uid = callback.from_user.id
+    await safe_answer(callback)
+
+    try:
+        expired = await pool.fetch(
+            """SELECT id, first_name, phone FROM tg_accounts
+               WHERE owner_id=$1 AND acc_status='session_expired'
+               ORDER BY added_at DESC""",
+            uid,
+        )
+    except Exception:
+        expired = []
+    if not expired:
+        await callback.message.edit_text(
+            "✅ <b>Нет кандидатов на очистку по истёкшей сессии</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
+
+    lines = [f"🧹 <b>Перепроверить и удалить {len(expired)} кандидатов?</b>\n"]
+    for a in expired[:10]:
+        label = escape(a.get("first_name") or a.get("phone") or f"id{a['id']}")
+        lines.append(f"• 🔑 {label}")
+    if len(expired) > 10:
+        lines.append(f"<i>... и ещё {len(expired) - 10}</i>")
+    lines.append(
+        "\n<i>Перед удалением каждый аккаунт будет перепроверен через Telegram ещё раз.</i>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"✅ Перепроверить и удалить {len(expired)}",
+        callback_data=AccCb(action="purge_expired_confirm"),
+    )
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "purge_expired_confirm"))
+async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    uid = callback.from_user.id
+    await callback.answer("🧹 Удаляю...")
+
+    try:
+        candidates = [
+            acc
+            for acc in await db.get_tg_accounts(pool, uid)
+            if acc.get("acc_status") == "session_expired"
+        ]
+        delete_ids: list[int] = []
+        for acc in candidates:
+            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
+            session_str = (
+                (acc_dict.get("session_str") if acc_dict else None)
+                or acc.get("session_str")
+                or ""
+            )
+            if not session_str:
+                continue
+            result = await check_account_status_full(
+                session_str,
+                _acc=dict(acc_dict) if acc_dict else None,
+                check_spambot=False,
+            )
+            if result.get("status") == "session_expired" and result.get("auth_error"):
+                delete_ids.append(acc["id"])
+
+        deleted = 0
+        for acc_id in delete_ids:
+            await pool.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
+            )
+            deleted += 1
+    except Exception as exc:
+        mark_handled_error(f"purge_expired_confirm: {exc}")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при удалении:</b> <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    if deleted == 0:
+        await callback.message.edit_text(
+            "✅ <b>Подтверждённо мёртвых сессий не найдено</b>\n\n"
+            "Старые статусы не подтвердились повторной проверкой, поэтому ничего не удалено.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"✅ <b>Удалено {deleted} аккаунтов с подтверждённо мёртвой сессией</b>\n\n"
+        "Добавьте аккаунты заново через QR-код или номер телефона.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Delete dead (session_expired) accounts ────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "del_dead"))
+async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.answer("Нет аккаунтов.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    await callback.message.edit_text(
+        "🔍 <b>Проверяю статус сессий...</b>\nЭто займёт ~30 сек.",
+        parse_mode="HTML",
+    )
+
+    from services import account_manager
+
+    dead_ids: list[int] = []
+    for acc in accounts:
+        try:
+            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
+            session_str = (
+                (acc_dict.get("session_str") if acc_dict else None)
+                or acc.get("session_str")
+                or ""
+            )
+            if not session_str:
+                continue
+            result = await account_manager.check_account_status_full(
+                session_str,
+                _acc=dict(acc_dict) if acc_dict else None,
+                check_spambot=False,
+            )
+            if result.get("status") == "session_expired" and result.get("auth_error"):
+                dead_ids.append(acc["id"])
+        except Exception as e:
+            if any(
+                x in str(e).lower()
+                for x in ("auth", "key is not registered", "registered in the system")
+            ):
+                dead_ids.append(acc["id"])
+
+    if not dead_ids:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+        await callback.message.edit_text(
+            "✅ <b>Мёртвых сессий не найдено</b>\n\nВсе аккаунты активны.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    for acc_id in dead_ids:
+        try:
+            await pool.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
+            )
+        except Exception:
+            log_exc_swallow(
+                log, "Ошибка удаления мёртвого аккаунта из БД", account_id=acc_id
+            )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🗑 <b>Удалено {len(dead_ids)} мёртвых аккаунтов</b>\n\n"
+        f"Ключи сессий были отозваны Telegram.\n"
+        f"Добавьте аккаунты заново через QR-код или номер телефона.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Dialogs stats ──────────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "dialogs_stats"))
+async def cb_dialogs_stats(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await callback.message.edit_text(
+        "📊 <b>Загружаю статистику диалогов…</b>",
+        parse_mode="HTML",
+    )
+
+    try:
+        stats = await get_account_dialogs_stats(session_str, _acc=acc)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        elif any(
+            x in err.upper()
+            for x in ("AUTH_KEY", "SESSION_REVOKED", "USER_DEACTIVATED")
+        ) or any(
+            x in err.lower()
+            for x in ("auth_key", "registered in the system", "key is not registered")
+        ):
+            await db.update_acc_status(
+                pool, callback_data.acc_id, "session_expired",
+                "Ключ сессии отозван Telegram"
+            )
+            await callback.message.edit_text(
+                "🔑 <b>Сессия истекла</b>\n\n"
+                "Ключ аккаунта отозван Telegram — требуется переавторизация.\n"
+                "Удалите аккаунт и добавьте заново.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось получить статистику:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    # Check if the service returned a structured error
+    if stats.get("session_dead"):
+        await db.update_acc_status(
+            pool, callback_data.acc_id, "session_expired",
+            "Ключ сессии отозван Telegram"
+        )
+        await callback.message.edit_text(
+            "🔑 <b>Сессия истекла</b>\n\n"
+            "Ключ аккаунта отозван Telegram — требуется переавторизация.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    error_key = stats.get("error", "")
+    if error_key and error_key not in ("", None) and stats.get("total", 0) == 0:
+        # Network or timeout error — show friendly message
+        if error_key == "timeout":
+            msg = "⏳ Таймаут подключения — возможно, прокси недоступен."
+        elif error_key == "network":
+            msg = "❌ Ошибка сети — проверьте прокси аккаунта."
+        elif error_key == "no_session":
+            msg = "⚠️ Сессия отсутствует — добавьте аккаунт заново."
+        else:
+            msg = f"❌ Ошибка: <code>{escape(error_key[:100])}</code>"
+        await callback.message.edit_text(
+            msg,
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"📊 <b>Статистика диалогов</b>\n\n"
+        f"📁 Всего диалогов: <b>{stats.get('total', 0)}</b>\n"
+        f"📢 Каналы: <b>{stats.get('channels', 0)}</b>\n"
+        f"👥 Группы: <b>{stats.get('groups', 0)}</b>\n"
+        f"💬 Личные чаты: <b>{stats.get('personal', 0)}</b>",
+        parse_mode="HTML",
+        reply_markup=_acc_menu_markup(callback_data.acc_id),
+    )
+
+
+# ── Dialogs list with pagination ───────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "dialogs"))
+async def cb_dialogs(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+    page_offset = callback_data.chat_id  # используем chat_id как page offset
+
+    await callback.message.edit_text(
+        "⏳ <b>Загружаю список диалогов…</b>",
+        parse_mode="HTML",
+    )
+
+    # Загружаем на одну страницу больше, чтобы проверить наличие следующей
+    fetch_limit = _DIALOGS_PAGE_SIZE + 1
+    try:
+        dialogs = await get_dialogs(
+            session_str, limit=fetch_limit + page_offset, offset=0, _acc=dict(acc)
+        )
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Не удалось получить диалоги:\n<code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
+        return
+
+    # Срезаем уже просмотренные страницы
+    page_dialogs = dialogs[page_offset:]
+    has_next = len(page_dialogs) > _DIALOGS_PAGE_SIZE
+    page_dialogs = page_dialogs[:_DIALOGS_PAGE_SIZE]
+
+    if not page_dialogs:
+        await callback.message.edit_text(
+            "📭 Диалогов не найдено.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    _type_labels = {"channel": "📢 Канал", "group": "👥 Группа"}
+    lines = [f"📂 <b>Диалоги (стр. {page_offset // _DIALOGS_PAGE_SIZE + 1})</b>\n"]
+    for dialog in page_dialogs:
+        title = escape(dialog.get("title") or "Без названия")
+        d_type = _type_labels.get(dialog.get("type", ""), "💬")
+        members = dialog.get("members") or 0
+        members_str = f" · {members:,} уч." if members else ""
+        lines.append(f"  • {d_type} {title}{members_str}")
+
+    kb = InlineKeyboardBuilder()
+
+    # Навигация
+    next_offset = page_offset + _DIALOGS_PAGE_SIZE
+    prev_offset = page_offset - _DIALOGS_PAGE_SIZE
+
+    if page_offset > 0:
+        kb.button(
+            text="◀️ Назад",
+            callback_data=AccCb(
+                action="dialogs",
+                acc_id=callback_data.acc_id,
+                chat_id=max(0, prev_offset),
+            ),
+        )
+    if has_next:
+        kb.button(
+            text="▶️ Далее",
+            callback_data=AccCb(
+                action="dialogs", acc_id=callback_data.acc_id, chat_id=next_offset
+            ),
+        )
+    kb.button(
+        text="◀️ К аккаунту",
+        callback_data=AccCb(action="view", acc_id=callback_data.acc_id),
+    )
+
+    nav_count = (1 if page_offset > 0 else 0) + (1 if has_next else 0)
+    if nav_count == 2:
+        kb.adjust(2, 1)
+    else:
+        kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Toggle account active status ───────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "toggle"))
+async def cb_toggle_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    current_status = bool(acc.get("is_active", True))
+    new_status = not current_status
+
+    updated = await db.update_tg_account_status(
+        pool, callback_data.acc_id, callback.from_user.id, new_status
+    )
+    if not updated:
+        await callback.answer("Не удалось обновить статус.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    status_text = (
+        "▶️ <b>Аккаунт включён.</b>" if new_status else "⏸ <b>Аккаунт отключён.</b>"
+    )
+    name = escape(acc.get("first_name") or "")
+    uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
+    phone = escape(acc.get("phone") or "")
+    tg_id = acc.get("tg_user_id") or ""
+
+    lines = ["👤 <b>Аккаунт</b>\n", status_text]
+    if name:
+        lines.append(f"Имя: <b>{name}</b>")
+    if uname:
+        lines.append(f"Username: <b>{uname}</b>")
+    if phone:
+        lines.append(f"Телефон: <code>{phone}</code>")
+    if tg_id:
+        lines.append(f"Telegram ID: <code>{tg_id}</code>")
+    lines.append(f"Статус: {'✅ Активен' if new_status else '⏸ Отключён'}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_acc_menu_markup(callback_data.acc_id, is_active=new_status),
+    )
+
+
+# ── Send message via personal account (FSM) ────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "send_msg"))
+async def cb_send_msg_start(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    await state.set_state(AccountSendMsg.waiting_chat_id)
+    await state.update_data(acc_id=callback_data.acc_id)
+
+    await callback.message.edit_text(
+        "✉️ <b>Отправка сообщения из личного аккаунта</b>\n\n"
+        "⚠️ <i>Отправка из вашего личного аккаунта — будьте осторожны с частотой.</i>\n\n"
+        "Введите <b>chat_id</b> или <b>@username</b> получателя:\n"
+        "<code>@channel_name</code> или <code>123456789</code>",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+@router.message(AccountSendMsg.waiting_chat_id)
+async def handle_send_msg_chat_id(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer(
+            "❌ Введите chat_id или @username:", reply_markup=_cancel_markup()
+        )
+        return
+
+    # Принимаем @username или числовой chat_id
+    if raw.startswith("@"):
+        chat_id_value: str | int = raw
+    elif raw.lstrip("-").isdigit():
+        chat_id_value = int(raw)
+    else:
+        await message.answer(
+            "❌ Неверный формат. Введите числовой ID или @username:",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    await state.update_data(chat_id=chat_id_value)
+    await state.set_state(AccountSendMsg.waiting_text)
+
+    await message.answer(
+        f"✏️ Получатель: <code>{escape(str(chat_id_value))}</code>\n\n"
+        "Введите <b>текст сообщения</b>:",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+@router.message(AccountSendMsg.waiting_text)
+async def handle_send_msg_text(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer(
+            "❌ Сообщение не может быть пустым. Введите текст:",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    data = await state.get_data()
+    acc_id: int = data.get("acc_id", 0)
+    chat_id = data.get("chat_id")
+
+    if not acc_id or chat_id is None:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Ошибка состояния. Начните заново.", reply_markup=kb.as_markup())
+        await state.clear()
+        return
+
+    acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+    if not acc:
+        await message.answer("❌ Аккаунт не найден.")
+        await state.clear()
+        return
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+
+    await message.answer("⏳ Отправляю сообщение…")
+
+    ok = await send_message_via_account(session_str, chat_id, text, _acc=dict(acc))
+
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    if ok:
+        await message.answer(
+            "✅ <b>Сообщение успешно отправлено!</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await message.answer(
+            "❌ <b>Не удалось отправить сообщение.</b>\n\n"
+            "<i>Проверьте корректность chat_id/@username и убедитесь, "
+            "что аккаунт имеет доступ к этому чату.</i>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+# ── Session Import ─────────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "import_menu"))
+async def cb_import_menu(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    if not _api_configured():
+        await callback.message.edit_text(
+            _api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup()
+        )
+        return
+    plan, limit = await _get_account_limit(pool, callback.from_user.id)
+    if limit == 0:
+        await callback.message.edit_text(
+            locked_text("Личные аккаунты Telegram", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=AccCb(action="menu")
+            ),
+        )
+        return
+    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
+    if len(accounts) >= limit:
+        limit_label = "∞" if limit >= 9999 else str(limit)
+        upgrade_plan = _next_account_plan(plan)
+        await callback.message.edit_text(
+            f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
+            "Обновите подписку для добавления новых аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                upgrade_plan, back_callback=AccCb(action="menu")
+            ),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🔑 String Session (Telethon)", callback_data=AccCb(action="import_string")
+    )
+    kb.button(
+        text="📄 Session JSON (Pyrogram)", callback_data=AccCb(action="import_pyrogram")
+    )
+    kb.button(text="📦 tdata (ZIP-архив)", callback_data=AccCb(action="import_tdata"))
+    kb.button(
+        text="📂 Session файл (.session)",
+        callback_data=AccCb(action="import_session_file"),
+    )
+    kb.button(
+        text="📋 Батч-импорт (несколько)", callback_data=AccCb(action="import_batch")
+    )
+    kb.button(text="◀️ Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📥 <b>Импорт сессии</b>\n\n"
+        "Выберите формат:\n\n"
+        "🔑 <b>String Session</b> — строка вида <code>1BQANOTEuA...</code> (Telethon)\n"
+        "📄 <b>Session JSON</b> — JSON с полями <code>dc_id</code>, <code>auth_key</code> (Pyrogram)\n"
+        "📦 <b>tdata</b> — ZIP-архив папки <code>tdata</code> из Telegram Desktop\n"
+        "📋 <b>Батч-импорт</b> — несколько Telethon session strings, по одному на строку\n\n"
+        "⚠️ Никогда не передавайте сессии незнакомым людям.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Import: Telethon String Session ───────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "import_string"))
+async def cb_import_string(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(SessionImport.waiting_string_session)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "🔑 <b>Импорт Telethon String Session</b>\n\n"
+        "Отправьте строку сессии. Она начинается с цифры <code>1</code> "
+        "и содержит только буквы, цифры, <code>+</code>, <code>/</code>, <code>=</code>.\n\n"
+        "Пример:\n<code>1BQANOTEuAGkA...</code>\n\n"
+        "Как получить: запустить скрипт с <code>StringSession()</code> и вызвать <code>client.session.save()</code>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_string_session, F.text)
+async def handle_import_string(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    session_str = (message.text or "").strip()
+    msg = await message.answer("⏳ Проверяю сессию...")
+    try:
+        session_str, info = await import_from_session_string(session_str)
+    except Exception as exc:
+        await state.clear()
+        await msg.edit_text(
+            f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
+            "Проверьте строку сессии и попробуйте снова.",
+            parse_mode="HTML",
+        )
+        return
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+# ── Import: Pyrogram JSON ─────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "import_pyrogram"))
+async def cb_import_pyrogram(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(SessionImport.waiting_pyrogram_json)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📄 <b>Импорт Pyrogram JSON Session</b>\n\n"
+        "Отправьте JSON с данными сессии. Необходимые поля:\n"
+        "• <code>dc_id</code> — номер дата-центра (1–5)\n"
+        "• <code>auth_key</code> — ключ авторизации (base64, 256 байт)\n\n"
+        "Пример:\n"
+        '<code>{"dc_id": 2, "auth_key": "AAAA...", "user_id": 123456}</code>',
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_pyrogram_json, F.text)
+async def handle_import_pyrogram(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    json_str = (message.text or "").strip()
+    msg = await message.answer("⏳ Конвертирую и проверяю сессию...")
+    try:
+        session_str, info = await import_from_pyrogram_json(json_str)
+    except Exception as exc:
+        await state.clear()
+        await msg.edit_text(
+            f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
+            "Проверьте JSON и попробуйте снова.",
+            parse_mode="HTML",
+        )
+        return
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+# ── Import: tdata ZIP ─────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "import_tdata"))
+async def cb_import_tdata(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(SessionImport.waiting_tdata_zip)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📦 <b>Импорт tdata (Telegram Desktop)</b>\n\n"
+        "<b>Как подготовить архив:</b>\n"
+        "1. Найдите папку <code>tdata</code> в директории Telegram Desktop\n"
+        "   • Windows: <code>%APPDATA%\\Telegram Desktop\\tdata</code>\n"
+        "   • Linux: <code>~/.local/share/TelegramDesktop/tdata</code>\n"
+        "   • macOS: <code>~/Library/Group Containers/.../tdata</code>\n"
+        "2. Упакуйте папку <code>tdata</code> целиком в ZIP-архив\n"
+        "3. Отправьте ZIP-файл сюда\n\n"
+        "⚠️ Максимальный размер: <b>20 МБ</b>\n"
+        "⚠️ Аккаунт не должен быть защищён паролем экрана блокировки Telegram Desktop",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_tdata_zip, F.document)
+async def handle_import_tdata(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    import os
+    import tempfile
+    import zipfile
+
+    doc = message.document
+    if not doc:
+        await state.clear()
+        await message.answer("⚠️ Отправьте ZIP-файл как документ.")
+        return
+
+    if doc.file_size and doc.file_size > 50 * 1024 * 1024:
+        await state.clear()
+        await message.answer("❌ Файл слишком большой. Максимум 50 МБ.")
+        return
+
+    name = (doc.file_name or "").lower()
+    if not name.endswith(".zip"):
+        await state.clear()
+        await message.answer(
+            "❌ Ожидается ZIP-архив. Упакуйте папку tdata в .zip и отправьте снова."
+        )
+        return
+
+    # Дебаунс: если уже обрабатываем — игнорируем повторную отправку
+    sd = await state.get_data()
+    if sd.get("tdata_processing"):
+        await message.answer("⏳ Уже обрабатываю предыдущий файл, подождите...")
+        return
+    await state.update_data(tdata_processing=True)
+
+    msg = await message.answer("⏳ Загружаю архив...")
+
+    tmp_dir = tempfile.mkdtemp(prefix="tdata_import_")
+    zip_path = os.path.join(tmp_dir, "tdata.zip")
+    extract_dir = os.path.join(tmp_dir, "extracted")
+    os.makedirs(extract_dir, exist_ok=True)
+
+    session_str = None
+    info = None
+    try:
+        # Download ZIP via Bot API
+        try:
+            bot_file = await message.bot.get_file(doc.file_id)
+            buf = await message.bot.download_file(bot_file.file_path)
+            with open(zip_path, "wb") as f:
+                f.write(buf.read() if hasattr(buf, "read") else buf)
+        except Exception as exc:
+            await state.clear()
+            await msg.edit_text(
+                f"❌ <b>Ошибка загрузки файла</b>\n\n"
+                f"Telegram не смог передать файл: <code>{escape(str(exc)[:200])}</code>\n\n"
+                f"Убедитесь что ZIP-архив не превышает 50 МБ.",
+                parse_mode="HTML",
+            )
+            return
+
+        # Extract — zip-bomb guard: size, file count, path traversal
+        _MAX_UNCOMPRESSED = 200 * 1024 * 1024  # 200 MB
+        _MAX_FILES = 5_000
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                members = zf.infolist()
+                if len(members) > _MAX_FILES:
+                    await state.clear()
+                    await msg.edit_text(
+                        f"❌ Архив содержит {len(members)} файлов. Максимум {_MAX_FILES}.",
+                        parse_mode="HTML",
+                    )
+                    return
+                total_size = sum(i.file_size for i in members)
+                if total_size > _MAX_UNCOMPRESSED:
+                    await state.clear()
+                    await msg.edit_text(
+                        f"❌ Архив слишком большой ({total_size // 1024 // 1024} МБ). "
+                        "Максимум 200 МБ в распакованном виде.",
+                        parse_mode="HTML",
+                    )
+                    return
+                for member in members:
+                    fname = member.filename.replace("\\", "/")
+                    if os.path.isabs(fname) or ".." in fname.split("/"):
+                        await state.clear()
+                        await msg.edit_text("❌ Архив содержит подозрительные пути (path traversal). Отклонено.")
+                        return
+                zf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            await state.clear()
+            _err_kb = InlineKeyboardBuilder()
+            _err_kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+            _err_kb.adjust(1)
+            await msg.edit_text(
+                "❌ <b>Файл повреждён или не является ZIP-архивом.</b>\n\n"
+                "Убедитесь, что файл скачан полностью и является корректным архивом.",
+                parse_mode="HTML",
+                reply_markup=_err_kb.as_markup(),
+            )
+            return
+
+        # Locate tdata folder inside the extract
+        tdata_path = _find_tdata_root(extract_dir)
+        if not tdata_path:
+            await state.clear()
+            _err_kb = InlineKeyboardBuilder()
+            _err_kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+            _err_kb.adjust(1)
+            await msg.edit_text(
+                "❌ <b>Папка <code>tdata</code> не найдена в архиве.</b>\n\n"
+                "Убедитесь что архив содержит папку <code>tdata</code> с файлом <code>key_datas</code>.",
+                parse_mode="HTML",
+                reply_markup=_err_kb.as_markup(),
+            )
+            return
+
+        await msg.edit_text("⏳ Конвертирую tdata в сессию Telethon...")
+        try:
+            session_str, info = await import_from_tdata(tdata_path)
+        except ImportError:
+            await state.clear()
+            kb = InlineKeyboardBuilder()
+            kb.button(
+                text="🔑 Импорт через String Session",
+                callback_data=AccCb(action="import_string"),
+            )
+            kb.button(
+                text="📂 Импорт .session файла",
+                callback_data=AccCb(action="import_session_file"),
+            )
+            kb.button(text="◀️ Назад", callback_data=AccCb(action="import_menu"))
+            kb.adjust(1)
+            await msg.edit_text(
+                "❌ <b>tdata импорт недоступен</b>\n\n"
+                "Пакет <code>opentele</code> не установлен на сервере.\n\n"
+                "<b>Альтернативные способы импорта:</b>\n"
+                "• <b>String Session</b> — скопируйте строку сессии из вашего скрипта\n"
+                "• <b>.session файл</b> — загрузите SQLite-файл Telethon напрямую",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+        except Exception as exc:
+            await state.clear()
+            await msg.edit_text(
+                f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{escape(str(exc)[:300])}</code>",
+                parse_mode="HTML",
+            )
+            return
+    finally:
+        await state.update_data(tdata_processing=False)
+        # Always clean up temp files
+        import shutil
+
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            log_exc_swallow(log, "Ошибка очистки временной директории импорта")
+
+    if session_str and info:
+        await _finalize_import(message, pool, state, session_str, info)
+    else:
+        await state.clear()
+        await message.answer(
+            "❌ Конвертация завершилась без результата. Попробуйте снова."
+        )
+
+
+@router.message(SessionImport.waiting_tdata_zip)
+async def handle_import_tdata_wrong_type(message: Message) -> None:
+    await message.answer(
+        "⚠️ Отправьте ZIP-файл как документ (не фото, не текст).\n\n"
+        "Используйте вложение → Файл при отправке."
+    )
+
+
+# ── Import: .session file (Telethon SQLite) ───────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "import_session_file"))
+async def cb_import_session_file(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(SessionImport.waiting_session_file)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📂 <b>Импорт .session файла (Telethon)</b>\n\n"
+        "Отправьте файл <code>.session</code> — это SQLite-база которую создаёт Telethon.\n\n"
+        "<b>Где найти:</b>\n"
+        "• В директории вашего Python-скрипта с Telethon\n"
+        "• Файл называется как номер телефона или любое другое имя с расширением <code>.session</code>\n\n"
+        "⚠️ Максимальный размер: <b>1 МБ</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_session_file, F.document)
+async def handle_import_session_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    from services.account_manager import import_from_session_file
+
+    doc = message.document
+    if not doc:
+        await message.answer("⚠️ Отправьте .session файл как документ.")
+        return
+
+    filename = (doc.file_name or "").lower()
+    if not filename.endswith(".session"):
+        await state.clear()
+        await message.answer(
+            "❌ Ожидается файл с расширением <code>.session</code>.\n"
+            "Убедитесь что отправляете правильный файл.",
+            parse_mode="HTML",
+        )
+        return
+
+    if doc.file_size and doc.file_size > 1_048_576:
+        await state.clear()
+        await message.answer("❌ Файл слишком большой. Максимум 1 МБ.")
+        return
+
+    msg = await message.answer("⏳ Читаю .session файл...")
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        raw_bytes = (
+            downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+        )
+    except Exception as e:
+        await state.clear()
+        await msg.edit_text(
+            f"❌ Не удалось скачать файл: {escape(str(e)[:200])}", parse_mode="HTML"
+        )
+        return
+
+    await msg.edit_text("⏳ Конвертирую .session → StringSession...")
+    try:
+        session_str, info = await import_from_session_file(raw_bytes, filename)
+    except Exception as exc:
+        await state.clear()
+        await msg.edit_text(
+            f"❌ <b>Ошибка чтения .session файла</b>\n\n"
+            f"<code>{escape(str(exc)[:300])}</code>\n\n"
+            "Убедитесь что файл является валидным Telethon .session файлом.",
+            parse_mode="HTML",
+        )
+        return
+
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+@router.message(SessionImport.waiting_session_file)
+async def handle_import_session_file_wrong_type(message: Message) -> None:
+    await message.answer(
+        "⚠️ Отправьте .session файл как документ (не фото, не текст).\n\n"
+        "Используйте вложение → Файл при отправке."
+    )
+
+
+# ── Shared import finalization ─────────────────────────────────────────────────
+
+
+def _find_tdata_root(extract_dir: str) -> str | None:
+    """Walk the extraction directory and find the tdata root (contains key_datas)."""
+    import os
+
+    # Check up to 3 levels deep
+    for root, dirs, files in os.walk(extract_dir):
+        if "key_datas" in files:
+            return root
+        # Limit depth
+        depth = root[len(extract_dir) :].count(os.sep)
+        if depth >= 3:
+            dirs.clear()
+    return None
+
+
+async def _finalize_import(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+    session_str: str,
+    info: dict,
+) -> None:
+    """Save imported account to DB and report success.
+
+    Checks for duplicate by tg_user_id before inserting — if the same Telegram
+    account already exists (even under a different phone key), update the session
+    instead of creating a duplicate record.
+    """
+    await state.clear()
+
+    plan, limit = await _get_account_limit(pool, message.from_user.id)
+    accounts = await db.get_tg_accounts(pool, message.from_user.id)
+
+    tg_user_id = info.get("tg_user_id") or 0
+    phone = info.get("phone") or f"id:{tg_user_id or 'unknown'}"
+
+    # ── Duplicate check by tg_user_id ─────────────────────────────────────────
+    # The DB unique constraint is (owner_id, phone). When the same Telegram account
+    # is imported twice — once with a real phone and once with "id:<n>" — two rows
+    # would be created for the same person. We prevent this by checking tg_user_id.
+    existing_by_uid = None
+    if tg_user_id:
+        try:
+            existing_by_uid = await pool.fetchrow(
+                "SELECT id, phone FROM tg_accounts WHERE owner_id=$1 AND tg_user_id=$2",
+                message.from_user.id,
+                tg_user_id,
+            )
+        except Exception:
+            existing_by_uid = None
+
+    if existing_by_uid:
+        # Account already exists — update the session string instead of inserting.
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                   SET session_str=$1, first_name=$2, username=$3,
+                       acc_status='active', status_reason=NULL,
+                       status_checked_at=now(), is_active=true, last_used=now()
+                   WHERE id=$4""",
+                session_str,
+                info.get("first_name", ""),
+                info.get("username", ""),
+                existing_by_uid["id"],
+            )
+        except Exception as exc:
+            await message.answer(
+                f"❌ Ошибка обновления сессии в БД: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        name = info.get("first_name", "") or info.get("username", "") or phone
+        uname = f"@{info['username']}" if info.get("username") else "—"
+        kb = InlineKeyboardBuilder()
+        kb.button(text="➕ Импортировать ещё", callback_data=AccCb(action="import_menu"))
+        kb.button(
+            text="👤 Открыть аккаунт",
+            callback_data=AccCb(action="view", acc_id=existing_by_uid["id"]),
+        )
+        kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            f"🔄 <b>Сессия обновлена</b>\n\n"
+            f"Аккаунт уже существует в системе.\n"
+            f"Имя: <b>{escape(name)}</b>\n"
+            f"Username: {escape(uname)}\n"
+            f"Telegram ID: <code>{tg_user_id}</code>\n\n"
+            f"<i>Сессия обновлена — старая запись перезаписана.</i>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    if len(accounts) >= limit:
+        limit_label = "∞" if limit >= 9999 else str(limit)
+        upgrade_plan = _next_account_plan(plan)
+        await message.answer(
+            f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
+            "Обновите подписку для добавления новых аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                upgrade_plan, back_callback=AccCb(action="menu")
+            ),
+        )
+        return
+
+    device = {
+        "device_model": info.get("device_model"),
+        "system_version": info.get("system_version"),
+        "app_version": info.get("app_version"),
+        "lang_code": info.get("lang_code"),
+        "system_lang_code": info.get("system_lang_code"),
+    }
+    if not device["device_model"]:
+        device = generate_device_fingerprint()
+    try:
+        acc_id = await db.add_tg_account(
+            pool,
+            owner_id=message.from_user.id,
+            phone=phone,
+            session_str=session_str,
+            tg_user_id=tg_user_id,
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=device["device_model"],
+            system_version=device["system_version"],
+            app_version=device["app_version"],
+            lang_code=device.get("lang_code"),
+            system_lang_code=device.get("system_lang_code"),
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Ошибка сохранения в БД: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    name = info.get("first_name", "") or info.get("username", "") or phone
+    uname = f"@{info['username']}" if info.get("username") else "—"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Импортировать ещё", callback_data=AccCb(action="import_menu"))
+    kb.button(text="🔲 Добавить (QR-код)", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ <b>Аккаунт успешно импортирован!</b>\n\n"
+        f"Имя: <b>{escape(name)}</b>\n"
+        f"Username: {escape(uname)}\n"
+        f"Телефон: <code>{escape(phone)}</code>\n"
+        f"Telegram ID: <code>{tg_user_id or '?'}</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Batch Import (multiple Telethon string sessions) ──────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "import_batch"))
+async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(SessionImport.waiting_batch_sessions)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📋 <b>Батч-импорт Telethon String Sessions</b>\n\n"
+        "Отправьте несколько session strings — <b>по одной на строку</b>:\n\n"
+        "<code>1BQANOTEuAGkA...\n"
+        "1BVtsOIKAGkB...</code>\n\n"
+        "Или загрузите файл:\n"
+        "• <b>.txt</b> — одна сессия на строку\n"
+        "• <b>.csv</b> — колонки: <code>session,cluster</code> (cluster — опционально)\n"
+        "• <b>.zip</b> — архив с файлами <code>.session</code> (Telethon SQLite)\n\n"
+        "Пример CSV:\n"
+        "<code>session,cluster\n"
+        "1BQANOTEuAGkA...,main\n"
+        "1BVtsOIKAGkB...,reserve</code>\n\n"
+        "⚠️ Никогда не передавайте сессии незнакомым людям.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+def _parse_sessions_csv(raw: bytes) -> list[tuple[str, str]]:
+    """Parse CSV bytes → list of (session_string, cluster) pairs."""
+    import csv
+    import io
+
+    for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return []
+    delimiter = "," if raw[:2000].count(b",") >= raw[:2000].count(b";") else ";"
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    results: list[tuple[str, str]] = []
+    header_skipped = False
+    for row in reader:
+        if not row:
+            continue
+        first = (row[0] or "").strip().lower()
+        if not header_skipped and first in (
+            "session",
+            "session_string",
+            "string",
+            "#",
+            "",
+        ):
+            header_skipped = True
+            continue
+        header_skipped = True
+        sess = (row[0] or "").strip()
+        cluster = (row[1] if len(row) > 1 else "").strip()
+        if sess and len(sess) > 20:
+            results.append((sess, cluster))
+    return results
+
+
+def _prevalidate_sessions(
+    pairs: list[tuple[str, str]],
+) -> dict:
+    """Pre-validate session strings before import.
+
+    Returns dict with:
+      - valid: list of (session_str, cluster) that pass format check
+      - invalid: list of (index, reason) for invalid entries
+      - warnings: list of str with non-blocking warnings
+    """
+    import base64
+
+    valid = []
+    invalid = []
+    warnings = []
+
+    for i, (session_str, cluster) in enumerate(pairs):
+        session_str = session_str.strip()
+        if not session_str:
+            invalid.append((i + 1, "пустая строка"))
+            continue
+
+        # Check length: StringSession is typically >200 chars
+        if len(session_str) < 50:
+            invalid.append(
+                (i + 1, f"слишком короткая ({len(session_str)} симв., нужно ≥50)")
+            )
+            continue
+
+        # Check base64-decodable (StringSession = base64)
+        try:
+            base64.b64decode(session_str + "=" * (-len(session_str) % 4))
+        except Exception:
+            warnings.append(
+                f"Сессия #{i + 1}: не в формате base64 — может быть другой формат"
+            )
+
+        valid.append((session_str, cluster))
+
+        # Warn about very long sessions
+        if len(session_str) > 10_000:
+            warnings.append(
+                f"Сессия #{i + 1}: очень длинная ({len(session_str)} симв.)"
+            )
+
+    return {"valid": valid, "invalid": invalid, "warnings": warnings}
+
+
+async def _do_batch_import(
+    raw_sessions: list[str] | list[tuple[str, str]],
+    message,
+    pool: asyncpg.Pool,
+    user_id: int,
+) -> None:
+    """Common logic for batch session import. Accepts plain strings or (session, cluster) tuples."""
+    from services.account_manager import (
+        import_from_session_string,
+        generate_device_fingerprint,
+    )
+
+    # Normalise input: always work with (session_str, cluster) pairs
+    pairs: list[tuple[str, str]] = []
+    for item in raw_sessions:
+        if isinstance(item, tuple):
+            pairs.append(item)
+        else:
+            pairs.append((str(item).strip(), ""))
+
+    total = len(pairs)
+    progress_msg = await message.answer(
+        f"⏳ <b>Батч-импорт</b>\n\nОбрабатывается 0 / {total}...",
+        parse_mode="HTML",
+    )
+
+    ok_list, err_list = [], []
+    for i, (session_str, cluster) in enumerate(pairs):
+        session_str = session_str.strip()
+        if not session_str:
+            continue
+        try:
+            validated_str, info = await import_from_session_string(session_str)
+            if not validated_str or not info:
+                raise ValueError("invalid session or expired")
+
+            phone = info.get("phone", "") or ""
+            tg_uid = info.get("tg_user_id") or 0
+            device = {
+                "device_model": info.get("device_model"),
+                "system_version": info.get("system_version"),
+                "app_version": info.get("app_version"),
+                "lang_code": info.get("lang_code"),
+                "system_lang_code": info.get("system_lang_code"),
+            }
+            if not device["device_model"]:
+                device = generate_device_fingerprint()
+
+            # ── Duplicate check by tg_user_id ─────────────────────────────────
+            # Prevents inserting duplicate rows when the same Telegram account
+            # appears in the batch under different phone key formats.
+            acc_id = None
+            existing_uid_row = None
+            if tg_uid:
+                try:
+                    existing_uid_row = await pool.fetchrow(
+                        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND tg_user_id=$2",
+                        user_id,
+                        tg_uid,
+                    )
+                except Exception:
+                    existing_uid_row = None
+
+            if existing_uid_row:
+                acc_id = existing_uid_row["id"]
+                await pool.execute(
+                    """UPDATE tg_accounts
+                       SET session_str=$1, first_name=$2, username=$3,
+                           acc_status='active', status_reason=NULL,
+                           status_checked_at=now(), is_active=true, last_used=now()
+                       WHERE id=$4""",
+                    validated_str,
+                    info.get("first_name", ""),
+                    info.get("username", ""),
+                    acc_id,
+                )
+                name = (
+                    info.get("first_name")
+                    or info.get("username")
+                    or phone
+                    or f"сессия #{i + 1}"
+                )
+                suffix = f" [{cluster}]" if cluster else ""
+                ok_list.append(f"🔄 {escape(name[:35])}{suffix} (обновлена)")
+            else:
+                acc_id = await db.add_tg_account(
+                    pool,
+                    owner_id=user_id,
+                    phone=phone,
+                    session_str=validated_str,
+                    tg_user_id=tg_uid,
+                    first_name=info.get("first_name", ""),
+                    username=info.get("username", ""),
+                    device_model=device["device_model"],
+                    system_version=device["system_version"],
+                    app_version=device["app_version"],
+                    lang_code=device.get("lang_code"),
+                    system_lang_code=device.get("system_lang_code"),
+                )
+                name = (
+                    info.get("first_name")
+                    or info.get("username")
+                    or phone
+                    or f"сессия #{i + 1}"
+                )
+                suffix = f" [{cluster}]" if cluster else ""
+                ok_list.append(f"✅ {escape(name[:35])}{suffix}")
+
+            # Assign cluster if provided
+            if cluster and acc_id:
+                try:
+                    # Регистрируем имя кластера в реестре clusters (идемпотентно).
+                    await pool.execute(
+                        "INSERT INTO clusters(owner_id, name) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                        user_id,
+                        cluster,
+                    )
+                    # tg_accounts.cluster — TEXT и хранит ИМЯ кластера: именно так его
+                    # читает mass_ops (показывает как label и фильтрует по нему). Раньше
+                    # сюда писался числовой clusters.id, из-за чего кластер отображался
+                    # как "🗂 5" вместо имени и не совпадал с фильтром по имени.
+                    await pool.execute(
+                        "UPDATE tg_accounts SET cluster=$1 WHERE id=$2",
+                        cluster,
+                        acc_id,
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log,
+                        "Ошибка привязки кластера при батч-импорте аккаунта",
+                        account_id=acc_id,
+                    )
+        except Exception as e:
+            err_list.append(f"❌ Сессия #{i + 1}: {escape(str(e)[:60])}")
+
+        if (i + 1) % 3 == 0 or i + 1 == total:
+            try:
+                await progress_msg.edit_text(
+                    f"⏳ <b>Батч-импорт</b>\n\nОбрабатывается {i + 1} / {total}...",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(
+                    log, "Ошибка обновления прогресса батч-импорта аккаунтов"
+                )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    result_lines = ok_list + err_list
+    detail = "\n".join(result_lines[:30])
+    if len(result_lines) > 30:
+        detail += f"\n<i>...ещё {len(result_lines) - 30}</i>"
+
+    await progress_msg.edit_text(
+        f"✅ <b>Батч-импорт завершён</b>\n\n"
+        f"Всего: {total} | Успешно: {len(ok_list)} | Ошибок: {len(err_list)}\n\n"
+        f"{detail}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_batch_sessions, F.text)
+async def fsm_batch_import_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    raw = (message.text or "").strip()
+    sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not sessions:
+        await message.answer("⚠️ Введите хотя бы одну session string:")
+        return
+    if len(sessions) > 50:
+        sessions = sessions[:50]
+        await message.answer("⚠️ Взяты первые 50 сессий из списка.")
+
+    # Pre-validate
+    pairs = [(s, "") for s in sessions]
+    report = _prevalidate_sessions(pairs)
+    await _show_validation_report(message, state, report)
+
+
+async def _show_validation_report(message, state: FSMContext, report: dict) -> None:
+    """Show pre-validation report and ask for confirmation."""
+    valid = report["valid"]
+    invalid = report["invalid"]
+    warnings = report["warnings"]
+
+    lines = ["📋 <b>Результат проверки сессий</b>\n"]
+    lines.append(f"✅ Годных: <b>{len(valid)}</b>")
+    if invalid:
+        lines.append(f"❌ Невалидных: <b>{len(invalid)}</b>")
+        for idx, reason in invalid[:5]:
+            lines.append(f"  • #{idx}: {reason}")
+        if len(invalid) > 5:
+            lines.append(f"  <i>... ещё {len(invalid) - 5}</i>")
+
+    if warnings:
+        lines.append(f"\n⚠️ Предупреждений: <b>{len(warnings)}</b>")
+        for w in warnings[:3]:
+            lines.append(f"  • {w}")
+        if len(warnings) > 3:
+            lines.append(f"  <i>... ещё {len(warnings) - 3}</i>")
+
+    if not valid:
+        lines.append("\n❌ Нет валидных сессий для импорта.")
+        await state.clear()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))
+        kb.adjust(1)
+        await message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+        )
+        return
+
+    await state.update_data(batch_pairs=valid)
+    await state.set_state(SessionImport.waiting_batch_confirm)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить импорт", callback_data=AccCb(action="confirm_batch"))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_batch"))
+    kb.adjust(1)
+
+    lines.append(f"\nЗапустить импорт <b>{len(valid)}</b> сессий?")
+    await message.answer(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.message(SessionImport.waiting_batch_sessions, F.document)
+async def fsm_batch_import_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    doc = message.document
+    if not doc:
+        await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.")
+        return
+    filename = (doc.file_name or "").lower()
+    if not (
+        filename.endswith(".txt")
+        or filename.endswith(".csv")
+        or filename.endswith(".zip")
+    ):
+        await message.answer(
+            "⚠️ Поддерживаются .txt, .csv и .zip (архив .session файлов)."
+        )
+        return
+    max_size = 20 * 1024 * 1024 if filename.endswith(".zip") else 500_000
+    if doc.file_size and doc.file_size > max_size:
+        size_label = "20 МБ" if filename.endswith(".zip") else "500 КБ"
+        await message.answer(f"⚠️ Файл слишком большой. Максимум {size_label}.")
+        return
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        raw_bytes = (
+            downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+        )
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+
+    if filename.endswith(".zip"):
+        import zipfile
+        import io as _io
+        from services.account_manager import convert_session_file_to_string
+
+        try:
+            with zipfile.ZipFile(_io.BytesIO(raw_bytes)) as zf:
+                session_names = [
+                    n
+                    for n in zf.namelist()
+                    if n.lower().endswith(".session") and not n.startswith("__")
+                ]
+        except zipfile.BadZipFile:
+            await message.answer("❌ Повреждённый ZIP-файл.")
+            return
+        if not session_names:
+            await message.answer(
+                "⚠️ ZIP не содержит .session файлов.\n\n"
+                "Убедитесь что архив содержит файлы с расширением <code>.session</code>.",
+                parse_mode="HTML",
+            )
+            return
+        if len(session_names) > 50:
+            session_names = session_names[:50]
+            await message.answer("⚠️ Взяты первые 50 .session файлов из архива.")
+        msg = await message.answer(
+            f"⏳ Читаю {len(session_names)} .session файлов из архива..."
+        )
+        pairs: list[tuple[str, str]] = []
+        errors: list[str] = []
+        with zipfile.ZipFile(_io.BytesIO(raw_bytes)) as zf:
+            for name in session_names:
+                try:
+                    file_bytes = zf.read(name)
+                    session_str = await convert_session_file_to_string(file_bytes)
+                    pairs.append((session_str, ""))
+                except Exception as e:
+                    errors.append(f"{name}: {str(e)[:80]}")
+        if errors:
+            err_text = "\n".join(f"  • {e}" for e in errors[:5])
+            await msg.edit_text(
+                f"⚠️ Часть файлов не удалось прочитать ({len(errors)} шт.):\n{err_text}",
+                parse_mode="HTML",
+            )
+        if not pairs:
+            await state.clear()
+            await message.answer("❌ Ни одной валидной .session не найдено в архиве.")
+            return
+        report = _prevalidate_sessions(pairs)
+        await _show_validation_report(message, state, report)
+    elif filename.endswith(".csv"):
+        pairs = _parse_sessions_csv(raw_bytes)
+        if not pairs:
+            await message.answer(
+                "⚠️ CSV не содержит распознанных сессий.\n\n"
+                "Ожидаемый формат: <code>session,cluster</code> (cluster — опционально)",
+                parse_mode="HTML",
+            )
+            return
+        if len(pairs) > 50:
+            pairs = pairs[:50]
+            await message.answer("⚠️ Взяты первые 50 сессий из CSV.")
+        report = _prevalidate_sessions(pairs)
+        await _show_validation_report(message, state, report)
+    else:
+        raw_text = raw_bytes.decode("utf-8", errors="ignore")
+        sessions = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+        if not sessions:
+            await message.answer("⚠️ Файл пустой или не содержит сессий.")
+            return
+        if len(sessions) > 50:
+            sessions = sessions[:50]
+            await message.answer("⚠️ Взяты первые 50 сессий из файла.")
+        pairs = [(s, "") for s in sessions]
+        report = _prevalidate_sessions(pairs)
+        await _show_validation_report(message, state, report)
+
+
+# ── Batch import confirmation ────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "confirm_batch"))
+async def cb_confirm_batch_import(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """User confirmed batch import after pre-validation."""
+    await safe_answer(callback)
+    data = await state.get_data()
+    pairs = data.get("batch_pairs", [])
+
+    if not pairs:
+        await callback.message.edit_text(
+            "⚠️ Нет данных для импорта.",
+            reply_markup=InlineKeyboardBuilder()
+            .button(
+                text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch")
+            )
+            .as_markup(),
+        )
+        return
+
+    await state.clear()
+    await _do_batch_import(pairs, callback.message, pool, callback.from_user.id)
+
+
+# ── Asset Scanner ──────────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "scan_assets"))
+async def cb_scan_assets(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    await callback.message.edit_text(
+        "⏳ <b>Сканирую активы аккаунта…</b>\n\n"
+        "Ищу каналы и группы, где вы администратор или создатель.\n"
+        "Это может занять 15–30 секунд.",
+        parse_mode="HTML",
+    )
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+    result = await scan_owned_assets(session_str, _acc=acc)
+
+    if result.get("error"):
+        err = result["error"]
+        await callback.message.edit_text(
+            f"❌ Ошибка сканирования:\n<code>{escape(err)}</code>",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    channels = result["channels"]
+    groups = result["groups"]
+
+    if not channels and not groups:
+        await callback.message.edit_text(
+            "📭 <b>Активы не найдены</b>\n\n"
+            "Аккаунт не является администратором ни одного канала или группы.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    lines = ["🔍 <b>Активы аккаунта</b> — найдено:\n"]
+    if channels:
+        lines.append(f"📢 <b>Каналы ({len(channels)}):</b>")
+        for ch in channels[:20]:
+            title = escape(ch["title"][:35] or "Без названия")
+            uname = f" @{ch['username']}" if ch.get("username") else ""
+            members = f" — {ch['members']:,} подп." if ch.get("members") else ""
+            crown = "👑" if ch.get("is_creator") else "🔧"
+            lines.append(f"  {crown} {title}{uname}{members}")
+        if len(channels) > 20:
+            lines.append(f"  … и ещё {len(channels) - 20}")
+
+    if groups:
+        lines.append(f"\n👥 <b>Группы ({len(groups)}):</b>")
+        for gr in groups[:20]:
+            title = escape(gr["title"][:35] or "Без названия")
+            uname = f" @{gr['username']}" if gr.get("username") else ""
+            members = f" — {gr['members']:,} уч." if gr.get("members") else ""
+            crown = "👑" if gr.get("is_creator") else "🔧"
+            lines.append(f"  {crown} {title}{uname}{members}")
+        if len(groups) > 20:
+            lines.append(f"  … и ещё {len(groups) - 20}")
+
+    lines.append("\n<i>👑 = создатель, 🔧 = администратор</i>")
+
+    kb = InlineKeyboardBuilder()
+    total = len(channels) + len(groups)
+    if total:
+        kb.button(
+            text=f"✅ Подключить все ({total})",
+            callback_data=AccCb(action="scan_connect_all", acc_id=callback_data.acc_id),
+        )
+    if channels:
+        kb.button(
+            text=f"📢 Только каналы ({len(channels)})",
+            callback_data=AccCb(action="scan_connect_ch", acc_id=callback_data.acc_id),
+        )
+    if groups:
+        kb.button(
+            text=f"👥 Только группы ({len(groups)})",
+            callback_data=AccCb(action="scan_connect_gr", acc_id=callback_data.acc_id),
+        )
+    kb.button(
+        text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id)
+    )
+    kb.adjust(1)
+
+    # Store scan results temporarily in FSM or just re-scan on connect
+    # We encode the counts in the message; re-scan is acceptable (fast second scan)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(
+    AccCb.filter(
+        F.action.in_({"scan_connect_all", "scan_connect_ch", "scan_connect_gr"})
+    )
+)
+async def cb_scan_connect(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+    result = await scan_owned_assets(session_str, _acc=acc)
+
+    if result.get("error"):
+        await callback.answer(f"Ошибка: {result['error'][:100]}", show_alert=True)
+        return
+
+    action = callback_data.action
+    to_connect: list[dict] = []
+    if action in ("scan_connect_all", "scan_connect_ch"):
+        to_connect.extend(result["channels"])
+    if action in ("scan_connect_all", "scan_connect_gr"):
+        to_connect.extend(result["groups"])
+
+    if not to_connect:
+        await callback.answer("Нечего подключать.", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    acc_id = callback_data.acc_id
+
+    # Check channel limit before importing (counts across linked abuse accounts)
+    from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+    chan_limit = await get_channel_limit(pool, user_id)
+    try:
+        current_count = await get_effective_channel_count(pool, user_id)
+    except Exception:
+        current_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
+        ) or 0
+    slots_free = chan_limit - current_count
+    if slots_free <= 0:
+        from bot.callbacks import SubCb
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
+        kb2 = _IKB()
+        kb2.button(text="💳 Оформить подписку", callback_data=SubCb(action="choose_plan", plan="paid"))
+        kb2.adjust(1)
+        await callback.message.edit_text(
+            f"⛔️ <b>Лимит каналов достигнут</b>\n\n"
+            f"У вас {current_count} каналов из {chan_limit} доступных.\n"
+            "Оформите подписку для неограниченного числа каналов.",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+        return
+    if len(to_connect) > slots_free:
+        to_connect = to_connect[:slots_free]
+
+    await callback.answer("⏳ Подключаю…")
+
+    # Insert all selected into managed_channels (no delete, just upsert)
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
+               VALUES($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET title=EXCLUDED.title, username=EXCLUDED.username,
+                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
+            [
+                (
+                    user_id,
+                    acc_id,
+                    ch["id"],
+                    ch.get("title", ""),
+                    ch.get("username", ""),
+                    ch.get("access_hash", 0),
+                )
+                for ch in to_connect
+            ],
+        )
+
+    parts = []
+    if action in ("scan_connect_all", "scan_connect_ch"):
+        parts.append(f"📢 {len(result['channels'])} каналов")
+    if action in ("scan_connect_all", "scan_connect_gr"):
+        parts.append(f"👥 {len(result['groups'])} групп")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📋 Мои каналы", callback_data=AccCb(action="channels", acc_id=acc_id)
+    )
+    kb.button(text="◀️ К аккаунту", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ <b>Подключено: {len(to_connect)} активов</b>\n\n"
+        + "\n".join(f"  • {p}" for p in parts)
+        + "\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACCOUNT INFRASTRUCTURE (v60): Tags / Pool / CRM / Disaster Recovery
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class AccountTagsPoolFSM(StatesGroup):
+    waiting_tags = State()
+    waiting_pool = State()
+    waiting_label_add = State()
+    waiting_warning_add = State()
+    waiting_project = State()
+
+
+def _tags_pool_back_kb(acc_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+# ── Tags & Pool menu ──────────────────────────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "tags_menu"))
+async def cb_tags_menu(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    tags = acc.get("tags") or []
+    pool_name = acc.get("pool") or ""
+    acc_id = callback_data.acc_id
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✏️ Изменить теги", callback_data=AccCb(action="edit_tags", acc_id=acc_id)
+    )
+    kb.button(
+        text="🏊 Изменить пул", callback_data=AccCb(action="edit_pool", acc_id=acc_id)
+    )
+    if tags:
+        kb.button(
+            text="🗑 Очистить теги",
+            callback_data=AccCb(action="clear_tags", acc_id=acc_id),
+        )
+    if pool_name:
+        kb.button(
+            text="🗑 Убрать из пула",
+            callback_data=AccCb(action="clear_pool", acc_id=acc_id),
+        )
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(2, 2, 1)
+
+    tags_text = ", ".join(tags) if tags else "не назначены"
+    pool_text = pool_name if pool_name else "не назначен"
+
+    await callback.message.edit_text(
+        f"🏷 <b>Теги и Пул</b>\n\n"
+        f"Теги используются для умного выбора аккаунта в операциях и страйке.\n\n"
+        f"🏷 Теги: <b>{escape(tags_text)}</b>\n"
+        f"🏊 Пул: <b>{escape(pool_text)}</b>\n\n"
+        f"<i>Примеры тегов: strike, warmup, publish, rank\n"
+        f"Примеры пулов: main, backup, staging</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "edit_tags"))
+async def cb_edit_tags(
+    callback: CallbackQuery, callback_data: AccCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_tags)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🏷 <b>Теги аккаунта</b>\n\n"
+        "Введите теги через запятую:\n"
+        "<code>strike, warmup, publish</code>\n\n"
+        "Теги позволяют разделить аккаунты по ролям и использовать умный выбор в операциях.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_tags)
+async def handle_tags_input(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    raw = (message.text or "").strip()
+    tags = [t.strip().lower() for t in raw.replace(";", ",").split(",") if t.strip()]
+    tags = tags[:20]  # max 20 tags
+    await db.update_account_tags(pool, acc_id, message.from_user.id, tags)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    tags_text = ", ".join(tags) if tags else "очищены"
+    await message.answer(
+        f"✅ Теги обновлены: <b>{escape(tags_text)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_tags"))
+async def cb_clear_tags(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    await db.update_account_tags(pool, callback_data.acc_id, callback.from_user.id, [])
+    await callback.answer("Теги очищены", show_alert=False)
+    await cb_tags_menu(callback, callback_data, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "edit_pool"))
+async def cb_edit_pool(
+    callback: CallbackQuery, callback_data: AccCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+
+    # Show existing pools as quick pick
+    existing_pools = await db.get_distinct_pools(pool, callback.from_user.id)
+
+    kb = InlineKeyboardBuilder()
+    for i, p in enumerate(existing_pools[:8]):
+        # Use index in action to avoid 64-byte callback limit with long pool names
+        kb.button(
+            text=f"🏊 {p[:25]}",
+            callback_data=AccCb(action="pool_set", page=i, acc_id=acc_id),
+        )
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.adjust(2)
+
+    await state.set_state(AccountTagsPoolFSM.waiting_pool)
+    await state.update_data(acc_id=acc_id, existing_pools=existing_pools)
+
+    pool_hint = (
+        "\n\n" + "Быстрый выбор из существующих пулов ↑" if existing_pools else ""
+    )
+    await callback.message.edit_text(
+        f"🏊 <b>Пул аккаунта</b>\n\n"
+        f"Введите название пула (например: <code>strike</code>, <code>warmup</code>, <code>main</code>)\n"
+        f"или нажмите кнопку для выбора существующего.{pool_hint}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_pool)
+async def handle_pool_input(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    bulk_mode = sd.get("bulk_pool_mode", False)
+    bulk_acc_ids: list = sd.get("bulk_pool_acc_ids") or []
+    await state.clear()
+    pool_name = (message.text or "").strip()[:50] or None
+    uid = message.from_user.id
+
+    if bulk_mode and bulk_acc_ids:
+        # Bulk assignment: apply to all accounts that have no pool
+        updated = 0
+        for aid in bulk_acc_ids:
+            acc = await db.get_tg_account(pool, aid, uid)
+            if acc and not acc.get("pool"):
+                await db.update_account_pool(pool, aid, uid, pool_name)
+                updated += 1
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🏊 Пулы", callback_data=AccCb(action="pools_view"))
+        kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            f"✅ Пул <b>{escape(pool_name or 'не назначен')}</b> назначен {updated} аккаунтам.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await db.update_account_pool(pool, acc_id, uid, pool_name)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+        kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+        kb.adjust(1)
+        await message.answer(
+            f"✅ Пул обновлён: <b>{escape(pool_name or 'не назначен')}</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+@router.callback_query(AccCb.filter(F.action == "pool_set"))
+async def cb_pool_set_quick(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    existing_pools: list = sd.get("existing_pools") or []
+    pool_idx = callback_data.page
+    if 0 <= pool_idx < len(existing_pools):
+        pool_name = existing_pools[pool_idx]
+    else:
+        # Fallback: re-fetch pools if FSM state was lost
+        all_pools = await db.get_distinct_pools(pool, callback.from_user.id)
+        pool_name = all_pools[pool_idx] if 0 <= pool_idx < len(all_pools) else None
+    if not pool_name:
+        await callback.answer("Пул не найден. Введите название вручную.", show_alert=True)
+        return
+    await state.clear()
+    acc_id = callback_data.acc_id
+    await db.update_account_pool(pool, acc_id, callback.from_user.id, pool_name)
+    await callback.answer(f"✅ Пул: {pool_name}", show_alert=False)
+    from bot.callbacks import AccCb as _AccCb
+    new_cd = _AccCb(action="tags_menu", acc_id=acc_id)
+    await cb_tags_menu(callback, new_cd, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_pool"))
+async def cb_clear_pool(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    await db.update_account_pool(
+        pool, callback_data.acc_id, callback.from_user.id, None
+    )
+    await callback.answer("Пул убран", show_alert=False)
+    await cb_tags_menu(callback, callback_data, pool)
+
+
+# ── CRM menu (labels, warnings, project) ─────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "crm_menu"))
+async def cb_crm_menu(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    labels = acc.get("labels") or []
+    warnings = acc.get("warnings") or []
+    project = acc.get("project") or ""
+    notes = acc.get("account_notes") or ""
+    acc_id = callback_data.acc_id
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔵 + Метка", callback_data=AccCb(action="add_label", acc_id=acc_id))
+    kb.button(
+        text="⚠️ + Предупреждение",
+        callback_data=AccCb(action="add_warning", acc_id=acc_id),
+    )
+    kb.button(
+        text="📁 Проект", callback_data=AccCb(action="edit_project", acc_id=acc_id)
+    )
+    if labels:
+        kb.button(
+            text="🗑 Очистить метки",
+            callback_data=AccCb(action="clear_labels", acc_id=acc_id),
+        )
+    if warnings:
+        kb.button(
+            text="🗑 Очистить предупреждения",
+            callback_data=AccCb(action="clear_warnings", acc_id=acc_id),
+        )
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(2, 1, 2, 1)
+
+    labels_text = ", ".join(labels) if labels else "нет"
+    warnings_text = ", ".join(warnings) if warnings else "нет"
+    proj_text = project if project else "не задан"
+    notes_text = notes[:100] + "…" if len(notes) > 100 else (notes or "нет")
+
+    await callback.message.edit_text(
+        f"🗂 <b>CRM аккаунта</b>\n\n"
+        f"Организуйте аккаунты по проектам, добавляйте метки и предупреждения.\n\n"
+        f"🔵 Метки: <b>{escape(labels_text)}</b>\n"
+        f"⚠️ Предупреждения: <b>{escape(warnings_text)}</b>\n"
+        f"📁 Проект: <b>{escape(proj_text)}</b>\n"
+        f"📝 Заметки: {escape(notes_text)}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "add_label"))
+async def cb_add_label(
+    callback: CallbackQuery, callback_data: AccCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_label_add)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🔵 <b>Добавить метку</b>\n\nВведите метку (одну):\n<i>Примеры: основной, резервный, для рассылок</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_label_add)
+async def handle_label_add(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    new_label = (message.text or "").strip()[:50]
+    if new_label:
+        acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+        labels = list((acc.get("labels") if acc else None) or [])
+        if new_label not in labels:
+            labels.append(new_label)
+        await db.update_account_labels(pool, acc_id, message.from_user.id, labels)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Метка добавлена: <b>{escape(new_label)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_labels"))
+async def cb_clear_labels(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    await db.update_account_labels(
+        pool, callback_data.acc_id, callback.from_user.id, []
+    )
+    await callback.answer("Метки очищены")
+    await cb_crm_menu(callback, callback_data, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "add_warning"))
+async def cb_add_warning(
+    callback: CallbackQuery, callback_data: AccCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_warning_add)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "⚠️ <b>Добавить предупреждение</b>\n\nВведите предупреждение:\n<i>Примеры: частые флуды, под наблюдением, не использовать для DM</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_warning_add)
+async def handle_warning_add(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    new_warn = (message.text or "").strip()[:100]
+    if new_warn:
+        acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+        warnings = list((acc.get("warnings") if acc else None) or [])
+        if new_warn not in warnings:
+            warnings.append(new_warn)
+        await db.update_account_warnings(pool, acc_id, message.from_user.id, warnings)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Предупреждение добавлено: <b>{escape(new_warn)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_warnings"))
+async def cb_clear_warnings(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    await db.update_account_warnings(
+        pool, callback_data.acc_id, callback.from_user.id, []
+    )
+    await callback.answer("Предупреждения очищены")
+    await cb_crm_menu(callback, callback_data, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "edit_project"))
+async def cb_edit_project(
+    callback: CallbackQuery, callback_data: AccCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_project)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📁 <b>Проект аккаунта</b>\n\nВведите название проекта или 'нет' для сброса:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_project)
+async def handle_project_input(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    raw = (message.text or "").strip()
+    project = None if raw.lower() in ("нет", "no", "-", "") else raw[:100]
+    await db.update_account_project(pool, acc_id, message.from_user.id, project)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Проект: <b>{escape(project or 'не задан')}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Disaster Recovery — Assets of account ─────────────────────────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "assets"))
+async def cb_account_assets(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+
+    assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)
+    channels = assets.get("channels", [])
+    ops = assets.get("ops", [])
+
+    name = escape(acc.get("first_name") or acc.get("phone") or f"id{acc_id}")
+
+    lines = [f"🆘 <b>Активы аккаунта: {name}</b>\n"]
+    lines.append("Все ресурсы, привязанные к этому аккаунту.\n")
+
+    if channels:
+        lines.append(f"📢 <b>Каналы/группы ({len(channels)}):</b>")
+        for ch in channels[:15]:
+            title = escape(ch.get("title") or "")
+            uname = f"@{escape(ch.get('username') or '')}" if ch.get("username") else ""
+            lines.append(f"  • {title} {uname}".strip())
+        if len(channels) > 15:
+            lines.append(f"  … и ещё {len(channels) - 15}")
+    else:
+        lines.append("📢 Каналов/групп не найдено")
+
+    lines.append("")
+    if ops:
+        lines.append(f"⚙️ <b>Активные операции ({len(ops)}):</b>")
+        for op in ops[:5]:
+            op_type = escape(op.get("op_type") or "")
+            status = op.get("status") or ""
+            lines.append(f"  • {op_type} [{status}]")
+    else:
+        lines.append("⚙️ Активных операций нет")
+
+    if not channels and not ops:
+        lines.append(
+            "\n✅ Аккаунт можно безопасно отключить или удалить — нет зависимых ресурсов."
+        )
+    elif channels:
+        lines.append(
+            f"\n⚠️ <b>Внимание:</b> при удалении аккаунта {len(channels)} канал(ов) потеряют привязку."
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )

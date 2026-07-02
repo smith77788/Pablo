@@ -110,30 +110,46 @@ Deno.serve(async (req) => {
     const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
     const expiresAt = new Date(now + 7 * 86400_000).toISOString();
 
-    // Parallel processing across qualifying orders
-    const stageResults = await Promise.all(toProcess.map(async (o: any) => {
+    // Pre-compute codes and promo rows for all orders needing promo
+    type OrderCtx = { o: any; orderShort: string; code?: string };
+    const orderCtxs: OrderCtx[] = toProcess.map((o: any) => {
       const orderShort = (o.id as string).slice(0, 8).toUpperCase();
-      let code: string | undefined;
+      const code = stage.needsPromo ? `NURTURE${orderShort}` : undefined;
+      return { o, orderShort, code };
+    });
 
-      if (stage.needsPromo) {
-        code = `NURTURE${orderShort}`;
-        await supabase.from("promo_codes").upsert(
-          { code, discount_type: "percentage", discount_value: 10, min_order_amount: 300, max_uses: 1, ends_at: expiresAt, is_active: true },
-          { onConflict: "code" },
-        );
-      }
+    // Batch upsert all promo codes for this stage in one query
+    if (stage.needsPromo) {
+      const promoRows = orderCtxs.map(({ code }) => ({
+        code: code!,
+        discount_type: "percentage",
+        discount_value: 10,
+        min_order_amount: 300,
+        max_uses: 1,
+        ends_at: expiresAt,
+        is_active: true,
+      }));
+      await supabase.from("promo_codes").upsert(promoRows, { onConflict: "code" }).catch(() => {});
+    }
 
-      const { error: notifErr } = await supabase.from("notifications").insert({
-        user_id: o.user_id,
-        type: stage.key,
-        title: stage.title(orderShort),
-        message: stage.message(orderShort, code),
-        reference_id: o.id,
-      });
-      if (notifErr) return false;
+    // Batch insert all notifications for this stage
+    const notifRows = orderCtxs.map(({ o, orderShort, code }) => ({
+      user_id: o.user_id,
+      type: stage.key,
+      title: stage.title(orderShort),
+      message: stage.message(orderShort, code),
+      reference_id: o.id,
+    }));
+    const { error: batchNotifErr } = notifRows.length > 0
+      ? await supabase.from("notifications").insert(notifRows)
+      : { error: null };
 
-      try {
-        await supabase.functions.invoke("send-web-push", {
+    let stageCount = 0;
+    if (!batchNotifErr) {
+      stageCount = notifRows.length;
+      // Parallel best-effort web pushes
+      await Promise.allSettled(orderCtxs.map(({ o, code }) =>
+        supabase.functions.invoke("send-web-push", {
           body: {
             user_id: o.user_id,
             title: stage.pushTitle(),
@@ -144,11 +160,10 @@ Deno.serve(async (req) => {
             reference_id: o.id,
           },
           headers: { "x-cron-secret": CRON_SECRET },
-        });
-      } catch {/* push optional */}
-      return true;
-    }));
-    summary[stage.key] = stageResults.filter(Boolean).length;
+        }),
+      ));
+    }
+    summary[stage.key] = stageCount;
   }
 
   return new Response(

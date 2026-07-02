@@ -212,21 +212,29 @@ Deno.serve(async (req) => {
       completed = enrUpdates.filter((u) => u.isCompleted).length;
     }
 
-    // Update sequence aggregate counters (parallel per-sequence, 2 counts each)
+    // Update sequence aggregate counters.
+    // Batch: fetch all enrollment rows once grouped in-memory instead of 2×N count queries.
     if (sequences?.length) {
+      const seqIds = (sequences as any[]).map((s: any) => s.id as string);
+      const { data: allEnrollRows } = await supabase
+        .from("bot_sequence_enrollments")
+        .select("sequence_id, status")
+        .in("sequence_id", seqIds);
+      const enrollCount = new Map<string, number>();
+      const completedCount = new Map<string, number>();
+      for (const e of allEnrollRows ?? []) {
+        enrollCount.set(e.sequence_id, (enrollCount.get(e.sequence_id) ?? 0) + 1);
+        if (e.status === "completed") {
+          completedCount.set(e.sequence_id, (completedCount.get(e.sequence_id) ?? 0) + 1);
+        }
+      }
       await Promise.all(
-        (sequences as any[]).map(async (seq) => {
-          const [enrolledRes, completedRes] = await Promise.all([
-            supabase.from("bot_sequence_enrollments")
-              .select("id", { count: "exact", head: true }).eq("sequence_id", seq.id),
-            supabase.from("bot_sequence_enrollments")
-              .select("id", { count: "exact", head: true }).eq("sequence_id", seq.id).eq("status", "completed"),
-          ]);
-          await supabase.from("bot_sequences").update({
-            total_enrolled: enrolledRes.count ?? 0,
-            total_completed: completedRes.count ?? 0,
-          }).eq("id", seq.id).catch(() => {});
-        }),
+        seqIds.map((sid) =>
+          supabase.from("bot_sequences").update({
+            total_enrolled: enrollCount.get(sid) ?? 0,
+            total_completed: completedCount.get(sid) ?? 0,
+          }).eq("id", sid).catch(() => {}),
+        ),
       );
     }
 

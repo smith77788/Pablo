@@ -243,7 +243,7 @@ Deno.serve(async (req) => {
         supabase.from("promo_codes").update({ is_active: false }).in("id", flopPromoIds),
       );
     }
-    if (writeBatch.length > 0) await Promise.all(writeBatch);
+    if (writeBatch.length > 0) await Promise.allSettled(writeBatch);
 
     // 5. Emit roll-up summary insight only if there are decided verdicts.
     const winners = results.filter((r) => r.verdict === "winner");

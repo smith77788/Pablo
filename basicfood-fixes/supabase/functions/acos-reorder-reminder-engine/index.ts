@@ -72,11 +72,14 @@ Deno.serve(async (req) => {
   const orderIds = candidates.map((c) => c.id);
   const userIds = [...new Set(candidates.map((c) => c.user_id as string))];
 
-  const [recentOrdersRes, remindersRes, tokensRes] = await Promise.all([
+  const [recentOrdersSettled, remindersSettled, tokensSettled] = await Promise.allSettled([
     supabase.from("orders").select("user_id, created_at").in("user_id", userIds).gt("created_at", windowStart.toISOString()),
     supabase.from("events").select("order_id").eq("event_type", "reorder_reminder_sent").in("order_id", orderIds),
     supabase.from("device_tokens").select("user_id").in("user_id", userIds).eq("is_active", true),
   ]);
+  const recentOrdersRes = recentOrdersSettled.status === "fulfilled" ? recentOrdersSettled.value : { data: [] };
+  const remindersRes = remindersSettled.status === "fulfilled" ? remindersSettled.value : { data: [] };
+  const tokensRes = tokensSettled.status === "fulfilled" ? tokensSettled.value : { data: [] };
 
   // Build lookup maps
   const recentByUser = new Map<string, string[]>();

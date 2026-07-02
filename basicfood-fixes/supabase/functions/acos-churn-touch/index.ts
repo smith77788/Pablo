@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
       .from("customers")
       .select("id, name, telegram_chat_id, total_orders, tags")
       .eq("id", customerId)
-      .single();
+      .maybeSingle();
 
     if (cErr || !customer) {
       return new Response(

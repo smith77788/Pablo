@@ -153,11 +153,14 @@ Deno.serve(async (req) => {
         day: dayBucket,
       });
     });
-    const { data: dupRows } = await sb
-      .from("tribunal_cases")
-      .select("id, change_hash, status")
-      .in("change_hash", allHashes)
-      .in("status", ["pending", "prosecuted", "defended", "judged"]);
+    // Guard: empty .in() returns ALL rows, not zero rows.
+    const { data: dupRows } = allHashes.length
+      ? await sb
+          .from("tribunal_cases")
+          .select("id, change_hash, status")
+          .in("change_hash", allHashes)
+          .in("status", ["pending", "prosecuted", "defended", "judged"])
+      : { data: [] as any[] };
     const dupMap = new Map((dupRows ?? []).map((d: any) => [d.change_hash, d.id]));
 
     const insightUpdateOps: Array<{ id: string; payload: Record<string, unknown> }> = [];

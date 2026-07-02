@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
     ];
 
     // Parallel selects then single batch upsert for non-paid obligations.
-    const existingRows = await Promise.all(
+    const existingResults = await Promise.all(
       upserts.map((u) =>
         sb.from("finance_tax_obligations")
           .select("id, status")
@@ -92,14 +92,18 @@ Deno.serve(async (req) => {
           .eq("period_year", u.period_year)
           .eq("period_quarter", u.period_quarter)
           .maybeSingle()
-          .then((r) => r.data)
       ),
     );
+    for (const r of existingResults) {
+      if (r.error) throw new Error(`finance_tax_obligations lookup failed: ${r.error.message}`);
+    }
+    const existingRows = existingResults.map((r) => r.data);
     const toUpsert = upserts.filter((_, i) => existingRows[i]?.status !== "paid");
     if (toUpsert.length > 0) {
-      await sb.from("finance_tax_obligations").upsert(toUpsert, {
+      const { error: upsertErr } = await sb.from("finance_tax_obligations").upsert(toUpsert, {
         onConflict: "tax_type,period_year,period_quarter",
       });
+      if (upsertErr) throw new Error(`finance_tax_obligations upsert failed: ${upsertErr.message}`);
     }
 
     return json({ ok: true, year, quarter, income, ep_5pct: ep, esv, total: ep + esv });

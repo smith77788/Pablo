@@ -83,9 +83,14 @@ Deno.serve(async (req) => {
       const chunk = 500;
       const chunks: any[][] = [];
       for (let i = 0; i < upserts.length; i += chunk) chunks.push(upserts.slice(i, i + chunk));
-      await Promise.all(
+      // Use Promise.allSettled so a single chunk failure doesn't kill the rest.
+      const chunkResults = await Promise.allSettled(
         chunks.map((c) => supabase.from("customer_loyalty").upsert(c, { onConflict: "customer_id" } as any)),
       );
+      const chunkErrors = chunkResults.filter((r) => r.status === "rejected" || (r.status === "fulfilled" && (r.value as any).error));
+      if (chunkErrors.length > 0) {
+        console.warn("[loyalty-tier-engine] some upsert chunks failed:", chunkErrors.length);
+      }
     }
 
     const summary = Object.entries(tierCounts).map(([n, c]) => `${n}: ${c}`).join(", ");

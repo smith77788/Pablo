@@ -132,8 +132,15 @@ Deno.serve(async (req) => {
         if (stage.filter) countQ = stage.filter(countQ);
         let latestQ = sb.from(stage.table).select(tsCol).order(tsCol, { ascending: false }).limit(1);
         if (stage.filter) latestQ = stage.filter(latestQ);
-        const [{ count }, { data: latestRows }] = await Promise.all([countQ, latestQ]);
-        return { stage, count, latestRows };
+        try {
+          const [countRes, latestRes] = await Promise.all([countQ, latestQ]);
+          if (countRes.error) console.warn(`[loop-watchdog] count query failed for ${stage.key}:`, countRes.error.message);
+          if (latestRes.error) console.warn(`[loop-watchdog] latest query failed for ${stage.key}:`, latestRes.error.message);
+          return { stage, count: countRes.count, latestRows: latestRes.data };
+        } catch (e) {
+          console.warn(`[loop-watchdog] stage query crashed for ${stage.key}:`, String((e as Error)?.message ?? e));
+          return { stage, count: null, latestRows: null };
+        }
       }),
     );
 
@@ -202,7 +209,8 @@ Deno.serve(async (req) => {
         }));
 
       if (newInsightRows.length > 0) {
-        await sb.from("ai_insights").insert(newInsightRows);
+        const { error: insightInsertErr } = await sb.from("ai_insights").insert(newInsightRows);
+        if (insightInsertErr) console.warn("[loop-watchdog] insight insert failed:", insightInsertErr.message);
       }
     }
 
