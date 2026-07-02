@@ -3654,6 +3654,9 @@ function openSSE() {
   SSE.addEventListener('activity', e => {
     try { renderAct((JSON.parse(e.data).items)||[]); } catch(_) {}
   });
+  SSE.addEventListener('op_progress', e => {
+    try { renderOpProgress((JSON.parse(e.data).items)||[]); } catch(_) {}
+  });
   SSE.onopen = () => {
     _sseRetry = 0;
     const hLive = document.getElementById('hLive');
@@ -3669,6 +3672,26 @@ function openSSE() {
     _sseRetry = Math.min(_sseRetry + 1, 5);
     setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
   };
+}
+
+function renderOpProgress(items) {
+  const el = document.getElementById('opProgress');
+  if (!el) return;
+  if (!items.length) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = items.map(op => {
+    const bar = '█'.repeat(Math.floor(op.pct/10)) + '░'.repeat(10 - Math.floor(op.pct/10));
+    return `<div class="op-progress-item">
+      <div class="op-progress-header">
+        <span class="op-progress-label">${op.label || op.op_type}</span>
+        <span class="op-progress-pct">${op.pct}%</span>
+      </div>
+      <div class="op-progress-bar">[${bar}] ${op.done}/${op.total}</div>
+    </div>`;
+  }).join('');
 }
 
 // ── SVG-иконки (line-style, как нижнее меню) ─────────────

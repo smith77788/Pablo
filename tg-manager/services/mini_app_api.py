@@ -7276,15 +7276,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return []
 
+        async def fetch_op_progress() -> list:
+            """Fetch running operations with progress for real-time updates."""
+            try:
+                rows = await pool.fetch(
+                    """SELECT id, op_type, COALESCE(label, op_type) AS label,
+                              total_items, done_items, status, error_msg
+                       FROM operation_queue WHERE owner_id=$1 AND status='running'
+                       ORDER BY created_at DESC""",
+                    uid)
+                result = []
+                for r in rows:
+                    total = r["total_items"] or 0
+                    done = r["done_items"] or 0
+                    pct = int(done * 100 / total) if total > 0 else 0
+                    result.append({
+                        "id": r["id"],
+                        "op_type": r["op_type"],
+                        "label": r["label"],
+                        "total": total,
+                        "done": done,
+                        "pct": pct,
+                        "status": r["status"],
+                    })
+                return result
+            except Exception:
+                return []
+
         try:
             data = await _stats(pool, uid)
             await push("stats", data)
             await push("activity", {"items": await fetch_activity()})
+            await push("op_progress", {"items": await fetch_op_progress()})
             while True:
-                await asyncio.sleep(30)
+                await asyncio.sleep(15)  # Faster updates for real-time feel
                 data = await _stats(pool, uid)
                 await push("stats", data)
                 await push("activity", {"items": await fetch_activity()})
+                await push("op_progress", {"items": await fetch_op_progress()})
                 await response.write(b": keepalive\n\n")
         except (asyncio.CancelledError, ConnectionResetError):
             pass
