@@ -14,8 +14,8 @@ CREATE INDEX IF NOT EXISTS idx_restriction_events_owner_recent
 -- account_flood_log: prune by created_at (30-day retention)
 CREATE INDEX IF NOT EXISTS idx_flood_log_created ON account_flood_log(created_at);
 
--- search_snapshots: prune by checked_at
-CREATE INDEX IF NOT EXISTS idx_search_snapshots_checked ON search_snapshots(checked_at);
+-- search_snapshots: prune by captured_at (table's actual timestamp column, see schema_v18.sql)
+CREATE INDEX IF NOT EXISTS idx_search_snapshots_checked ON search_snapshots(captured_at);
 
 -- behavioral_events: compound index for the maintenance DELETE
 -- (already has idx on occurred_at DESC, this adds composite for owner queries)

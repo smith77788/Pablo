@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import os
+import re
 import time
 from config import DATABASE_URL, PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
@@ -12,38 +13,96 @@ log = logging.getLogger(__name__)
 
 
 def _split_sql_statements(sql: str) -> list[str]:
-    """Split a SQL file into individual statements, correctly handling dollar-quoted blocks."""
+    """Split a SQL file into individual statements on top-level ";".
+
+    Must not split inside: dollar-quoted blocks ($$...$$ / $tag$...$tag$),
+    single-quoted string literals ('...', with '' as an escaped quote),
+    double-quoted identifiers ("...", with "" as an escaped quote), "--"
+    line comments, or "/* ... */" block comments — a literal ";" in any of
+    these (e.g. a trailing comment like "-- null if not found; see below")
+    would otherwise cut a real CREATE TABLE statement in half, corrupting it
+    and every statement after it in the file.
+    """
     stmts: list[str] = []
     buf: list[str] = []
-    in_dollar = False
+    n = len(sql)
     i = 0
-    while i < len(sql):
-        # Detect $$ or $tag$ opening/closing
-        if sql[i] == "$" and not in_dollar:
-            # Find matching closing $...$
+    while i < n:
+        ch = sql[i]
+        # Dollar-quoted block: $$ ... $$ or $tag$ ... $tag$
+        if ch == "$":
             j = sql.find("$", i + 1)
             if j != -1:
                 tag = sql[i:j + 1]
                 closing = sql.find(tag, j + 1)
                 if closing != -1:
-                    # Consume entire dollar-quoted block
                     end = closing + len(tag)
                     buf.append(sql[i:end])
                     i = end
                     continue
-        if sql[i] == ";" and not in_dollar:
+        # "--" line comment: consume through end of line
+        if ch == "-" and sql[i + 1:i + 2] == "-":
+            end = sql.find("\n", i + 2)
+            end = n if end == -1 else end
+            buf.append(sql[i:end])
+            i = end
+            continue
+        # "/* ... */" block comment
+        if ch == "/" and sql[i + 1:i + 2] == "*":
+            end = sql.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            buf.append(sql[i:end])
+            i = end
+            continue
+        # '...' string literal, '' is an escaped quote
+        if ch == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'" and sql[j + 1:j + 2] != "'":
+                    break
+                j = j + 2 if sql[j] == "'" else j + 1
+            end = min(j + 1, n)
+            buf.append(sql[i:end])
+            i = end
+            continue
+        # "..." quoted identifier, "" is an escaped quote
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if sql[j] == '"' and sql[j + 1:j + 2] != '"':
+                    break
+                j = j + 2 if sql[j] == '"' else j + 1
+            end = min(j + 1, n)
+            buf.append(sql[i:end])
+            i = end
+            continue
+        if ch == ";":
             stmt = "".join(buf).strip()
-            if stmt:
+            if stmt and _has_sql_content(stmt):
                 stmts.append(stmt)
             buf = []
             i += 1
             continue
-        buf.append(sql[i])
+        buf.append(ch)
         i += 1
     last = "".join(buf).strip()
-    if last:
+    if last and _has_sql_content(last):
         stmts.append(last)
     return stmts
+
+
+def _has_sql_content(stmt: str) -> bool:
+    """True if `stmt` has any executable content left after stripping comments.
+
+    A trailing "-- comment" at the end of a schema file (with no statement
+    after it) survives splitting as its own "statement" that's pure comment —
+    sending that to asyncpg's execute() raises a confusing internal
+    AttributeError (no actual command for the server to acknowledge), so
+    these must be filtered out before we ever call conn.execute().
+    """
+    stripped = re.sub(r"--[^\n]*", "", stmt)
+    stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.S)
+    return bool(stripped.strip())
 
 
 async def create_pool() -> asyncpg.Pool:

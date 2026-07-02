@@ -31,10 +31,10 @@ BEGIN
         ON restriction_events (owner_id, created_at DESC);
   END IF;
 
-  -- managed_bots: bot list per owner
+  -- managed_bots: bot list per owner (column is added_by, not owner_id)
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='managed_bots') THEN
     CREATE INDEX IF NOT EXISTS idx_managed_bots_owner
-        ON managed_bots (owner_id, created_at DESC);
+        ON managed_bots (added_by, added_at DESC);
   END IF;
 
   -- bot_warehouse: promo warehouse list per owner+status
