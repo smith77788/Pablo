@@ -9,11 +9,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import aiohttp
 import asyncpg
 from aiogram import Bot
 
-from services import bot_api
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -221,21 +219,24 @@ async def create_campaign(
     spread_hours: int,
     campaign_type: str,
     ai_provider=None,
-    bot_ids: list[int] | None = None,
+    channel_meta: list[dict] | None = None,
 ) -> int:
     """
     Создаёт кампанию, генерирует посты и планирует время публикации.
+
+    channel_meta: parallel list to channel_usernames, each {"channel_id", "acc_id"} —
+    identifies the managed_channels row + owning Telethon account used to publish
+    (see _publish_post; there is no channel<->bot relationship in the schema, so
+    posting always goes through the channel's own account session, like self_promo.py).
 
     Возвращает ID созданной кампании.
     """
     if not channel_usernames:
         raise ValueError("Нужен хотя бы один канал")
 
-    if bot_ids is None:
-        bot_ids = [None] * len(channel_usernames)
-    # Дополняем bot_ids если короче
-    while len(bot_ids) < len(channel_usernames):
-        bot_ids.append(None)
+    channel_meta = channel_meta or []
+    while len(channel_meta) < len(channel_usernames):
+        channel_meta.append({})
 
     # Генерация постов
     posts_data = await generate_campaign_posts(
@@ -266,13 +267,14 @@ async def create_campaign(
                 scheduled_at = now + timedelta(
                     minutes=post["scheduled_offset_minutes"]
                 )
-                bot_id = bot_ids[i] if i < len(bot_ids) else None
+                meta = channel_meta[i] if i < len(channel_meta) else {}
                 await conn.execute(
                     """INSERT INTO narrative_posts
-                       (campaign_id, owner_id, channel_username, bot_id, angle,
+                       (campaign_id, owner_id, channel_username, channel_id, acc_id, angle,
                         content, scheduled_at, status)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')""",
-                    campaign_id, owner_id, username, bot_id,
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')""",
+                    campaign_id, owner_id, username,
+                    meta.get("channel_id"), meta.get("acc_id"),
                     post["angle"], post["content"], scheduled_at,
                 )
 
@@ -404,33 +406,51 @@ async def cancel_campaign(pool: asyncpg.Pool, campaign_id: int, owner_id: int) -
 # ── Execution loop ────────────────────────────────────────────────────────────
 
 
-async def _publish_post(pool: asyncpg.Pool, http: aiohttp.ClientSession, post: dict) -> tuple[bool, str]:
+async def _publish_post(pool: asyncpg.Pool, post: dict) -> tuple[bool, str]:
     """
-    Публикует один пост в канал через managed bot (по bot_id из поста).
+    Публикует один пост в канал через Telethon-сессию аккаунта, которым канал
+    был добавлен в managed_channels — тот же паттерн, что и в self_promo.py.
+
+    Постинг через managed bot (Bot API) невозможен в принципе: в схеме нет связи
+    канал<->бот, и обычный бот почти никогда не состоит админом в пользовательских
+    каналах — это и было причиной, что публикация 100% постов падала с ошибкой
+    "bot_id не задан для поста" (bot_id никогда не устанавливался мастером создания).
     Возвращает (success, error_text).
     """
     channel = post["channel_username"]
     content = post["content"]
-    bot_id = post.get("bot_id")
+    channel_id = post.get("channel_id")
+    acc_id = post.get("acc_id")
+    owner_id = post["owner_id"]
 
-    if not bot_id:
-        return False, "bot_id не задан для поста"
+    if not channel_id or not acc_id:
+        return False, "Канал не привязан к аккаунту — пересоздайте кампанию"
+
+    from database import db
+    from services import account_manager
 
     try:
-        from database.db import fetchrow_bot as _fetchrow_bot
-        bot_row = await _fetchrow_bot(
-            pool, "SELECT token FROM managed_bots WHERE bot_id=$1 AND is_active=TRUE", bot_id
+        acc_row = await db.get_account_for_telethon(pool, acc_id, owner_id)
+        if not acc_row or not acc_row["session_str"]:
+            return False, "Аккаунт-владелец канала недоступен (нет активной сессии)"
+
+        chan_row = await pool.fetchrow(
+            "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            owner_id, channel_id,
         )
-        if not bot_row:
-            return False, f"managed bot {bot_id} не найден или неактивен"
+        access_hash = (chan_row["access_hash"] if chan_row else 0) or 0
 
-        if not channel.startswith("@") and not channel.startswith("-"):
-            channel = f"@{channel}"
-
-        ok, retry = await bot_api.send_message(http, bot_row["token"], channel, content)
-        if ok:
-            return True, ""
-        return False, f"Telegram API error (retry={retry})"
+        res = await account_manager.post_to_channel(
+            session_string=acc_row["session_str"],
+            channel_id=channel_id,
+            text=content,
+            access_hash=access_hash,
+            username=(channel or "").lstrip("@"),
+            _acc=dict(acc_row),
+        )
+        if res.get("error"):
+            return False, str(res["error"])[:512]
+        return True, ""
     except Exception as e:
         err = str(e)
         log.warning("narrative_engine: failed to publish post %d to %s: %s", post["id"], channel, err)
@@ -458,17 +478,14 @@ async def execute_pending_posts(pool: asyncpg.Pool, bot: Bot) -> int:
     if not posts:
         return 0
 
-    async with aiohttp.ClientSession() as http:
-        return await _execute_with_session(pool, http, posts)
+    return await _execute_with_session(pool, posts)
 
 
-async def _execute_with_session(
-    pool: asyncpg.Pool, http: aiohttp.ClientSession, posts: list
-) -> int:
+async def _execute_with_session(pool: asyncpg.Pool, posts: list) -> int:
     published_count = 0
     for post in posts:
         post_dict = dict(post)
-        success, error = await _publish_post(pool, http, post_dict)
+        success, error = await _publish_post(pool, post_dict)
 
         if success:
             await pool.execute(

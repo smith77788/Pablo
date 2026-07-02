@@ -37,6 +37,32 @@ def _is_admin(uid: int) -> bool:
     return uid in {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
 
 
+# self_promo_templates.owner_id is NULL for admin-created platform-wide templates
+# (schema_v101) and set to a user's id for personal templates added via the Mini
+# App (mini_app_api.py's inline migration). Regular bot users must only see
+# platform templates + their own — never other users' personal ones. Admins keep
+# the unfiltered view for moderation.
+async def _visible_templates(pool: asyncpg.Pool, uid: int, is_adm: bool):
+    if is_adm:
+        return await pool.fetch(
+            "SELECT id, style, title, use_count FROM self_promo_templates WHERE is_active ORDER BY id",
+        )
+    return await pool.fetch(
+        "SELECT id, style, title, use_count FROM self_promo_templates "
+        "WHERE is_active AND (owner_id IS NULL OR owner_id=$1) ORDER BY id",
+        uid,
+    )
+
+
+async def _get_template_for_user(pool: asyncpg.Pool, tpl_id: int, uid: int, is_adm: bool):
+    if is_adm:
+        return await pool.fetchrow("SELECT * FROM self_promo_templates WHERE id=$1", tpl_id)
+    return await pool.fetchrow(
+        "SELECT * FROM self_promo_templates WHERE id=$1 AND (owner_id IS NULL OR owner_id=$2)",
+        tpl_id, uid,
+    )
+
+
 # ─── FSM ──────────────────────────────────────────────────────────────────────
 
 class SelfPromoFSM(StatesGroup):
@@ -179,12 +205,10 @@ async def cb_sp_menu(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_sp_list(callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
     page = callback_data.page
-    all_rows = await pool.fetch(
-        "SELECT id, style, title, use_count FROM self_promo_templates WHERE is_active ORDER BY id",
-    )
+    is_adm = _is_admin(callback.from_user.id)
+    all_rows = await _visible_templates(pool, callback.from_user.id, is_adm)
     total = len(all_rows)
     page_rows = all_rows[page * _PAGE: (page + 1) * _PAGE]
-    is_adm = _is_admin(callback.from_user.id)
     badge_map = {"direct": "🎯 Прямая", "native": "💡 Нативная"}
     lines = [
         f"• [{badge_map.get(r['style'], r['style'])}] {_html.escape(r['title'])}"
@@ -207,7 +231,8 @@ async def cb_sp_list(callback: CallbackQuery, callback_data: SelfPromoCb, pool: 
 @router.callback_query(SelfPromoCb.filter(F.action == "view"))
 async def cb_sp_view(callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    tpl = await pool.fetchrow("SELECT * FROM self_promo_templates WHERE id=$1", callback_data.item_id)
+    is_adm = _is_admin(callback.from_user.id)
+    tpl = await _get_template_for_user(pool, callback_data.item_id, callback.from_user.id, is_adm)
     if not tpl:
         await callback.answer("Шаблон не найден", show_alert=True)
         return
@@ -225,7 +250,6 @@ async def cb_sp_view(callback: CallbackQuery, callback_data: SelfPromoCb, pool: 
         f"{tpl['content']}"
         f"{cta_line}{ref_note}"
     )
-    is_adm = _is_admin(callback.from_user.id)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_view_kb(tpl["id"], is_adm))
     except Exception:
@@ -417,9 +441,8 @@ async def _save_template(pool: asyncpg.Pool, data: dict, cta_text, cta_url) -> N
 @router.callback_query(SelfPromoCb.filter(F.action == "launch_channel"))
 async def cb_sp_launch_channel(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    rows = await pool.fetch(
-        "SELECT id, style, title FROM self_promo_templates WHERE is_active ORDER BY id LIMIT 10"
-    )
+    is_adm = _is_admin(callback.from_user.id)
+    rows = (await _visible_templates(pool, callback.from_user.id, is_adm))[:10]
     if not rows:
         await callback.answer("Нет шаблонов.", show_alert=True)
         return
@@ -451,7 +474,8 @@ async def cb_sp_run_confirm(
     callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    tpl = await pool.fetchrow("SELECT * FROM self_promo_templates WHERE id=$1", callback_data.item_id)
+    is_adm = _is_admin(callback.from_user.id)
+    tpl = await _get_template_for_user(pool, callback_data.item_id, callback.from_user.id, is_adm)
     if not tpl:
         await callback.answer("Шаблон не найден", show_alert=True)
         return
@@ -491,10 +515,10 @@ async def cb_sp_run_now(
     callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Запускаю…")
-    tpl = await pool.fetchrow("SELECT * FROM self_promo_templates WHERE id=$1", callback_data.item_id)
+    user_id = callback.from_user.id
+    tpl = await _get_template_for_user(pool, callback_data.item_id, user_id, _is_admin(user_id))
     if not tpl:
         return
-    user_id = callback.from_user.id
     channels = await db.get_managed_channels(pool, user_id)
     # Build content: append referral link if needed
     content = tpl["content"] or ""
