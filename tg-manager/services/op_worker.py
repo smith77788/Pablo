@@ -620,29 +620,37 @@ _progress_milestones: dict[int, int] = {}
 _cancel_cache: dict[int, tuple[bool, float]] = {}
 _CANCEL_CACHE_TTL = 5.0  # seconds between DB checks in tight loops
 
+# ETA tracking: op_id -> {start_time, start_done, last_done, last_time}
+_eta_data: dict[int, dict] = {}
+
 
 async def _progress_monitor(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str
 ) -> None:
-    """Периодически проверяет прогресс и уведомляет на 25/50/75% (один раз каждый milestone)."""
+    """Enhanced progress monitor with ETA calculation and milestone notifications."""
     _progress_milestones[op_id] = 0
     _heartbeat_sent = False
     _ticks_without_total = 0
+    _last_update_sent = 0.0
+    _eta_data[op_id] = {"start": time.time(), "last_done": 0, "last_time": time.time()}
+    
     try:
         while True:
             await asyncio.sleep(15)
             try:
-                row = await pool.fetchrow(
+                row = await _safe_fetchrow(
+                    pool,
                     "SELECT total_items, done_items, status FROM operation_queue WHERE id=$1",
                     op_id,
+                    log_ctx=f"[progress_monitor op={op_id}]",
                 )
                 if not row or row["status"] != "running":
                     break
                 total = row["total_items"] or 0
                 done = row["done_items"] or 0
+                
                 if total <= 0:
                     # total_items not set yet — send a "still running" heartbeat
-                    # every ~2 min (8 ticks × 15s) so user knows it's alive
                     _ticks_without_total += 1
                     if _ticks_without_total >= 8 and not _heartbeat_sent:
                         _heartbeat_sent = True
@@ -654,36 +662,52 @@ async def _progress_monitor(
                     continue
                 _ticks_without_total = 0
                 pct = int(done * 100 / total)
-
+                
+                # Calculate ETA
+                eta = _calculate_eta(op_id, done, total)
+                eta_text = f"⏰ ETA: {eta}" if eta else ""
+                
+                # Send update every 30 seconds (not just milestones)
+                now = time.time()
+                if now - _last_update_sent >= 30:
+                    _last_update_sent = now
+                    bar_filled = pct // 10
+                    bar = "█" * bar_filled + "░" * (10 - bar_filled)
+                    speed = _calculate_speed(op_id, done)
+                    speed_text = f"⚡ {speed}/мин" if speed else ""
+                    
+                    await db.notify_if_enabled(
+                        pool, bot, owner_id, "op_complete",
+                        f"⏳ <b>Операция #{op_id}</b> — {pct}%\n"
+                        f"[{bar}] {done}/{total}\n"
+                        f"<code>{op_type}</code> {speed_text} {eta_text}",
+                    )
+                
+                # Milestone notifications (25/50/75%)
                 last = _progress_milestones.get(op_id, 0)
                 milestone = None
                 for m in (25, 50, 75):
                     if pct >= m > last:
                         milestone = m
                         break
-                if milestone is None:
-                    continue
+                if milestone is not None:
+                    _progress_milestones[op_id] = milestone
+                    bar_filled = milestone // 10
+                    bar = "█" * bar_filled + "░" * (10 - bar_filled)
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    from bot.callbacks import BmCb
 
-                _progress_milestones[op_id] = milestone
-                bar_filled = milestone // 10
-                bar = "█" * bar_filled + "░" * (10 - bar_filled)
-                from aiogram.utils.keyboard import InlineKeyboardBuilder
-                from bot.callbacks import BmCb
-
-                kb = InlineKeyboardBuilder()
-                kb.button(
-                    text="📋 Очередь операций", callback_data=BmCb(action="op_reports")
-                )
-                await db.notify_if_enabled(
-                    pool,
-                    bot,
-                    owner_id,
-                    "op_complete",
-                    f"⏳ <b>Операция #{op_id}</b> — {milestone}%\n"
-                    f"[{bar}] {done}/{total}\n"
-                    f"<code>{op_type}</code>",
-                    reply_markup=kb.as_markup(),
-                )
+                    kb = InlineKeyboardBuilder()
+                    kb.button(
+                        text="📋 Очередь операций", callback_data=BmCb(action="op_reports")
+                    )
+                    await db.notify_if_enabled(
+                        pool, bot, owner_id, "op_complete",
+                        f"⏳ <b>Операция #{op_id}</b> — {milestone}%\n"
+                        f"[{bar}] {done}/{total}\n"
+                        f"<code>{op_type}</code> {eta_text}",
+                        reply_markup=kb.as_markup(),
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -693,6 +717,48 @@ async def _progress_monitor(
     finally:
         _progress_milestones.pop(op_id, None)
         _cancel_cache.pop(op_id, None)
+        _eta_data.pop(op_id, None)
+
+
+def _calculate_eta(op_id: int, done: int, total: int) -> str | None:
+    """Calculate ETA based on processing speed."""
+    data = _eta_data.get(op_id)
+    if not data or done <= 0:
+        return None
+    
+    elapsed = time.time() - data["start"]
+    if elapsed < 30:  # Need at least 30s of data
+        return None
+    
+    speed = done / elapsed  # items per second
+    remaining = total - done
+    if speed <= 0:
+        return None
+    
+    eta_seconds = remaining / speed
+    if eta_seconds < 60:
+        return f"~{int(eta_seconds)}с"
+    elif eta_seconds < 3600:
+        return f"~{int(eta_seconds / 60)}мин"
+    else:
+        return f"~{int(eta_seconds / 3600)}ч {int((eta_seconds % 3600) / 60)}мин"
+
+
+def _calculate_speed(op_id: int, done: int) -> str | None:
+    """Calculate current processing speed."""
+    data = _eta_data.get(op_id)
+    if not data or done <= 0:
+        return None
+    
+    elapsed = time.time() - data["start"]
+    if elapsed < 10:
+        return None
+    
+    speed = done / elapsed * 60  # items per minute
+    if speed < 1:
+        return f"{speed:.1f}"
+    else:
+        return f"{int(speed)}"
 
 
 async def _reset_stale_running(pool: asyncpg.Pool) -> None:
