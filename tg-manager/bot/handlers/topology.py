@@ -413,34 +413,26 @@ async def cb_topo_chan_list(
     page = callback_data.page
 
     channels = await db.get_managed_channels(pool, owner_id)
-    accounts = await db.get_tg_accounts(pool, owner_id)
-    acc_lookup = {
-        a["id"]: (
-            a.get("first_name")
-            or a.get("username")
-            or a.get("phone")
-            or f"acc#{a['id']}"
-        )
-        for a in accounts
-    }
 
     total_pages = max(1, (len(channels) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
     start = page * _PAGE_SIZE
     chunk = channels[start : start + _PAGE_SIZE]
 
-    lines = ["📡 <b>Топология — по каналам</b>\n"]
+    lines = ["📡 <b>Топология — по каналам</b>\n", "Выберите канал для подробностей:"]
+
+    kb = InlineKeyboardBuilder()
     for ch in chunk:
         title = ch.get("title") or ch.get("username") or f"ID:{ch.get('channel_id')}"
-        uname = f"@{escape(ch['username'])}" if ch.get("username") else ""
-        acc_name = acc_lookup.get(ch.get("acc_id"), "неизв.")
         ctype = {"megagroup": "👥", "supergroup": "👥", "group": "👥"}.get(
             ch.get("type", ""), "📡"
         )
-        lines.append(f"{ctype} <b>{escape(str(title)[:30])}</b> {uname}")
-        lines.append(f"   ↳ аккаунт: {escape(str(acc_name)[:25])}")
+        kb.button(
+            text=f"{ctype} {str(title)[:22]}",
+            callback_data=TopoCb(action="chan_view", chan_id=ch.get("channel_id", 0)),
+        )
+    kb.adjust(2)
 
-    kb = InlineKeyboardBuilder()
     nav = InlineKeyboardBuilder()
     if page > 0:
         nav.button(
@@ -457,6 +449,87 @@ async def cb_topo_chan_list(
 
     await callback.message.edit_text(
         "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Single channel view — owning account + type ─────────────────────────────────
+
+
+@router.callback_query(TopoCb.filter(F.action == "chan_view"))
+async def cb_topo_chan_view(
+    callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool
+) -> None:
+    owner_id = callback.from_user.id
+    chan_id = callback_data.chan_id
+
+    channels = await db.get_managed_channels(pool, owner_id)
+    ch = next((c for c in channels if c.get("channel_id") == chan_id), None)
+    if not ch:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+    await callback.answer()
+
+    acc = await db.get_tg_account(pool, ch.get("acc_id"), owner_id) if ch.get("acc_id") else None
+
+    if acc:
+        asyncio.create_task(
+            behavioral_engine.record_cross_nav(
+                pool,
+                owner_id=owner_id,
+                from_type="channel",
+                from_id=chan_id,
+                to_type="account",
+                to_id=acc["id"],
+            )
+        )
+
+    title = ch.get("title") or ch.get("username") or f"ID:{chan_id}"
+    ctype = {"megagroup": "👥 Группа", "supergroup": "👥 Супергруппа", "group": "👥 Группа"}.get(
+        ch.get("type", ""), "📡 Канал"
+    )
+
+    lines = [
+        "📡 <b>Топология канала</b>",
+        f"{ctype}: <b>{escape(str(title)[:40])}</b>",
+    ]
+    if ch.get("username"):
+        lines.append(f"🔗 @{escape(ch['username'])}")
+    lines.append("")
+
+    if acc:
+        acc_name = (
+            acc.get("first_name") or acc.get("username") or acc.get("phone") or f"acc#{acc['id']}"
+        )
+        si = {
+            "active": "✅", "cooldown": "⏳", "spamblock": "⚠️",
+            "banned": "❌", "deactivated": "💀",
+        }.get(
+            effective_account_status(
+                acc.get("acc_status"),
+                has_session=_has_account_session(acc),
+                is_active=bool(acc.get("is_active", True)),
+            ),
+            "❓",
+        )
+        lines.append(f"📱 <b>Владеющий аккаунт:</b>\n   {si} {escape(str(acc_name)[:30])}")
+    else:
+        lines.append("📱 <i>Аккаунт не привязан или удалён.</i>")
+
+    kb = InlineKeyboardBuilder()
+    if acc:
+        kb.button(text="📱 К аккаунту", callback_data=TopoCb(action="acc_view", acc_id=acc["id"]))
+    kb.button(text="◀️ Назад к списку", callback_data=TopoCb(action="chan_list", page=0))
+    kb.button(text="🗺️ Меню", callback_data=TopoCb(action="menu"))
+    kb.adjust(1)
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n<i>...текст обрезан</i>"
+
+    await callback.message.edit_text(
+        text,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
