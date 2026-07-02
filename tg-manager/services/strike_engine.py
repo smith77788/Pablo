@@ -304,6 +304,96 @@ PRESET_TEXTS = {
     "escort": TEXTS["escort"],
 }
 
+
+# ── Smart Presets (умные пресеты) ──────────────────────────────────────────
+# Автоматический выбор пресета на основе анализа контента.
+
+# Keyword patterns for auto-detection
+_CONTENT_PATTERNS = {
+    "drugs": [
+        r"наркотик|нарко|марихуан|кокаин|героин|амфетамин|метамфетамин",
+        r"drug|weed|marijuana|cocaine|heroin|meth|amphetamine",
+        r"наркотическ|psychoactive|substance",
+    ],
+    "terrorism": [
+        r"террор|теракт|взрыв|оружие|джихад|джихадист",
+        r"terror|bomb|weapon|extremist|radical",
+        r"насил|насиль|убий|убив",
+    ],
+    "fraud": [
+        r"мошенничеств|обман|взятк|вымогательств|кидок|развод",
+        r"fraud|scam|ponzi|phishing|steal",
+        r"финансов.*мошенничеств|investment.*fraud",
+    ],
+    "csam": [
+        r"дет.*порн|child.*porn|CSAM|pedofil|pedophil",
+        r"nsfw.*child|underage|minor",
+    ],
+    "weapons": [
+        r"оружие|пистолет|автомат|гранат|взрыв",
+        r"weapon|gun|firearm|explosive|ammunition",
+        r"купить.*оружие|sell.*weapon",
+    ],
+    "darknet": [
+        r"darknet|даркнет|тор|tor.*market|мега.*маркет",
+        r"onion.*market| silk.*road|hydra",
+    ],
+    "escort": [
+        r"эскорт|проституц|интим.*услуг|секс.*услуг",
+        r"escort|prostitut|call.*girl|sex.*service",
+    ],
+    "spam": [
+        r"спам|рассылк|реклам.*без.*соглас|массов.*рассыл",
+        r"spam|unsolicited|bulk.*message",
+    ],
+}
+
+
+def smart_detect_preset(text: str) -> str | None:
+    """Auto-detect the best preset based on text content analysis.
+    
+    Returns preset name or None if no match found.
+    """
+    import re
+    
+    text_lower = text.lower()
+    scores = {}
+    
+    for preset, patterns in _CONTENT_PATTERNS.items():
+        score = 0
+        for pattern in patterns:
+            matches = re.findall(pattern, text_lower)
+            score += len(matches)
+        if score > 0:
+            scores[preset] = score
+    
+    if not scores:
+        return None
+    
+    # Return preset with highest score
+    return max(scores, key=scores.get)
+
+
+def smart_select_preset(text: str, user_preset: str | None = None) -> str:
+    """Select the best preset: user choice > auto-detection > default.
+    
+    Args:
+        text: Content text to analyze
+        user_preset: User's explicit preset choice (overrides auto-detection)
+    
+    Returns:
+        Preset name to use
+    """
+    if user_preset and user_preset in PRESET_TEXTS:
+        return user_preset
+    
+    detected = smart_detect_preset(text)
+    if detected:
+        log.info("smart_preset: auto-detected '%s' from content", detected)
+        return detected
+    
+    return "spam"  # Default fallback
+
 # Приоритетные причины для эскалации (наиболее эффективные)
 # CSAM/drugs — мгновенная реакция, violence — быстрая, spam — медленная
 _REASON_PRIORITY = {
