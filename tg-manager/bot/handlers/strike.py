@@ -1041,7 +1041,10 @@ async def cb_mini_strike_run(
     try:
         acc_row = await pool.fetchrow(
             """SELECT id, phone, first_name, session_str, trust_score,
-                      device_model, system_version, app_version, is_active
+                      device_model, system_version, app_version,
+                      lang_code, system_lang_code, is_active,
+                      (SELECT proxy_url FROM user_proxies up
+                       WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url
                FROM tg_accounts WHERE id=$1 AND owner_id=$2""",
             acc_id,
             callback.from_user.id,

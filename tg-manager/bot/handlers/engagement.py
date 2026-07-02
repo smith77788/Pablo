@@ -197,7 +197,8 @@ async def msg_reactivate(
         return
 
     bc_id = await db.create_broadcast(
-        pool, bot_id, message.text, len(user_ids), message.from_user.id
+        pool, bot_id, message.text, len(user_ids), message.from_user.id,
+        target_user_ids=user_ids,
     )
     await message.answer(
         f"✅ <b>Реактивация запущена!</b>\n\n"

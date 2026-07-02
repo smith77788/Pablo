@@ -198,7 +198,8 @@ async def cb_confirm(
 
     buttons = data.get("buttons")
     bc_id = await db.create_broadcast(
-        pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id
+        pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id,
+        target_user_ids=segment_user_ids,
     )
     if not bc_id:
         await callback.message.edit_text(

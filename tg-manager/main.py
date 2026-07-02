@@ -75,8 +75,7 @@ from bot.handlers import phone_checker as phone_checker_handler
 from bot.handlers import reporter_standalone as reporter_handler
 from bot.handlers import content_cloner as content_cloner_handler
 from bot.handlers import auto_registrar as auto_registrar_handler
-# growth_hub disabled (кнопка убрана из меню — постит промо в чужие группы)
-# from bot.handlers import growth_hub as growth_hub_handler
+from bot.handlers import growth_hub as growth_hub_handler
 from bot.handlers import account_cleaner as account_cleaner_handler
 from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
@@ -295,7 +294,7 @@ async def main() -> None:
     dp.include_router(reporter_handler.router)
     dp.include_router(content_cloner_handler.router)
     dp.include_router(auto_registrar_handler.router)
-    # growth_hub_handler.router — disabled, see import above
+    dp.include_router(growth_hub_handler.router)
     dp.include_router(promo_handler.router)
     dp.include_router(self_promo_handler.router)
     dp.include_router(ghost_hub_handler.router)
@@ -329,11 +328,57 @@ async def main() -> None:
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
 
+    # Тумблер уведомлений о новых пользователях — восстанавливаем из БД
+    try:
+        from bot.handlers.admin import set_notify_new_users
+        _nn = await _db.get_platform_setting(pool, "notify_new_users", "true")
+        set_notify_new_users(_nn == "true")
+        log.info("Notify-new-users on startup: %s", "ON" if _nn == "true" else "OFF")
+    except Exception:
+        log.warning("failed to load notify_new_users setting", exc_info=True)
+
     _gate_val = await _db.get_platform_setting(pool, "gate_enabled", "false")
     set_gate_enabled(_gate_val == "true")
     _gate_chs = await _db.get_subscription_gate_channels(pool)
     set_gate_channels(_gate_chs)
     log.info("Subscription gate on startup: %s (%d channels)", "ON" if _gate_val == "true" else "OFF", len(_gate_chs))
+
+    # AI-ключи из БД (настраиваются из админ-панели) — приоритет над env.
+    # Без них narrative/growth/ai-assistant/SEO-AI не работают.
+    try:
+        from services.ai_providers import set_ai_keys, configured_providers
+        from services.token_vault import decrypt_token
+        _ai_map = {}
+        for _env_name, _skey in (
+            ("OPENROUTER_API_KEY", "ai_openrouter_key"),
+            ("GROQ_API_KEY", "ai_groq_key"),
+            ("GEMINI_API_KEY", "ai_gemini_key"),
+        ):
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val:
+                _ai_map[_env_name] = decrypt_token(_val)  # хранится зашифрованным
+        if _ai_map:
+            set_ai_keys(_ai_map)
+        log.info("AI providers on startup: %d configured", len(configured_providers()))
+    except Exception:
+        log.warning("failed to load AI keys from DB", exc_info=True)
+
+    # Платёжные кошельки из БД (настраиваются из UI) — приоритет над env.
+    try:
+        from bot.handlers.subscription import set_pay_config
+        _pay_map = {}
+        for _env_name, _skey in (
+            ("TRON_WALLET", "pay_tron_wallet"),
+            ("TON_WALLET", "pay_ton_wallet"),
+        ):
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val:
+                _pay_map[_env_name] = _val
+        if _pay_map:
+            set_pay_config(_pay_map)
+        log.info("Payment wallets on startup: %d configured from DB", len(_pay_map))
+    except Exception:
+        log.warning("failed to load payment wallets from DB", exc_info=True)
 
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)
@@ -357,7 +402,7 @@ async def main() -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="menu", description="🏠 BotMother OS"),
+            BotCommand(command="menu", description="🏠 Infragram OS"),
             BotCommand(command="find", description="🔍 Найти функцию"),
             BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
             BotCommand(command="accounts", description="📱 Мои аккаунты"),
@@ -411,10 +456,24 @@ async def main() -> None:
                 )
                 await asyncio.sleep(5)
 
+    # Определяем webhook режим ДО старта сервера, чтобы передать dp в payment_webhook
+    _webhook_path = "/webhook"
+    _webhook_url = os.getenv("WEBHOOK_URL") or None
+    _allowed_updates = [
+        "message", "callback_query", "inline_query",
+        "chosen_inline_result", "pre_checkout_query",
+    ]
+
     try:
         # HTTP server starts FIRST — must bind to PORT immediately for Railway web services.
-        # All other services use _resilient (staggered) to avoid DB overload at startup.
-        asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
+        # Если задан WEBHOOK_URL — передаём dp чтобы Telegram webhook работал на том же порту.
+        # Это предотвращает конфликт двух серверов на одном PORT.
+        if _webhook_url:
+            asyncio.create_task(_web_resilient(
+                "payment_webhook", payment_webhook.run, pool, bot, dp, _webhook_path, http
+            ))
+        else:
+            asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
 
         asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
         asyncio.create_task(
@@ -512,51 +571,25 @@ async def main() -> None:
         asyncio.create_task(_resilient("account_shield", _account_shield.run, pool, bot))
         asyncio.create_task(_resilient("stars_optimizer", _stars_optimizer.run, pool, bot))
         asyncio.create_task(_resilient("audience_dna", _audience_dna.run, pool, bot))
+        # Докатить рассылки, оборванные предыдущим рестартом (status running/pending).
+        # broadcaster.run пропускает уже доставленных через delivery log — без дублей.
+        from services import broadcaster as _broadcaster
+        asyncio.create_task(_broadcaster.resume_interrupted(pool))
         log.info("TG Manager started")
 
         # ── Webhook or long-polling ───────────────────────────────────────────
-        # Webhook only if WEBHOOK_URL is explicitly set (not auto-detected).
-        # RAILWAY_PUBLIC_DOMAIN alone is NOT enough: Railway worker processes
-        # don't expose HTTP ports, so Telegram can't reach the webhook endpoint.
-        # Set WEBHOOK_URL manually only if the service is configured as a web
-        # service with a routed port (e.g. Railway web service with Generate Domain).
-        _webhook_path = "/webhook"
-        _webhook_url = os.getenv("WEBHOOK_URL") or None
-        _allowed_updates = [
-            "message", "callback_query", "inline_query",
-            "chosen_inline_result", "pre_checkout_query",
-        ]
-
         if _webhook_url:
-            from aiohttp import web as _web
-            from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-
+            # Webhook handler уже зарегистрирован на payment_webhook сервере (выше).
+            # Просто подключаемся к Telegram и ждём — никакого отдельного сервера.
             await bot.set_webhook(
                 _webhook_url,
                 allowed_updates=_allowed_updates,
                 drop_pending_updates=True,
             )
-            log.info("Webhook mode: %s", _webhook_url)
-
-            _app = _web.Application()
-            SimpleRequestHandler(
-                dispatcher=dp,
-                bot=bot,
-                pool=pool,
-                http=http,
-            ).register(_app, path=_webhook_path)
-            setup_application(_app, dp, bot=bot, pool=pool, http=http)
-
-            _port = int(os.getenv("PORT", "8080"))
-            _runner = _web.AppRunner(_app)
-            await _runner.setup()
-            _site = _web.TCPSite(_runner, "0.0.0.0", _port)
-            await _site.start()
-            log.info("Webhook server on port %d", _port)
+            log.info("Webhook mode: %s (handler on shared HTTP server)", _webhook_url)
             try:
                 await asyncio.Event().wait()
             finally:
-                await _runner.cleanup()
                 try:
                     await bot.delete_webhook()
                 except Exception:

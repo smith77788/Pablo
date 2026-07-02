@@ -9,6 +9,25 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Переопределения ключей из БД (platform_settings) имеют приоритет над env.
+# Позволяет настраивать AI-ключи из UI (без доступа к переменным окружения) —
+# иначе narrative/growth/ai-assistant/SEO-AI не работают без правки env.
+_KEY_OVERRIDES: dict[str, str] = {}
+
+
+def set_ai_keys(mapping: dict[str, str]) -> None:
+    """Задать/обновить AI-ключи из БД (env-имена: OPENROUTER_API_KEY и т.п.)."""
+    for k, v in (mapping or {}).items():
+        if v:
+            _KEY_OVERRIDES[k] = v
+        else:
+            _KEY_OVERRIDES.pop(k, None)
+
+
+def _key(name: str) -> str:
+    """Ключ: сначала override из БД, затем переменная окружения."""
+    return (_KEY_OVERRIDES.get(name) or os.getenv(name, "")).strip()
+
 
 @dataclass(frozen=True)
 class AiProvider:
@@ -50,7 +69,7 @@ def configured_providers() -> list[AiProvider]:
     """Return providers in configured failover order."""
     providers: dict[str, AiProvider] = {}
 
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    openrouter_key = _key("OPENROUTER_API_KEY")
     if openrouter_key:
         provider = _provider(
             name="openrouter",
@@ -73,7 +92,7 @@ def configured_providers() -> list[AiProvider]:
         if provider:
             providers["openrouter"] = provider
 
-    groq_key = os.getenv("GROQ_API_KEY", "")
+    groq_key = _key("GROQ_API_KEY")
     if groq_key:
         provider = _provider(
             name="groq",
@@ -92,7 +111,7 @@ def configured_providers() -> list[AiProvider]:
         if provider:
             providers["groq"] = provider
 
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    gemini_key = _key("GEMINI_API_KEY")
     if gemini_key:
         provider = _provider(
             name="gemini",

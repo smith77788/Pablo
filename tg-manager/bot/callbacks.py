@@ -433,7 +433,7 @@ class InfraHCCb(CallbackData, prefix="ihc"):
 class RegCb(CallbackData, prefix="rc"):
     """Registration / creation date checker + full entity analyzer."""
 
-    action: str  # menu | start | exact | history | cancel | analyze | page | export | follow_toggle
+    action: str  # menu | start | exact | history | cancel | analyze | refresh | page | export | follow_toggle
     entity_id: int = 0
     entity_type: Optional[str] = None  # user | bot | channel | supergroup | group
     page: int = 0          # history page OR analyzer tab (0=overview,1=stats,2=content,3=network,4=seo,5=admins)
@@ -598,10 +598,11 @@ class NodesCb(CallbackData, prefix="nd"):
 
 
 class BoostCb(CallbackData, prefix="bst"):
-    """Накрутка — просмотры, реакции, сторис."""
+    """Накрутка — просмотры, реакции, сторис, подписчики/участники, старты в ботах."""
 
-    action: str          # menu|views|reactions|stories|confirm
-    sub: str = ""        # views|reactions|stories (for confirm)
+    action: str          # menu|views|reactions|stories|subscribers|bot_starts|premium|confirm
+    sub: str = ""        # views|reactions|stories|subscribers|bot_starts (for confirm)
+                          # subs_yes|subs_no|bot_yes|bot_no (for premium)
 
 
 class InviterCb(CallbackData, prefix="inv"):

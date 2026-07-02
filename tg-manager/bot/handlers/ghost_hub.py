@@ -130,7 +130,7 @@ async def cb_ghost_add(
         )
     }
     accounts = await pool.fetch(
-        "SELECT id, phone, username, first_name FROM tg_accounts WHERE owner_id = $1 AND banned = FALSE ORDER BY id",
+        "SELECT id, phone, username, first_name FROM tg_accounts WHERE owner_id = $1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id",
         callback.from_user.id,
     )
     available = [a for a in accounts if a["id"] not in already]

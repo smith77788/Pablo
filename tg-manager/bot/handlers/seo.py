@@ -2149,7 +2149,7 @@ async def cb_seo_chan_preview(
     chan_id = callback_data.chan_id
     try:
         chan = await pool.fetchrow(
-            "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
             chan_id,
             callback.from_user.id,
         )
@@ -2161,15 +2161,55 @@ async def cb_seo_chan_preview(
         return
     await callback.answer()
 
+    # Тянем реальные подписчики + описание из Telegram (было: плейсхолдеры "N подписчиков")
+    await callback.message.edit_text(
+        "⏳ <b>Готовлю превью...</b>\n\nПолучаю данные канала из Telegram...",
+        parse_mode="HTML",
+    )
+    about = ""
+    members = 0
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                callback_data.acc_id,
+                callback.from_user.id,
+            )
+            if callback_data.acc_id
+            else None
+        )
+    except Exception:
+        log.warning("seo chan_preview: failed to fetch account row")
+        acc = None
+    if acc:
+        try:
+            from services import account_manager
+
+            info = await account_manager.get_full_channel_info(
+                acc["session_str"], chan["channel_id"], _acc=acc
+            )
+            if info:
+                about = info.get("about", "") or ""
+                members = info.get("members_count", 0) or 0
+        except Exception as e:
+            log.debug("seo chan_preview get_full_channel_info: %s", e)
+
     title = chan.get("title") or "Канал"
     uname = chan.get("username") or ""
     uname_line = f"@{uname}" if uname else "⚠️ без @username"
+    members_line = f"{members:,} подписчиков" if members else "подписчики скрыты"
+    if about.strip():
+        about_snippet = html.escape(about.strip()[:100])
+        about_line = f"│ <i>{about_snippet}{'…' if len(about.strip()) > 100 else ''}</i>"
+    else:
+        about_line = "│ <i>⚠️ About не задан — пустой snippet в поиске</i>"
     lines = [
         "🔍 <b>Так канал выглядит в поиске Telegram:</b>\n",
         "┌─────────────────────────────────────┐",
         f"│ 📢 <b>{html.escape(title[:40])}</b>",
-        f"│ {html.escape(uname_line)} · N подписчиков",
-        "│ <i>← первые 100 симв. описания (About)</i>",
+        f"│ {html.escape(uname_line)} · {members_line}",
+        about_line,
         "└─────────────────────────────────────┘\n",
         "<b>Что влияет на эту карточку:</b>",
         "  1️⃣ Название — содержит ли ключевые слова?",

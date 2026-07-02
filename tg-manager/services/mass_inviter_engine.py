@@ -27,6 +27,48 @@ _ACTION_TIMEOUT = 15.0
 _BATCH_SIZE = 5  # Telegram разрешает добавлять до 5 за раз без флуда
 
 
+async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
+    """Resolve a group reference to an entity usable by InviteToChannelRequest.
+
+    Handles both public (@username / t.me/username) and private invite-link
+    (t.me/+HASH, t.me/joinchat/HASH) references. The naive `client.get_entity()`
+    on a raw invite-link string either mismatches "joinchat" as a bogus username
+    or fails outright for `+HASH` links — Telethon can't resolve an invite hash
+    to a peer without ImportChatInviteRequest/CheckChatInviteRequest.
+    """
+    from services.account_manager import normalize_telegram_join_ref
+
+    ref_kind, ref_value = normalize_telegram_join_ref(group_ref)
+    if ref_kind != "invite":
+        return await asyncio.wait_for(
+            client.get_entity(ref_value or group_ref), timeout=_ACTION_TIMEOUT
+        )
+
+    from telethon.tl.functions.messages import (
+        ImportChatInviteRequest,
+        CheckChatInviteRequest,
+    )
+    from telethon.errors import UserAlreadyParticipantError
+
+    try:
+        result = await asyncio.wait_for(
+            client(ImportChatInviteRequest(hash=ref_value)), timeout=_ACTION_TIMEOUT
+        )
+        chats = getattr(result, "chats", None) or []
+        if chats:
+            return chats[0]
+        raise ValueError("ImportChatInviteRequest returned no chat")
+    except UserAlreadyParticipantError:
+        # Account is already a member — peek instead of re-joining to get the entity.
+        info = await asyncio.wait_for(
+            client(CheckChatInviteRequest(hash=ref_value)), timeout=_ACTION_TIMEOUT
+        )
+        chat = getattr(info, "chat", None)
+        if chat is None:
+            raise
+        return chat
+
+
 # ── Добавление пачки user_id/username ────────────────────────────────────────
 
 async def invite_batch(
@@ -59,7 +101,7 @@ async def invite_batch(
 
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        group = await asyncio.wait_for(client.get_entity(group_ref), timeout=_ACTION_TIMEOUT)
+        group = await _resolve_group_entity(client, group_ref)
 
         for ref in user_refs:
             try:
@@ -138,7 +180,7 @@ async def invite_by_phones(
 
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        group = await asyncio.wait_for(client.get_entity(group_ref), timeout=_ACTION_TIMEOUT)
+        group = await _resolve_group_entity(client, group_ref)
 
         # Импортируем контакты
         contacts = [
@@ -208,17 +250,23 @@ async def invite_by_phones(
 # ── Утилиты ──────────────────────────────────────────────────────────────────
 
 def parse_group_ref(text: str) -> str:
+    """Normalize a user-typed group reference (@name / t.me/name / numeric ID /
+    private invite link) to a canonical form _resolve_group_entity() can consume.
+
+    Delegates public-vs-invite classification to account_manager's
+    normalize_telegram_join_ref — the previous hand-rolled regex here matched
+    "t.me/joinchat/HASH" as if "joinchat" were a public username, and didn't
+    match "t.me/+HASH" at all (the plus sign isn't in its character class),
+    silently corrupting every private invite link passed to this feature.
+    """
     text = text.strip()
-    m = re.search(r"t\.me/([A-Za-z0-9_]{3,})", text)
-    if m:
-        return f"@{m.group(1)}"
-    if text.startswith("@"):
-        return text
     if re.match(r"^-?\d+$", text):
-        return text
-    if re.match(r"^[A-Za-z0-9_]{3,}$", text):
-        return f"@{text}"
-    return text
+        return text  # numeric chat ID — not a join ref, pass through as-is
+
+    from services.account_manager import format_telegram_join_ref_display
+
+    formatted = format_telegram_join_ref_display(text)
+    return formatted or text
 
 
 def parse_user_refs(text: str) -> list[str]:

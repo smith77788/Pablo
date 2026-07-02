@@ -111,12 +111,19 @@ async def report_message(
 
 
 def parse_target_ref(text: str) -> str:
+    """Нормализует ссылку/username цели → @username, числовой ID, или
+    канонический https://t.me/+HASH для приватных invite-ссылок.
+
+    Delegates to account_manager.normalize_telegram_join_ref — the previous
+    regex here matched "t.me/joinchat/HASH" as if "joinchat" were a public
+    username, and didn't match "t.me/+HASH" at all, silently corrupting
+    private invite links.
+    """
     text = text.strip()
-    m = re.search(r"t\.me/([A-Za-z0-9_]{3,})", text)
-    if m:
-        return f"@{m.group(1)}"
-    if text.startswith("@") or re.match(r"^-?\d+$", text):
-        return text
-    if re.match(r"^[A-Za-z0-9_]{3,}$", text):
-        return f"@{text}"
-    return text
+    if re.match(r"^-?\d+$", text):
+        return text  # numeric chat ID — not a join ref, pass through as-is
+
+    from services.account_manager import format_telegram_join_ref_display
+
+    formatted = format_telegram_join_ref_display(text)
+    return formatted or text

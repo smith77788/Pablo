@@ -323,7 +323,7 @@ async def _save_proxy(
         proxy_type = "socks4"
 
     try:
-        await pool.execute(
+        result = await pool.execute(
             """
             INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type)
             VALUES ($1, $2, $3, $4)
@@ -335,7 +335,16 @@ async def _save_proxy(
             proxy_type,
         )
         display = html.escape(label or proxy_url)
-        text = f"✅ Прокси <code>{display}</code> добавлен."
+        # "INSERT 0 1" — реально добавлено; "INSERT 0 0" — дубликат (ON CONFLICT).
+        # Раньше при дубликате показывался ложный «✅ добавлен».
+        inserted = str(result).split()[-1] != "0"
+        if inserted:
+            text = f"✅ Прокси <code>{display}</code> добавлен."
+        else:
+            text = (
+                f"ℹ️ Прокси <code>{display}</code> уже есть в списке — "
+                "повторно не добавлен."
+            )
     except Exception as exc:
         log.exception("Error saving proxy: %s", exc)
         text = f"⚠️ Ошибка сохранения: {html.escape(str(exc)[:200])}"

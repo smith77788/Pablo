@@ -316,7 +316,7 @@ async def cb_adi_top_channels(
         )
         rows = await conn.fetch(
             """
-            SELECT channel_username, channel_title, subscribers,
+            SELECT id, channel_username, channel_title, subscribers,
                    views_avg, er_rate, ad_price_est, quality_score, ad_posts_count
             FROM ad_placements
             WHERE owner_id = $1
@@ -338,6 +338,7 @@ async def cb_adi_top_channels(
         return
 
     lines = [f"🏆 <b>Топ каналов по качеству</b> (стр. {page+1})\n"]
+    kb = InlineKeyboardBuilder()
     for i, r in enumerate(rows, start=offset + 1):
         qs = r["quality_score"]
         er = _fmt_er(r["er_rate"])
@@ -350,22 +351,34 @@ async def cb_adi_top_channels(
             f"   👥 {subs} · ER {er} · ⭐ {qs:.0f}/100\n"
             f"   💰 ~{price:,} ⭐ за пост · 📝 {r['ad_posts_count']} рекл. постов\n"
         )
+        # Кликабельная кнопка деталей на каждый канал (handler placement_detail уже есть)
+        kb.button(
+            text=f"🔎 {i}. {(r['channel_title'] or r['channel_username'])[:24]}",
+            callback_data=AdIntelCb(action="placement_detail", placement_id=r["id"]),
+        )
 
     text = "\n".join(lines)
 
-    kb = InlineKeyboardBuilder()
+    n_nav = 0
     if page > 0:
         kb.button(
             text="◀️ Предыдущие",
             callback_data=AdIntelCb(action="top_channels", page=page - 1),
         )
+        n_nav += 1
     if (offset + _PAGE_SIZE) < (total or 0):
         kb.button(
             text="Следующие ▶️",
             callback_data=AdIntelCb(action="top_channels", page=page + 1),
         )
+        n_nav += 1
     kb.button(text="◀️ Дашборд", callback_data=AdIntelCb(action="menu"))
-    kb.adjust(2, 1)
+    # Layout: каждый канал-деталь на своей строке, навигация вместе, дашборд отдельно
+    _layout = [1] * len(rows)
+    if n_nav:
+        _layout.append(n_nav)
+    _layout.append(1)
+    kb.adjust(*_layout)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 

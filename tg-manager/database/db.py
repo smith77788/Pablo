@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import os
+import re
 import time
 from config import DATABASE_URL, PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
@@ -12,38 +13,96 @@ log = logging.getLogger(__name__)
 
 
 def _split_sql_statements(sql: str) -> list[str]:
-    """Split a SQL file into individual statements, correctly handling dollar-quoted blocks."""
+    """Split a SQL file into individual statements on top-level ";".
+
+    Must not split inside: dollar-quoted blocks ($$...$$ / $tag$...$tag$),
+    single-quoted string literals ('...', with '' as an escaped quote),
+    double-quoted identifiers ("...", with "" as an escaped quote), "--"
+    line comments, or "/* ... */" block comments — a literal ";" in any of
+    these (e.g. a trailing comment like "-- null if not found; see below")
+    would otherwise cut a real CREATE TABLE statement in half, corrupting it
+    and every statement after it in the file.
+    """
     stmts: list[str] = []
     buf: list[str] = []
-    in_dollar = False
+    n = len(sql)
     i = 0
-    while i < len(sql):
-        # Detect $$ or $tag$ opening/closing
-        if sql[i] == "$" and not in_dollar:
-            # Find matching closing $...$
+    while i < n:
+        ch = sql[i]
+        # Dollar-quoted block: $$ ... $$ or $tag$ ... $tag$
+        if ch == "$":
             j = sql.find("$", i + 1)
             if j != -1:
                 tag = sql[i:j + 1]
                 closing = sql.find(tag, j + 1)
                 if closing != -1:
-                    # Consume entire dollar-quoted block
                     end = closing + len(tag)
                     buf.append(sql[i:end])
                     i = end
                     continue
-        if sql[i] == ";" and not in_dollar:
+        # "--" line comment: consume through end of line
+        if ch == "-" and sql[i + 1:i + 2] == "-":
+            end = sql.find("\n", i + 2)
+            end = n if end == -1 else end
+            buf.append(sql[i:end])
+            i = end
+            continue
+        # "/* ... */" block comment
+        if ch == "/" and sql[i + 1:i + 2] == "*":
+            end = sql.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            buf.append(sql[i:end])
+            i = end
+            continue
+        # '...' string literal, '' is an escaped quote
+        if ch == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'" and sql[j + 1:j + 2] != "'":
+                    break
+                j = j + 2 if sql[j] == "'" else j + 1
+            end = min(j + 1, n)
+            buf.append(sql[i:end])
+            i = end
+            continue
+        # "..." quoted identifier, "" is an escaped quote
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if sql[j] == '"' and sql[j + 1:j + 2] != '"':
+                    break
+                j = j + 2 if sql[j] == '"' else j + 1
+            end = min(j + 1, n)
+            buf.append(sql[i:end])
+            i = end
+            continue
+        if ch == ";":
             stmt = "".join(buf).strip()
-            if stmt:
+            if stmt and _has_sql_content(stmt):
                 stmts.append(stmt)
             buf = []
             i += 1
             continue
-        buf.append(sql[i])
+        buf.append(ch)
         i += 1
     last = "".join(buf).strip()
-    if last:
+    if last and _has_sql_content(last):
         stmts.append(last)
     return stmts
+
+
+def _has_sql_content(stmt: str) -> bool:
+    """True if `stmt` has any executable content left after stripping comments.
+
+    A trailing "-- comment" at the end of a schema file (with no statement
+    after it) survives splitting as its own "statement" that's pure comment —
+    sending that to asyncpg's execute() raises a confusing internal
+    AttributeError (no actual command for the server to acknowledge), so
+    these must be filtered out before we ever call conn.execute().
+    """
+    stripped = re.sub(r"--[^\n]*", "", stmt)
+    stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.S)
+    return bool(stripped.strip())
 
 
 async def create_pool() -> asyncpg.Pool:
@@ -79,8 +138,24 @@ async def create_pool() -> asyncpg.Pool:
                 seen.add(bn)
                 schema_files.append(p)
 
+        # Таблица учёта миграций — наблюдаемость (какие файлы применились чисто,
+        # какие с ошибками). Не влияет на поведение, только фиксирует статус.
+        try:
+            await conn.execute(
+                """CREATE TABLE IF NOT EXISTS schema_migrations (
+                       filename    TEXT PRIMARY KEY,
+                       status      TEXT NOT NULL,        -- 'ok' | 'warnings'
+                       error_count INT  NOT NULL DEFAULT 0,
+                       last_error  TEXT,
+                       applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                   )"""
+            )
+        except Exception as _mig_exc:
+            log.warning("schema_migrations table create failed: %s", _mig_exc)
+
         applied = 0
         failed = 0
+        failed_files: list[str] = []
         for path in schema_files:
             with open(path, encoding="utf-8") as f:
                 sql = f.read().strip()
@@ -91,6 +166,8 @@ async def create_pool() -> asyncpg.Pool:
             # their own semicolons that must not be split).
             statements = _split_sql_statements(sql)
             file_ok = True
+            _err_count = 0
+            _last_error = None
             for stmt in statements:
                 try:
                     await conn.execute(stmt)
@@ -106,12 +183,36 @@ async def create_pool() -> asyncpg.Pool:
                         os.path.basename(path), exc, stmt,
                     )
                     file_ok = False
+                    _err_count += 1
+                    _last_error = err[:500]
+            _bn = os.path.basename(path)
             if file_ok:
                 applied += 1
             else:
                 failed += 1
+                failed_files.append(_bn)
+            # Фиксируем статус файла (best-effort)
+            try:
+                await conn.execute(
+                    """INSERT INTO schema_migrations(filename, status, error_count, last_error, applied_at)
+                       VALUES($1, $2, $3, $4, now())
+                       ON CONFLICT (filename) DO UPDATE
+                       SET status=EXCLUDED.status, error_count=EXCLUDED.error_count,
+                           last_error=EXCLUDED.last_error, applied_at=now()""",
+                    _bn, "ok" if file_ok else "warnings", _err_count, _last_error,
+                )
+            except Exception:
+                pass
 
-        log.info("Schema migration: %d files OK, %d with warnings", applied, failed)
+        if failed:
+            # Раньше это был log.info и терялось — теперь ERROR со списком файлов.
+            log.error(
+                "Schema migration: %d files OK, %d WITH ERRORS: %s "
+                "(детали в таблице schema_migrations)",
+                applied, failed, ", ".join(failed_files[:30]),
+            )
+        else:
+            log.info("Schema migration: %d files OK, 0 with errors", applied)
 
         # Verify critical tables exist after migration — log ERROR if missing
         _CRITICAL_TABLES = ["activity_log", "operation_audit", "operation_queue"]

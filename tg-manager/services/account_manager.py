@@ -387,8 +387,7 @@ def _resolve_client_proxy(device: dict[str, Any]) -> Any:
         return proxy
     if TG_PROXY:
         return _parse_proxy(TG_PROXY)
-    pool_url = _get_pool_proxy_url()
-    return _parse_proxy(pool_url) if pool_url else None
+    return None
 
 
 def generate_device_fingerprint(country_code: str | None = None) -> dict[str, str]:
@@ -410,12 +409,13 @@ def _make_client(session_string: str = "", device: dict | None = None):
     Приоритет транспорта (от высшего к низшему):
     1. Аккаунт-bound прокси (proxy_url в device dict) — строгая изоляция,
        используется если у аккаунта назначен конкретный прокси.
-    2. CF_RELAY_URL env var — Cloudflare Worker WebSocket→TCP relay (бесплатный,
-       скрывает Railway IP за Cloudflare edge IP). Используется только если
-       аккаунт не имеет собственного прокси.
-    3. Глобальный TG_PROXY (socks5://...) — применяется если CF_RELAY_URL не задан.
-    4. Прямое подключение через ConnectionTcpObfuscated — если ни один из выше
-       не задан. Протокол обфускован, но Railway IP виден Telegram.
+    2. Глобальный TG_PROXY (socks5://...) — явно заданный оператором прокси.
+    3. CF_RELAY_URL env var — Cloudflare Worker WebSocket→TCP relay (бесплатный,
+       скрывает Railway IP за Cloudflare edge IP, контролируемый и стабильный).
+    4. Бесплатный пул прокси (proxy_scraper) — публичные SOCKS5-списки; ниже
+       CF relay по приоритету, т.к. заведомо менее надёжны, но лучше, чем ничего.
+    5. Прямое подключение через ConnectionTcpObfuscated — если ни один из выше
+       не задан/не сработал. Протокол обфускован, но Railway IP виден Telegram.
 
     Всегда используется обфускация (ConnectionTcpObfuscated или CF relay поверх неё),
     никогда ConnectionTcpFull — он легко детектится как Telethon/MTProto.
@@ -429,7 +429,7 @@ def _make_client(session_string: str = "", device: dict | None = None):
     # Определяем прокси (может поднять ProxyIsolationError если обязательный прокси не задан)
     proxy = _resolve_client_proxy(d)
 
-    # Выбор транспорта: если нет аккаунт-bound прокси И задан CF relay → используем relay
+    # Выбор транспорта: если нет аккаунт-bound/TG_PROXY И задан CF relay → используем relay
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
     if not has_bound_proxy and CF_RELAY_URL:
         from services.cf_relay import make_cf_relay_connection as _make_relay
@@ -437,6 +437,11 @@ def _make_client(session_string: str = "", device: dict | None = None):
         effective_proxy = None  # relay сам маршрутизирует
     else:
         connection_cls = ConnectionTcpObfuscated
+        if not has_bound_proxy:
+            # Нет аккаунт-прокси, TG_PROXY и CF relay не заданы — последний резерв:
+            # бесплатный пул публичных SOCKS5-прокси (populated by proxy_scraper).
+            pool_url = _get_pool_proxy_url()
+            proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
 
     return TelegramClient(
@@ -1958,6 +1963,96 @@ async def join_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в join_channel")
+
+
+async def is_premium_account(session_string: str, _acc: dict | None = None) -> bool:
+    """Проверить, является ли сам аккаунт (владелец сессии) Telegram Premium.
+
+    Используется для фильтрации аккаунтов в накрутке "только Premium".
+    Любая ошибка подключения/API трактуется как False — вызывающий код должен
+    просто пропустить такой аккаунт при фильтрации, а не валить всю операцию.
+    """
+    if not session_string:
+        return False
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        return bool(getattr(me, "premium", False))
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "premium_check")
+        return False
+    except (OSError, ConnectionError):
+        _record_proxy_fail(_acc, "premium_check")
+        return False
+    except Exception as e:
+        log.debug("is_premium_account error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в is_premium_account")
+
+
+async def send_bot_start(
+    session_string: str,
+    bot_username: str,
+    payload: str | None = None,
+    _acc: dict | None = None,
+) -> dict:
+    """Отправить боту команду /start (с опциональным deep-link payload).
+
+    Returns {"ok": True} on success or {"error": ..., ...} matching the same
+    shape used by join_channel (proxy_error/flood_wait/banned flags).
+    """
+    if not session_string:
+        return {"error": "session_str отсутствует — сессия недоступна"}
+    target = (bot_username or "").strip().lstrip("@")
+    if not target:
+        return {"error": "Не указан бот"}
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await asyncio.wait_for(client.get_entity(target), timeout=_OP_TIMEOUT)
+        text = f"/start {payload}" if payload else "/start"
+        await asyncio.wait_for(client.send_message(entity, text), timeout=_OP_TIMEOUT)
+        return {"ok": True}
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "bot_start")
+        return {
+            "error": "Timeout при подключении — прокси недоступен",
+            "proxy_error": True,
+        }
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "bot_start")
+        return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
+    except Exception as e:
+        from telethon.errors import (
+            FloodWaitError,
+            UserDeactivatedBanError,
+            UsernameNotOccupiedError,
+            UsernameInvalidError,
+        )
+
+        if isinstance(e, FloodWaitError):
+            return {
+                "error": f"FloodWait {e.seconds}с — подождите перед запуском бота",
+                "flood_wait": e.seconds,
+            }
+        if isinstance(e, UserDeactivatedBanError):
+            return {"error": f"Аккаунт заблокирован: {e}", "banned": True}
+        if isinstance(e, (UsernameNotOccupiedError, UsernameInvalidError)):
+            return {"error": "Бот не найден — проверьте username"}
+        log.exception("send_bot_start error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в send_bot_start")
 
 
 async def leave_channel(

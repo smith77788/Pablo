@@ -337,9 +337,12 @@ async def send_message(
     text: str,
     buttons: list[dict] | None = None,
     reply_markup: dict | None = None,
+    disable_notification: bool = False,
 ) -> tuple[bool, int | None]:
     """Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if disable_notification:
+        params["disable_notification"] = True
     if reply_markup is not None:
         params["reply_markup"] = reply_markup
     elif buttons:

@@ -21,22 +21,22 @@ _COMMON_EMOJIS = ["❤", "🔥", "👍", "💯", "🎉", "👏", "😍", "🤩",
 
 
 def parse_channel_ref(text: str) -> str:
-    """Нормализовать ссылку на канал/чат → @username или числовой ID."""
+    """Нормализовать ссылку на канал/чат → @username, числовой ID, или
+    канонический https://t.me/+HASH для приватных invite-ссылок.
+
+    Delegates to account_manager.normalize_telegram_join_ref — the previous
+    hand-rolled regex here matched "t.me/joinchat/HASH" as if "joinchat" were
+    a public username, and didn't match "t.me/+HASH" at all (the plus sign
+    isn't in its character class), silently corrupting private invite links.
+    """
     text = text.strip()
-    # https://t.me/username or t.me/username
-    m = re.search(r"t\.me/([A-Za-z0-9_]{3,})", text)
-    if m:
-        return f"@{m.group(1)}"
-    # @username
-    if text.startswith("@"):
-        return text
-    # numeric chat id
     if re.match(r"^-?\d+$", text):
-        return text
-    # bare username
-    if re.match(r"^[A-Za-z0-9_]{3,}$", text):
-        return f"@{text}"
-    return text
+        return text  # numeric chat ID — not a join ref, pass through as-is
+
+    from services.account_manager import format_telegram_join_ref_display
+
+    formatted = format_telegram_join_ref_display(text)
+    return formatted or text
 
 
 def parse_msg_ids(text: str) -> list[int]:

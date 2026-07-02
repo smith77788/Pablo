@@ -255,20 +255,27 @@ async def _finish_cluster_create(
     kb.adjust(1)
 
     # Persist the cluster to the database so it can be listed/used later.
+    created = True
     try:
-        await pool.execute(
+        result = await pool.execute(
             """INSERT INTO clusters (owner_id, name)
                VALUES ($1, $2)
                ON CONFLICT (owner_id, name) DO NOTHING""",
             owner_id,
             cluster_name,
         )
+        # "INSERT 0 0" → кластер с таким именем уже существовал (устраняем ложный «создан»)
+        created = str(result).split()[-1] != "0"
     except Exception:
         log_exc_swallow(log, "_finish_cluster_create: DB insert failed")
 
-    await message.answer(
+    head = (
         f"✅ Кластер <b>{cluster_name}</b> создан.\n\n"
-        "Назначьте ботов через раздел <b>Мои боты</b>.",
+        if created
+        else f"ℹ️ Кластер <b>{cluster_name}</b> уже существует.\n\n"
+    )
+    await message.answer(
+        head + "Назначьте ботов через раздел <b>Мои боты</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

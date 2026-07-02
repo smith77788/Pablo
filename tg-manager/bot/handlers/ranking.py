@@ -536,7 +536,7 @@ async def cb_rank_check_now(
                 )
 
                 # Mark account as used (least-recently-used rotation)
-                await db.update_tg_account_used(pool, account["id"])
+                await db.update_tg_account_used(pool, account["id"], owner_id)
 
                 results.append(
                     {

@@ -1135,16 +1135,20 @@ _LIB_PAGE_SIZE = 5
 @router.callback_query(LibCb.filter(F.action == "menu"))
 async def cb_lib_menu(callback: CallbackQuery) -> None:
     await callback.answer()
+    from services.preset_templates import get_presets
+
     kb = InlineKeyboardBuilder()
     for atype, label in _LIB_TYPE_LABELS.items():
         kb.button(text=label, callback_data=LibCb(action="type", asset_type=atype))
     kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
     kb.adjust(2, 2, 1)
+    # Реальное число пресетов (было захардкожено «24»)
+    total_presets = sum(len(get_presets(atype)) for atype in _LIB_TYPE_LABELS)
     await callback.message.edit_text(
         "📚 <b>Библиотека готовых шаблонов</b>\n\n"
         "Готовые шаблоны для быстрого старта. "
         "Выберите категорию, просмотрите шаблон и примените или клонируйте в свои.\n\n"
-        "Доступно шаблонов: 24 (каналы, группы, боты, посты)",
+        f"Доступно шаблонов: {total_presets} (каналы, группы, боты, посты)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

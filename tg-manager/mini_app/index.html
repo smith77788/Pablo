@@ -34,6 +34,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .back:active{opacity:.6}
 .hdr-title{flex:1;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-meta{text-align:right;flex-shrink:0}
+/* ── Боковая навигация (drawer) ── */
+.hdr-burger{flex-shrink:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,.06);cursor:pointer;color:var(--fg);font-size:19px;line-height:1;user-select:none}
+.hdr-burger:active{background:rgba(255,255,255,.14)}
+#navOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;visibility:hidden;transition:opacity .22s;z-index:120}
+#navOverlay.on{opacity:1;visibility:visible}
+#navDrawer{position:fixed;top:0;left:0;bottom:0;width:82%;max-width:340px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .24s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 24px rgba(0,0,0,.4)}
+#navDrawer.on{transform:translateX(0)}
+.nav-head{padding:calc(var(--safe-t) + 16px) 18px 14px;border-bottom:1px solid var(--sep);display:flex;align-items:center;gap:10px}
+.nav-head-t{font-size:18px;font-weight:800;letter-spacing:-.4px}
+.nav-body{flex:1;overflow-y:auto;padding:8px 0 24px}
+.nav-cat{padding:14px 18px 6px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--hint)}
+.nav-item{display:flex;align-items:center;gap:13px;padding:11px 18px;cursor:pointer;font-size:15px;font-weight:500;color:var(--fg)}
+.nav-item:active{background:rgba(255,255,255,.07)}
+.nav-item.on{background:rgba(88,133,240,.16);color:var(--blue,#5b8def);box-shadow:inset 3px 0 0 var(--blue,#5b8def)}
+.nav-item .ni-ico{font-size:19px;width:24px;text-align:center;flex-shrink:0}
 .hdr-user{font-size:13px;color:var(--hint);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-live{font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
 
@@ -49,7 +64,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .tab.on .tab-ico::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--btn)}
 
 /* ─── Section ────────────────────────────────────────────────── */
-.sec{padding:14px 16px 7px;font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em}
+.sec{padding:16px 16px 8px;font-size:13px;font-weight:700;color:var(--text);text-transform:none;letter-spacing:.01em;display:flex;align-items:center;gap:8px}
+.sec::before{content:'';width:3px;height:15px;border-radius:3px;background:linear-gradient(180deg,var(--blue),var(--purple));flex:none}
 .sec-row{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 7px}
 .sec-row .sec{padding:0}
 .sec-btn{font-size:13px;font-weight:600;color:var(--btn);cursor:pointer}
@@ -368,18 +384,29 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .qa-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 4px}
 .qa-tile{background:var(--bg2);border-radius:14px;padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;transition:transform .12s,opacity .12s;text-align:center}
 .qa-tile:active{transform:scale(.93);opacity:.7}
-.qa-tile-ico{font-size:26px;line-height:1}
+.qa-tile-ico{font-size:24px;line-height:1;width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:14px;margin:0 auto;background:linear-gradient(145deg,rgba(59,130,246,.18),rgba(168,85,247,.13));box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);color:#cbd5ff}
+.qa-tile-ico svg{width:25px;height:25px;display:block}
 .qa-tile-lbl{font-size:11px;font-weight:600;color:var(--hint);line-height:1.2}
 .qa-tile-val{font-size:18px;font-weight:700;margin-top:2px}
 </style>
 </head>
 <body>
+<!-- ══════════════════════ БОКОВАЯ НАВИГАЦИЯ ══════════════════════ -->
+<div id="navOverlay" onclick="closeDrawer()"></div>
+<nav id="navDrawer">
+  <div class="nav-head">
+    <div class="hdr-burger" onclick="closeDrawer()">✕</div>
+    <div class="nav-head-t">⚡ Infragram</div>
+  </div>
+  <div class="nav-body" id="navBody"><!-- заполняется buildDrawer() --></div>
+</nav>
 <div id="app">
 <div id="content">
 
 <!-- ══════════════════════ HOME ══════════════════════ -->
 <div class="screen show" id="s-home">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -433,6 +460,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ BOTS LIST ══════════════════════ -->
 <div class="screen" id="s-bots">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
       <span id="bots-cnt" style="font-size:12px;color:var(--hint)"></span>
@@ -517,6 +545,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
 <div class="screen" id="s-accounts">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
     <div class="hdr-meta"><div class="hdr-user" id="acc-cnt"></div></div>
   </div>
@@ -637,6 +666,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ BROADCASTS ══════════════════════ -->
 <div class="screen" id="s-broadcasts">
   <div class="hdr">
+    <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">📨 Рассылки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
@@ -652,7 +682,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ MORE ══════════════════════ -->
 <div class="screen" id="s-more">
-  <div class="hdr"><div class="hdr-title">⚙️ Ещё</div></div>
+  <div class="hdr"><div class="hdr-burger" onclick="openDrawer()">☰</div><div class="hdr-title">⚙️ Ещё</div></div>
   <div class="sb">
 
     <!-- Статус аккаунта -->
@@ -1084,8 +1114,36 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Объединяет ВАШИ существующие бота + каналы + группы в одну воронку: бот-админ, посевные посты, синхронная работа. Это <b>не</b> создание новых каналов.</div>
+    <div style="display:flex;gap:8px;padding:0 0 10px">
+      <button class="btn btn-s" style="flex:1;padding:9px 4px;font-size:12px" onclick="openBotFactory()">🏭 Создать бота</button>
+      <button class="btn btn-s" style="flex:1;padding:9px 4px;font-size:12px" onclick="openChannelFactory()">📡 Создать канал/группу</button>
+    </div>
     <div class="sec">Мои связки</div>
     <div class="lst" id="ppList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ PRESENCE PACK — DETAIL/EDIT ══════════════════════ -->
+<div class="screen" id="s-pp-detail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="ppDetail-name">Связка</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Бот-администратор</div>
+    <div class="lst" id="ppDetailBot"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec">Каналы (<span id="ppChCount">0</span> выбрано)</div>
+    <div class="lst" id="ppDetailChannels"></div>
+    <div class="sec">Группы (<span id="ppGrCount">0</span> выбрано)</div>
+    <div class="lst" id="ppDetailGroups"></div>
+    <div style="display:flex;gap:8px;margin:12px 0">
+      <button class="btn btn-p" id="ppSaveBtn" style="flex:1" onclick="savePresencePackConfig()">💾 Сохранить</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-s" style="flex:1" onclick="seedPresencePack()">🌱 Посеять посты</button>
+      <button class="btn btn-s" style="flex:1" onclick="promotePresencePack()">👑 Бот → admin</button>
+    </div>
+    <div class="field-err" id="ppDetailErr"></div>
   </div>
 </div>
 
@@ -1596,6 +1654,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <option value="counter">⚔️ Контр-нарратив</option>
     </select></div>
     <div class="field"><label>Распределить за (часов)</label><input id="nc-hours" type="number" min="1" max="168" value="4" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="sec" style="margin-top:4px">Каналы кампании</div>
+    <div style="color:var(--hint);font-size:12px;padding:2px 0 6px">Каждый выбранный канал получит уникальный пост со своим углом подачи.</div>
+    <div class="lst" id="nc-channels" style="max-height:200px;overflow-y:auto"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div style="padding:6px 0;color:#a78bfa;font-size:13px" id="nc-selcount">Выбрано: 0 каналов</div>
     <div class="field-err" id="nc-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-narrative')" style="flex:1">Отмена</button>
@@ -1657,6 +1719,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">ДНК аудитории по ботам</div>
     <div class="lst" id="dnaList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ AUDIENCE DNA — DETAIL ══════════════════════ -->
+<div class="screen" id="s-dna-detail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="dnaDetail-name">DNA</div>
+    <div class="hdr-meta">
+      <button class="btn btn-p" id="dnaRecomputeBtn" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="recomputeDna()">🔄 Пересчитать</button>
+    </div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="dnaDetailBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -2078,10 +2154,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Тип накрутки</div>
-    <div style="display:flex;gap:8px;padding:8px 0">
+    <div style="display:flex;gap:8px;padding:8px 0;flex-wrap:wrap">
       <button class="btn btn-s" id="boostTab-views" onclick="boostSetType('views')" style="flex:1;padding:9px 4px;font-size:13px">👁 Просмотры</button>
       <button class="btn btn-s" id="boostTab-reactions" onclick="boostSetType('reactions')" style="flex:1;padding:9px 4px;font-size:13px">❤ Реакции</button>
       <button class="btn btn-s" id="boostTab-stories" onclick="boostSetType('stories')" style="flex:1;padding:9px 4px;font-size:13px">📖 Сторис</button>
+      <button class="btn btn-s" id="boostTab-subscribers" onclick="boostSetType('subscribers')" style="flex:1;padding:9px 4px;font-size:13px">👥 Подписчики</button>
+      <button class="btn btn-s" id="boostTab-bot_starts" onclick="boostSetType('bot_starts')" style="flex:1;padding:9px 4px;font-size:13px">🚀 Старты в ботах</button>
     </div>
     <div style="padding:8px 0">
       <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
@@ -2089,6 +2167,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field" id="boostF-msgid"><label>ID сообщения</label><input type="number" id="boostMsgId" placeholder="123" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
       <div class="field" id="boostF-emoji"><label>Эмодзи реакции</label><input type="text" id="boostEmoji" value="👍" maxlength="8"></div>
       <div class="field" id="boostF-target"><label>Цель — чьи сторис смотреть (@username)</label><input type="text" id="boostTarget" placeholder="@username"></div>
+      <div class="field" id="boostF-subtarget"><label>Канал/группа для вступления (@username или t.me/+hash)</label><input type="text" id="boostSubTarget" placeholder="@channel или t.me/+hash"></div>
+      <div class="field" id="boostF-botuser"><label>@username бота</label><input type="text" id="boostBotUsername" placeholder="@mybot"></div>
+      <div class="field" id="boostF-payload"><label>Deep-link payload для /start (опционально)</label><input type="text" id="boostPayload" placeholder="ref_XXXX"></div>
+      <div class="field" id="boostF-premium" style="display:none">
+        <label>Фильтр аккаунтов</label>
+        <select id="boostPremiumOnly" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="0">👤 Все аккаунты</option>
+          <option value="1">💎 Только Premium</option>
+        </select>
+      </div>
       <div class="field"><label>Количество аккаунтов (0 = все доступные)</label><input type="number" id="boostAccCount" value="0" min="0" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
       <div class="field-err" id="boostErr"></div>
       <button class="btn btn-p" id="boostBtn" onclick="submitBoost()" style="width:100%">🚀 Запустить</button>
@@ -2156,7 +2244,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Агент найдёт группы по нише, вступит и опубликует ваш текст (до 5 групп за запуск, с паузами для безопасности).</div>
     <div style="padding:8px 0">
       <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
+      <div class="field"><label>Гео / город (опционально)</label><input type="text" id="growthGeo" placeholder="например: Москва, СПб"></div>
       <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+      <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
     </div>
@@ -3371,6 +3461,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Ключевое слово</label><input type="text" id="promoKw" placeholder="Напр: игровой бот"></div>
     <div class="field"><label>Целевая позиция (1-50)</label><input type="number" id="promoPos" min="1" max="50" value="1"></div>
     <div class="field"><label>Кол-во подписчиков (целевое)</label><input type="number" id="promoSubs" min="0" placeholder="Не обязательно"></div>
+    <div class="field"><label>Бот со склада (для накрутки)</label><select id="promoOrderBot" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">— не выбран —</option></select></div>
+    <div class="field"><label>SMM-панель</label><select id="promoOrderPanel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">— не выбрана —</option></select></div>
+    <div style="color:var(--hint);font-size:12px;padding:2px 0 6px">Бот и панель нужны для запуска накрутки. Панели добавляются через Telegram-бота командой /promo.</div>
     <div class="field-err" id="promoOrderErr"></div>
     <button class="btn btn-p" id="promoOrderBtn" onclick="savePromoOrder()" style="width:100%">➕ Создать заказ</button>
   </div>
@@ -3633,9 +3726,10 @@ const _EMOJI2ICON = {
   '✅':'check','⚡':'zap','⚔️':'zap','⚔':'zap','⚛️':'atom','⚛':'atom','🐝':'activity','🔗':'link','🆕':'star',
 };
 function modernizeIcons(root) {
-  (root||document).querySelectorAll('.mgmt-tile-ico').forEach(el=>{
+  (root||document).querySelectorAll('.mgmt-tile-ico, .qa-tile-ico').forEach(el=>{
     if (el.dataset.svg) return;
     const t = (el.textContent||'').trim();
+    if (t) el.dataset.emoji = t;  // сохраняем эмодзи (для бокового меню и др.)
     const name = _EMOJI2ICON[t];
     if (name && _ICON_PATHS[name]) { el.innerHTML = _SVG(_ICON_PATHS[name]); el.dataset.svg='1'; }
   });
@@ -3731,6 +3825,67 @@ function goTab(tab) {
   if (tab === 'more') buildMoreCategories();
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
+  try { markDrawerActive(); } catch(_) {}
+}
+
+// ── Боковая навигация (drawer) ──────────────────────────────
+
+function buildDrawer() {
+  const body = document.getElementById('navBody');
+  if (!body || body.dataset.built) return;
+  let html = '';
+  // 1) Верхний блок — основные вкладки
+  html += '<div class="nav-cat">Навигация</div>';
+  [['home','📊','Дашборд'],['bots','🤖','Боты'],['accounts','📱','Аккаунты'],
+   ['broadcasts','📨','Рассылки'],['more','🧩','Все функции']].forEach(([tab,ico,lbl])=>{
+    html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
+  });
+  // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки).
+  //    Меню всегда полное и синхронно с каталогом функций, без дублирования списка.
+  const more = document.getElementById('s-more');
+  if (more) {
+    more.querySelectorAll('.sec').forEach(sec=>{
+      let grid = sec.nextElementSibling;
+      while (grid && !grid.classList.contains('mgmt-grid')) grid = grid.nextElementSibling;
+      if (!grid) return;
+      const tiles = grid.querySelectorAll('.mgmt-tile');
+      if (!tiles.length) return;
+      html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>`;
+      tiles.forEach(tile=>{
+        const icoEl = tile.querySelector('.mgmt-tile-ico');
+        // dataset.emoji переживает модернизацию иконок в SVG (textContent пустеет)
+        const ico = (icoEl && (icoEl.dataset.emoji || icoEl.textContent||'').trim()) || '•';
+        const lbl = ((tile.querySelector('.mgmt-tile-lbl')||{}).textContent||'').trim();
+        if (!lbl) return;
+        const handler = (tile.getAttribute('onclick')||'').replace(/"/g,'&quot;');
+        html += `<div class="nav-item" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
+      });
+    });
+  }
+  body.innerHTML = html;
+  body.dataset.built = '1';
+}
+function markDrawerActive() {
+  document.querySelectorAll('#navBody .nav-item[data-tab]').forEach(el=>{
+    el.classList.toggle('on', el.dataset.tab === (typeof CUR!=='undefined'?CUR:'home'));
+  });
+}
+function openDrawer() {
+  buildDrawer(); markDrawerActive();
+  document.getElementById('navOverlay')?.classList.add('on');
+  document.getElementById('navDrawer')?.classList.add('on');
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_) {}
+}
+function closeDrawer() {
+  document.getElementById('navOverlay')?.classList.remove('on');
+  document.getElementById('navDrawer')?.classList.remove('on');
+}
+function navGo(tab, fn) {
+  closeDrawer();
+  try {
+    if (tab) { goTab(tab); }
+    else if (fn && typeof window[fn] === 'function') { window[fn](); }
+  } catch(e) { try { toast('Не удалось открыть раздел'); } catch(_) {} }
 }
 
 function _syncBackButton() {
@@ -3743,8 +3898,13 @@ function _syncBackButton() {
 
 function push(sid) {
   closeAllModals();
+  // Прячем все видимые экраны — иначе абсолютно спозиционированные элементы
+  // предыдущего экрана (напр. кнопки удаления с z-index) «протекают» поверх
+  // нового экрана.
+  document.querySelectorAll('.screen.show').forEach(s=>s.classList.remove('show'));
   STACK.push(sid);
-  document.getElementById(sid).classList.add('show');
+  const el = document.getElementById(sid);
+  if (el) { el.classList.add('show'); el.scrollTop = 0; }
   showTabbar(false);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -3754,7 +3914,11 @@ function back() {
   closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
-  document.getElementById(id).classList.remove('show');
+  document.getElementById(id)?.classList.remove('show');
+  // Возвращаем предыдущий экран стека, либо экран текущей вкладки.
+  const prev = STACK.length ? STACK[STACK.length - 1] : ('s-' + CUR);
+  const pel = document.getElementById(prev);
+  if (pel) pel.classList.add('show');
   if (!STACK.length) showTabbar(true);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -3772,6 +3936,7 @@ function loadTab(tab) {
 
 // ── Home ───────────────────────────────────────────────
 async function loadHome() {
+  modernizeIcons(document.getElementById('s-home'));  // SVG-иконки в быстрых действиях
   try {
     const d = await api('/api/miniapp/dashboard');
     renderCards(d);
@@ -3916,8 +4081,9 @@ async function loadBots() {
   try {
     const d = await api('/api/miniapp/bots');
     BOTS = d.bots||[];
+    const botTotal = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = BOTS.length ? BOTS.length+' ботов' : '';
+    if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : '';
     renderBots();
   } catch(e) {
     const wrap = document.getElementById('botList');
@@ -3993,6 +4159,9 @@ async function submitBotBroadcast() {
   const text=document.getElementById('bbText').value.trim();
   if(!text){ errEl.textContent='Введите текст рассылки'; return; }
   const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
+  const preview = `Отправить рассылку по ${BOT_SEL.size} ботам?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+    + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
+  if (!await askConfirm(preview)) return;
   const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
@@ -4366,10 +4535,11 @@ async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
   api('/api/miniapp/accounts').then(ad => {
     CUR_ACCS = ad.accounts||[];
-    const cnt = CUR_ACCS.length;
+    // Истинное число из серверной агрегации (список ограничен LIMIT 100)
+    const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
-    updateAccKpi(CUR_ACCS);
+    updateAccKpi(CUR_ACCS, ad.stats);
     renderAccounts(CUR_ACCS);
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
@@ -4449,11 +4619,12 @@ function filterAcc(mode, btn) {
   renderAccounts(list);
 }
 
-function updateAccKpi(list) {
-  const all = list.length;
-  const active = list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned').length;
-  const cd = list.filter(a=>isOnCooldown(a)).length;
-  const banned = list.filter(a=>a.acc_status==='banned').length;
+function updateAccKpi(list, stats) {
+  // Предпочитаем серверную агрегацию (по всем аккаунтам); список ограничен LIMIT 100.
+  const all    = (stats && stats.total!=null)    ? stats.total    : list.length;
+  const active = (stats && stats.active!=null)   ? stats.active   : list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned').length;
+  const cd     = (stats && stats.cooldown!=null) ? stats.cooldown : list.filter(a=>isOnCooldown(a)).length;
+  const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
   const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
   el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-ban', banned);
 }
@@ -4701,7 +4872,7 @@ async function openChannels() {
   try {
     const d = await api('/api/miniapp/channels');
     CUR_CHANNELS = d.channels||[];
-    txt('ch-cnt', CUR_CHANNELS.length+' каналов');
+    txt('ch-cnt', (d.total!=null?d.total:CUR_CHANNELS.length)+' каналов');
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Добавьте канал через меню в Telegram')); return; }
     renderChannels(CUR_CHANNELS);
   } catch(e) {
@@ -5025,6 +5196,11 @@ async function sendBcast() {
   if (btnsRaw.trim() && !buttons.length) {
     errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
   }
+  // Предпросмотр перед отправкой — защита от случайной рассылки
+  const recip = document.getElementById('bcastRecip')?.textContent || '';
+  const preview = `Отправить рассылку?\n\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+    + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
+  if (!await askConfirm(preview)) return;
   const btn = document.getElementById('bcastBtn');
   btn.disabled=true; btn.textContent='⏳ Отправка...';
   try {
@@ -5118,7 +5294,7 @@ async function loadOps() {
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
             ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="cancelOp(${o.id})">Отмена</span>`:''}
-            ${o.status==='failed'?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="retryOp(${o.id})">↺ Повтор</span>`:''}
+            ${(o.status==='failed'||(o.op_type==='mass_publish'&&(o.err_cnt||0)>0&&o.status!=='running'&&o.status!=='pending'))?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="retryOp(${o.id})">↺ Повтор${o.op_type==='mass_publish'&&(o.err_cnt||0)>0?' ('+o.err_cnt+')':''}</span>`:''}
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
@@ -5781,7 +5957,8 @@ async function loadTemplates() {
   try {
     const d = await api('/api/miniapp/templates');
     const items = d.templates||[];
-    txt('m-tpl-cnt', items.length ? items.length+' шаблонов' : '');
+    const tplTotal = (d.total!=null?d.total:items.length);
+    txt('m-tpl-cnt', tplTotal ? tplTotal+' шаблонов' : '');
     if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Нажмите + Создать')); return; }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
@@ -6489,6 +6666,35 @@ async function openTopology() {
         <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Сложность инфраструктуры</div><div class="row-val">${d.accounts||0} аккаунтов → ${d.channels||0} каналов / ${d.bots||0} ботов</div></div></div>
         <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔗</div><div class="row-body"><div class="row-name">Межаккаунтные связи</div><div class="row-val">${d.channel_links||0} аккаунт↔канал · ${d.bot_users_total||0} пользователей ботов</div></div></div>
       </div>
+      <div class="sec">Карта связей</div>
+      <div class="lst" id="topoLinks"><div class="spin-wrap"><div class="spin"></div></div></div>
+    `);
+    const links = await api('/api/miniapp/topology/links');
+    const accs = (links.accounts||[]).filter(a => a.channels && a.channels.length);
+    const bots = links.bots||[];
+    if (!accs.length && !bots.length) {
+      txt('topoLinks', empty('🗺','Связей пока нет',''));
+      return;
+    }
+    txt('topoLinks', `
+      ${accs.map(a => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(59,130,246,.16)">📱</div>
+          <div class="row-body">
+            <div class="row-name">${esc(a.label)}</div>
+            <div class="row-val">${a.channels.map(c=>esc(c.username?'@'+c.username:c.title||('#'+c.channel_id))).join(', ')}</div>
+          </div>
+        </div>
+      `).join('')}
+      ${bots.map(b => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div>
+          <div class="row-body">
+            <div class="row-name">${esc(b.label)}</div>
+            <div class="row-val">${b.subscribers} подписчиков</div>
+          </div>
+        </div>
+      `).join('')}
     `);
   } catch(e) {
     txt('topoStats','');
@@ -6516,9 +6722,12 @@ async function openInfra() {
       <div class="row"><div class="row-body"><div class="row-name">Пул: ${esc(p.pool||'default')}</div></div><div class="row-right">${p.cnt} акк</div></div>
     `).join('') : empty('📦','Нет пулов',''));
     const audit = d.audit||[];
+    // operation_audit.result у успешных операций = 'success' (не 'ok'); также
+    // считаем зелёными 'ok'/'done'. Иначе успешные показывались красным ❌.
+    const _auditOk = r => r==='success' || r==='ok' || r==='done';
     txt('infraAudit', audit.length ? audit.map(a=>`
       <div class="row">
-        <div class="row-ico" style="background:rgba(${a.result==='ok'?'34,197,94':'239,68,68'},.16)">${a.result==='ok'?'✅':'❌'}</div>
+        <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'34,197,94':'239,68,68'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
         <div class="row-body">
           <div class="row-name">${esc(a.action||'action')}</div>
           <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru'):''}</div>
@@ -6573,7 +6782,7 @@ async function submitReporter() {
 let BOOST_TYPE = 'views';
 function boostSetType(t) {
   BOOST_TYPE = t;
-  ['views','reactions','stories'].forEach(x=>{
+  ['views','reactions','stories','subscribers','bot_starts'].forEach(x=>{
     const tab=document.getElementById('boostTab-'+x);
     if(tab) tab.className = 'btn '+(x===t?'btn-p':'btn-s');
   });
@@ -6584,6 +6793,10 @@ function boostSetType(t) {
   show('boostF-msgid', t==='reactions');
   show('boostF-emoji', t==='reactions');
   show('boostF-target', t==='stories');
+  show('boostF-subtarget', t==='subscribers');
+  show('boostF-botuser', t==='bot_starts');
+  show('boostF-payload', t==='bot_starts');
+  show('boostF-premium', t==='subscribers'||t==='bot_starts');
 }
 async function openBoost() {
   push('s-boost');
@@ -6592,8 +6805,8 @@ async function openBoost() {
   txt('boostHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>['boost_views','boost_reactions','boost_stories'].includes(o.op_type)).slice(0,10);
-    const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖'};
+    const ops = (d.operations||[]).filter(o=>['boost_views','boost_reactions','boost_stories','boost_subscribers','boost_bot_starts'].includes(o.op_type)).slice(0,10);
+    const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖',boost_subscribers:'👥',boost_bot_starts:'🚀'};
     txt('boostHistory', ops.length ? ops.map(o=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(59,130,246,.16)">${ICO[o.op_type]||'🚀'}</div>
@@ -6620,9 +6833,18 @@ async function submitBoost() {
     payload.msg_id=parseInt(document.getElementById('boostMsgId').value)||0;
     payload.emoji=document.getElementById('boostEmoji').value.trim()||'👍';
     if(!payload.channel||!payload.msg_id){ errEl.textContent='Укажите канал и ID сообщения'; return; }
-  } else {
+  } else if (BOOST_TYPE==='stories') {
     payload.target=document.getElementById('boostTarget').value.trim();
     if(!payload.target){ errEl.textContent='Укажите цель'; return; }
+  } else if (BOOST_TYPE==='subscribers') {
+    payload.target=document.getElementById('boostSubTarget').value.trim();
+    payload.premium_only=document.getElementById('boostPremiumOnly').value==='1';
+    if(!payload.target){ errEl.textContent='Укажите канал/группу'; return; }
+  } else { // bot_starts
+    payload.bot_username=document.getElementById('boostBotUsername').value.trim();
+    payload.payload=document.getElementById('boostPayload').value.trim();
+    payload.premium_only=document.getElementById('boostPremiumOnly').value==='1';
+    if(!payload.bot_username){ errEl.textContent='Укажите @username бота'; return; }
   }
   const btn=document.getElementById('boostBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
@@ -6775,12 +6997,14 @@ async function openGrowth() {
 async function submitGrowth() {
   const errEl=document.getElementById('growthErr'); errEl.textContent='';
   const niche=document.getElementById('growthNiche').value.trim();
+  const geo=document.getElementById('growthGeo').value.trim();
   const promo_text=document.getElementById('growthPromo').value.trim();
+  const acc_count=parseInt(document.getElementById('growthAccCount').value)||3;
   if(!niche){ errEl.textContent='Укажите нишу'; return; }
   if(!promo_text){ errEl.textContent='Укажите рекламный текст'; return; }
   const btn=document.getElementById('growthBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify({niche,promo_text})});
+    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify({niche,geo,promo_text,acc_count})});
     toast(`🌿 Запущено (#${r.op_id})`);
     openGrowth();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
@@ -7571,14 +7795,15 @@ async function openDmCampaigns() {
   try {
     const d = await api('/api/miniapp/dm_campaigns');
     const cmp = d.campaigns||[];
+    const cmpTotal = (d.total!=null?d.total:cmp.length);
     const running = cmp.filter(c=>c.status==='running').length;
     const done = cmp.filter(c=>c.status==='done').length;
     txt('dmStats',`
-      <div class="kpi-card"><div class="kpi-val">${cmp.length}</div><div class="kpi-lbl">Всего</div></div>
+      <div class="kpi-card"><div class="kpi-val">${cmpTotal}</div><div class="kpi-lbl">Всего</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${running}</div><div class="kpi-lbl">Запущено</div></div>
       <div class="kpi-card"><div class="kpi-val">${done}</div><div class="kpi-lbl">Завершено</div></div>
     `);
-    txt('m-dm-cnt', cmp.length+' кампаний');
+    txt('m-dm-cnt', cmpTotal+' кампаний');
     if (!cmp.length) { txt('dmList', empty('✉️','Нет кампаний','Нажмите + Новая')); return; }
     txt('dmList', cmp.map(c=>`
       <div class="row">
@@ -8295,7 +8520,7 @@ async function loadParserRuns() {
     const d = await api('/api/miniapp/parser/runs');
     const runs = d.runs||[];
     if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
-    const stIco = {pending:'⏳',running:'⚙️',done:'✅',failed:'❌',cancelled:'🚫'};
+    const stIco = {pending:'⏳',running:'⚙️',done:'✅',empty:'∅',failed:'❌',cancelled:'🚫'};
     txt('parserRunList', runs.map(r=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div>
@@ -8546,7 +8771,10 @@ function renderPromoTab(tab) {
         <div class="row-val">${ORDER_STATUS[o.status]||o.status} · Топ-${o.target_position}${o.current_subs?` · ${num(o.current_subs)}/${num(o.target_subs)} подп.`:''}</div>
         <div class="row-val" style="color:#555">${ago(o.created_at)}</div>
       </div>
-      ${o.status!=='cancelled'&&o.status!=='transferred'?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})">✕</button></div>`:''}
+      <div class="row-right" style="display:flex;gap:6px">
+        ${o.status==='waiting'&&o.bot_id&&o.smm_panel_id?`<button class="btn btn-p" style="padding:5px 10px;min-width:0;font-size:12px" onclick="boostPromoOrder(${o.id})">🚀</button>`:''}
+        ${o.status!=='cancelled'&&o.status!=='transferred'?`<button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})">✕</button>`:''}
+      </div>
     </div>
   `).join(''));
   if (!bots.length) txt('promoBotList', empty('📦','Склад пуст','Добавьте бот для продвижения'));
@@ -8579,6 +8807,12 @@ function openPromoOrderModal() {
   document.getElementById('promoPos').value='1';
   document.getElementById('promoSubs').value='';
   document.getElementById('promoOrderErr').textContent='';
+  const botSel = document.getElementById('promoOrderBot');
+  const panelSel = document.getElementById('promoOrderPanel');
+  const bots = (PROMO_DATA&&PROMO_DATA.bots||[]).filter(b=>b.status!=='transferred');
+  const panels = (PROMO_DATA&&PROMO_DATA.panels||[]).filter(p=>p.is_active);
+  botSel.innerHTML = '<option value="">— не выбран —</option>' + bots.map(b=>`<option value="${b.id}">@${esc(b.bot_username)} (${BOT_STATUS[b.status]||b.status})</option>`).join('');
+  panelSel.innerHTML = '<option value="">— не выбрана —</option>' + panels.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   document.getElementById('promoOrderMbg').classList.add('show');
 }
 function closePromoOrderModal() { document.getElementById('promoOrderMbg').classList.remove('show'); }
@@ -8586,18 +8820,28 @@ async function savePromoOrder() {
   const keyword = document.getElementById('promoKw').value.trim();
   const target_position = parseInt(document.getElementById('promoPos').value)||1;
   const target_subs = parseInt(document.getElementById('promoSubs').value)||null;
+  const bot_id = parseInt(document.getElementById('promoOrderBot').value)||null;
+  const smm_panel_id = parseInt(document.getElementById('promoOrderPanel').value)||null;
   const errEl = document.getElementById('promoOrderErr');
   errEl.textContent='';
   if (!keyword) { errEl.textContent='Введите ключевое слово'; return; }
   const btn = document.getElementById('promoOrderBtn');
   btn.disabled=true; btn.textContent='Создаю…';
   try {
-    const r = await api('/api/miniapp/promo/order', {method:'POST', body:JSON.stringify({keyword, target_position, target_subs})});
+    const r = await api('/api/miniapp/promo/order', {method:'POST', body:JSON.stringify({keyword, target_position, target_subs, bot_id, smm_panel_id})});
     closePromoOrderModal();
     toast(`✅ Заказ #${r.order_id} создан`);
     loadPromo();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='➕ Создать заказ'; }
+}
+async function boostPromoOrder(orderId) {
+  if (!await askConfirm('Запустить накрутку по заказу?')) return;
+  try {
+    const r = await api('/api/miniapp/promo/order/'+orderId+'/boost', {method:'POST'});
+    toast(`🚀 Накрутка запущена (SMM #${r.smm_order_id})`);
+    loadPromo();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 function openPromoBotModal() {
   document.getElementById('promoBotUsername').value='';
@@ -8864,7 +9108,7 @@ async function openPresencePacks() {
     const rows = await api('/api/miniapp/presence_packs');
     if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
-      <div class="row">
+      <div class="row tap" onclick="openPpDetail(${r.id},'${esc(r.name)}')">
         <div class="row-ico" style="background:rgba(168,85,247,.16)">📦</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
@@ -8873,12 +9117,101 @@ async function openPresencePacks() {
           ${r.target_url?`<div class="row-val" style="color:var(--hint)">${esc(r.target_url)}</div>`:''}
         </div>
         <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="deletePresencePack(${r.id},this)">✕</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="event.stopPropagation();deletePresencePack(${r.id},this)">✕</button>
+          <span class="chev">›</span>
         </div>
       </div>
     `).join(''));
     document.getElementById('m-pp-val').textContent = rows.length+' пакетов';
   } catch(e) { txt('ppList', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Presence Pack — detail/edit ─────────────────────────
+let PP_DETAIL_ID = null;
+let PP_BOT_SEL = null;
+let PP_CH_SEL = new Set();
+let PP_GR_SEL = new Set();
+function _ppGroupTypes(t) { return t==='megagroup' || t==='supergroup' || t==='group'; }
+async function openPpDetail(packId, packName) {
+  PP_DETAIL_ID = packId;
+  push('s-pp-detail');
+  document.getElementById('ppDetail-name').textContent = '📦 ' + packName;
+  txt('ppDetailErr','');
+  txt('ppDetailBot','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('ppDetailChannels','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('ppDetailGroups','');
+  try {
+    const [pack, botsD, chD] = await Promise.all([
+      api(`/api/miniapp/presence_pack/${packId}`),
+      api('/api/miniapp/bots'),
+      api('/api/miniapp/channels'),
+    ]);
+    PP_BOT_SEL = pack.bot_id || null;
+    PP_CH_SEL = new Set(pack.channel_ids||[]);
+    PP_GR_SEL = new Set(pack.group_ids||[]);
+    const bots = botsD.bots||[];
+    txt('ppDetailBot', bots.length ? bots.map(b=>`
+      <div class="row tap" onclick="_ppPickBot(${b.bot_id})">
+        <div class="row-ico" id="ppb-${b.bot_id}" style="background:${PP_BOT_SEL===b.bot_id?'rgba(34,197,94,.16)':'rgba(59,130,246,.16)'}">${PP_BOT_SEL===b.bot_id?'✅':'🤖'}</div>
+        <div class="row-body"><div class="row-name">${b.username?'@'+esc(b.username):esc(b.first_name||'Бот')}</div></div>
+      </div>
+    `).join('') : empty('🤖','Нет ботов',''));
+    const chans = (chD.channels||[]).filter(c=>!_ppGroupTypes(c.type));
+    const groups = (chD.channels||[]).filter(c=>_ppGroupTypes(c.type));
+    const rowHtml = (c, sel, kind) => `
+      <div class="row tap" onclick="_ppToggle(${c.id},'${kind}')">
+        <div class="row-ico" id="pp${kind}-${c.id}" style="background:${sel.has(c.id)?'rgba(34,197,94,.16)':'rgba(59,130,246,.16)'}">${sel.has(c.id)?'✅':(kind==='ch'?'📢':'👥')}</div>
+        <div class="row-body"><div class="row-name">${esc(c.title||c.username||('#'+c.id))}</div></div>
+      </div>`;
+    txt('ppDetailChannels', chans.length ? chans.map(c=>rowHtml(c,PP_CH_SEL,'ch')).join('') : empty('📢','Нет каналов',''));
+    txt('ppDetailGroups', groups.length ? groups.map(c=>rowHtml(c,PP_GR_SEL,'gr')).join('') : empty('👥','Нет групп',''));
+    txt('ppChCount', PP_CH_SEL.size);
+    txt('ppGrCount', PP_GR_SEL.size);
+  } catch(e) { txt('ppDetailChannels', empty('⚠️','Ошибка',e.message)); }
+}
+function _ppPickBot(botId) {
+  PP_BOT_SEL = botId;
+  document.querySelectorAll('#ppDetailBot .row-ico').forEach(el=>{
+    const id = parseInt(el.id.replace('ppb-',''));
+    el.style.background = id===botId ? 'rgba(34,197,94,.16)' : 'rgba(59,130,246,.16)';
+    el.textContent = id===botId ? '✅' : '🤖';
+  });
+}
+function _ppToggle(id, kind) {
+  const sel = kind==='ch' ? PP_CH_SEL : PP_GR_SEL;
+  const ico = document.getElementById(`pp${kind}-${id}`);
+  if (sel.has(id)) { sel.delete(id); if(ico){ico.style.background='rgba(59,130,246,.16)'; ico.textContent=kind==='ch'?'📢':'👥';} }
+  else { sel.add(id); if(ico){ico.style.background='rgba(34,197,94,.16)'; ico.textContent='✅';} }
+  txt(kind==='ch'?'ppChCount':'ppGrCount', sel.size);
+}
+async function savePresencePackConfig() {
+  if (!PP_DETAIL_ID) return;
+  const btn = document.getElementById('ppSaveBtn');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Сохраняю…';
+  txt('ppDetailErr','');
+  try {
+    await api(`/api/miniapp/presence_pack/${PP_DETAIL_ID}/config`,{method:'PUT',body:JSON.stringify({
+      bot_id: PP_BOT_SEL, channel_ids:[...PP_CH_SEL], group_ids:[...PP_GR_SEL],
+    })});
+    toast('✅ Сохранено');
+  } catch(e) { document.getElementById('ppDetailErr').textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+async function seedPresencePack() {
+  if (!PP_DETAIL_ID) return;
+  txt('ppDetailErr','');
+  try {
+    const r = await api(`/api/miniapp/presence_pack/${PP_DETAIL_ID}/seed`,{method:'POST'});
+    toast(`⏳ Посев поставлен в очередь (#${r.op_id})`);
+  } catch(e) { document.getElementById('ppDetailErr').textContent = e.message; }
+}
+async function promotePresencePack() {
+  if (!PP_DETAIL_ID) return;
+  txt('ppDetailErr','');
+  try {
+    const r = await api(`/api/miniapp/presence_pack/${PP_DETAIL_ID}/promote`,{method:'POST'});
+    toast(`⏳ Назначение бота поставлено в очередь (#${r.op_id})`);
+  } catch(e) { document.getElementById('ppDetailErr').textContent = e.message; }
 }
 
 // ── Global Presence ────────────────────────────────────
@@ -8958,7 +9291,8 @@ const MASS_OP_LABELS = {
   bulk_update_profile:'🎨 Обновление профилей', bulk_edit_channels:'✏️ Ред. каналов',
   bulk_chan_exec:'✏️ Username/About', bulk_create_channels:'📡 Создание каналов',
   bulk_dm_adhoc:'📨 Рассылка ЛС', boost_views:'👁 Просмотры', boost_reactions:'❤ Реакции',
-  boost_stories:'📖 Сторис', niche_growth_post:'🌿 Growth Agent',
+  boost_stories:'📖 Сторис', boost_subscribers:'👥 Подписчики/участники', boost_bot_starts:'🚀 Старты в ботах',
+  niche_growth_post:'🌿 Growth Agent',
   check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
   channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
@@ -9000,7 +9334,7 @@ async function openEcosystems() {
     if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
     txt('ecoList', rows.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${esc(r.name)}')">
-        <div class="row-ico" style="background:rgba(34,197,94,.16)">${(ECO_TYPES[r.ecosystem_type]||'🌐').charAt(0)}</div>
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">${[...(ECO_TYPES[r.ecosystem_type]||'🌐')][0]}</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
           <div class="row-val">${ECO_TYPES[r.ecosystem_type]||r.ecosystem_type} · ${RISK_LABEL[r.risk_level]||r.risk_level}</div>
@@ -9533,7 +9867,40 @@ async function openNarrativeDetail(cid, topic) {
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',e.message)); }
 }
 
-function openNarrativeModal() { showModal('mo-narrative'); }
+let NC_CHANNELS_SELECTED = new Set();
+async function openNarrativeModal() {
+  NC_CHANNELS_SELECTED = new Set();
+  txt('nc-selcount', 'Выбрано: 0 каналов');
+  txt('nc-channels', '<div class="spin-wrap"><div class="spin"></div></div>');
+  showModal('mo-narrative');
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels||[];
+    if (!chs.length) { txt('nc-channels', empty('📢','Нет каналов','Добавьте каналы в разделе «Каналы»')); return; }
+    txt('nc-channels', chs.map(c=>`
+      <div class="row tap" onclick="toggleNcChannel(${c.id})">
+        <div class="row-ico" id="ncc-${c.id}" style="background:rgba(59,130,246,.16)">📢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username):''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('nc-channels', empty('⚠️','Ошибка',e.message));
+  }
+}
+function toggleNcChannel(id) {
+  const ico = document.getElementById('ncc-'+id);
+  if (NC_CHANNELS_SELECTED.has(id)) {
+    NC_CHANNELS_SELECTED.delete(id);
+    if (ico) { ico.textContent='📢'; ico.style.background='rgba(59,130,246,.16)'; }
+  } else {
+    NC_CHANNELS_SELECTED.add(id);
+    if (ico) { ico.textContent='✅'; ico.style.background='rgba(34,197,94,.16)'; }
+  }
+  txt('nc-selcount', `Выбрано: ${NC_CHANNELS_SELECTED.size} каналов`);
+}
 async function submitNarrativeCreate() {
   const errEl = document.getElementById('nc-err');
   errEl.textContent = '';
@@ -9543,12 +9910,13 @@ async function submitNarrativeCreate() {
   const spread_hours = parseInt(document.getElementById('nc-hours').value)||4;
   if (!topic) { errEl.textContent='Введите тему'; return; }
   if (!core_message) { errEl.textContent='Введите послание'; return; }
+  if (NC_CHANNELS_SELECTED.size===0) { errEl.textContent='Выберите хотя бы один канал'; return; }
   try {
     await api('/api/miniapp/narrative',{method:'POST',body:JSON.stringify({
-      topic, core_message, campaign_type, spread_hours
+      topic, core_message, campaign_type, spread_hours, channel_ids:[...NC_CHANNELS_SELECTED]
     })});
     closeModal('mo-narrative');
-    toast('✅ Нарратив создан (черновик)');
+    toast('✅ Нарратив-кампания запущена');
     openNarrative();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
@@ -9789,7 +10157,7 @@ async function openAudienceDna() {
   txt('dnaList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/audience_dna');
-    if (!rows.length) { txt('dnaList', empty('🔬','Данных ДНК нет','Запустите анализ аудитории в боте')); return; }
+    if (!rows.length) { txt('dnaList', empty('🔬','Данных ДНК нет','Откройте 🤖 Боты и нажмите на бота, чтобы запустить первый анализ')); return; }
     txt('dnaList', rows.map(r => {
       const er = r.avg_engagement_rate ? r.avg_engagement_rate.toFixed(1)+'%' : '—';
       const risk = r.churn_risk_pct||0;
@@ -9797,8 +10165,9 @@ async function openAudienceDna() {
       const peaks = (r.peak_hours||[]).slice(0,3).map(h=>h+':00').join(', ')||'—';
       const topics = (r.top_topics||[]).slice(0,3).join(', ')||'—';
       const types = (r.best_content_types||[]).slice(0,3).join(', ')||'—';
+      const botName = esc(r.first_name||r.username||'Бот');
       return `
-      <div class="row">
+      <div class="row tap" onclick="openDnaDetail(${r.bot_id},'${botName}')">
         <div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div>
         <div class="row-body">
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
@@ -9808,9 +10177,66 @@ async function openAudienceDna() {
           <div class="row-val">Темы: ${esc(topics)}</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
         </div>
+        <div class="row-right chev">›</div>
       </div>
     `}).join(''));
   } catch(e) { txt('dnaList', empty('⚠️','Ошибка',e.message)); }
+}
+
+let _dnaDetailBotId = null;
+function _renderDnaProfile(d) {
+  if (!d.computed) {
+    return empty('📭','DNA-профиль ещё не вычислен','Нажмите «🔄 Пересчитать» вверху для первичного анализа аудитории');
+  }
+  const er = d.avg_engagement_rate ? d.avg_engagement_rate.toFixed(1)+'%' : 'нет данных';
+  const risk = d.churn_risk_pct||0;
+  const riskE = risk>40?'🔴':risk>20?'🟡':'🟢';
+  const peaksH = (d.peak_hours||[]).map(h=>h+':00').join(', ')||'нет данных';
+  const peaksD = (d.peak_days||[]).join(', ')||'нет данных';
+  const topics = (d.top_topics||[]).join(', ')||'нет данных';
+  const types = (d.best_content_types||[]).join(', ')||'нет данных';
+  const recs = (d.recommendations||[]);
+  return `
+    <div class="row">
+      <div class="row-body">
+        <div class="row-val">⏰ <b>Пик активности (часы):</b> ${esc(peaksH)}</div>
+        <div class="row-val">📆 <b>Пик активности (дни):</b> ${esc(peaksD)}</div>
+        <div class="row-val">📝 <b>Лучшие форматы:</b> ${esc(types)}</div>
+        <div class="row-val">📈 <b>Вовлечённость:</b> ${er}</div>
+        <div class="row-val">⚠️ <b>Риск оттока:</b> ${riskE} ${risk.toFixed(0)}%</div>
+        <div class="row-val">🏷️ <b>Топ-темы:</b> ${esc(topics)}</div>
+        <div class="row-val">👥 <b>Проанализировано:</b> ${d.total_users_analyzed||0}</div>
+        <div class="row-val" style="color:var(--hint)">🕐 ${ago(d.computed_at)}</div>
+      </div>
+    </div>
+    ${recs.length ? `<div class="sec">💡 Рекомендации</div><div class="row"><div class="row-body">${recs.map(r=>`<div class="row-val">${esc(r)}</div>`).join('')}</div></div>` : ''}
+  `;
+}
+async function openDnaDetail(botId, botName) {
+  _dnaDetailBotId = botId;
+  push('s-dna-detail');
+  document.getElementById('dnaDetail-name').textContent = '🧬 ' + botName;
+  txt('dnaDetailBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/audience_dna/${botId}/profile`);
+    txt('dnaDetailBody', _renderDnaProfile(d));
+  } catch(e) { txt('dnaDetailBody', empty('⚠️','Ошибка',e.message)); }
+}
+async function recomputeDna() {
+  if (!_dnaDetailBotId) return;
+  const btn = document.getElementById('dnaRecomputeBtn');
+  btn.disabled = true; const oldTxt = btn.textContent; btn.textContent = '⏳ Считаю…';
+  txt('dnaDetailBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/audience_dna/${_dnaDetailBotId}/compute`, {method:'POST'});
+    txt('dnaDetailBody', _renderDnaProfile(d));
+    toast('✅ DNA обновлён');
+  } catch(e) {
+    txt('dnaDetailBody', empty('⚠️','Ошибка',e.message));
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
+  } finally {
+    btn.disabled = false; btn.textContent = oldTxt;
+  }
 }
 
 // ── Auto Funnels ───────────────────────────────────────
@@ -10031,7 +10457,7 @@ function txt(id, html) {
   if(el) el.innerHTML=html;
 }
 function stb(s) {
-  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено']}[s]||['b-gy',s||'—'];
+  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],empty:['b-gy','∅ Пусто'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено']}[s]||['b-gy',s||'—'];
 }
 let _tt=null;
 function toast(msg) {

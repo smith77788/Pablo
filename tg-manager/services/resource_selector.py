@@ -139,6 +139,7 @@ async def select_all_active(
     respect_cooldown: bool = True,
     action_type: str = "default",
     min_trust_score: float | None = None,
+    respect_daily_budget: bool = False,
 ) -> list[asyncpg.Record]:
     """Вернуть все активные аккаунты (аналог _get_active_accounts, но с опцией фильтра cooldown).
 
@@ -146,6 +147,8 @@ async def select_all_active(
     Для bulk-операций без flood-ранжирования.
 
     include_ids: если указан — вернуть только эти аккаунты (пользователь выбрал конкретные).
+    respect_daily_budget: исключить аккаунты, исчерпавшие дневной бюджет действий
+        (долговечность). Если исчерпали ВСЕ — возвращаем всех + warning (не рушим op).
     """
     conditions = ["a.owner_id=$1", "a.is_active=TRUE", "a.session_str IS NOT NULL"]
     params: list = [owner_id]
@@ -175,7 +178,7 @@ async def select_all_active(
         conditions.append(f"COALESCE(a.trust_score, 0) >= ${len(params)}")
 
     where = " AND ".join(conditions)
-    return await pool.fetch(
+    rows = await pool.fetch(
         f"""SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
                    a.device_model, a.system_version, a.app_version,
                    a.lang_code, a.system_lang_code, a.proxy_id,
@@ -189,6 +192,26 @@ async def select_all_active(
             ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
         *params,
     )
+
+    if respect_daily_budget and rows:
+        try:
+            from services import account_budget
+            ids = [int(r["id"]) for r in rows]
+            within, over = await account_budget.filter_within_budget(pool, ids)
+            if within and over:
+                within_set = set(within)
+                rows = [r for r in rows if int(r["id"]) in within_set]
+            elif over and not within:
+                # Все исчерпали лимит — не рушим операцию, но громко предупреждаем.
+                log.warning(
+                    "select_all_active: ВСЕ %d аккаунтов исчерпали дневной бюджет "
+                    "действий — операция продолжится, но риск бана повышен (owner=%d)",
+                    len(over), owner_id,
+                )
+        except Exception:
+            log.debug("select_all_active: budget filter failed", exc_info=True)
+
+    return rows
 
 
 async def record_flood(

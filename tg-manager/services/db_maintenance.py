@@ -30,7 +30,7 @@ _RETENTION: list[tuple[str, str, str]] = [
     ("restriction_events", "created_at", "90 days"),
     ("account_flood_log", "created_at", "30 days"),
     ("search_rankings", "checked_at", "90 days"),
-    ("search_snapshots", "checked_at", "14 days"),
+    ("search_snapshots", "captured_at", "14 days"),
     # EPOCH VI tables
     ("recovery_events", "created_at", "30 days"),
     ("anomaly_events", "detected_at", "14 days"),
@@ -116,7 +116,7 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         deleted = await pool.fetchval(
             "WITH d AS (DELETE FROM operation_queue "
             "WHERE status = ANY($1::text[]) "
-            "  AND created_at < NOW() - INTERVAL $2 "
+            "  AND created_at < NOW() - $2::INTERVAL "
             "  AND NOT EXISTS ("
             "      SELECT 1 FROM operation_log WHERE op_id = operation_queue.id"
             "  ) "

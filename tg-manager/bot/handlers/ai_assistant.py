@@ -741,7 +741,7 @@ async def _process_ai_turn(
     # ── Fast path: detect action intent without LLM ──────────────────────────
     fast_reply = await _fast_parse_action(user_content, pool, message.from_user.id)
     if fast_reply:
-        thinking = await message.answer("⚡ <i>Готово!</i>", parse_mode="HTML")
+        thinking = await message.answer("⚡ <i>Подготавливаю…</i>", parse_mode="HTML")
         reply = fast_reply
     else:
         # Показываем индикатор набора текста перед вызовом API

@@ -566,7 +566,7 @@ async def cb_ca_run(
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text("❌ Источник не найден.", reply_markup=kb.as_markup())
         return
 

@@ -177,7 +177,7 @@ async def cb_persona_create(callback: CallbackQuery, state: FSMContext, pool: as
     await callback.answer()
     accounts = await pool.fetch(
         "SELECT id, phone, username, first_name FROM tg_accounts "
-        "WHERE owner_id = $1 AND banned = FALSE ORDER BY id",
+        "WHERE owner_id = $1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id",
         callback.from_user.id,
     )
     if not accounts:
@@ -547,7 +547,7 @@ async def cb_persona_do_create(
         )
     }
     accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id = $1 AND banned = FALSE ORDER BY id",
+        "SELECT id FROM tg_accounts WHERE owner_id = $1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id",
         owner_id,
     )
     available = [a for a in accounts if a["id"] not in used_accounts]

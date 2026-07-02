@@ -106,7 +106,7 @@ async def _activate_subscription(
                 # Дубликат уже подтверждённого платежа — не продлеваем повторно.
                 log.info("payment webhook: дубликат подтверждённого платежа ref=%s — продление пропущено", safe_ref)
                 return
-            await conn.execute(
+            expires = await conn.fetchval(
                 """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
                    VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
                    ON CONFLICT(user_id) DO UPDATE
@@ -120,7 +120,8 @@ async def _activate_subscription(
                        started_at  = CASE
                            WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
                            ELSE now()
-                       END""",
+                       END
+                   RETURNING expires_at""",
                 user_id, plan, str(months),
             )
             # Синхронизируем platform_users.current_plan — часть кода читает его
@@ -132,7 +133,10 @@ async def _activate_subscription(
                 )
             except Exception:
                 log.warning("payment webhook: не удалось синхронизировать current_plan user=%s", user_id)
-    expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
+    if expires is None:
+        # RETURNING всегда должен вернуть строку при успешном upsert; запасной
+        # вариант на случай неожиданного None — не даёт уведомлению упасть.
+        expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     try:
         from bot.utils.subscription import invalidate_plan_cache
@@ -390,21 +394,45 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     return app
 
 
-async def run(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Запустить HTTP webhook-сервер. Вызывается как asyncio.create_task."""
+async def run(
+    pool: asyncpg.Pool,
+    bot: Bot,
+    dp=None,
+    webhook_path: str = "/webhook",
+    http=None,
+) -> None:
+    """Запустить HTTP-сервер (webhook + payment + mini_app_api).
+
+    Если передан dp — регистрирует Telegram webhook на том же порту,
+    чтобы не занимать PORT дважды.
+    """
     app = make_app(pool, bot)
+
+    if dp is not None:
+        try:
+            from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application as _sa
+            SimpleRequestHandler(
+                dispatcher=dp,
+                bot=bot,
+                pool=pool,
+                http=http,
+            ).register(app, path=webhook_path)
+            _sa(app, dp, bot=bot, pool=pool, http=http)
+            log.info("Telegram webhook registered at %s on the shared server", webhook_path)
+        except Exception:
+            log.exception("Failed to register aiogram webhook handler — falling back to polling")
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", _WEBHOOK_PORT)
     try:
         await site.start()
-        log.info("Payment webhook server started on port %d", _WEBHOOK_PORT)
-        # Держать живым
+        log.info("HTTP server started on port %d (webhook=%s)", _WEBHOOK_PORT, webhook_path if dp else "polling")
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        log.exception("Payment webhook server error: %s", e)
+        log.exception("HTTP server error: %s", e)
     finally:
         await runner.cleanup()

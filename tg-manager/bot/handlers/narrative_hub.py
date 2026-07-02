@@ -118,16 +118,6 @@ async def _get_user_channels(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def _get_user_bots(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
-    """Возвращает управляемые боты пользователя."""
-    rows = await pool.fetch(
-        """SELECT bot_id, username, first_name FROM managed_bots
-           WHERE added_by=$1 AND is_active=TRUE ORDER BY added_at DESC""",
-        owner_id,
-    )
-    return [dict(r) for r in rows]
-
-
 # ── Menu ──────────────────────────────────────────────────────────────────────
 
 
@@ -475,10 +465,17 @@ async def cb_narr_set_spread(
         ch.get("title") or ch.get("username") or str(ch.get("channel_id", "?"))
         for ch in selected_channels
     ]
+    # Публикация идёт через Telethon-сессию аккаунта, которым канал был добавлен
+    # (как в self_promo.py) — боты тут ни при чём, у них нет доступа к каналу.
+    channel_meta = [
+        {"channel_id": ch.get("channel_id"), "acc_id": ch.get("acc_id"), "username": ch.get("username")}
+        for ch in selected_channels
+    ]
 
     await state.update_data(
         channel_usernames=channel_usernames,
         channel_titles=channel_titles,
+        channel_meta=channel_meta,
     )
 
     # Генерируем посты
@@ -507,7 +504,28 @@ async def cb_narr_set_spread(
         log_exc_swallow(log, f"narrative_hub: AI generation error: {e}")
         posts = []
 
-    await state.update_data(generated_posts=posts)
+    # Детект заглушек: _call_ai возвращает текст в [...] когда AI недоступен.
+    # Такие посты НЕЛЬЗЯ публиковать в реальные каналы — блокируем запуск.
+    _ai_failed = (not posts) or any(
+        (p.get("content", "") or "").lstrip().startswith("[") for p in posts
+    )
+    await state.update_data(generated_posts=posts, ai_failed=_ai_failed)
+
+    if _ai_failed:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔁 Попробовать снова", callback_data=NarrCb(action="create"))
+        kb.button(text="◀️ В меню", callback_data=NarrCb(action="menu"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "⚠️ <b>AI не настроен или недоступен</b>\n\n"
+            "Не удалось сгенерировать реальные тексты постов — публиковать "
+            "посты-заглушки в каналы нельзя.\n\n"
+            "Добавьте API-ключ AI-провайдера (OpenRouter / Groq / Gemini) "
+            "в настройках и попробуйте снова.",
+            kb.as_markup(),
+        )
+        return
 
     # Показываем предпросмотр
     preview_lines = [
@@ -557,6 +575,7 @@ async def cb_narr_launch(
     topic = data.get("topic", "")
     core_message = data.get("core_message", "")
     channel_usernames: list[str] = data.get("channel_usernames", [])
+    channel_meta: list[dict] = data.get("channel_meta", [])
     ctype = data.get("campaign_type", "trend")
     spread_hours = data.get("spread_hours", 4)
 
@@ -571,6 +590,25 @@ async def cb_narr_launch(
     providers = configured_providers()
     ai_provider = providers[0] if providers else None
 
+    # Guard: не запускаем кампанию с постами-заглушками или без AI-провайдера.
+    # Без ключей create_campaign сгенерирует те же [...] заглушки и зальёт их в каналы.
+    _has_placeholder = any(
+        (p.get("content", "") or "").lstrip().startswith("[") for p in generated_posts
+    )
+    if data.get("ai_failed") or _has_placeholder or (not generated_posts and ai_provider is None):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔁 Попробовать снова", callback_data=NarrCb(action="create"))
+        kb.button(text="◀️ В меню", callback_data=NarrCb(action="menu"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "⚠️ <b>AI не настроен или недоступен</b>\n\n"
+            "Запуск отменён: нельзя публиковать посты-заглушки. "
+            "Добавьте API-ключ AI-провайдера и сгенерируйте кампанию заново.",
+            kb.as_markup(),
+        )
+        return
+
     loading_kb = InlineKeyboardBuilder()
     loading_kb.button(text="⏳ Запуск...", callback_data=NarrCb(action="menu"))
     await _edit(callback, "⚙️ <b>Создаём кампанию...</b>", loading_kb.as_markup())
@@ -584,6 +622,7 @@ async def cb_narr_launch(
                 topic=topic,
                 core_message=core_message,
                 channel_usernames=channel_usernames,
+                channel_meta=channel_meta,
                 spread_hours=spread_hours,
                 campaign_type=ctype,
                 posts=generated_posts,
@@ -595,6 +634,7 @@ async def cb_narr_launch(
                 topic=topic,
                 core_message=core_message,
                 channel_usernames=channel_usernames,
+                channel_meta=channel_meta,
                 spread_hours=spread_hours,
                 campaign_type=ctype,
                 ai_provider=ai_provider,
@@ -637,10 +677,12 @@ async def _create_campaign_with_posts(
     spread_hours: int,
     campaign_type: str,
     posts: list[dict],
+    channel_meta: list[dict] | None = None,
 ) -> int:
     """Создаёт кампанию с уже готовыми постами."""
     from datetime import timedelta
     now = datetime.now(timezone.utc)
+    channel_meta = channel_meta or []
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -656,12 +698,14 @@ async def _create_campaign_with_posts(
 
             for i, (username, post) in enumerate(zip(channel_usernames, posts)):
                 scheduled_at = now + timedelta(minutes=post.get("scheduled_offset_minutes", 0))
+                meta = channel_meta[i] if i < len(channel_meta) else {}
                 await conn.execute(
                     """INSERT INTO narrative_posts
-                       (campaign_id, owner_id, channel_username, angle,
+                       (campaign_id, owner_id, channel_username, channel_id, acc_id, angle,
                         content, scheduled_at, status)
-                       VALUES ($1, $2, $3, $4, $5, $6, 'pending')""",
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')""",
                     campaign_id, owner_id, username,
+                    meta.get("channel_id"), meta.get("acc_id"),
                     post.get("angle", "news"),
                     post.get("content", ""),
                     scheduled_at,

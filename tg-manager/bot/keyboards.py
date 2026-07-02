@@ -30,6 +30,7 @@ from bot.callbacks import (
     RankCb,
     BmCb,
     TaskCb,
+    BotFactCb,
 )
 
 PAGE_SIZE = 5
@@ -50,7 +51,7 @@ LANGUAGES = [
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
     kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
     kb.button(text="⚡ Активные задачи", callback_data=TaskCb(action="list"))
     kb.button(text="❓ Справка", callback_data=BotCb(action="help"))
@@ -205,7 +206,11 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
     kb.row(
         InlineKeyboardButton(
             text="➕ Добавить", callback_data=BotCb(action="add").pack()
-        )
+        ),
+        InlineKeyboardButton(
+            text="🏭 Создать через BotFather",
+            callback_data=BotFactCb(action="menu").pack(),
+        ),
     )
     return kb.as_markup()
 

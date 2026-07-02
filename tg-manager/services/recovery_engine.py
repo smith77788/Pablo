@@ -307,6 +307,10 @@ async def _proxy_recovery(
                    ) pql ON pql.proxy_id = up.id
                    WHERE up.owner_id=$1
                      AND up.id != $2
+                     -- не переназначать на заведомо мёртвый прокси (авто-деактивирован
+                     -- или последняя проверка провалена); непроверенные (NULL) — годны
+                     AND COALESCE(up.is_active, TRUE) = TRUE
+                     AND COALESCE(up.is_alive, TRUE) = TRUE
                    ORDER BY COALESCE(pql.sr, 0.5) DESC
                    LIMIT 1""",
                 owner_id,

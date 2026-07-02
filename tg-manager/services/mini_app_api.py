@@ -86,6 +86,18 @@ def _is_admin(uid: int | None) -> bool:
     return bool(uid) and uid in _admin_ids()
 
 
+def _jlist(val) -> list:
+    """Safe JSONB→list: asyncpg may return already-parsed list or a JSON string."""
+    if isinstance(val, list):
+        return val
+    if val is None:
+        return []
+    try:
+        return json.loads(val) or []
+    except Exception:
+        return []
+
+
 def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
     import csv as _csv
     import io as _io
@@ -130,6 +142,22 @@ async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args) -> dict | None:
     except Exception as e:
         log.warning("_safe_fetchrow error: %s | query=%.120s", e, query)
         return None
+
+
+def _dna_to_dict(dna: Any) -> dict:
+    """Serialize an AudienceDNA dataclass instance to a JSON-friendly dict."""
+    return {
+        "bot_id": dna.bot_id,
+        "owner_id": dna.owner_id,
+        "peak_hours": list(dna.peak_hours),
+        "peak_days": list(dna.peak_days),
+        "best_content_types": list(dna.best_content_types),
+        "avg_engagement_rate": dna.avg_engagement_rate,
+        "churn_risk_pct": dna.churn_risk_pct,
+        "top_topics": list(dna.top_topics),
+        "total_users_analyzed": dna.total_users_analyzed,
+        "computed_at": dna.computed_at.isoformat() if dna.computed_at else None,
+    }
 
 
 async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
@@ -378,7 +406,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                WHERE mb.added_by=$1
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active
                ORDER BY subscriber_count DESC LIMIT 50""", uid)
-        return _json_resp({"bots": rows})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+        return _json_resp({"bots": rows, "total": int(total or 0)})
 
     async def bot_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -657,7 +687,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       total_targets, created_at
                FROM dm_campaigns WHERE owner_id=$1
                ORDER BY created_at DESC LIMIT 20""", uid)
-        return _json_resp({"campaigns": rows})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1", uid)
+        return _json_resp({"campaigns": rows, "total": int(total or 0)})
 
     async def funnels_all(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -690,7 +722,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       cooldown_until
                FROM tg_accounts WHERE owner_id=$1
                ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", uid)
-        return _json_resp({"accounts": rows})
+        # Серверная агрегация KPI по ВСЕМ аккаунтам (список ограничен LIMIT 100 —
+        # иначе при >100 аккаунтах счётчики считались бы по обрезанному списку).
+        st = await _safe_fetchrow(pool,
+            """SELECT COUNT(*) AS total,
+                      COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
+                      COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
+                      COUNT(*) FILTER (
+                          WHERE is_active
+                            AND COALESCE(acc_status,'ok') <> 'banned'
+                            AND (cooldown_until IS NULL OR cooldown_until <= now())
+                      ) AS active
+               FROM tg_accounts WHERE owner_id=$1""", uid)
+        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "cooldown", "active")} if st else {}
+        return _json_resp({"accounts": rows, "stats": stats})
 
     async def account_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -879,16 +924,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         status_filter = request.query.get("status")
         if status_filter and status_filter not in ("pending", "running", "done", "failed", "cancelled"):
             status_filter = None
+        # err_cnt — число упавших под-элементов (каналов) для показа кнопки
+        # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
+        _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
+                    "WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt")
         if status_filter:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1 AND status=$2
-                   ORDER BY created_at DESC LIMIT 30""", uid, status_filter)
+                f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
+                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at, {_err_sub}
+                   FROM operation_queue oq WHERE oq.owner_id=$1 AND oq.status=$2
+                   ORDER BY oq.created_at DESC LIMIT 30""", uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
-                """SELECT id, op_type, status, label, total_items, done_items, error_msg, created_at, started_at, finished_at
-                   FROM operation_queue WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT 30""", uid)
+                f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
+                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at, {_err_sub}
+                   FROM operation_queue oq WHERE oq.owner_id=$1
+                   ORDER BY oq.created_at DESC LIMIT 30""", uid)
         return _json_resp({"operations": rows})
 
     async def cancel_operation(request: web.Request) -> web.Response:
@@ -921,13 +972,43 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid op_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT id FROM operation_queue WHERE id=$1 AND owner_id=$2 AND status='failed'",
+                "SELECT op_type, params, label, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
+                return _err("Not found", 404)
+
+            # Массовая публикация: повторяем ТОЛЬКО упавшие каналы (channel_ids из
+            # operation_log). Иначе успешные каналы получили бы пост повторно
+            # (дубликаты). Работает и для partial-success ('done' с ошибками) —
+            # паритет с ботом (retry_failed).
+            if row["op_type"] == "mass_publish":
+                import json as _json
+                failed = await pool.fetch(
+                    "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='error'",
+                    op_id)
+                failed_ids = [
+                    int(r["target"]) for r in failed
+                    if (r["target"] or "").strip().lstrip("-").isdigit()
+                ]
+                failed_ids = list(dict.fromkeys(failed_ids))
+                if not failed_ids:
+                    return _err("Нет неудавшихся каналов для повтора", 400)
+                try:
+                    base = row["params"] if isinstance(row["params"], dict) else _json.loads(row["params"] or "{}")
+                except (TypeError, ValueError):
+                    base = {}
+                base = dict(base)
+                base["channel_ids"] = failed_ids
+                new_id = await pool.fetchval(
+                    """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
+                       VALUES($1,$2,$3::jsonb,'pending',$4,$5) RETURNING id""",
+                    uid, row["op_type"], _json.dumps(base),
+                    f"Повтор неудавшихся ({len(failed_ids)})", len(failed_ids))
+                return _json_resp({"ok": True, "new_id": new_id, "channels": len(failed_ids)})
+
+            # Прочие операции — повтор целиком, только для проваленных.
+            if row["status"] != "failed":
                 return _err("Not found or not failed", 404)
-            # Carry over total_items so the retried op shows a real progress bar;
-            # done_items resets to 0 (fresh run). Executors that recompute
-            # total_items themselves will simply overwrite it.
             new_id = await pool.fetchval(
                 """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
                    SELECT owner_id, op_type, params, 'pending', label, total_items
@@ -1393,6 +1474,62 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception as exc:
             log.exception("topology_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def topology_links(request: web.Request) -> web.Response:
+        """Drill-down for the Topology Map: which account owns which channels/groups,
+        and per-bot subscriber counts — topology_overview only returns flat totals."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT a.id AS acc_id, a.phone, a.first_name,
+                          mc.id AS channel_pk, mc.channel_id, mc.title, mc.username
+                   FROM tg_accounts a
+                   LEFT JOIN managed_channels mc
+                       ON mc.acc_id = a.id AND mc.owner_id = a.owner_id
+                   WHERE a.owner_id=$1
+                   ORDER BY a.id, mc.title""",
+                uid,
+            )
+            by_acc: dict[int, dict] = {}
+            for r in rows:
+                acc = by_acc.setdefault(r["acc_id"], {
+                    "acc_id": r["acc_id"],
+                    "label": f"@{r['phone']}" if not r["first_name"] else r["first_name"],
+                    "channels": [],
+                })
+                if r["channel_pk"] is not None:
+                    acc["channels"].append({
+                        "id": r["channel_pk"],
+                        "channel_id": r["channel_id"],
+                        "title": r["title"] or "",
+                        "username": r["username"] or "",
+                    })
+            bot_rows = await pool.fetch(
+                """SELECT b.bot_id, b.username, b.first_name,
+                          COUNT(bu.user_id) FILTER (WHERE bu.is_active) AS subs
+                   FROM managed_bots b
+                   LEFT JOIN bot_users bu ON bu.bot_id = b.bot_id
+                   WHERE b.added_by=$1
+                   GROUP BY b.bot_id, b.username, b.first_name
+                   ORDER BY subs DESC NULLS LAST""",
+                uid,
+            )
+            return _json_resp({
+                "accounts": list(by_acc.values()),
+                "bots": [
+                    {
+                        "bot_id": r["bot_id"],
+                        "label": f"@{r['username']}" if r["username"] else (r["first_name"] or ""),
+                        "subscribers": r["subs"] or 0,
+                    }
+                    for r in bot_rows
+                ],
+            })
+        except Exception as exc:
+            log.exception("topology_links uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Infra Analytics ────────────────────────────────────────────────────────
@@ -2021,8 +2158,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp(report)
 
     async def boost_submit(request: web.Request) -> web.Response:
-        """Накрутка: просмотры / реакции / сторис через аккаунты владельца.
-        body: {type: views|reactions|stories, channel|target, msg_ids|msg_id, emoji, acc_count}
+        """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах.
+        body: {type: views|reactions|stories|subscribers|bot_starts, channel|target,
+               msg_ids|msg_id, emoji, bot_username, payload, premium_only, acc_count}
         """
         uid = _get_uid(request)
         if not uid:
@@ -2032,7 +2170,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         btype = (body.get("type") or "").strip()
-        if btype not in ("views", "reactions", "stories"):
+        if btype not in ("views", "reactions", "stories", "subscribers", "bot_starts"):
             return _err("Неверный тип накрутки", 400)
         try:
             acc_count = int(body.get("acc_count") or 0)
@@ -2094,7 +2232,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
             total = len(account_ids)
             label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
-        else:  # stories
+        elif btype == "stories":
             target = (body.get("target") or "").strip()
             if not target:
                 return _err("Укажите цель (@username)", 400)
@@ -2102,13 +2240,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params = {"target": target, "account_ids": account_ids}
             total = len(account_ids)
             label = f"Сторис: {target} × {len(account_ids)} акк."
+        elif btype == "subscribers":
+            from services.boost_engine import parse_channel_ref
+            target = parse_channel_ref((body.get("target") or "").strip())
+            premium_only = bool(body.get("premium_only"))
+            if not target:
+                return _err("Укажите канал/группу (@username или t.me/link)", 400)
+            op_type = "boost_subscribers"
+            params = {"target": target, "account_ids": account_ids, "premium_only": premium_only}
+            total = len(account_ids)
+            prem_suffix = " (только Premium)" if premium_only else ""
+            label = f"Подписчики/участники: {target} × {len(account_ids)} акк.{prem_suffix}"
+        else:  # bot_starts
+            from services.boost_engine import parse_channel_ref
+            bot_username = parse_channel_ref((body.get("bot_username") or "").strip()).lstrip("@")
+            payload = (body.get("payload") or "").strip() or None
+            premium_only = bool(body.get("premium_only"))
+            if not bot_username:
+                return _err("Укажите @username бота", 400)
+            op_type = "boost_bot_starts"
+            params = {
+                "bot_username": bot_username,
+                "payload": payload,
+                "account_ids": account_ids,
+                "premium_only": premium_only,
+            }
+            total = len(account_ids)
+            prem_suffix = " (только Premium)" if premium_only else ""
+            label = f"Старты в боте: @{bot_username} × {len(account_ids)} акк.{prem_suffix}"
 
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
-                uid, op_type, _json.dumps(params), total, label,
-            )
+            if op_type in ("boost_subscribers", "boost_bot_starts"):
+                from services import operation_bus
+                op_id = await operation_bus.submit(pool, uid, op_type, params, total_items=total)
+            else:
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
+                    uid, op_type, _json.dumps(params), total, label,
+                )
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "accounts": len(account_ids)})
         except Exception as exc:
             log.exception("boost_submit uid=%d type=%s", uid, btype)
@@ -2116,7 +2286,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def growth_submit(request: web.Request) -> web.Response:
         """Growth Agent: постинг промо-текста в нишевых группах.
-        body: {niche, promo_text}
+        body: {niche, promo_text, geo?, acc_count?}
         """
         uid = _get_uid(request)
         if not uid:
@@ -2126,11 +2296,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         niche = (body.get("niche") or "").strip()
+        geo = (body.get("geo") or "").strip()[:60]
         promo_text = (body.get("promo_text") or "").strip()
+        try:
+            acc_count = max(1, min(int(body.get("acc_count") or 3), 10))
+        except (TypeError, ValueError):
+            acc_count = 3
         if not niche:
             return _err("Укажите нишу", 400)
         if not promo_text:
             return _err("Укажите рекламный текст", 400)
+        from services import content_safety
+
+        _v = await content_safety.enforce(pool, uid, niche, promo_text, surface="growth_agent")
+        if _v.blocked:
+            return _err("Контент заблокирован политикой платформы", 403)
         # Нужен хотя бы один активный аккаунт с сессией.
         has_acc = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
@@ -2142,7 +2322,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'niche_growth_post','pending',$2,5,$3) RETURNING id",
-                uid, _json.dumps({"niche": niche, "promo_text": promo_text}), label,
+                uid,
+                _json.dumps({"niche": niche, "geo": geo, "promo_text": promo_text, "acc_count": acc_count}),
+                label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
@@ -3175,10 +3357,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    ORDER BY created_at DESC LIMIT 50""",
                 uid,
             )
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1", uid)
             return _json_resp({"campaigns": [
                 {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
                 for r in rows
-            ]})
+            ], "total": int(total or 0)})
         except Exception as exc:
             log.exception("dm_campaigns_list uid=%d", uid)
             return _err(str(exc), 500)
@@ -4444,7 +4628,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             orders = await pool.fetch(
-                "SELECT id, keyword, status, target_position, current_subs, target_subs, created_at "
+                "SELECT id, keyword, status, target_position, current_subs, target_subs, "
+                "bot_id, smm_panel_id, created_at "
                 "FROM promo_orders WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
                 uid,
             )
@@ -4468,6 +4653,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "target_position": r["target_position"],
                     "current_subs": r["current_subs"],
                     "target_subs": r["target_subs"],
+                    "bot_id": r["bot_id"],
+                    "smm_panel_id": r["smm_panel_id"],
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
                 for r in orders
@@ -4538,6 +4725,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("promo_create_order uid=%d", uid)
             return _err(str(exc), 500)
         return _json_resp({"ok": True, "order_id": order_id})
+
+    async def promo_order_boost(request: web.Request) -> web.Response:
+        """Отправить заказ в SMM-панель — то же самое, что кнопка «🚀 Накрутить»
+        в боте (promo_platform.py:cb_order_boost). Раньше в mini_app не было
+        способа привязать заказ к боту/панели или запустить накрутку — заказ,
+        созданный тут, навсегда оставался в статусе 'waiting'."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            order_id = int(request.match_info["order_id"])
+        except (KeyError, ValueError):
+            return _err("bad order_id", 400)
+
+        from database import db
+        from services import smm_panel as smm_svc
+
+        order = await db.promo_get_order(pool, order_id)
+        if not order or order["owner_id"] != uid:
+            return _err("Заказ не найден", 404)
+        if not order["bot_id"] or not order["smm_panel_id"]:
+            return _err("У заказа не выбраны бот и SMM-панель", 400)
+
+        panel = await db.smm_get_panel(pool, order["smm_panel_id"])
+        if not panel:
+            return _err("SMM-панель не найдена", 404)
+        bot_rec = await db.warehouse_get_bot(pool, order["bot_id"])
+        if not bot_rec:
+            return _err("Бот не найден в складе", 404)
+
+        link = f"https://t.me/{bot_rec['bot_username']}"
+        client = smm_svc.make_client(panel["api_url"], panel["api_key_enc"])
+        result = await client.add_order(
+            service_id=panel["service_id"] or "",
+            link=link,
+            quantity=int(order["target_subs"] or 100),
+        )
+        if result.get("error") or "order" not in result:
+            err_msg = result.get("error", str(result)[:200])
+            await db.promo_log(
+                pool, uid, "booster",
+                f"Ошибка запуска накрутки заказ #{order['id']}: {err_msg}",
+                level="ERROR", order_id=order["id"],
+                meta={"panel": panel["name"], "link": link},
+            )
+            return _err(f"Ошибка панели: {str(err_msg)[:300]}", 502)
+
+        smm_order_id = str(result["order"])
+        await db.promo_update_order_status(
+            pool, order["id"], "boosting",
+            smm_order_id=smm_order_id,
+            smm_panel_id=panel["id"],
+        )
+        await db.warehouse_update_bot(pool, bot_rec["id"], uid, status="working")
+        await db.promo_log(
+            pool, uid, "booster",
+            f"Накрутка запущена: заказ #{order['id']} → панель #{smm_order_id}",
+            order_id=order["id"],
+            meta={"panel": panel["name"], "smm_order_id": smm_order_id, "link": link},
+        )
+        return _json_resp({"ok": True, "smm_order_id": smm_order_id})
 
     async def promo_add_warehouse_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -5196,7 +5444,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     r["template"] = _json.loads(r["template"])
                 except Exception:
                     r["template"] = {}
-        return _json_resp({"templates": rows})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type='post'", uid)
+        return _json_resp({"templates": rows, "total": int(total or 0)})
 
     async def create_template(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -5678,6 +5928,145 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("presence_pack_delete uid=%d", uid)
+            return _err(str(exc), 500)
+
+    def _presence_pack_dict(pack) -> dict:
+        d = dict(pack)
+        d["channel_ids"] = _jlist(pack.get("channel_ids"))
+        d["group_ids"] = _jlist(pack.get("group_ids"))
+        return d
+
+    async def presence_pack_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+            return _json_resp(_presence_pack_dict(pack))
+        except Exception as exc:
+            log.exception("presence_pack_detail uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
+    async def presence_pack_config(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+
+            if "bot_id" in body:
+                bot_id = body.get("bot_id") or None
+                bot_username = None
+                if bot_id:
+                    try:
+                        bot_id = int(bot_id)
+                    except (TypeError, ValueError):
+                        return _err("Invalid bot_id", 400)
+                    bot_row = await pool.fetchrow(
+                        "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
+                    )
+                    bot_username = bot_row["username"] if bot_row else None
+                await pool.execute(
+                    "UPDATE presence_packs SET bot_id=$3, bot_username=$4 WHERE id=$1 AND owner_id=$2",
+                    pack_id, uid, bot_id, bot_username,
+                )
+
+            if "channel_ids" in body or "group_ids" in body:
+                cur = _jlist(pack.get("channel_ids"))
+                grp = _jlist(pack.get("group_ids"))
+                channel_ids = body.get("channel_ids", cur)
+                group_ids = body.get("group_ids", grp)
+                if not isinstance(channel_ids, list) or not isinstance(group_ids, list):
+                    return _err("channel_ids/group_ids must be lists", 400)
+                await db.update_presence_pack_channels(
+                    pool, pack_id, uid,
+                    [int(x) for x in channel_ids],
+                    [int(x) for x in group_ids],
+                )
+
+            updated = await db.get_presence_pack(pool, pack_id, uid)
+            return _json_resp(_presence_pack_dict(updated))
+        except Exception as exc:
+            log.exception("presence_pack_config uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
+    async def presence_pack_seed(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+            ch_ids = _jlist(pack.get("channel_ids"))
+            if not ch_ids:
+                return _err("Нет каналов в пакете", 400)
+            from services.operation_bus import submit
+            op_id = await submit(
+                pool, uid, "seed_presence_pack", {"pack_id": pack_id},
+                total_items=len(ch_ids),
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("presence_pack_seed uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
+    async def presence_pack_promote(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+            if not pack.get("bot_id"):
+                return _err("Нет бота в пакете. Привяжите бот перед назначением admin.", 400)
+            ch_ids = _jlist(pack.get("channel_ids"))
+            gr_ids = _jlist(pack.get("group_ids"))
+            all_asset_ids = ch_ids + gr_ids
+            if not all_asset_ids:
+                return _err("Нет каналов/групп в пакете", 400)
+            from services.operation_bus import submit
+            op_id = await submit(
+                pool, uid, "promote_presence_pack",
+                {
+                    "pack_id": pack_id,
+                    "bot_tg_id": pack["bot_id"],
+                    "channel_ids": all_asset_ids,
+                },
+                total_items=len(all_asset_ids),
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("presence_pack_promote uid=%d pack_id=%d", uid, pack_id)
             return _err(str(exc), 500)
 
     # ── Global Presence ───────────────────────────────────────────────────────
@@ -6373,6 +6762,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def narrative_campaign_create(request: web.Request) -> web.Response:
+        """Создаёт и сразу запускает кампанию (как мастер в боте) — а не пустой
+        черновик: без выбранных каналов посты некому публиковать, и раньше
+        кампания, созданная тут, навсегда оставалась 'draft' с 0 постов."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -6384,18 +6776,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         core_message = str(data.get("core_message", "")).strip()
         campaign_type = data.get("campaign_type", "trend")
         spread_hours = int(data.get("spread_hours", 4))
+        channel_ids = data.get("channel_ids") or []
         if not topic or not core_message:
             return _err("topic и core_message обязательны", 400)
+        if not channel_ids:
+            return _err("Выберите хотя бы один канал", 400)
         if campaign_type not in ("trend", "launch", "awareness", "counter"):
             campaign_type = "trend"
         if spread_hours < 1:
             spread_hours = 1
         try:
-            cid = await pool.fetchval(
-                """INSERT INTO narrative_campaigns
-                   (owner_id, topic, core_message, campaign_type, spread_hours, status)
-                   VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id""",
-                uid, topic, core_message, campaign_type, spread_hours,
+            req_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
+        except (TypeError, ValueError):
+            req_ids = []
+        rows = await _safe_fetch(pool,
+            "SELECT channel_id, acc_id, username, title FROM managed_channels "
+            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, req_ids)
+        if not rows:
+            return _err("Каналы не найдены", 404)
+
+        from services.ai_providers import configured_providers
+        from services import narrative_engine
+        providers = configured_providers()
+        ai_provider = providers[0] if providers else None
+        if ai_provider is None:
+            return _err("AI-провайдер не настроен — добавьте API-ключ в Настройках", 400)
+
+        channel_usernames = [r["username"] or str(r["channel_id"]) for r in rows]
+        channel_meta = [{"channel_id": r["channel_id"], "acc_id": r["acc_id"]} for r in rows]
+        try:
+            cid = await narrative_engine.create_campaign(
+                pool=pool,
+                owner_id=uid,
+                topic=topic,
+                core_message=core_message,
+                channel_usernames=channel_usernames,
+                channel_meta=channel_meta,
+                spread_hours=spread_hours,
+                campaign_type=campaign_type,
+                ai_provider=ai_provider,
             )
             return _json_resp({"id": cid, "ok": True})
         except Exception as exc:
@@ -6599,6 +7018,81 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp([dict(r) for r in rows])
         except Exception as exc:
             log.exception("audience_dna_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def audience_dna_profile(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            from database import db as _db
+            from services import audience_dna as dna_svc
+
+            bot_row = await _db.get_bot(pool, bot_id, uid)
+            if not bot_row:
+                return _err("Not found", 404)
+
+            dna = await dna_svc.get_dna(pool, bot_id)
+            if not dna:
+                return _json_resp({"computed": False})
+
+            data = _dna_to_dict(dna)
+            data["computed"] = True
+            data["recommendations"] = dna_svc.generate_recommendations(dna)
+            return _json_resp(data)
+        except Exception as exc:
+            log.exception("audience_dna_profile uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
+    async def audience_dna_compute(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            from database import db as _db
+            from services import audience_dna as dna_svc
+
+            bot_row = await _db.get_bot(pool, bot_id, uid)
+            if not bot_row:
+                return _err("Not found", 404)
+
+            dna = await dna_svc.compute_dna(pool, bot_id, uid)
+            data = _dna_to_dict(dna)
+            data["computed"] = True
+            data["recommendations"] = dna_svc.generate_recommendations(dna)
+            return _json_resp(data)
+        except Exception as exc:
+            log.exception("audience_dna_compute uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
+    async def audience_dna_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            from database import db as _db
+            from services import audience_dna as dna_svc
+
+            bot_row = await _db.get_bot(pool, bot_id, uid)
+            if not bot_row:
+                return _err("Not found", 404)
+
+            history = await dna_svc.get_dna_history(pool, bot_id, limit=10)
+            return _json_resp([_dna_to_dict(snap) for snap in history])
+        except Exception as exc:
+            log.exception("audience_dna_history uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
 
     # ── Auto Funnels ──────────────────────────────────────────────────────────
@@ -6940,6 +7434,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/promo", promo_overview)
     app.router.add_post("/api/miniapp/promo/order", promo_create_order_api)
     app.router.add_post("/api/miniapp/promo/order/{order_id}/cancel", promo_cancel_order)
+    app.router.add_post("/api/miniapp/promo/order/{order_id}/boost", promo_order_boost)
     app.router.add_post("/api/miniapp/promo/warehouse/bot", promo_add_warehouse_bot)
     # Error Reports
     app.router.add_post("/api/miniapp/error_report", submit_error_report)
@@ -6965,6 +7460,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/health", health_overview)
     # Topology Map
     app.router.add_get("/api/miniapp/topology", topology_overview)
+    app.router.add_get("/api/miniapp/topology/links", topology_links)
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter
@@ -7047,6 +7543,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/presence_packs", presence_packs_list)
     app.router.add_post("/api/miniapp/presence_pack", presence_pack_create)
     app.router.add_delete("/api/miniapp/presence_pack/{pack_id}", presence_pack_delete)
+    app.router.add_get("/api/miniapp/presence_pack/{pack_id}", presence_pack_detail)
+    app.router.add_put("/api/miniapp/presence_pack/{pack_id}/config", presence_pack_config)
+    app.router.add_post("/api/miniapp/presence_pack/{pack_id}/seed", presence_pack_seed)
+    app.router.add_post("/api/miniapp/presence_pack/{pack_id}/promote", presence_pack_promote)
     # Global Presence
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
@@ -7095,6 +7595,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/semantic_memory/{bot_id}", semantic_memory_bot)
     # Audience DNA
     app.router.add_get("/api/miniapp/audience_dna", audience_dna_list)
+    app.router.add_get("/api/miniapp/audience_dna/{bot_id}/profile", audience_dna_profile)
+    app.router.add_post("/api/miniapp/audience_dna/{bot_id}/compute", audience_dna_compute)
+    app.router.add_get("/api/miniapp/audience_dna/{bot_id}/history", audience_dna_history)
     # Auto Funnels
     app.router.add_get("/api/miniapp/auto_funnels", auto_funnels_list)
     app.router.add_post("/api/miniapp/auto_funnel", auto_funnel_create)

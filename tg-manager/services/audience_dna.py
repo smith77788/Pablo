@@ -467,7 +467,7 @@ async def _recompute_all(pool: asyncpg.Pool) -> None:
     """Compute DNA for every active managed bot."""
     try:
         bots = await pool.fetch(
-            "SELECT bot_id, owner_id FROM managed_bots WHERE is_active = TRUE"
+            "SELECT bot_id, added_by FROM managed_bots WHERE is_active = TRUE"
         )
     except Exception as exc:
         log.error("audience_dna: failed to fetch active bots: %s", exc)
@@ -476,7 +476,7 @@ async def _recompute_all(pool: asyncpg.Pool) -> None:
     log.info("audience_dna: recomputing for %d bots", len(bots))
     for b in bots:
         try:
-            await compute_dna(pool, b["bot_id"], b["owner_id"])
+            await compute_dna(pool, b["bot_id"], b["added_by"])
             await asyncio.sleep(0.5)  # avoid DB overload
         except Exception as exc:
             log.warning("audience_dna: failed for bot_id=%s: %s", b["bot_id"], exc)

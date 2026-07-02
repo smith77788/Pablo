@@ -221,7 +221,7 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
                p.proxy_url
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-        WHERE a.id = $1 AND a.in_operation = FALSE AND a.banned = FALSE
+        WHERE a.id = $1 AND a.in_operation = FALSE AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
         """,
         account_id,
     )

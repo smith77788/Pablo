@@ -218,6 +218,18 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📖",
     },
+    "boost_subscribers": {
+        "description": "Накрутка подписчиков/участников",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "👥",
+    },
+    "boost_bot_starts": {
+        "description": "Накрутка стартов в ботах",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "🚀",
+    },
     "mass_invite": {
         "description": "Массовый инвайт участников в группы",
         "min_plan": "pro",

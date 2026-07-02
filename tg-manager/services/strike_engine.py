@@ -1198,14 +1198,29 @@ async def staggered_strike(
     plan: StrikePlan,
     progress_cb=None,
     pool=None,
+    op_id: int | None = None,
 ) -> list[StrikeResult]:
     """
     Эшелонированная атака: волны аккаунтов с нарастающей интенсивностью.
 
     progress_cb(phase: str, detail: str) — опциональный колбэк для обновления UI.
+    op_id — если задан, на чекпоинтах (смена цели, перед волнами) проверяется
+    отмена операции (operation_queue.status='cancelled'), чтобы «Отмена» из
+    очереди реально останавливала страйк, а не игнорировалась до конца волн.
     """
     all_results: list[StrikeResult] = []
     sem = asyncio.Semaphore(_CONCURRENCY)
+
+    async def _op_cancelled() -> bool:
+        if not (op_id and pool):
+            return False
+        try:
+            row = await pool.fetchrow(
+                "SELECT status FROM operation_queue WHERE id=$1", op_id
+            )
+            return bool(row and row["status"] == "cancelled")
+        except Exception:
+            return False
 
     # Claim every account for the whole strike so warmup/op_worker won't drive
     # the same sessions in parallel (concurrent clients on one auth_key = ban).
@@ -1219,6 +1234,10 @@ async def staggered_strike(
 
     try:
         for _target_idx, target in enumerate(plan.targets):
+            # Отмена операции из очереди: останавливаемся перед следующей целью.
+            if await _op_cancelled():
+                log.info("staggered_strike: операция %s отменена, остановка перед целью %s", op_id, target)
+                break
             # Inter-target cooldown: не бить по следующей цели сразу — это копит
             # per-account объём далеко за безопасный предел и провоцирует флуд.
             if _target_idx > 0:
@@ -1283,7 +1302,7 @@ async def staggered_strike(
                 await asyncio.sleep(wc)
 
             # ═══ Волна 2: Поддержка — другие причины, админы, боты ═══
-            if len(plan.waves) > 1 and plan.waves[1]:
+            if len(plan.waves) > 1 and plan.waves[1] and not await _op_cancelled():
                 if progress_cb:
                     await progress_cb(
                         "strike_wave2",
@@ -1321,7 +1340,7 @@ async def staggered_strike(
                 await asyncio.sleep(wc)
 
             # ═══ Волна 3: Завершение — блокировка, финальные жалобы ═══
-            if len(plan.waves) > 2 and plan.waves[2]:
+            if len(plan.waves) > 2 and plan.waves[2] and not await _op_cancelled():
                 if progress_cb:
                     await progress_cb(
                         "strike_wave3",

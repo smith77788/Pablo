@@ -107,6 +107,7 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
     from bot.callbacks import BmCb, MassPubCb
     await callback.answer()
     kb = InlineKeyboardBuilder()
+    kb.button(text="🏗 Активы & Сети", callback_data=BmCb(action="assets"))
     kb.button(text="📤 Публикация", callback_data=MassPubCb(action="menu"))
     kb.button(text="⚡ Все операции", callback_data=BmCb(action="operations"))
     kb.adjust(1)

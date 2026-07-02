@@ -324,9 +324,11 @@ async def cb_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.answer()
     uid = callback.from_user.id
 
-    # Get the first bot of the user for context (recommendations are per-owner)
-    bot_row = await pool.fetchrow("SELECT id FROM managed_bots WHERE owner_id = $1 LIMIT 1", uid)
-    bot_id = bot_row["id"] if bot_row else 0
+    # Get the first bot of the user for context (recommendations are per-owner).
+    # managed_bots использует added_by (не owner_id); stars_experiments.bot_id хранит
+    # telegram bot_id, поэтому выбираем bot_id, а не внутренний serial id.
+    bot_row = await pool.fetchrow("SELECT bot_id FROM managed_bots WHERE added_by = $1 LIMIT 1", uid)
+    bot_id = bot_row["bot_id"] if bot_row else 0
 
     recs = await stars_optimizer.get_recommendations(pool, bot_id, uid)
     text = "💡 <b>Рекомендации по ценообразованию</b>\n\n" + "\n\n".join(recs)

@@ -326,9 +326,10 @@ async def cb_eco_view(
     kb.button(text="♻️ Клон", callback_data=EcoCb(action="clone_start", eco_id=eco_id))
     kb.button(text="🏭 Фабрика", callback_data=EcoCb(action="factory", eco_id=eco_id))
     kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="🗄 Архивировать", callback_data=EcoCb(action="archive_ask", eco_id=eco_id))
     kb.button(text="🔄 Обновить", callback_data=EcoCb(action="view", eco_id=eco_id))
     kb.button(text="◀️ Назад", callback_data=EcoCb(action="menu"))
-    kb.adjust(3, 2, 2, 2, 2, 1, 2)
+    kb.adjust(3, 2, 2, 2, 2, 1, 1, 2)
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=kb.as_markup()
     )
@@ -938,6 +939,26 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 # ── Archive ───────────────────────────────────────────────────────────────────
+
+
+@router.callback_query(EcoCb.filter(F.action == "archive_ask"))
+async def cb_eco_archive_ask(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
+    """Экран подтверждения перед архивацией (действие необратимо)."""
+    await callback.answer()
+    eco_id = callback_data.eco_id
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, архивировать", callback_data=EcoCb(action="archive", eco_id=eco_id))
+    kb.button(text="◀️ Отмена", callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🗄 <b>Архивировать экосистему?</b>\n\n"
+        "Экосистема будет удалена из активного списка. "
+        "Действие <b>необратимо</b>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(EcoCb.filter(F.action == "archive"))
