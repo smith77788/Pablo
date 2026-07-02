@@ -6244,3 +6244,67 @@ async def count_channels_across_linked(pool: asyncpg.Pool, owner_id: int) -> int
             "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
             owner_id,
         ) or 0
+
+
+# ── Connection Pool Health Monitor (мониторинг пула соединений) ─────────────
+# Автоматический мониторинг состояния пула соединений.
+
+_pool_stats: dict = {
+    "total_connections": 0,
+    "active_connections": 0,
+    "idle_connections": 0,
+    "waiting": 0,
+    "errors": 0,
+    "last_check": 0,
+}
+
+
+async def monitor_pool_health(pool: asyncpg.Pool) -> dict:
+    """Monitor connection pool health and return statistics."""
+    try:
+        # Get pool size info
+        _pool_stats["total_connections"] = pool.get_size()
+        _pool_stats["idle_connections"] = pool.get_idle_size()
+        _pool_stats["active_connections"] = pool.get_size() - pool.get_idle_size()
+        _pool_stats["last_check"] = time.time()
+        
+        # Check for connection errors
+        try:
+            async with pool.acquire(timeout=5) as conn:
+                await conn.fetchval("SELECT 1")
+        except Exception as e:
+            _pool_stats["errors"] += 1
+            log.warning("pool_health: connection test failed: %s", e)
+        
+        return {
+            "status": "healthy" if _pool_stats["errors"] < 5 else "degraded",
+            "total": _pool_stats["total_connections"],
+            "active": _pool_stats["active_connections"],
+            "idle": _pool_stats["idle_connections"],
+            "errors": _pool_stats["errors"],
+            "utilization": round(
+                _pool_stats["active_connections"] / max(_pool_stats["total_connections"], 1) * 100,
+                1,
+            ),
+        }
+    except Exception as e:
+        log.warning("pool_health monitoring failed: %s", e)
+        return {"status": "error", "error": str(e)}
+
+
+async def run_pool_monitor(pool: asyncpg.Pool) -> None:
+    """Background service: monitor pool health every 5 minutes."""
+    log.info("pool_monitor: starting")
+    while True:
+        try:
+            stats = await monitor_pool_health(pool)
+            if stats.get("utilization", 0) > 80:
+                log.warning(
+                    "pool_monitor: high utilization %d%% (active=%d, total=%d)",
+                    stats["utilization"],
+                    stats.get("active", 0),
+                    stats.get("total", 0),
+                )
+        except Exception as e:
+            log.error("pool_monitor: error: %s", e)
+        await asyncio.sleep(300)  # каждые 5 минут
