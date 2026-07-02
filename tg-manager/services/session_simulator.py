@@ -254,3 +254,109 @@ async def respect_daily_rhythm(hard_pause_at_night: bool = False) -> None:
     elif not is_active_hours(hour):
         # Just slow down significantly without full stop
         await asyncio.sleep(random.uniform(60, 300))
+
+
+# ── Adaptive Pacing (интеллектуальные задержки) ─────────────────────────────
+# Система учитывает историю операций и динамически корректирует задержки.
+
+# In-memory learning data: action_type → {success_times, fail_times, avg_delay}
+_adaptive_data: dict[str, dict] = {}
+
+
+def _record_operation_result(action_type: str, success: bool, duration_s: float) -> None:
+    """Record operation result for adaptive pacing learning."""
+    data = _adaptive_data.setdefault(action_type, {
+        "success_times": [],
+        "fail_times": [],
+        "total_ops": 0,
+        "failures": 0,
+    })
+    data["total_ops"] += 1
+    if success:
+        data["success_times"].append(duration_s)
+        # Keep last 100
+        if len(data["success_times"]) > 100:
+            data["success_times"] = data["success_times"][-100:]
+    else:
+        data["failures"] += 1
+        data["fail_times"].append(time.time())
+        # Keep last 50
+        if len(data["fail_times"]) > 50:
+            data["fail_times"] = data["fail_times"][-50:]
+
+
+def get_adaptive_delay(action_type: str, base_delay: float = 5.0) -> float:
+    """Calculate adaptive delay based on operation history.
+    
+    Features:
+    - If recent failures: increase delay (cool down)
+    - If high success rate: decrease delay slightly (optimize speed)
+    - If operation type has high failure rate: more conservative delays
+    """
+    data = _adaptive_data.get(action_type)
+    if not data or data["total_ops"] < 5:
+        return base_delay
+    
+    # Calculate failure rate
+    fail_rate = data["failures"] / data["total_ops"]
+    
+    # Check recent failures (last 10 minutes)
+    now = time.time()
+    recent_fails = sum(1 for t in data["fail_times"] if now - t < 600)
+    
+    # Adjust delay based on conditions
+    adjusted = base_delay
+    
+    if recent_fails >= 3:
+        # High recent failure rate — slow down significantly
+        adjusted *= 2.5
+        log.info("adaptive_pacing: %s — %d recent failures, delay=%.1fs", 
+                 action_type, recent_fails, adjusted)
+    elif recent_fails >= 1:
+        # Some recent failures — moderate slowdown
+        adjusted *= 1.5
+    elif fail_rate > 0.2:
+        # High overall failure rate — be more conservative
+        adjusted *= 1.3
+    elif fail_rate < 0.05 and data["total_ops"] > 20:
+        # Very low failure rate — can speed up slightly
+        adjusted *= 0.85
+    
+    # Add jitter
+    adjusted = adjusted * chaos_factor(1.0, 0.15)
+    
+    return max(1.0, adjusted)  # Minimum 1 second
+
+
+def get_adaptive_delay_for_account(action_type: str, account_id: int, base_delay: float = 5.0) -> float:
+    """Get adaptive delay considering account-specific history."""
+    # Combine action type and account for per-account learning
+    key = f"{action_type}:{account_id}"
+    return get_adaptive_delay(key, base_delay)
+
+
+def record_success(action_type: str, account_id: int = 0, duration_s: float = 0.0) -> None:
+    """Record successful operation for adaptive pacing."""
+    _record_operation_result(action_type, True, duration_s)
+    if account_id:
+        _record_operation_result(f"{action_type}:{account_id}", True, duration_s)
+
+
+def record_failure(action_type: str, account_id: int = 0, duration_s: float = 0.0) -> None:
+    """Record failed operation for adaptive pacing."""
+    _record_operation_result(action_type, False, duration_s)
+    if account_id:
+        _record_operation_result(f"{action_type}:{account_id}", False, duration_s)
+
+
+def get_pacing_stats(action_type: str) -> dict:
+    """Get pacing statistics for an action type."""
+    data = _adaptive_data.get(action_type, {})
+    total = data.get("total_ops", 0)
+    fails = data.get("failures", 0)
+    return {
+        "total_ops": total,
+        "failures": fails,
+        "fail_rate": round(fails / total * 100, 1) if total > 0 else 0,
+        "suggested_delay": get_adaptive_delay(action_type),
+    }

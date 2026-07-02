@@ -14,6 +14,7 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import infra_memory as _infra_mem
+from services import session_simulator
 
 log = logging.getLogger(__name__)
 
@@ -1281,6 +1282,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             )
             # Circuit breaker: record result
             await _circuit_breaker_record(owner_id, _final_status == "done")
+            # Adaptive pacing: record result for learning
+            session_simulator.record_success(op_type, 0, elapsed) if _final_status == "done" else session_simulator.record_failure(op_type, 0, elapsed)
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
