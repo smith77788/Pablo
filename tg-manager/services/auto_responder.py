@@ -25,6 +25,14 @@ _MAX_RULES_PER_USER_PER_CYCLE = 5
 # Structure: {(bot_id, chat_id): int}
 _cycle_rule_counts: dict[tuple[int, int], int] = {}
 
+# Cooldown for bots whose token getUpdates rejects as Unauthorized (revoked/invalid
+# token). Without this, a single dead-token bot gets re-polled every 10s forever,
+# spamming warnings and hammering Telegram's API with calls that can only ever fail.
+# Structure: {bot_id: (consecutive_fail_count, retry_after_monotonic)}
+_dead_token_cooldown: dict[int, tuple[int, float]] = {}
+_DEAD_TOKEN_BASE_COOLDOWN = 60.0  # seconds
+_DEAD_TOKEN_MAX_COOLDOWN = 3600.0  # cap at 1h between retries
+
 
 def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str:
     """Render {{PLACEHOLDER}} tokens in text with user/bot context."""
@@ -113,9 +121,28 @@ async def _process_bot(
                     )
                 except Exception:
                     log.warning("auto_responder: bot=%d webhook-конфликт, deleteWebhook не удался", bot_id)
+            elif "unauthorized" in err_desc.lower() or data.get("error_code") == 401:
+                # Токен отозван/невалиден — getUpdates будет проваливаться на
+                # каждом цикле бесконечно. Ставим cooldown с экспоненциальным
+                # отступом вместо ретрая каждые 10с (было: бесконечный спам
+                # варнингов + бесполезные вызовы Telegram API на каждый цикл).
+                fails, _ = _dead_token_cooldown.get(bot_id, (0, 0.0))
+                fails += 1
+                cooldown = min(
+                    _DEAD_TOKEN_BASE_COOLDOWN * (2 ** (fails - 1)),
+                    _DEAD_TOKEN_MAX_COOLDOWN,
+                )
+                _dead_token_cooldown[bot_id] = (fails, time.monotonic() + cooldown)
+                if fails == 1 or fails % 10 == 0:
+                    log.warning(
+                        "auto_responder: bot=%d токен невалиден (Unauthorized), "
+                        "попытка #%d, следующая через %.0fс",
+                        bot_id, fails, cooldown,
+                    )
             else:
                 log.warning("auto_responder: bot=%d getUpdates вернул ошибку: %s", bot_id, err_desc[:200])
             return
+        _dead_token_cooldown.pop(bot_id, None)
         updates = data.get("result", [])
         if not updates:
             return
@@ -794,10 +821,15 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
         try:
             bots = await db.get_bots_for_polling(pool)
             if bots:
+                now = time.monotonic()
+                pollable = [
+                    b for b in bots
+                    if now >= _dead_token_cooldown.get(b["bot_id"], (0, 0.0))[1]
+                ]
                 await asyncio.gather(
                     *(
                         _process_bot(pool, http, b["bot_id"], b["token"], main_bot)
-                        for b in bots
+                        for b in pollable
                     ),
                     return_exceptions=True,
                 )

@@ -116,7 +116,7 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         deleted = await pool.fetchval(
             "WITH d AS (DELETE FROM operation_queue "
             "WHERE status = ANY($1::text[]) "
-            "  AND created_at < NOW() - INTERVAL $2 "
+            "  AND created_at < NOW() - $2::INTERVAL "
             "  AND NOT EXISTS ("
             "      SELECT 1 FROM operation_log WHERE op_id = operation_queue.id"
             "  ) "
