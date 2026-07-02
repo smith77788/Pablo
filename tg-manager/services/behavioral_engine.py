@@ -768,3 +768,124 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
 
     if concluded:
         log.info("behavioral_engine: auto-concluded %d experiments", concluded)
+
+
+# ── Predictive Analytics (предиктивная аналитика) ───────────────────────────
+# Предсказание банов, роста аудитории, эффективности кампаний.
+
+async def predict_ban_risk(pool: asyncpg.Pool, account_id: int) -> dict:
+    """Predict ban risk for an account based on recent activity.
+    
+    Returns {risk_level: "low"|"medium"|"high"|"critical", risk_score: 0-100, reasons: list}
+    """
+    try:
+        # Get recent activity
+        recent_ops = await pool.fetch(
+            """SELECT action, result, occurred_at
+               FROM operation_audit
+               WHERE account_id=$1 AND occurred_at > now() - INTERVAL '24 hours'
+               ORDER BY occurred_at DESC""",
+            account_id,
+        )
+        
+        if not recent_ops:
+            return {"risk_level": "low", "risk_score": 0, "reasons": []}
+        
+        risk_score = 0
+        reasons = []
+        
+        # Count failures
+        failures = sum(1 for op in recent_ops if op["result"] == "error")
+        fail_rate = failures / len(recent_ops) if recent_ops else 0
+        
+        if fail_rate > 0.3:
+            risk_score += 30
+            reasons.append(f"High failure rate: {fail_rate:.0%}")
+        
+        # Check for flood events
+        flood_ops = await pool.fetch(
+            """SELECT COUNT(*) as cnt FROM operation_audit
+               WHERE account_id=$1 AND (error_msg ILIKE '%flood%' OR error_msg ILIKE '%peer_flood%')
+               AND occurred_at > now() - INTERVAL '24 hours'""",
+            account_id,
+        )
+        flood_count = flood_ops[0]["cnt"] if flood_ops else 0
+        if flood_count > 0:
+            risk_score += min(flood_count * 20, 50)
+            reasons.append(f"Flood events: {flood_count}")
+        
+        # Check account health status
+        acc = await pool.fetchrow(
+            "SELECT acc_status, trust_score FROM tg_accounts WHERE id=$1",
+            account_id,
+        )
+        if acc:
+            if acc["acc_status"] in ("cooldown", "spamblock"):
+                risk_score += 40
+                reasons.append(f"Account status: {acc['acc_status']}")
+            trust = float(acc.get("trust_score") or 0.5)
+            if trust < 0.3:
+                risk_score += 25
+                reasons.append(f"Low trust score: {trust:.2f}")
+        
+        # Determine risk level
+        if risk_score >= 70:
+            risk_level = "critical"
+        elif risk_score >= 50:
+            risk_level = "high"
+        elif risk_score >= 25:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+        
+        return {
+            "risk_level": risk_level,
+            "risk_score": min(risk_score, 100),
+            "reasons": reasons,
+        }
+    except Exception as e:
+        log.warning("predict_ban_risk failed for account %d: %s", account_id, e)
+        return {"risk_level": "unknown", "risk_score": 0, "reasons": [str(e)]}
+
+
+async def predict_campaign_success(pool: asyncpg.Pool, owner_id: int, op_type: str) -> dict:
+    """Predict campaign success rate based on historical data.
+    
+    Returns {success_rate: 0-100, avg_duration_s: float, confidence: "low"|"medium"|"high"}
+    """
+    try:
+        # Get historical data for this op_type
+        history = await pool.fetch(
+            """SELECT status, EXTRACT(EPOCH FROM (finished_at - started_at)) as duration
+               FROM operation_queue
+               WHERE owner_id=$1 AND op_type=$2 AND finished_at IS NOT NULL
+               ORDER BY created_at DESC LIMIT 50""",
+            owner_id,
+            op_type,
+        )
+        
+        if not history:
+            return {"success_rate": 50, "avg_duration_s": 0, "confidence": "low"}
+        
+        success_count = sum(1 for h in history if h["status"] == "done")
+        success_rate = success_count / len(history) * 100
+        
+        durations = [h["duration"] for h in history if h["duration"]]
+        avg_duration = sum(durations) / len(durations) if durations else 0
+        
+        # Confidence based on sample size
+        if len(history) >= 20:
+            confidence = "high"
+        elif len(history) >= 5:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        
+        return {
+            "success_rate": round(success_rate, 1),
+            "avg_duration_s": round(avg_duration, 1),
+            "confidence": confidence,
+        }
+    except Exception as e:
+        log.warning("predict_campaign_success failed: %s", e)
+        return {"success_rate": 50, "avg_duration_s": 0, "confidence": "low"}
