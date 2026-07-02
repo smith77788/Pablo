@@ -249,3 +249,91 @@ def is_cooling(account_id: int) -> bool:
 def cooldown_seconds(account_id: int) -> float:
     """Сколько секунд осталось до готовности аккаунта."""
     return flood_engine.seconds_until_ready(account_id)
+
+
+# ── Account Rotation (ротация аккаунтов) ─────────────────────────────────────
+# Smart selection с учётом load balancing и trust_score.
+
+# Usage tracking: account_id → {total_ops, last_used, success_rate}
+_account_usage: dict[int, dict] = {}
+
+
+async def select_account_rotated(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    action_type: str = "default",
+    *,
+    exclude_ids: list[int] | None = None,
+    pool_name: str | None = None,
+    tags: list[str] | None = None,
+) -> dict | None:
+    """Select best account with load balancing.
+    
+    Balances between:
+    - trust_score (higher = better)
+    - usage count (lower = better, avoid overusing one account)
+    - cooldown status (cooling accounts skipped)
+    - success rate (higher = better)
+    """
+    candidates = await select_all_active(
+        pool, owner_id,
+        pool_name=pool_name, tags=tags,
+        action_type=action_type,
+        respect_cooldown=True,
+    )
+    if not candidates:
+        return None
+    
+    # Filter excluded
+    if exclude_ids:
+        candidates = [c for c in candidates if c["id"] not in exclude_ids]
+    if not candidates:
+        return None
+    
+    # Score each candidate
+    scored = []
+    for acc in candidates:
+        usage = _account_usage.get(acc["id"], {})
+        trust = float(acc.get("trust_score") or 0.5)
+        ops_done = usage.get("total_ops", 0)
+        success_rate = usage.get("success_rate", 1.0)
+        
+        # Score formula: trust * 0.4 + (1 - usage_penalty) * 0.3 + success_rate * 0.3
+        usage_penalty = min(ops_done / 100, 1.0)  # Normalize to 0-1
+        score = trust * 0.4 + (1 - usage_penalty) * 0.3 + success_rate * 0.3
+        
+        scored.append((score, acc))
+    
+    # Sort by score descending
+    scored.sort(key=lambda x: -x[0])
+    
+    best_acc = scored[0][1]
+    _record_account_usage(best_acc["id"], True)
+    
+    log.debug(
+        "resource_selector.select_account_rotated: owner=%d selected=%d score=%.2f action=%s",
+        owner_id, best_acc["id"], scored[0][0], action_type,
+    )
+    return dict(best_acc)
+
+
+def _record_account_usage(account_id: int, success: bool) -> None:
+    """Record account usage for load balancing."""
+    usage = _account_usage.setdefault(account_id, {
+        "total_ops": 0, "successes": 0, "last_used": 0
+    })
+    usage["total_ops"] += 1
+    if success:
+        usage["successes"] += 1
+    usage["last_used"] = time.time()
+    # Update success rate
+    total = usage["total_ops"]
+    usage["success_rate"] = usage["successes"] / total if total > 0 else 1.0
+
+
+def get_account_usage_summary(account_ids: list[int]) -> dict[int, dict]:
+    """Get usage summary for accounts."""
+    return {
+        aid: _account_usage.get(aid, {"total_ops": 0, "success_rate": 1.0})
+        for aid in account_ids
+    }
