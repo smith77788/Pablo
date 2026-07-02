@@ -74,9 +74,11 @@ async def cb_growth_menu(callback: CallbackQuery, state: FSMContext) -> None:
         "Автоматически находит группы по вашей нише и публикует "
         "рекламный текст, привлекая подписчиков в ваш канал.\n\n"
         "<b>Как работает:</b>\n"
-        "1. Вы задаёте нишу (например: «эскорт Москва», «крипто», «фитнес»)\n"
-        "2. Вы пишете рекламный текст для чужих групп\n"
-        "3. Агент ищет подходящие группы → вступает → публикует\n\n"
+        "1. Вы задаёте нишу (например: «крипто», «фитнес», «недвижимость»)\n"
+        "2. Опционально — город/регион для локального таргетинга\n"
+        "3. Вы пишете рекламный текст для чужих групп\n"
+        "4. Выбираете сколько аккаунтов задействовать\n"
+        "5. Агент ищет подходящие группы → вступает → публикует\n\n"
         "⚠️ Используйте аккаунты с хорошим trust score — постинг в группах "
         "требует прогретых аккаунтов.",
         reply_markup=_menu_kb(),
@@ -98,13 +100,13 @@ async def cb_growth_create(
 
     await state.set_state(GrowthAgentFSM.waiting_niche)
     await callback.message.edit_text(
-        "🌱 <b>Growth Agent — шаг 1/2</b>\n\n"
+        "🌱 <b>Growth Agent — шаг 1/5</b>\n\n"
         "Опишите вашу нишу или целевую аудиторию.\n"
         "<i>Примеры:</i>\n"
-        "• <code>знакомства встречи Москва</code>\n"
         "• <code>криптовалюта трейдинг</code>\n"
         "• <code>фитнес похудение</code>\n"
-        "• <code>недвижимость инвестиции</code>\n\n"
+        "• <code>недвижимость инвестиции</code>\n"
+        "• <code>маркетинг для малого бизнеса</code>\n\n"
         "Чем конкретнее — тем лучше подберём группы.",
         reply_markup=_cancel_kb(),
     )
@@ -121,10 +123,44 @@ async def on_niche_input(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(niche=niche)
-    await state.set_state(GrowthAgentFSM.waiting_promo_text)
+    await state.set_state(GrowthAgentFSM.waiting_geo)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Без гео-таргетинга", callback_data=GrowthCb(action="skip_geo"))
+    kb.button(text="❌ Отмена", callback_data=GrowthCb(action="menu"))
+    kb.adjust(1)
     await message.answer(
         f"✅ Ниша: <b>{html.escape(niche)}</b>\n\n"
-        "🌱 <b>Growth Agent — шаг 2/2</b>\n\n"
+        "🌱 <b>Growth Agent — шаг 2/5</b>\n\n"
+        "Хотите ограничить поиск конкретным городом/регионом?\n"
+        "Введите его (например: <code>Москва</code>, <code>СПб</code>) "
+        "или нажмите «Без гео-таргетинга»:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(GrowthCb.filter(F.action == "skip_geo"), GrowthAgentFSM.waiting_geo)
+async def cb_growth_skip_geo(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.update_data(geo="")
+    await _go_to_promo_step(callback.message, state, is_edit=True, callback=callback)
+
+
+@router.message(GrowthAgentFSM.waiting_geo)
+async def on_geo_input(message: Message, state: FSMContext) -> None:
+    geo = (message.text or "").strip()
+    if len(geo) > 60:
+        await message.answer("Слишком длинно (макс 60 символов). Введите город/регион:")
+        return
+    await state.update_data(geo=geo)
+    await _go_to_promo_step(message, state, is_edit=False)
+
+
+async def _go_to_promo_step(
+    target: Message, state: FSMContext, is_edit: bool, callback: CallbackQuery | None = None
+) -> None:
+    await state.set_state(GrowthAgentFSM.waiting_promo_text)
+    text = (
+        "🌱 <b>Growth Agent — шаг 3/5</b>\n\n"
         "Теперь введите рекламный текст, который будет опубликован "
         "в найденных группах.\n\n"
         "<i>Хороший текст:</i>\n"
@@ -132,11 +168,14 @@ async def on_niche_input(message: Message, state: FSMContext) -> None:
         "• Краткое описание вашего канала/бота\n"
         "• Призыв к действию со ссылкой (@вашканал или t.me/...)\n\n"
         "<i>Пример:</i>\n"
-        "<code>💎 Топовый канал по знакомствам в Москве\n"
-        "500+ проверенных анкет. Только реальные встречи.\n"
-        "➡️ Подписывайся: @mychannel</code>",
-        reply_markup=_cancel_kb(),
+        "<code>💎 Канал про инвестиции в недвижимость\n"
+        "Разборы объектов, расчёты доходности, кейсы.\n"
+        "➡️ Подписывайся: @mychannel</code>"
     )
+    if is_edit and callback:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_cancel_kb())
+    else:
+        await target.answer(text, parse_mode="HTML", reply_markup=_cancel_kb())
 
 
 @router.message(GrowthAgentFSM.waiting_promo_text)
@@ -167,17 +206,65 @@ async def on_promo_text_input(
         return
 
     await state.update_data(promo_text=promo_text)
+    await state.set_state(GrowthAgentFSM.waiting_acc_count)
+    total = await _get_acc_count(pool, message.from_user.id)
+    await message.answer(
+        f"🌱 <b>Growth Agent — шаг 4/5</b>\n\n"
+        f"Доступно прогретых аккаунтов: <b>{total}</b>\n"
+        "Сколько задействовать для поиска и постинга?\n"
+        "Введите число или <code>0</code> — использовать до 3 (безопасный режим по умолчанию):",
+        parse_mode="HTML",
+        reply_markup=_cancel_kb(),
+    )
+
+
+async def _get_acc_count(pool: asyncpg.Pool, owner_id: int) -> int:
+    try:
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+            "AND session_str IS NOT NULL "
+            "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
+            owner_id,
+        ) or 0
+    except Exception:
+        return 0
+
+
+@router.message(GrowthAgentFSM.waiting_acc_count)
+async def on_acc_count_input(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    try:
+        n = int((message.text or "0").strip())
+    except ValueError:
+        await message.answer("⚠️ Введите число")
+        return
+    total = await _get_acc_count(pool, message.from_user.id)
+    use = min(n, total) if n > 0 else min(3, total)
+    if use == 0:
+        await message.answer(
+            "⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты."
+        )
+        return
+
+    await state.update_data(acc_count=use)
     await state.set_state(GrowthAgentFSM.confirming)
     data = await state.get_data()
     niche = data.get("niche", "")
+    geo = data.get("geo", "")
+    promo_text = data.get("promo_text", "")
 
+    geo_line = f"<b>Гео:</b> {html.escape(geo)}\n" if geo else ""
     await message.answer(
         "🌱 <b>Growth Agent — подтверждение</b>\n\n"
-        f"<b>Ниша:</b> {html.escape(niche)}\n\n"
+        f"<b>Ниша:</b> {html.escape(niche)}\n"
+        f"{geo_line}"
+        f"<b>Аккаунтов:</b> {use}\n\n"
         f"<b>Рекламный текст:</b>\n{html.escape(promo_text)}\n\n"
-        "Агент найдёт до 50 групп в нише и опубликует ваш текст в каждой.\n"
+        "Агент найдёт до 5 групп в нише и опубликует ваш текст в каждой.\n"
         "⏱ Время выполнения: 5–20 минут\n\n"
         "Запустить?",
+        parse_mode="HTML",
         reply_markup=_confirm_kb(),
     )
 
@@ -189,7 +276,9 @@ async def _launch_campaign(
 ) -> None:
     data = await state.get_data()
     niche: str = data.get("niche", "")
+    geo: str = data.get("geo", "")
     promo_text: str = data.get("promo_text", "")
+    acc_count: int = int(data.get("acc_count") or 3)
     await state.clear()
 
     try:
@@ -200,7 +289,13 @@ async def _launch_campaign(
             pool,
             callback.from_user.id,
             "niche_growth_post",
-            {"niche": niche, "promo_text": promo_text, "max_groups": 5},
+            {
+                "niche": niche,
+                "geo": geo,
+                "promo_text": promo_text,
+                "acc_count": acc_count,
+                "max_groups": 5,
+            },
             total_items=5,
         )
     except Exception as exc:

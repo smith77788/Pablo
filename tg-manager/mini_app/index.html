@@ -2224,7 +2224,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Агент найдёт группы по нише, вступит и опубликует ваш текст (до 5 групп за запуск, с паузами для безопасности).</div>
     <div style="padding:8px 0">
       <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
+      <div class="field"><label>Гео / город (опционально)</label><input type="text" id="growthGeo" placeholder="например: Москва, СПб"></div>
       <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+      <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
     </div>
@@ -6959,12 +6961,14 @@ async function openGrowth() {
 async function submitGrowth() {
   const errEl=document.getElementById('growthErr'); errEl.textContent='';
   const niche=document.getElementById('growthNiche').value.trim();
+  const geo=document.getElementById('growthGeo').value.trim();
   const promo_text=document.getElementById('growthPromo').value.trim();
+  const acc_count=parseInt(document.getElementById('growthAccCount').value)||3;
   if(!niche){ errEl.textContent='Укажите нишу'; return; }
   if(!promo_text){ errEl.textContent='Укажите рекламный текст'; return; }
   const btn=document.getElementById('growthBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify({niche,promo_text})});
+    const r=await api('/api/miniapp/growth',{method:'POST',body:JSON.stringify({niche,geo,promo_text,acc_count})});
     toast(`🌿 Запущено (#${r.op_id})`);
     openGrowth();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }

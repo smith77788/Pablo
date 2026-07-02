@@ -6871,9 +6871,16 @@ async def _exec_niche_growth_post(
     from services import niche_searcher, resource_selector, account_manager
 
     niche: str = params.get("niche", "")
+    geo: str = (params.get("geo") or "").strip()
     promo_text: str = params.get("promo_text", "")
     # Безопасный лимит: не более 5 групп за запуск во избежание блокировки
     max_groups: int = min(int(params.get("max_groups") or 5), 5)
+    # Сколько аккаунтов задействовать (0/не задано → безопасный дефолт 3)
+    acc_count: int = max(1, min(int(params.get("acc_count") or 3), 10))
+    # Гео дописывается к нише как доп. контекст для генерации ключевых слов —
+    # search_niche_groups сам не умеет фильтровать по гео (Telegram SearchRequest
+    # глобальный), но "фитнес Москва" вместо "фитнес" даёт более локальные ключи.
+    search_description = f"{niche} {geo}".strip() if geo else niche
 
     if not niche or not promo_text:
         return {"status": "failed", "reason": "Нет ниши или рекламного текста"}
@@ -6889,8 +6896,8 @@ async def _exec_niche_growth_post(
     if _verdict.blocked:
         return {"status": "failed", "reason": "Контент заблокирован политикой платформы"}
 
-    # Выбираем до 3 прогретых аккаунтов для постинга
-    accounts = await resource_selector.select_accounts(pool, owner_id, 3, action_type="post")
+    # Выбираем прогретые аккаунты для постинга (запрошенное количество, дефолт 3)
+    accounts = await resource_selector.select_accounts(pool, owner_id, acc_count, action_type="post")
     if not accounts:
         return {
             "status": "failed",
@@ -6904,13 +6911,13 @@ async def _exec_niche_growth_post(
     if not session_str:
         return {"status": "failed", "reason": "Аккаунт без сессии"}
 
-    # Генерируем ключевые слова для ниши
+    # Генерируем ключевые слова для ниши (+ гео, если задан)
     try:
-        keywords = await niche_searcher.generate_keywords(niche)
+        keywords = await niche_searcher.generate_keywords(search_description)
         log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
     except Exception as exc:
         log.warning("niche_growth_post: keyword gen failed: %s", exc)
-        keywords = [niche]
+        keywords = [search_description]
 
     # Ищем группы
     try:

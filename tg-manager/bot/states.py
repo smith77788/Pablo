@@ -583,7 +583,9 @@ class ApiKeyFSM(StatesGroup):
 
 class GrowthAgentFSM(StatesGroup):
     waiting_niche      = State()  # ниша/тематика (куда ищем аудиторию)
+    waiting_geo        = State()  # опциональный город/регион для локального таргетинга
     waiting_promo_text = State()  # рекламный текст для постинга в чужих группах
+    waiting_acc_count  = State()  # сколько аккаунтов задействовать (0 = все доступные)
     confirming         = State()  # подтверждение запуска
 
 

@@ -2253,7 +2253,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def growth_submit(request: web.Request) -> web.Response:
         """Growth Agent: постинг промо-текста в нишевых группах.
-        body: {niche, promo_text}
+        body: {niche, promo_text, geo?, acc_count?}
         """
         uid = _get_uid(request)
         if not uid:
@@ -2263,7 +2263,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         niche = (body.get("niche") or "").strip()
+        geo = (body.get("geo") or "").strip()[:60]
         promo_text = (body.get("promo_text") or "").strip()
+        try:
+            acc_count = max(1, min(int(body.get("acc_count") or 3), 10))
+        except (TypeError, ValueError):
+            acc_count = 3
         if not niche:
             return _err("Укажите нишу", 400)
         if not promo_text:
@@ -2284,7 +2289,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'niche_growth_post','pending',$2,5,$3) RETURNING id",
-                uid, _json.dumps({"niche": niche, "promo_text": promo_text}), label,
+                uid,
+                _json.dumps({"niche": niche, "geo": geo, "promo_text": promo_text, "acc_count": acc_count}),
+                label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
