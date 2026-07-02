@@ -86,6 +86,18 @@ def _is_admin(uid: int | None) -> bool:
     return bool(uid) and uid in _admin_ids()
 
 
+def _jlist(val) -> list:
+    """Safe JSONB→list: asyncpg may return already-parsed list or a JSON string."""
+    if isinstance(val, list):
+        return val
+    if val is None:
+        return []
+    try:
+        return json.loads(val) or []
+    except Exception:
+        return []
+
+
 def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
     import csv as _csv
     import io as _io
@@ -2256,6 +2268,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите нишу", 400)
         if not promo_text:
             return _err("Укажите рекламный текст", 400)
+        from services import content_safety
+
+        _v = await content_safety.enforce(pool, uid, niche, promo_text, surface="growth_agent")
+        if _v.blocked:
+            return _err("Контент заблокирован политикой платформы", 403)
         # Нужен хотя бы один активный аккаунт с сессией.
         has_acc = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
@@ -5809,6 +5826,145 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("presence_pack_delete uid=%d", uid)
             return _err(str(exc), 500)
 
+    def _presence_pack_dict(pack) -> dict:
+        d = dict(pack)
+        d["channel_ids"] = _jlist(pack.get("channel_ids"))
+        d["group_ids"] = _jlist(pack.get("group_ids"))
+        return d
+
+    async def presence_pack_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+            return _json_resp(_presence_pack_dict(pack))
+        except Exception as exc:
+            log.exception("presence_pack_detail uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
+    async def presence_pack_config(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+
+            if "bot_id" in body:
+                bot_id = body.get("bot_id") or None
+                bot_username = None
+                if bot_id:
+                    try:
+                        bot_id = int(bot_id)
+                    except (TypeError, ValueError):
+                        return _err("Invalid bot_id", 400)
+                    bot_row = await pool.fetchrow(
+                        "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
+                    )
+                    bot_username = bot_row["username"] if bot_row else None
+                await pool.execute(
+                    "UPDATE presence_packs SET bot_id=$3, bot_username=$4 WHERE id=$1 AND owner_id=$2",
+                    pack_id, uid, bot_id, bot_username,
+                )
+
+            if "channel_ids" in body or "group_ids" in body:
+                cur = _jlist(pack.get("channel_ids"))
+                grp = _jlist(pack.get("group_ids"))
+                channel_ids = body.get("channel_ids", cur)
+                group_ids = body.get("group_ids", grp)
+                if not isinstance(channel_ids, list) or not isinstance(group_ids, list):
+                    return _err("channel_ids/group_ids must be lists", 400)
+                await db.update_presence_pack_channels(
+                    pool, pack_id, uid,
+                    [int(x) for x in channel_ids],
+                    [int(x) for x in group_ids],
+                )
+
+            updated = await db.get_presence_pack(pool, pack_id, uid)
+            return _json_resp(_presence_pack_dict(updated))
+        except Exception as exc:
+            log.exception("presence_pack_config uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
+    async def presence_pack_seed(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+            ch_ids = _jlist(pack.get("channel_ids"))
+            if not ch_ids:
+                return _err("Нет каналов в пакете", 400)
+            from services.operation_bus import submit
+            op_id = await submit(
+                pool, uid, "seed_presence_pack", {"pack_id": pack_id},
+                total_items=len(ch_ids),
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("presence_pack_seed uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
+    async def presence_pack_promote(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pack_id = int(request.match_info["pack_id"])
+        except (KeyError, ValueError):
+            return _err("bad pack_id", 400)
+        try:
+            from database import db
+            pack = await db.get_presence_pack(pool, pack_id, uid)
+            if not pack:
+                return _err("Pack not found", 404)
+            if not pack.get("bot_id"):
+                return _err("Нет бота в пакете. Привяжите бот перед назначением admin.", 400)
+            ch_ids = _jlist(pack.get("channel_ids"))
+            gr_ids = _jlist(pack.get("group_ids"))
+            all_asset_ids = ch_ids + gr_ids
+            if not all_asset_ids:
+                return _err("Нет каналов/групп в пакете", 400)
+            from services.operation_bus import submit
+            op_id = await submit(
+                pool, uid, "promote_presence_pack",
+                {
+                    "pack_id": pack_id,
+                    "bot_tg_id": pack["bot_id"],
+                    "channel_ids": all_asset_ids,
+                },
+                total_items=len(all_asset_ids),
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("presence_pack_promote uid=%d pack_id=%d", uid, pack_id)
+            return _err(str(exc), 500)
+
     # ── Global Presence ───────────────────────────────────────────────────────
 
     async def global_presence_plans(request: web.Request) -> web.Response:
@@ -7252,6 +7408,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/presence_packs", presence_packs_list)
     app.router.add_post("/api/miniapp/presence_pack", presence_pack_create)
     app.router.add_delete("/api/miniapp/presence_pack/{pack_id}", presence_pack_delete)
+    app.router.add_get("/api/miniapp/presence_pack/{pack_id}", presence_pack_detail)
+    app.router.add_put("/api/miniapp/presence_pack/{pack_id}/config", presence_pack_config)
+    app.router.add_post("/api/miniapp/presence_pack/{pack_id}/seed", presence_pack_seed)
+    app.router.add_post("/api/miniapp/presence_pack/{pack_id}/promote", presence_pack_promote)
     # Global Presence
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)

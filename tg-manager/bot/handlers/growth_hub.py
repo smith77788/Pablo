@@ -140,7 +140,9 @@ async def on_niche_input(message: Message, state: FSMContext) -> None:
 
 
 @router.message(GrowthAgentFSM.waiting_promo_text)
-async def on_promo_text_input(message: Message, state: FSMContext) -> None:
+async def on_promo_text_input(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     promo_text = (message.text or "").strip()
     if len(promo_text) < _MIN_PROMO_TEXT:
         await message.answer(
@@ -151,6 +153,17 @@ async def on_promo_text_input(message: Message, state: FSMContext) -> None:
         await message.answer(
             f"Текст слишком длинный (максимум {_MAX_PROMO_TEXT} символов)."
         )
+        return
+
+    data = await state.get_data()
+    from services import content_safety
+
+    _v = await content_safety.enforce(
+        pool, message.from_user.id, data.get("niche", ""), promo_text,
+        surface="growth_agent",
+    )
+    if _v.blocked:
+        await message.answer(content_safety.REFUSAL_TEXT, parse_mode="HTML")
         return
 
     await state.update_data(promo_text=promo_text)

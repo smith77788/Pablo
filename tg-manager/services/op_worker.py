@@ -6878,6 +6878,17 @@ async def _exec_niche_growth_post(
     if not niche or not promo_text:
         return {"status": "failed", "reason": "Нет ниши или рекламного текста"}
 
+    # Universal content-safety backstop — Growth Agent searches for and joins
+    # groups matching `niche`, then posts `promo_text` into them, so both fields
+    # need the same CSAM/terrorism guard every other text-distribution surface has.
+    from services import content_safety
+
+    _verdict = await content_safety.enforce(
+        pool, owner_id, niche, promo_text, surface="growth_agent"
+    )
+    if _verdict.blocked:
+        return {"status": "failed", "reason": "Контент заблокирован политикой платформы"}
+
     # Выбираем до 3 прогретых аккаунтов для постинга
     accounts = await resource_selector.select_accounts(pool, owner_id, 3, action_type="post")
     if not accounts:
