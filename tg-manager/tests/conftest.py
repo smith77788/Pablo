@@ -37,33 +37,38 @@ class _Any:
         return _Any()
 
 
-class _TelethonFinder:
-    """Meta-path finder: любой импорт telethon.* отдаёт лёгкую заглушку.
+import importlib.abc
+import importlib.util
 
-    Так тесты не зависят от полного набора подмодулей telethon (network, tl.*, …).
+
+class _TelethonFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Meta-path finder (современный протокол find_spec/exec_module — работает на
+    Python 3.11 И 3.12+, где легаси find_module/load_module удалён).
+
+    Любой импорт telethon.* отдаёт лёгкую заглушку, поэтому тесты не зависят от
+    полного набора подмодулей telethon (network, tl.*, …).
     """
 
-    def find_module(self, fullname, path=None):
+    def find_spec(self, fullname, path=None, target=None):
         if fullname == "telethon" or fullname.startswith("telethon."):
-            return self
+            return importlib.util.spec_from_loader(fullname, self)
         return None
 
-    def load_module(self, fullname):
-        if fullname in sys.modules:
-            return sys.modules[fullname]
-        m = _stub(fullname)
+    def create_module(self, spec):
+        m = _stub(spec.name)
         m.__getattr__ = lambda _n: _Any()  # type: ignore[attr-defined]
         m.TelegramClient = _Any  # type: ignore[attr-defined]
         m.StringSession = _Any  # type: ignore[attr-defined]
-        sys.modules[fullname] = m
         return m
+
+    def exec_module(self, module):
+        return None
 
 
 def _install_telethon_stubs() -> None:
     if "telethon" in sys.modules:
         return
     sys.meta_path.insert(0, _TelethonFinder())
-    import telethon  # noqa: F401  (форсируем создание корня через finder)
 
 
 _install_telethon_stubs()
