@@ -2146,10 +2146,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Тип накрутки</div>
-    <div style="display:flex;gap:8px;padding:8px 0">
+    <div style="display:flex;gap:8px;padding:8px 0;flex-wrap:wrap">
       <button class="btn btn-s" id="boostTab-views" onclick="boostSetType('views')" style="flex:1;padding:9px 4px;font-size:13px">👁 Просмотры</button>
       <button class="btn btn-s" id="boostTab-reactions" onclick="boostSetType('reactions')" style="flex:1;padding:9px 4px;font-size:13px">❤ Реакции</button>
       <button class="btn btn-s" id="boostTab-stories" onclick="boostSetType('stories')" style="flex:1;padding:9px 4px;font-size:13px">📖 Сторис</button>
+      <button class="btn btn-s" id="boostTab-subscribers" onclick="boostSetType('subscribers')" style="flex:1;padding:9px 4px;font-size:13px">👥 Подписчики</button>
+      <button class="btn btn-s" id="boostTab-bot_starts" onclick="boostSetType('bot_starts')" style="flex:1;padding:9px 4px;font-size:13px">🚀 Старты в ботах</button>
     </div>
     <div style="padding:8px 0">
       <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
@@ -2157,6 +2159,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field" id="boostF-msgid"><label>ID сообщения</label><input type="number" id="boostMsgId" placeholder="123" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
       <div class="field" id="boostF-emoji"><label>Эмодзи реакции</label><input type="text" id="boostEmoji" value="👍" maxlength="8"></div>
       <div class="field" id="boostF-target"><label>Цель — чьи сторис смотреть (@username)</label><input type="text" id="boostTarget" placeholder="@username"></div>
+      <div class="field" id="boostF-subtarget"><label>Канал/группа для вступления (@username или t.me/+hash)</label><input type="text" id="boostSubTarget" placeholder="@channel или t.me/+hash"></div>
+      <div class="field" id="boostF-botuser"><label>@username бота</label><input type="text" id="boostBotUsername" placeholder="@mybot"></div>
+      <div class="field" id="boostF-payload"><label>Deep-link payload для /start (опционально)</label><input type="text" id="boostPayload" placeholder="ref_XXXX"></div>
+      <div class="field" id="boostF-premium" style="display:none">
+        <label>Фильтр аккаунтов</label>
+        <select id="boostPremiumOnly" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="0">👤 Все аккаунты</option>
+          <option value="1">💎 Только Premium</option>
+        </select>
+      </div>
       <div class="field"><label>Количество аккаунтов (0 = все доступные)</label><input type="number" id="boostAccCount" value="0" min="0" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
       <div class="field-err" id="boostErr"></div>
       <button class="btn btn-p" id="boostBtn" onclick="submitBoost()" style="width:100%">🚀 Запустить</button>
@@ -6759,7 +6771,7 @@ async function submitReporter() {
 let BOOST_TYPE = 'views';
 function boostSetType(t) {
   BOOST_TYPE = t;
-  ['views','reactions','stories'].forEach(x=>{
+  ['views','reactions','stories','subscribers','bot_starts'].forEach(x=>{
     const tab=document.getElementById('boostTab-'+x);
     if(tab) tab.className = 'btn '+(x===t?'btn-p':'btn-s');
   });
@@ -6770,6 +6782,10 @@ function boostSetType(t) {
   show('boostF-msgid', t==='reactions');
   show('boostF-emoji', t==='reactions');
   show('boostF-target', t==='stories');
+  show('boostF-subtarget', t==='subscribers');
+  show('boostF-botuser', t==='bot_starts');
+  show('boostF-payload', t==='bot_starts');
+  show('boostF-premium', t==='subscribers'||t==='bot_starts');
 }
 async function openBoost() {
   push('s-boost');
@@ -6778,8 +6794,8 @@ async function openBoost() {
   txt('boostHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>['boost_views','boost_reactions','boost_stories'].includes(o.op_type)).slice(0,10);
-    const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖'};
+    const ops = (d.operations||[]).filter(o=>['boost_views','boost_reactions','boost_stories','boost_subscribers','boost_bot_starts'].includes(o.op_type)).slice(0,10);
+    const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖',boost_subscribers:'👥',boost_bot_starts:'🚀'};
     txt('boostHistory', ops.length ? ops.map(o=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(59,130,246,.16)">${ICO[o.op_type]||'🚀'}</div>
@@ -6806,9 +6822,18 @@ async function submitBoost() {
     payload.msg_id=parseInt(document.getElementById('boostMsgId').value)||0;
     payload.emoji=document.getElementById('boostEmoji').value.trim()||'👍';
     if(!payload.channel||!payload.msg_id){ errEl.textContent='Укажите канал и ID сообщения'; return; }
-  } else {
+  } else if (BOOST_TYPE==='stories') {
     payload.target=document.getElementById('boostTarget').value.trim();
     if(!payload.target){ errEl.textContent='Укажите цель'; return; }
+  } else if (BOOST_TYPE==='subscribers') {
+    payload.target=document.getElementById('boostSubTarget').value.trim();
+    payload.premium_only=document.getElementById('boostPremiumOnly').value==='1';
+    if(!payload.target){ errEl.textContent='Укажите канал/группу'; return; }
+  } else { // bot_starts
+    payload.bot_username=document.getElementById('boostBotUsername').value.trim();
+    payload.payload=document.getElementById('boostPayload').value.trim();
+    payload.premium_only=document.getElementById('boostPremiumOnly').value==='1';
+    if(!payload.bot_username){ errEl.textContent='Укажите @username бота'; return; }
   }
   const btn=document.getElementById('boostBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
@@ -9236,7 +9261,8 @@ const MASS_OP_LABELS = {
   bulk_update_profile:'🎨 Обновление профилей', bulk_edit_channels:'✏️ Ред. каналов',
   bulk_chan_exec:'✏️ Username/About', bulk_create_channels:'📡 Создание каналов',
   bulk_dm_adhoc:'📨 Рассылка ЛС', boost_views:'👁 Просмотры', boost_reactions:'❤ Реакции',
-  boost_stories:'📖 Сторис', niche_growth_post:'🌿 Growth Agent',
+  boost_stories:'📖 Сторис', boost_subscribers:'👥 Подписчики/участники', boost_bot_starts:'🚀 Старты в ботах',
+  niche_growth_post:'🌿 Growth Agent',
   check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
   channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',

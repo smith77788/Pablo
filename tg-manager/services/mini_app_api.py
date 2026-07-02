@@ -2158,8 +2158,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp(report)
 
     async def boost_submit(request: web.Request) -> web.Response:
-        """Накрутка: просмотры / реакции / сторис через аккаунты владельца.
-        body: {type: views|reactions|stories, channel|target, msg_ids|msg_id, emoji, acc_count}
+        """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах.
+        body: {type: views|reactions|stories|subscribers|bot_starts, channel|target,
+               msg_ids|msg_id, emoji, bot_username, payload, premium_only, acc_count}
         """
         uid = _get_uid(request)
         if not uid:
@@ -2169,7 +2170,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         btype = (body.get("type") or "").strip()
-        if btype not in ("views", "reactions", "stories"):
+        if btype not in ("views", "reactions", "stories", "subscribers", "bot_starts"):
             return _err("Неверный тип накрутки", 400)
         try:
             acc_count = int(body.get("acc_count") or 0)
@@ -2231,7 +2232,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params = {"channel": channel, "msg_id": msg_id, "emoji": emoji, "account_ids": account_ids}
             total = len(account_ids)
             label = f"Реакции {emoji}: {channel} × {len(account_ids)} акк."
-        else:  # stories
+        elif btype == "stories":
             target = (body.get("target") or "").strip()
             if not target:
                 return _err("Укажите цель (@username)", 400)
@@ -2239,13 +2240,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params = {"target": target, "account_ids": account_ids}
             total = len(account_ids)
             label = f"Сторис: {target} × {len(account_ids)} акк."
+        elif btype == "subscribers":
+            from services.boost_engine import parse_channel_ref
+            target = parse_channel_ref((body.get("target") or "").strip())
+            premium_only = bool(body.get("premium_only"))
+            if not target:
+                return _err("Укажите канал/группу (@username или t.me/link)", 400)
+            op_type = "boost_subscribers"
+            params = {"target": target, "account_ids": account_ids, "premium_only": premium_only}
+            total = len(account_ids)
+            prem_suffix = " (только Premium)" if premium_only else ""
+            label = f"Подписчики/участники: {target} × {len(account_ids)} акк.{prem_suffix}"
+        else:  # bot_starts
+            from services.boost_engine import parse_channel_ref
+            bot_username = parse_channel_ref((body.get("bot_username") or "").strip()).lstrip("@")
+            payload = (body.get("payload") or "").strip() or None
+            premium_only = bool(body.get("premium_only"))
+            if not bot_username:
+                return _err("Укажите @username бота", 400)
+            op_type = "boost_bot_starts"
+            params = {
+                "bot_username": bot_username,
+                "payload": payload,
+                "account_ids": account_ids,
+                "premium_only": premium_only,
+            }
+            total = len(account_ids)
+            prem_suffix = " (только Premium)" if premium_only else ""
+            label = f"Старты в боте: @{bot_username} × {len(account_ids)} акк.{prem_suffix}"
 
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
-                uid, op_type, _json.dumps(params), total, label,
-            )
+            if op_type in ("boost_subscribers", "boost_bot_starts"):
+                from services import operation_bus
+                op_id = await operation_bus.submit(pool, uid, op_type, params, total_items=total)
+            else:
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
+                    uid, op_type, _json.dumps(params), total, label,
+                )
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "accounts": len(account_ids)})
         except Exception as exc:
             log.exception("boost_submit uid=%d type=%s", uid, btype)
