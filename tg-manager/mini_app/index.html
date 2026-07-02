@@ -1119,6 +1119,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ PRESENCE PACK — DETAIL/EDIT ══════════════════════ -->
+<div class="screen" id="s-pp-detail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="ppDetail-name">Связка</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Бот-администратор</div>
+    <div class="lst" id="ppDetailBot"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec">Каналы (<span id="ppChCount">0</span> выбрано)</div>
+    <div class="lst" id="ppDetailChannels"></div>
+    <div class="sec">Группы (<span id="ppGrCount">0</span> выбрано)</div>
+    <div class="lst" id="ppDetailGroups"></div>
+    <div style="display:flex;gap:8px;margin:12px 0">
+      <button class="btn btn-p" id="ppSaveBtn" style="flex:1" onclick="savePresencePackConfig()">💾 Сохранить</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-s" style="flex:1" onclick="seedPresencePack()">🌱 Посеять посты</button>
+      <button class="btn btn-s" style="flex:1" onclick="promotePresencePack()">👑 Бот → admin</button>
+    </div>
+    <div class="field-err" id="ppDetailErr"></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div></div>
@@ -9025,7 +9049,7 @@ async function openPresencePacks() {
     const rows = await api('/api/miniapp/presence_packs');
     if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
-      <div class="row">
+      <div class="row tap" onclick="openPpDetail(${r.id},'${esc(r.name)}')">
         <div class="row-ico" style="background:rgba(168,85,247,.16)">📦</div>
         <div class="row-body">
           <div class="row-name">${esc(r.name)}</div>
@@ -9034,12 +9058,101 @@ async function openPresencePacks() {
           ${r.target_url?`<div class="row-val" style="color:var(--hint)">${esc(r.target_url)}</div>`:''}
         </div>
         <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="deletePresencePack(${r.id},this)">✕</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="event.stopPropagation();deletePresencePack(${r.id},this)">✕</button>
+          <span class="chev">›</span>
         </div>
       </div>
     `).join(''));
     document.getElementById('m-pp-val').textContent = rows.length+' пакетов';
   } catch(e) { txt('ppList', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Presence Pack — detail/edit ─────────────────────────
+let PP_DETAIL_ID = null;
+let PP_BOT_SEL = null;
+let PP_CH_SEL = new Set();
+let PP_GR_SEL = new Set();
+function _ppGroupTypes(t) { return t==='megagroup' || t==='supergroup' || t==='group'; }
+async function openPpDetail(packId, packName) {
+  PP_DETAIL_ID = packId;
+  push('s-pp-detail');
+  document.getElementById('ppDetail-name').textContent = '📦 ' + packName;
+  txt('ppDetailErr','');
+  txt('ppDetailBot','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('ppDetailChannels','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('ppDetailGroups','');
+  try {
+    const [pack, botsD, chD] = await Promise.all([
+      api(`/api/miniapp/presence_pack/${packId}`),
+      api('/api/miniapp/bots'),
+      api('/api/miniapp/channels'),
+    ]);
+    PP_BOT_SEL = pack.bot_id || null;
+    PP_CH_SEL = new Set(pack.channel_ids||[]);
+    PP_GR_SEL = new Set(pack.group_ids||[]);
+    const bots = botsD.bots||[];
+    txt('ppDetailBot', bots.length ? bots.map(b=>`
+      <div class="row tap" onclick="_ppPickBot(${b.bot_id})">
+        <div class="row-ico" id="ppb-${b.bot_id}" style="background:${PP_BOT_SEL===b.bot_id?'rgba(34,197,94,.16)':'rgba(59,130,246,.16)'}">${PP_BOT_SEL===b.bot_id?'✅':'🤖'}</div>
+        <div class="row-body"><div class="row-name">${b.username?'@'+esc(b.username):esc(b.first_name||'Бот')}</div></div>
+      </div>
+    `).join('') : empty('🤖','Нет ботов',''));
+    const chans = (chD.channels||[]).filter(c=>!_ppGroupTypes(c.type));
+    const groups = (chD.channels||[]).filter(c=>_ppGroupTypes(c.type));
+    const rowHtml = (c, sel, kind) => `
+      <div class="row tap" onclick="_ppToggle(${c.id},'${kind}')">
+        <div class="row-ico" id="pp${kind}-${c.id}" style="background:${sel.has(c.id)?'rgba(34,197,94,.16)':'rgba(59,130,246,.16)'}">${sel.has(c.id)?'✅':(kind==='ch'?'📢':'👥')}</div>
+        <div class="row-body"><div class="row-name">${esc(c.title||c.username||('#'+c.id))}</div></div>
+      </div>`;
+    txt('ppDetailChannels', chans.length ? chans.map(c=>rowHtml(c,PP_CH_SEL,'ch')).join('') : empty('📢','Нет каналов',''));
+    txt('ppDetailGroups', groups.length ? groups.map(c=>rowHtml(c,PP_GR_SEL,'gr')).join('') : empty('👥','Нет групп',''));
+    txt('ppChCount', PP_CH_SEL.size);
+    txt('ppGrCount', PP_GR_SEL.size);
+  } catch(e) { txt('ppDetailChannels', empty('⚠️','Ошибка',e.message)); }
+}
+function _ppPickBot(botId) {
+  PP_BOT_SEL = botId;
+  document.querySelectorAll('#ppDetailBot .row-ico').forEach(el=>{
+    const id = parseInt(el.id.replace('ppb-',''));
+    el.style.background = id===botId ? 'rgba(34,197,94,.16)' : 'rgba(59,130,246,.16)';
+    el.textContent = id===botId ? '✅' : '🤖';
+  });
+}
+function _ppToggle(id, kind) {
+  const sel = kind==='ch' ? PP_CH_SEL : PP_GR_SEL;
+  const ico = document.getElementById(`pp${kind}-${id}`);
+  if (sel.has(id)) { sel.delete(id); if(ico){ico.style.background='rgba(59,130,246,.16)'; ico.textContent=kind==='ch'?'📢':'👥';} }
+  else { sel.add(id); if(ico){ico.style.background='rgba(34,197,94,.16)'; ico.textContent='✅';} }
+  txt(kind==='ch'?'ppChCount':'ppGrCount', sel.size);
+}
+async function savePresencePackConfig() {
+  if (!PP_DETAIL_ID) return;
+  const btn = document.getElementById('ppSaveBtn');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Сохраняю…';
+  txt('ppDetailErr','');
+  try {
+    await api(`/api/miniapp/presence_pack/${PP_DETAIL_ID}/config`,{method:'PUT',body:JSON.stringify({
+      bot_id: PP_BOT_SEL, channel_ids:[...PP_CH_SEL], group_ids:[...PP_GR_SEL],
+    })});
+    toast('✅ Сохранено');
+  } catch(e) { document.getElementById('ppDetailErr').textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+async function seedPresencePack() {
+  if (!PP_DETAIL_ID) return;
+  txt('ppDetailErr','');
+  try {
+    const r = await api(`/api/miniapp/presence_pack/${PP_DETAIL_ID}/seed`,{method:'POST'});
+    toast(`⏳ Посев поставлен в очередь (#${r.op_id})`);
+  } catch(e) { document.getElementById('ppDetailErr').textContent = e.message; }
+}
+async function promotePresencePack() {
+  if (!PP_DETAIL_ID) return;
+  txt('ppDetailErr','');
+  try {
+    const r = await api(`/api/miniapp/presence_pack/${PP_DETAIL_ID}/promote`,{method:'POST'});
+    toast(`⏳ Назначение бота поставлено в очередь (#${r.op_id})`);
+  } catch(e) { document.getElementById('ppDetailErr').textContent = e.message; }
 }
 
 // ── Global Presence ────────────────────────────────────
