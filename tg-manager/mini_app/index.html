@@ -1650,6 +1650,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <option value="counter">⚔️ Контр-нарратив</option>
     </select></div>
     <div class="field"><label>Распределить за (часов)</label><input id="nc-hours" type="number" min="1" max="168" value="4" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    <div class="sec" style="margin-top:4px">Каналы кампании</div>
+    <div style="color:var(--hint);font-size:12px;padding:2px 0 6px">Каждый выбранный канал получит уникальный пост со своим углом подачи.</div>
+    <div class="lst" id="nc-channels" style="max-height:200px;overflow-y:auto"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div style="padding:6px 0;color:#a78bfa;font-size:13px" id="nc-selcount">Выбрано: 0 каналов</div>
     <div class="field-err" id="nc-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-narrative')" style="flex:1">Отмена</button>
@@ -3453,6 +3457,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Ключевое слово</label><input type="text" id="promoKw" placeholder="Напр: игровой бот"></div>
     <div class="field"><label>Целевая позиция (1-50)</label><input type="number" id="promoPos" min="1" max="50" value="1"></div>
     <div class="field"><label>Кол-во подписчиков (целевое)</label><input type="number" id="promoSubs" min="0" placeholder="Не обязательно"></div>
+    <div class="field"><label>Бот со склада (для накрутки)</label><select id="promoOrderBot" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">— не выбран —</option></select></div>
+    <div class="field"><label>SMM-панель</label><select id="promoOrderPanel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">— не выбрана —</option></select></div>
+    <div style="color:var(--hint);font-size:12px;padding:2px 0 6px">Бот и панель нужны для запуска накрутки. Панели добавляются через Telegram-бота командой /promo.</div>
     <div class="field-err" id="promoOrderErr"></div>
     <button class="btn btn-p" id="promoOrderBtn" onclick="savePromoOrder()" style="width:100%">➕ Создать заказ</button>
   </div>
@@ -8760,7 +8767,10 @@ function renderPromoTab(tab) {
         <div class="row-val">${ORDER_STATUS[o.status]||o.status} · Топ-${o.target_position}${o.current_subs?` · ${num(o.current_subs)}/${num(o.target_subs)} подп.`:''}</div>
         <div class="row-val" style="color:#555">${ago(o.created_at)}</div>
       </div>
-      ${o.status!=='cancelled'&&o.status!=='transferred'?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})">✕</button></div>`:''}
+      <div class="row-right" style="display:flex;gap:6px">
+        ${o.status==='waiting'&&o.bot_id&&o.smm_panel_id?`<button class="btn btn-p" style="padding:5px 10px;min-width:0;font-size:12px" onclick="boostPromoOrder(${o.id})">🚀</button>`:''}
+        ${o.status!=='cancelled'&&o.status!=='transferred'?`<button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})">✕</button>`:''}
+      </div>
     </div>
   `).join(''));
   if (!bots.length) txt('promoBotList', empty('📦','Склад пуст','Добавьте бот для продвижения'));
@@ -8793,6 +8803,12 @@ function openPromoOrderModal() {
   document.getElementById('promoPos').value='1';
   document.getElementById('promoSubs').value='';
   document.getElementById('promoOrderErr').textContent='';
+  const botSel = document.getElementById('promoOrderBot');
+  const panelSel = document.getElementById('promoOrderPanel');
+  const bots = (PROMO_DATA&&PROMO_DATA.bots||[]).filter(b=>b.status!=='transferred');
+  const panels = (PROMO_DATA&&PROMO_DATA.panels||[]).filter(p=>p.is_active);
+  botSel.innerHTML = '<option value="">— не выбран —</option>' + bots.map(b=>`<option value="${b.id}">@${esc(b.bot_username)} (${BOT_STATUS[b.status]||b.status})</option>`).join('');
+  panelSel.innerHTML = '<option value="">— не выбрана —</option>' + panels.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   document.getElementById('promoOrderMbg').classList.add('show');
 }
 function closePromoOrderModal() { document.getElementById('promoOrderMbg').classList.remove('show'); }
@@ -8800,18 +8816,28 @@ async function savePromoOrder() {
   const keyword = document.getElementById('promoKw').value.trim();
   const target_position = parseInt(document.getElementById('promoPos').value)||1;
   const target_subs = parseInt(document.getElementById('promoSubs').value)||null;
+  const bot_id = parseInt(document.getElementById('promoOrderBot').value)||null;
+  const smm_panel_id = parseInt(document.getElementById('promoOrderPanel').value)||null;
   const errEl = document.getElementById('promoOrderErr');
   errEl.textContent='';
   if (!keyword) { errEl.textContent='Введите ключевое слово'; return; }
   const btn = document.getElementById('promoOrderBtn');
   btn.disabled=true; btn.textContent='Создаю…';
   try {
-    const r = await api('/api/miniapp/promo/order', {method:'POST', body:JSON.stringify({keyword, target_position, target_subs})});
+    const r = await api('/api/miniapp/promo/order', {method:'POST', body:JSON.stringify({keyword, target_position, target_subs, bot_id, smm_panel_id})});
     closePromoOrderModal();
     toast(`✅ Заказ #${r.order_id} создан`);
     loadPromo();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='➕ Создать заказ'; }
+}
+async function boostPromoOrder(orderId) {
+  if (!await askConfirm('Запустить накрутку по заказу?')) return;
+  try {
+    const r = await api('/api/miniapp/promo/order/'+orderId+'/boost', {method:'POST'});
+    toast(`🚀 Накрутка запущена (SMM #${r.smm_order_id})`);
+    loadPromo();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 function openPromoBotModal() {
   document.getElementById('promoBotUsername').value='';
@@ -9837,7 +9863,40 @@ async function openNarrativeDetail(cid, topic) {
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',e.message)); }
 }
 
-function openNarrativeModal() { showModal('mo-narrative'); }
+let NC_CHANNELS_SELECTED = new Set();
+async function openNarrativeModal() {
+  NC_CHANNELS_SELECTED = new Set();
+  txt('nc-selcount', 'Выбрано: 0 каналов');
+  txt('nc-channels', '<div class="spin-wrap"><div class="spin"></div></div>');
+  showModal('mo-narrative');
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels||[];
+    if (!chs.length) { txt('nc-channels', empty('📢','Нет каналов','Добавьте каналы в разделе «Каналы»')); return; }
+    txt('nc-channels', chs.map(c=>`
+      <div class="row tap" onclick="toggleNcChannel(${c.id})">
+        <div class="row-ico" id="ncc-${c.id}" style="background:rgba(59,130,246,.16)">📢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username):''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('nc-channels', empty('⚠️','Ошибка',e.message));
+  }
+}
+function toggleNcChannel(id) {
+  const ico = document.getElementById('ncc-'+id);
+  if (NC_CHANNELS_SELECTED.has(id)) {
+    NC_CHANNELS_SELECTED.delete(id);
+    if (ico) { ico.textContent='📢'; ico.style.background='rgba(59,130,246,.16)'; }
+  } else {
+    NC_CHANNELS_SELECTED.add(id);
+    if (ico) { ico.textContent='✅'; ico.style.background='rgba(34,197,94,.16)'; }
+  }
+  txt('nc-selcount', `Выбрано: ${NC_CHANNELS_SELECTED.size} каналов`);
+}
 async function submitNarrativeCreate() {
   const errEl = document.getElementById('nc-err');
   errEl.textContent = '';
@@ -9847,12 +9906,13 @@ async function submitNarrativeCreate() {
   const spread_hours = parseInt(document.getElementById('nc-hours').value)||4;
   if (!topic) { errEl.textContent='Введите тему'; return; }
   if (!core_message) { errEl.textContent='Введите послание'; return; }
+  if (NC_CHANNELS_SELECTED.size===0) { errEl.textContent='Выберите хотя бы один канал'; return; }
   try {
     await api('/api/miniapp/narrative',{method:'POST',body:JSON.stringify({
-      topic, core_message, campaign_type, spread_hours
+      topic, core_message, campaign_type, spread_hours, channel_ids:[...NC_CHANNELS_SELECTED]
     })});
     closeModal('mo-narrative');
-    toast('✅ Нарратив создан (черновик)');
+    toast('✅ Нарратив-кампания запущена');
     openNarrative();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }

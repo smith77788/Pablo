@@ -4628,7 +4628,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             orders = await pool.fetch(
-                "SELECT id, keyword, status, target_position, current_subs, target_subs, created_at "
+                "SELECT id, keyword, status, target_position, current_subs, target_subs, "
+                "bot_id, smm_panel_id, created_at "
                 "FROM promo_orders WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
                 uid,
             )
@@ -4652,6 +4653,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "target_position": r["target_position"],
                     "current_subs": r["current_subs"],
                     "target_subs": r["target_subs"],
+                    "bot_id": r["bot_id"],
+                    "smm_panel_id": r["smm_panel_id"],
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
                 for r in orders
@@ -4722,6 +4725,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("promo_create_order uid=%d", uid)
             return _err(str(exc), 500)
         return _json_resp({"ok": True, "order_id": order_id})
+
+    async def promo_order_boost(request: web.Request) -> web.Response:
+        """Отправить заказ в SMM-панель — то же самое, что кнопка «🚀 Накрутить»
+        в боте (promo_platform.py:cb_order_boost). Раньше в mini_app не было
+        способа привязать заказ к боту/панели или запустить накрутку — заказ,
+        созданный тут, навсегда оставался в статусе 'waiting'."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            order_id = int(request.match_info["order_id"])
+        except (KeyError, ValueError):
+            return _err("bad order_id", 400)
+
+        from database import db
+        from services import smm_panel as smm_svc
+
+        order = await db.promo_get_order(pool, order_id)
+        if not order or order["owner_id"] != uid:
+            return _err("Заказ не найден", 404)
+        if not order["bot_id"] or not order["smm_panel_id"]:
+            return _err("У заказа не выбраны бот и SMM-панель", 400)
+
+        panel = await db.smm_get_panel(pool, order["smm_panel_id"])
+        if not panel:
+            return _err("SMM-панель не найдена", 404)
+        bot_rec = await db.warehouse_get_bot(pool, order["bot_id"])
+        if not bot_rec:
+            return _err("Бот не найден в складе", 404)
+
+        link = f"https://t.me/{bot_rec['bot_username']}"
+        client = smm_svc.make_client(panel["api_url"], panel["api_key_enc"])
+        result = await client.add_order(
+            service_id=panel["service_id"] or "",
+            link=link,
+            quantity=int(order["target_subs"] or 100),
+        )
+        if result.get("error") or "order" not in result:
+            err_msg = result.get("error", str(result)[:200])
+            await db.promo_log(
+                pool, uid, "booster",
+                f"Ошибка запуска накрутки заказ #{order['id']}: {err_msg}",
+                level="ERROR", order_id=order["id"],
+                meta={"panel": panel["name"], "link": link},
+            )
+            return _err(f"Ошибка панели: {str(err_msg)[:300]}", 502)
+
+        smm_order_id = str(result["order"])
+        await db.promo_update_order_status(
+            pool, order["id"], "boosting",
+            smm_order_id=smm_order_id,
+            smm_panel_id=panel["id"],
+        )
+        await db.warehouse_update_bot(pool, bot_rec["id"], uid, status="working")
+        await db.promo_log(
+            pool, uid, "booster",
+            f"Накрутка запущена: заказ #{order['id']} → панель #{smm_order_id}",
+            order_id=order["id"],
+            meta={"panel": panel["name"], "smm_order_id": smm_order_id, "link": link},
+        )
+        return _json_resp({"ok": True, "smm_order_id": smm_order_id})
 
     async def promo_add_warehouse_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6698,6 +6762,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def narrative_campaign_create(request: web.Request) -> web.Response:
+        """Создаёт и сразу запускает кампанию (как мастер в боте) — а не пустой
+        черновик: без выбранных каналов посты некому публиковать, и раньше
+        кампания, созданная тут, навсегда оставалась 'draft' с 0 постов."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -6709,18 +6776,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         core_message = str(data.get("core_message", "")).strip()
         campaign_type = data.get("campaign_type", "trend")
         spread_hours = int(data.get("spread_hours", 4))
+        channel_ids = data.get("channel_ids") or []
         if not topic or not core_message:
             return _err("topic и core_message обязательны", 400)
+        if not channel_ids:
+            return _err("Выберите хотя бы один канал", 400)
         if campaign_type not in ("trend", "launch", "awareness", "counter"):
             campaign_type = "trend"
         if spread_hours < 1:
             spread_hours = 1
         try:
-            cid = await pool.fetchval(
-                """INSERT INTO narrative_campaigns
-                   (owner_id, topic, core_message, campaign_type, spread_hours, status)
-                   VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id""",
-                uid, topic, core_message, campaign_type, spread_hours,
+            req_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
+        except (TypeError, ValueError):
+            req_ids = []
+        rows = await _safe_fetch(pool,
+            "SELECT channel_id, acc_id, username, title FROM managed_channels "
+            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, req_ids)
+        if not rows:
+            return _err("Каналы не найдены", 404)
+
+        from services.ai_providers import configured_providers
+        from services import narrative_engine
+        providers = configured_providers()
+        ai_provider = providers[0] if providers else None
+        if ai_provider is None:
+            return _err("AI-провайдер не настроен — добавьте API-ключ в Настройках", 400)
+
+        channel_usernames = [r["username"] or str(r["channel_id"]) for r in rows]
+        channel_meta = [{"channel_id": r["channel_id"], "acc_id": r["acc_id"]} for r in rows]
+        try:
+            cid = await narrative_engine.create_campaign(
+                pool=pool,
+                owner_id=uid,
+                topic=topic,
+                core_message=core_message,
+                channel_usernames=channel_usernames,
+                channel_meta=channel_meta,
+                spread_hours=spread_hours,
+                campaign_type=campaign_type,
+                ai_provider=ai_provider,
             )
             return _json_resp({"id": cid, "ok": True})
         except Exception as exc:
@@ -7340,6 +7434,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/promo", promo_overview)
     app.router.add_post("/api/miniapp/promo/order", promo_create_order_api)
     app.router.add_post("/api/miniapp/promo/order/{order_id}/cancel", promo_cancel_order)
+    app.router.add_post("/api/miniapp/promo/order/{order_id}/boost", promo_order_boost)
     app.router.add_post("/api/miniapp/promo/warehouse/bot", promo_add_warehouse_bot)
     # Error Reports
     app.router.add_post("/api/miniapp/error_report", submit_error_report)
