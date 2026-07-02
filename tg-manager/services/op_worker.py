@@ -667,6 +667,71 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
 
 
+# Алертинг о застрявших операциях (наблюдаемость очереди).
+_STUCK_PENDING_MIN = 15   # pending дольше N минут = очередь не разбирается
+_LONG_RUNNING_MIN = 45    # running дольше N минут = вероятно завис (до reset на 60)
+_alerted_stuck_ops: set[int] = set()
+
+
+async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
+    """Детектирует застрявшие операции и шлёт разовый алерт админам.
+
+    - pending > _STUCK_PENDING_MIN: очередь не разбирается (перегруз/неизвестный op_type)
+    - running > _LONG_RUNNING_MIN: вероятно завис (приближается к авто-reset)
+    Дедуп по op_id (_alerted_stuck_ops), чтобы не спамить.
+    """
+    try:
+        rows = await pool.fetch(
+            """SELECT id, op_type, status, owner_id,
+                      EXTRACT(EPOCH FROM (now() - COALESCE(started_at, created_at)))/60 AS age_min
+               FROM operation_queue
+               WHERE (status='pending'  AND created_at < now() - make_interval(mins => $1))
+                  OR (status='running'  AND started_at < now() - make_interval(mins => $2))
+               ORDER BY age_min DESC
+               LIMIT 20""",
+            _STUCK_PENDING_MIN, _LONG_RUNNING_MIN,
+        )
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker alerts query error: {e}")
+        return
+
+    fresh = [r for r in rows if int(r["id"]) not in _alerted_stuck_ops]
+    if not fresh:
+        # подчистим множество от уже завершённых, чтобы не росло бесконечно
+        if len(_alerted_stuck_ops) > 500:
+            _alerted_stuck_ops.clear()
+        return
+
+    for r in fresh:
+        _alerted_stuck_ops.add(int(r["id"]))
+    log.warning("op_worker: %d stuck operations detected: %s",
+                len(fresh), [(int(r["id"]), r["status"]) for r in fresh])
+
+    try:
+        from bot.utils.subscription import _admin_ids
+        admin_ids = _admin_ids()
+    except Exception:
+        admin_ids = set()
+    if not admin_ids:
+        return
+
+    lines = ["⚠️ <b>Застрявшие операции</b>\n"]
+    for r in fresh[:10]:
+        icon = "🕐" if r["status"] == "pending" else "⏳"
+        lines.append(
+            f"{icon} #{r['id']} <code>{r['op_type']}</code> — "
+            f"{r['status']} {int(r['age_min'])} мин (owner {r['owner_id']})"
+        )
+    lines.append("\n<i>pending не разбирается → проверьте воркер/op_type; "
+                 "running зависло → будет авто-сброшено.</i>")
+    text = "\n".join(lines)
+    for aid in admin_ids:
+        try:
+            await bot.send_message(aid, text, parse_mode="HTML")
+        except Exception:
+            log_exc_swallow(log, f"op_worker alert send to {aid} failed")
+
+
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py."""
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
@@ -683,6 +748,9 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         # Run stale-running watchdog every 6 poll cycles (~1 minute)
         if _watchdog_tick % 6 == 0:
             await _watchdog_stale(pool)
+        # Alert admins about stuck operations every ~5 minutes (30 cycles)
+        if _watchdog_tick % 30 == 0:
+            await _watchdog_alerts(pool, bot)
         await asyncio.sleep(_POLL_INTERVAL)
 
 
