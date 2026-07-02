@@ -125,6 +125,118 @@ def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
         pass
 
 
+# ── Proxy Intelligence (интеллект прокси) ───────────────────────────────────
+# Автотест, автопереключение, статистика, рекомендации.
+
+_proxy_stats: dict[str, dict] = {}  # proxy_url → {success, fail, avg_latency, last_check}
+
+
+async def test_proxy(proxy_url: str, timeout: float = 5.0) -> dict:
+    """Test proxy connectivity and latency. Returns {ok, latency_ms, error}."""
+    if not proxy_url:
+        return {"ok": False, "error": "No proxy URL"}
+    
+    try:
+        import socks
+        import socket
+        
+        # Parse proxy URL
+        parsed = _parse_proxy(proxy_url)
+        if not parsed:
+            return {"ok": False, "error": "Invalid proxy URL format"}
+        
+        # Create SOCKS proxy socket
+        s = socks.socksocket()
+        s.set_proxy(parsed[0], parsed[1], parsed[2], rdns=True, 
+                    username=parsed[4], password=parsed[5])
+        s.settimeout(timeout)
+        
+        # Test connection to Telegram DC
+        t0 = time.time()
+        s.connect(("149.154.167.50", 443))  # Telegram DC1
+        latency_ms = int((time.time() - t0) * 1000)
+        s.close()
+        
+        # Record success
+        _record_proxy_stat(proxy_url, True, latency_ms)
+        
+        return {"ok": True, "latency_ms": latency_ms}
+    except Exception as e:
+        _record_proxy_stat(proxy_url, False, 0)
+        return {"ok": False, "error": str(e)[:100]}
+
+
+def _record_proxy_stat(proxy_url: str, success: bool, latency_ms: int) -> None:
+    """Record proxy test result for statistics."""
+    stats = _proxy_stats.setdefault(proxy_url, {
+        "success": 0, "fail": 0, "latencies": [], "last_check": 0
+    })
+    if success:
+        stats["success"] += 1
+        stats["latencies"].append(latency_ms)
+        # Keep last 20 latencies
+        if len(stats["latencies"]) > 20:
+            stats["latencies"] = stats["latencies"][-20:]
+    else:
+        stats["fail"] += 1
+    stats["last_check"] = time.time()
+
+
+def get_proxy_stats(proxy_url: str) -> dict:
+    """Get proxy statistics: success_rate, avg_latency, total_checks."""
+    stats = _proxy_stats.get(proxy_url, {})
+    total = stats.get("success", 0) + stats.get("fail", 0)
+    if total == 0:
+        return {"success_rate": 0, "avg_latency_ms": 0, "total_checks": 0}
+    
+    latencies = stats.get("latencies", [])
+    avg_latency = sum(latencies) // len(latencies) if latencies else 0
+    
+    return {
+        "success_rate": round(stats["success"] / total * 100, 1),
+        "avg_latency_ms": avg_latency,
+        "total_checks": total,
+        "last_check": stats.get("last_check", 0),
+    }
+
+
+async def auto_select_proxy(account_id: int, pool: "asyncpg.Pool") -> str | None:
+    """Auto-select best proxy for account based on statistics and latency."""
+    # Get account's current proxy
+    acc = await pool.fetchrow(
+        "SELECT proxy_id FROM tg_accounts WHERE id=$1", account_id
+    )
+    if not acc or not acc["proxy_id"]:
+        return None
+    
+    proxy = await pool.fetchrow(
+        "SELECT id, proxy_url, is_active FROM user_proxies WHERE id=$1",
+        acc["proxy_id"],
+    )
+    if not proxy or not proxy["is_active"]:
+        return None
+    
+    # Test current proxy
+    result = await test_proxy(proxy["proxy_url"])
+    if result["ok"]:
+        return proxy["proxy_url"]
+    
+    # Current proxy failed — try to find a better one
+    alternatives = await pool.fetch(
+        "SELECT proxy_url FROM user_proxies WHERE is_active=TRUE AND id != $1",
+        acc["proxy_id"],
+    )
+    
+    for alt in alternatives:
+        alt_result = await test_proxy(alt["proxy_url"])
+        if alt_result["ok"]:
+            log.info("proxy_intelligence: acc=%d switching proxy %d→%s (latency=%dms)",
+                     account_id, acc["proxy_id"], alt["proxy_url"][:20], alt_result["latency_ms"])
+            return alt["proxy_url"]
+    
+    return None  # No working proxy found
+
+
 _TG_PUBLIC_RE = re.compile(
     r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:s/)?([A-Za-z0-9_]{5,32})(?:[/?#].*)?$",
     re.IGNORECASE,
