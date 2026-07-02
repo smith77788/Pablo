@@ -442,6 +442,12 @@ async def _maybe_requeue(
     """
     Если ошибка ретраевая и retry_count < max_retries — сбросить операцию в pending.
     Возвращает True если операция поставлена на повторную попытку.
+    
+    Smart Retry features:
+    - FloodWait: wait exactly as Telegram requests + jitter
+    - PeerFlood: rotate to different account, 48h cooldown
+    - AUTH_KEY dead: immediate deactivation, no retry
+    - CHANNEL_PRIVATE: skip channel permanently
     """
     kind = _classify_op_error(exc)
     if kind in ("fatal", "skip"):
@@ -462,12 +468,20 @@ async def _maybe_requeue(
         return False
 
     flood_wait = extract_flood_wait(exc, str(exc))
+    
+    # Smart backoff calculation
     if kind == "peer_flood":
+        # PeerFlood: 48h cooldown + rotate account
         backoff = 48 * 3600
+        log.info("op_worker: PeerFlood for op=%d — 48h cooldown, rotate account", op_id)
     elif kind == "flood" and flood_wait > 0:
+        # FloodWait: wait exactly as Telegram requests + 60s jitter
         backoff = min(flood_wait + 60, 24 * 3600)
+        log.info("op_worker: FloodWait %ds for op=%d — waiting %ds", flood_wait, op_id, backoff)
     else:
+        # Exponential backoff with jitter for other errors
         backoff = min(30 * (2 ** (retry_count - 1)), 600)
+        backoff = int(backoff * (0.8 + 0.4 * random.random()))  # ±20% jitter
 
     account_ids = [int(acc_id) for acc_id in (params.get("account_ids") or [])]
     try:
