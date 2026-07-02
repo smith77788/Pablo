@@ -1762,4 +1762,129 @@ async def generate_recommendations(
     # Sort: high → medium → low
     _order = {"high": 0, "medium": 1, "low": 2}
     recs.sort(key=lambda r: _order.get(r["priority"], 3))
+
+
+# ── Auto-Management (автоуправление экосистемами) ───────────────────────────
+# Автоматическое обнаружение связей, добавление каналов, балансировка контента.
+
+async def auto_discover_members(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) -> dict:
+    """Auto-discover and add new channels/groups to ecosystem.
+    
+    Scans managed_channels and managed_bots for owner, adds relevant ones.
+    Returns {added: int, skipped: int, total: int}
+    """
+    try:
+        # Get existing members
+        existing = await pool.fetch(
+            "SELECT object_id FROM ecosystem_members WHERE ecosystem_id=$1",
+            ecosystem_id,
+        )
+        existing_ids = {r["object_id"] for r in existing}
+        
+        # Find channels not yet in ecosystem
+        channels = await pool.fetch(
+            """SELECT channel_id, title, username
+               FROM managed_channels
+               WHERE owner_id=$1 AND is_active=TRUE""",
+            owner_id,
+        )
+        
+        added = 0
+        skipped = 0
+        for ch in channels:
+            ch_id = ch["channel_id"]
+            if ch_id in existing_ids:
+                skipped += 1
+                continue
+            try:
+                await add_member(pool, ecosystem_id, owner_id, "channel", ch_id)
+                added += 1
+            except Exception:
+                skipped += 1
+        
+        # Find bots not yet in ecosystem
+        bots = await pool.fetch(
+            """SELECT bot_id, username, first_name
+               FROM managed_bots
+               WHERE added_by=$1 AND is_active=TRUE""",
+            owner_id,
+        )
+        
+        for bot_row in bots:
+            bot_id = bot_row["bot_id"]
+            if bot_id in existing_ids:
+                skipped += 1
+                continue
+            try:
+                await add_member(pool, ecosystem_id, owner_id, "bot", bot_id)
+                added += 1
+            except Exception:
+                skipped += 1
+        
+        log.info(
+            "auto_discover eco=%d: added=%d skipped=%d total=%d",
+            ecosystem_id, added, skipped, added + skipped,
+        )
+        
+        return {"added": added, "skipped": skipped, "total": added + skipped}
+    except Exception as e:
+        log.warning("auto_discover failed for eco=%d: %s", ecosystem_id, e)
+        return {"added": 0, "skipped": 0, "total": 0}
+
+
+async def balance_content(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) -> dict:
+    """Analyze content distribution across ecosystem members.
+    
+    Returns {balanced: bool, distribution: dict, recommendations: list}
+    """
+    try:
+        # Get member activity data
+        members = await pool.fetch(
+            """SELECT m.object_id, m.object_type,
+                      COALESCE(m.last_activity_at, m.added_at) as last_activity
+               FROM ecosystem_members m
+               WHERE m.ecosystem_id=$1""",
+            ecosystem_id,
+        )
+        
+        if not members:
+            return {"balanced": True, "distribution": {}, "recommendations": []}
+        
+        # Analyze activity distribution
+        now = datetime.now(tz=timezone.utc)
+        active_count = 0
+        inactive_count = 0
+        
+        for m in members:
+            if m["last_activity"] and (now - m["last_activity"]).days < 7:
+                active_count += 1
+            else:
+                inactive_count += 1
+        
+        total = len(members)
+        active_ratio = active_count / total if total > 0 else 0
+        
+        recommendations = []
+        if active_ratio < 0.3:
+            recommendations.append({
+                "type": "boost_activity",
+                "message": f"Только {active_ratio:.0%} участников активны за неделю",
+                "action": "Запустите публикации или DM-кампанию",
+            })
+        
+        if inactive_count > active_count:
+            recommendations.append({
+                "type": "prune_inactive",
+                "message": f"{inactive_count} неактивных участников",
+                "action": "Рассмотрите удаление неактивных элементов",
+            })
+        
+        return {
+            "balanced": active_ratio >= 0.5,
+            "distribution": {"active": active_count, "inactive": inactive_count, "total": total},
+            "recommendations": recommendations,
+        }
+    except Exception as e:
+        log.warning("balance_content failed for eco=%d: %s", ecosystem_id, e)
+        return {"balanced": True, "distribution": {}, "recommendations": []}
     return recs
