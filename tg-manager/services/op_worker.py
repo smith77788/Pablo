@@ -1627,6 +1627,7 @@ async def _exec_mass_publish(
         owner_id,
         include_ids=explicit_acc_ids or None,
         action_type="mass_publish",
+        respect_daily_budget=True,  # долговечность: не грузим исчерпавшие лимит аккаунты
     )
     if not accounts_raw:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
