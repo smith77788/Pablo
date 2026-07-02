@@ -80,6 +80,74 @@ def init_op_worker_pool(pool: "asyncpg.Pool") -> None:
     _db_pool = pool
 
 
+# ── Circuit Breaker (аварийный выключатель) ──────────────────────────────────
+# Автоматическая пауза операций при повторных сбоях.
+# Если 3+ аккаунта подряд получают FloodWait/PeerFlood — автопауза на 30мин.
+
+_CIRCUIT_BREAKER_THRESHOLD = 3  # кол-во подряд ошибок для trip
+_CIRCUIT_BREAKER_COOLDOWN = 1800  # 30 минут cooldown
+_circuit_breaker_state: dict[int, dict] = {}  # owner_id → {failures, tripped_at, cooldown_until}
+_circuit_breaker_lock = asyncio.Lock()
+
+
+async def _circuit_breaker_record(owner_id: int, success: bool) -> bool:
+    """Record operation result for circuit breaker. Returns True if circuit is open (paused)."""
+    async with _circuit_breaker_lock:
+        state = _circuit_breaker_state.setdefault(owner_id, {
+            "failures": 0,
+            "tripped_at": None,
+            "cooldown_until": None,
+        })
+        
+        now = time.time()
+        
+        # Check if cooldown expired
+        if state["cooldown_until"] and now > state["cooldown_until"]:
+            state["failures"] = 0
+            state["tripped_at"] = None
+            state["cooldown_until"] = None
+            log.info("circuit_breaker: owner=%d cooldown expired, resetting", owner_id)
+        
+        if success:
+            state["failures"] = max(0, state["failures"] - 1)  # decay on success
+            return False
+        
+        state["failures"] += 1
+        if state["failures"] >= _CIRCUIT_BREAKER_THRESHOLD and not state["tripped_at"]:
+            state["tripped_at"] = now
+            state["cooldown_until"] = now + _CIRCUIT_BREAKER_COOLDOWN
+            log.warning(
+                "circuit_breaker: TRIPPED for owner=%d after %d failures — pausing %ds",
+                owner_id, state["failures"], _CIRCUIT_BREAKER_COOLDOWN,
+            )
+            return True
+        
+        return state["tripped_at"] is not None
+
+
+def _circuit_breaker_is_open(owner_id: int) -> bool:
+    """Check if circuit breaker is open (operations paused) for this owner."""
+    state = _circuit_breaker_state.get(owner_id)
+    if not state or not state["tripped_at"]:
+        return False
+    now = time.time()
+    if state["cooldown_until"] and now > state["cooldown_until"]:
+        return False
+    return True
+
+
+def _circuit_breaker_status(owner_id: int) -> dict:
+    """Get circuit breaker status for an owner."""
+    state = _circuit_breaker_state.get(owner_id, {})
+    if not state.get("tripped_at"):
+        return {"status": "closed", "failures": state.get("failures", 0)}
+    now = time.time()
+    if state.get("cooldown_until") and now > state["cooldown_until"]:
+        return {"status": "closed", "failures": 0}
+    remaining = int(state["cooldown_until"] - now) if state.get("cooldown_until") else 0
+    return {"status": "open", "failures": state.get("failures", 0), "cooldown_remaining_s": remaining}
+
+
 async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
     """Сбросить все зависшие in_operation=TRUE после рестарта бота."""
     try:
@@ -862,6 +930,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             _active_op_ids.discard(op_id)
         return
 
+    # Circuit breaker: skip if owner is in cooldown
+    if _circuit_breaker_is_open(owner_id):
+        status = _circuit_breaker_status(owner_id)
+        log.warning(
+            "op_worker: circuit breaker OPEN for owner=%d op=%d — pausing %ds",
+            owner_id, op_id, status.get("cooldown_remaining_s", 0),
+        )
+        async with _active_lock:
+            _active_op_ids.discard(op_id)
+        return
+
     # Получить семафор для ограничения параллельных операций на одного владельца
     try:
         owner_sem = await _get_owner_semaphore(owner_id)
@@ -1120,6 +1199,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 op_id, op_type, _final_status, elapsed, _ok, _failed,
                 result.get("summary", ""),
             )
+            # Circuit breaker: record result
+            await _circuit_breaker_record(owner_id, _final_status == "done")
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
@@ -1271,6 +1352,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     op_id,
                     log_ctx=f"[run_op_failed op={op_id}]",
                 )
+                # Circuit breaker: record failure
+                await _circuit_breaker_record(owner_id, False)
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
                 _acc_ids_for_audit = params.get("account_ids") or []
