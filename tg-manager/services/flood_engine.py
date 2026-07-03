@@ -358,9 +358,11 @@ async def get_best_account(
                    a.device_model, a.system_version, a.app_version,
                    a.lang_code, a.system_lang_code, a.proxy_id,
                    a.trust_score, a.cooldown_until, a.tags, a.pool,
-                   p.proxy_url, p.geo_country
+                   p.proxy_url, p.geo_country,
+                   r.ban_probability AS physics_ban_probability
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+            LEFT JOIN account_risk_scores r ON r.account_id = a.id
             WHERE {where}
             ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST
             LIMIT 10""",
@@ -369,18 +371,26 @@ async def get_best_account(
     if not rows:
         return None
 
-    # From DB candidates, pick the one with lowest in-memory risk_score
+    # From DB candidates, pick the one with lowest combined risk: in-memory
+    # flood-engine risk (this-process, reactive) blended with Physics
+    # Engine's persisted ban_probability (cross-restart, 7-day-history-based).
+    # Previously only the in-memory signal was consulted here, so Physics
+    # Engine's risk scoring never actually influenced which account got
+    # picked for an operation — it was purely a dashboard number.
+    candidates = [r for r in rows if not is_account_cooling(r["id"])] or list(rows)
+    safe = [r for r in candidates if (r["physics_ban_probability"] or 0.0) < 0.85]
+    pool_rows = safe or candidates  # if everything is high-risk, still return the least-bad one
+
     best = None
     best_score = float("inf")
-    for row in rows:
-        if is_account_cooling(row["id"]):
-            continue
+    for row in pool_rows:
         combined = account_rank_score(row["id"], row["trust_score"])
+        combined += float(row["physics_ban_probability"] or 0.0) * 1.5
         if combined < best_score:
             best_score = combined
             best = dict(row)
 
-    return best or (dict(rows[0]) if rows else None)
+    return best or dict(rows[0])
 
 
 async def get_active_accounts(
@@ -432,17 +442,24 @@ async def get_active_accounts(
                    a.device_model, a.system_version, a.app_version,
                    a.lang_code, a.system_lang_code, a.proxy_id,
                    a.trust_score, a.cooldown_until, a.tags, a.pool,
-                   p.proxy_url, p.geo_country
+                   p.proxy_url, p.geo_country,
+                   r.ban_probability AS physics_ban_probability
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+            LEFT JOIN account_risk_scores r ON r.account_id = a.id
             WHERE {where}
             ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST""",
         *params,
     )
 
-    # Exclude in-memory cooling accounts, then re-sort by combined score
+    # Exclude in-memory cooling accounts, then re-sort by combined score —
+    # in-memory flood-engine risk blended with Physics Engine's persisted
+    # ban_probability (see get_best_account for why this join was added).
     result = [dict(r) for r in rows if not is_account_cooling(r["id"])]
-    result.sort(key=lambda r: account_rank_score(r["id"], r.get("trust_score")))
+    result.sort(
+        key=lambda r: account_rank_score(r["id"], r.get("trust_score"))
+        + float(r.get("physics_ban_probability") or 0.0) * 1.5
+    )
     return result
 
 
