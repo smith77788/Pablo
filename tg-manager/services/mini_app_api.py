@@ -7791,10 +7791,88 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("admin_broadcast uid=%d", uid)
             return _err(str(e), 500)
 
+    async def _admin_target(request: web.Request):
+        """Общая проверка админ-действия: (uid, target_id) или (None, error-resp)."""
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return None, None, _err("Forbidden", 403)
+        try:
+            target_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return None, None, _err("bad user_id", 400)
+        return uid, target_id, None
+
+    async def admin_user_grant(request: web.Request) -> web.Response:
+        """Выдать подписку пользователю (paid) на N месяцев."""
+        uid, target_id, err = await _admin_target(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            months = int(body.get("months") or 1)
+        except (TypeError, ValueError):
+            months = 1
+        months = max(1, min(months, 120))
+        try:
+            from database import db as _db
+            await _db.grant_plan_to_user(pool, target_id, uid, "paid", months)
+            return _json_resp({"ok": True, "months": months})
+        except Exception as e:
+            log.exception("admin_user_grant uid=%d target=%d", uid, target_id)
+            return _err(str(e), 500)
+
+    async def admin_user_revoke(request: web.Request) -> web.Response:
+        """Отозвать подписку пользователя."""
+        uid, target_id, err = await _admin_target(request)
+        if err:
+            return err
+        try:
+            from database import db as _db
+            await _db.revoke_plan_from_user(pool, target_id, uid)
+            return _json_resp({"ok": True})
+        except Exception as e:
+            log.exception("admin_user_revoke uid=%d target=%d", uid, target_id)
+            return _err(str(e), 500)
+
+    async def admin_user_ban(request: web.Request) -> web.Response:
+        """Забанить пользователя (нельзя банить админов и себя)."""
+        uid, target_id, err = await _admin_target(request)
+        if err:
+            return err
+        if target_id == uid or _is_admin(target_id):
+            return _err("Нельзя забанить администратора", 400)
+        try:
+            from database import db as _db
+            await _db.ban_user(pool, target_id, uid, "Забанен из mini app")
+            return _json_resp({"ok": True})
+        except Exception as e:
+            log.exception("admin_user_ban uid=%d target=%d", uid, target_id)
+            return _err(str(e), 500)
+
+    async def admin_user_unban(request: web.Request) -> web.Response:
+        """Разбанить пользователя."""
+        uid, target_id, err = await _admin_target(request)
+        if err:
+            return err
+        try:
+            from database import db as _db
+            await _db.unban_user(pool, target_id, uid)
+            return _json_resp({"ok": True})
+        except Exception as e:
+            log.exception("admin_user_unban uid=%d target=%d", uid, target_id)
+            return _err(str(e), 500)
+
     app.router.add_get("/api/miniapp/admin/users", admin_users)
     app.router.add_get("/api/miniapp/admin/stats", admin_stats)
     app.router.add_get("/api/miniapp/admin/user/{user_id}", admin_user_detail)
     app.router.add_post("/api/miniapp/admin/broadcast", admin_broadcast)
+    app.router.add_post("/api/miniapp/admin/user/{user_id}/grant", admin_user_grant)
+    app.router.add_post("/api/miniapp/admin/user/{user_id}/revoke", admin_user_revoke)
+    app.router.add_post("/api/miniapp/admin/user/{user_id}/ban", admin_user_ban)
+    app.router.add_post("/api/miniapp/admin/user/{user_id}/unban", admin_user_unban)
 
     async def miniapp_config(request: web.Request) -> web.Response:
         """Public config endpoint — no auth required. Returns bot info for frontend."""

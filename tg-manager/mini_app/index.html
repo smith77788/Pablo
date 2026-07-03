@@ -10904,23 +10904,77 @@ async function openAdminUsers() {
   } catch(e) { txt('adm-users-body', errHtml(e.message)); }
 }
 
+let ADM_UD_ID = null;
 async function openAdminUserDetail(userId) {
+  ADM_UD_ID = userId;
   push('s-admin-user-detail');
   txt('adm-ud-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/admin/user/' + userId);
     const u = d.user;
+    const isPaid = (u.current_plan && u.current_plan !== 'free');
+    const banned = !!u.is_banned;
     let html = `<div class="sec">Пользователь ${u.user_id}</div>`;
     html += `<div style="padding:12px 16px;background:var(--bg);border-radius:14px">`;
     html += `<div>👤 ${esc(u.first_name||'')} ${esc(u.username?'@'+u.username:'')}</div>`;
-    html += `<div>💳 Подписка: <b>${u.current_plan||'free'}</b></div>`;
+    html += `<div>💳 Подписка: <b>${u.current_plan||'free'}</b>${u.plan_expires_at?' до '+new Date(u.plan_expires_at).toLocaleDateString('ru-RU'):''}</div>`;
+    html += `<div>${banned?'🚫 <b style="color:var(--red)">Забанен</b>':'✅ Активен'}</div>`;
     html += `<div>🤖 Ботов: <b>${d.bots}</b></div>`;
     html += `<div>📡 Каналов: <b>${d.channels}</b></div>`;
     html += `<div>📱 Аккаунтов: <b>${d.accounts}</b></div>`;
     html += `<div>📅 Регистрация: ${u.created_at?new Date(u.created_at).toLocaleDateString('ru-RU'):'—'}</div>`;
     html += '</div>';
+    // Действия админа
+    html += `<div class="sec" style="margin-top:12px">Действия</div><div style="display:flex;flex-direction:column;gap:8px">`;
+    if (isPaid) {
+      html += `<button class="btn" onclick="admUserRevoke()">💳 Отозвать подписку</button>`;
+    } else {
+      html += `<button class="btn btn-p" onclick="admUserGrant(1)">💳 Выдать подписку (1 мес)</button>`;
+      html += `<button class="btn" onclick="admUserGrant(12)">💳 Выдать на 12 мес</button>`;
+    }
+    if (banned) {
+      html += `<button class="btn" onclick="admUserUnban()">✅ Разбанить</button>`;
+    } else {
+      html += `<button class="btn" style="color:var(--red)" onclick="admUserBan()">🚫 Забанить</button>`;
+    }
+    html += '</div>';
     txt('adm-ud-body', html);
   } catch(e) { txt('adm-ud-body', errHtml(e.message)); }
+}
+
+async function admUserGrant(months) {
+  if (!ADM_UD_ID) return;
+  try {
+    await api('/api/miniapp/admin/user/'+ADM_UD_ID+'/grant', {method:'POST', body:JSON.stringify({months})});
+    toast('✅ Подписка выдана ('+months+' мес)');
+    openAdminUserDetail(ADM_UD_ID);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function admUserRevoke() {
+  if (!ADM_UD_ID) return;
+  if (!await askConfirm('Отозвать подписку у пользователя?')) return;
+  try {
+    await api('/api/miniapp/admin/user/'+ADM_UD_ID+'/revoke', {method:'POST'});
+    toast('✅ Подписка отозвана');
+    openAdminUserDetail(ADM_UD_ID);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function admUserBan() {
+  if (!ADM_UD_ID) return;
+  if (!await askConfirm('Забанить пользователя? Он потеряет доступ.')) return;
+  try {
+    await api('/api/miniapp/admin/user/'+ADM_UD_ID+'/ban', {method:'POST'});
+    toast('🚫 Забанен');
+    openAdminUserDetail(ADM_UD_ID);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function admUserUnban() {
+  if (!ADM_UD_ID) return;
+  try {
+    await api('/api/miniapp/admin/user/'+ADM_UD_ID+'/unban', {method:'POST'});
+    toast('✅ Разбанен');
+    openAdminUserDetail(ADM_UD_ID);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function openAdminBroadcast() {
