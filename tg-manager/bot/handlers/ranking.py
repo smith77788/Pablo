@@ -21,6 +21,7 @@ from bot.utils.op_helpers import safe_edit
 from bot.utils.subscription import get_plan, locked_text, require_plan
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ async def cb_rank_menu(
 ) -> None:
     plan = await get_plan(pool, callback.from_user.id)
     if plan == "free":
-        await callback.answer()
+        await safe_answer(callback)
         await safe_edit(
             callback,
             locked_text("Трекер позиций в поиске", "starter"),
@@ -141,7 +142,7 @@ async def cb_rank_menu(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await _render_rank_menu(callback, bot_id, bot_row, plan, pool)
 
 
@@ -160,7 +161,7 @@ async def cb_rank_add(
     bot_id = callback_data.bot_id
 
     if limit == 0:
-        await callback.answer()
+        await safe_answer(callback)
         await safe_edit(
             callback,
             locked_text("Трекер позиций в поиске", "starter"),
@@ -180,7 +181,7 @@ async def cb_rank_add(
         )
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddKeyword.waiting_keyword)
     await state.update_data(bot_id=bot_id)
 
@@ -309,7 +310,7 @@ async def cb_rank_remove(
         )
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await _show_rank_menu(callback, callback_data.bot_id, pool)
 
 
@@ -323,14 +324,14 @@ async def cb_rank_history(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     keyword_id = callback_data.keyword_id
     bot_id = callback_data.bot_id
@@ -401,7 +402,7 @@ async def cb_rank_check_now(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
@@ -609,7 +610,7 @@ async def cb_rank_check_all(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
@@ -709,7 +710,7 @@ async def cb_rank_dashboard(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     owner_id = callback.from_user.id
     plan = await get_plan(pool, owner_id)
@@ -820,7 +821,7 @@ async def cb_rank_toggle_keyword(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
@@ -836,7 +837,7 @@ async def cb_rank_toggle_keyword(
         await callback.answer("Ключевое слово не найдено.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await _show_rank_menu(callback, bot_id, pool)
 
 
@@ -986,7 +987,7 @@ async def cb_rank_notify_settings(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
     notify_on = await db.get_keyword_notify_enabled(pool, bot_id, owner_id)
@@ -1090,7 +1091,7 @@ async def vis_dashboard(
     state: FSMContext,
 ) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:
@@ -1148,7 +1149,7 @@ async def vis_all_positions(
     callback_data: VisCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:
@@ -1248,7 +1249,7 @@ async def vis_select_bot(
     callback_data: VisCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     bots = await db.get_bots(pool, owner_id)
@@ -1295,7 +1296,7 @@ async def vis_by_bot(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
 
@@ -1389,7 +1390,7 @@ async def vis_add_keyword_start(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     bots = await db.get_bots(pool, owner_id)
@@ -1430,7 +1431,7 @@ async def vis_pick_bot(
     callback_data: VisCb,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(vis_bot_id=callback_data.bot_id)
     await state.set_state(AddKeywordFSM.waiting_keyword)
 
@@ -1497,7 +1498,7 @@ async def vis_receive_region(
     pool: asyncpg.Pool,
 ) -> None:
     region_raw = callback.data.split(":", 1)[1]
-    await callback.answer()
+    await safe_answer(callback)
 
     if region_raw == "cancel":
         await state.clear()
@@ -1585,7 +1586,7 @@ async def vis_trends(
     bot_id = callback_data.bot_id
 
     if not bot_id:
-        await callback.answer()
+        await safe_answer(callback)
         bots = await db.get_bots(pool, owner_id)
         if not bots:
             kb = InlineKeyboardBuilder()
@@ -1619,7 +1620,7 @@ async def vis_trends(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
 
@@ -1719,7 +1720,7 @@ async def vis_alerts(
     callback_data: VisCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     await _render_vis_alerts(callback, owner_id, pool)
 
@@ -1769,7 +1770,7 @@ async def vis_alerts_toggle(
     callback_data: VisCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:
@@ -1799,7 +1800,7 @@ async def vis_alerts_threshold(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(KeywordAlertFSM.choosing_threshold)
 
     kb = InlineKeyboardBuilder()

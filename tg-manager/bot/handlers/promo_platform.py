@@ -41,6 +41,7 @@ from database import db
 from services import bot_api
 from services import smm_panel as smm_svc
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -104,7 +105,7 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 async def _cancel_fsm_and_back(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     await _show_menu(callback, pool, edit=True)
 
 
@@ -184,7 +185,7 @@ async def cmd_promo(message: Message, pool: asyncpg.Pool) -> None:
 @router.callback_query(PromoCb.filter(F.action == "menu"))
 async def cb_promo_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
             "🔒 <b>Платформа продвижения — 💎 ПОДПИСКА</b>\n\nОформите: /subscription"
@@ -197,7 +198,7 @@ async def cb_promo_menu(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
 @router.callback_query(PromoCb.filter(F.action == "orders"))
 async def cb_promo_orders(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     page = callback_data.page
     status_filter = callback_data.value
@@ -248,7 +249,7 @@ async def cb_promo_orders(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "order_detail"))
 async def cb_order_detail(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     order = await db.promo_get_order(pool, callback_data.item_id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
@@ -483,7 +484,7 @@ async def cb_order_check_smm(callback: CallbackQuery, callback_data: PromoCb, po
 
 @router.callback_query(PromoCb.filter(F.action == "new_order"))
 async def cb_new_order_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text("🔒 <b>Новый заказ — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
         return
@@ -527,7 +528,7 @@ async def fsm_order_keyword(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("promo_pos_"), PromoOrderFSM.target_position)
 async def fsm_order_position(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         pos = int(callback.data.split("_")[-1])
     except ValueError:
@@ -555,7 +556,7 @@ async def fsm_order_position(callback: CallbackQuery, state: FSMContext, pool: a
 
 @router.callback_query(F.data.startswith("promo_bot_"), PromoOrderFSM.pick_bot)
 async def fsm_order_pick_bot(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         bot_id = int(callback.data.split("_")[-1])
     except ValueError:
@@ -591,7 +592,7 @@ async def fsm_order_pick_bot(callback: CallbackQuery, state: FSMContext, pool: a
 
 @router.callback_query(F.data.startswith("promo_panel_"), PromoOrderFSM.pick_panel)
 async def fsm_order_pick_panel(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         panel_id = int(callback.data.split("_")[-1])
     except ValueError:
@@ -654,7 +655,7 @@ async def fsm_order_target_subs(message: Message, state: FSMContext, pool: async
 
 @router.callback_query(PromoCb.filter(F.action == "order_confirm"), PromoOrderFSM.confirm)
 async def fsm_order_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
 
@@ -693,7 +694,7 @@ async def fsm_order_confirm(callback: CallbackQuery, state: FSMContext, pool: as
 
 @router.callback_query(PromoCb.filter(F.action == "warehouse"))
 async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     status_filter = callback_data.value
     page = callback_data.page
@@ -763,7 +764,7 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
 
 @router.callback_query(PromoCb.filter(F.action == "bot_detail"))
 async def cb_bot_detail(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot = await db.warehouse_get_bot(pool, callback_data.item_id)
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
@@ -872,7 +873,7 @@ async def cb_bot_delete(callback: CallbackQuery, callback_data: PromoCb, pool: a
 
 @router.callback_query(PromoCb.filter(F.action == "bot_add"))
 async def cb_bot_add_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text("🔒 <b>Склад ботов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
         return
@@ -914,7 +915,7 @@ async def fsm_bot_username(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "promo_regdate_today", PromoAddBotFSM.reg_date)
 async def fsm_bot_regdate_today(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(reg_date=datetime.now(tz=timezone.utc).strftime("%Y-%m-%d"))
     await state.set_state(PromoAddBotFSM.token)
     await safe_edit(
@@ -1115,7 +1116,7 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(PromoCb.filter(F.action == "bot_transfer"))
 async def cb_bot_transfer_start(callback: CallbackQuery, callback_data: PromoCb, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot = await db.warehouse_get_bot(pool, callback_data.item_id)
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
@@ -1214,7 +1215,7 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
 
 @router.callback_query(PromoCb.filter(F.action == "panels"))
 async def cb_panels(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     panels = await db.smm_list_panels(pool, callback.from_user.id)
 
     if not panels:
@@ -1253,7 +1254,7 @@ async def cb_panels(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(PromoCb.filter(F.action == "panel_detail"))
 async def cb_panel_detail(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     panel = await db.smm_get_panel(pool, callback_data.item_id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
@@ -1373,7 +1374,7 @@ async def cb_panel_services(callback: CallbackQuery, callback_data: PromoCb, poo
 
 @router.callback_query(PromoCb.filter(F.action == "panel_toggle"))
 async def cb_panel_toggle(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     panel = await db.smm_get_panel(pool, callback_data.item_id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
@@ -1387,7 +1388,7 @@ async def cb_panel_toggle(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "panel_delete"))
 async def cb_panel_delete(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     panel = await db.smm_get_panel(pool, callback_data.item_id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
@@ -1401,7 +1402,7 @@ async def cb_panel_delete(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "panel_add"))
 async def cb_panel_add_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text("🔒 <b>SMM-панели — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
         return
@@ -1492,7 +1493,7 @@ async def fsm_panel_key(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "promo_panel_rekey", PromoAddPanelFSM.api_key)
 async def fsm_panel_rekey(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await safe_edit(
         callback,
@@ -1502,7 +1503,7 @@ async def fsm_panel_rekey(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "promo_panel_force", PromoAddPanelFSM.api_key)
 async def fsm_panel_force(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PromoAddPanelFSM.service_id)
     await safe_edit(
         callback,
@@ -1551,7 +1552,7 @@ async def fsm_panel_service_id(message: Message, state: FSMContext, pool: asyncp
 
 @router.callback_query(PromoCb.filter(F.action == "topcheck"))
 async def cb_topcheck_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text("🔒 <b>Чекер топа — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
         return
@@ -1640,7 +1641,7 @@ async def fsm_topcheck_keyword(message: Message, state: FSMContext, pool: asyncp
 
 @router.callback_query(PromoCb.filter(F.action == "logs"))
 async def cb_logs(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     order_id = callback_data.item_id or None
     level_filter = callback_data.value
 

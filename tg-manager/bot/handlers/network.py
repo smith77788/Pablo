@@ -25,6 +25,7 @@ from bot.states import NetworkBroadcast, CloneSettings, SetRoutingWeight, Assign
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import broadcaster, bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -50,7 +51,7 @@ async def cb_net_menu(
     callback: CallbackQuery, callback_data: NetworkCb, pool: asyncpg.Pool
 ) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     ov = await db.get_network_overview(pool, callback.from_user.id)
     swarm_pct = (
         round(ov["swarm_bots"] / ov["total_bots"] * 100) if ov["total_bots"] else 0
@@ -83,7 +84,7 @@ async def cb_net_menu(
 @router.callback_query(NetworkCb.filter(F.action == "analytics"))
 async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Аналитика сети", "enterprise"),
@@ -135,7 +136,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(NetworkCb.filter(F.action == "clusters"))
 async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Кластеры", "enterprise"),
@@ -168,7 +169,7 @@ async def cb_cluster_view(
     callback: CallbackQuery, callback_data: ClusterCb, pool: asyncpg.Pool
 ) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     cluster = callback_data.cluster or ""
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     total_aud = sum(b["audience_count"] for b in bots)
@@ -289,7 +290,7 @@ async def cb_cluster_assign_start(
     if not bots:
         await callback.answer("Нет ботов.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     cluster = callback_data.cluster or ""
     await state.set_state(AssignCluster.waiting_name)
     await state.update_data(cluster=cluster)
@@ -344,7 +345,7 @@ async def cb_cluster_assign_confirm(
 @router.callback_query(NetworkCb.filter(F.action == "ranking"))
 async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Рейтинг ботов", "enterprise"),
@@ -382,7 +383,7 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(NetworkCb.filter(F.action == "routing"))
 async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Веса роутинга", "enterprise"),
@@ -432,7 +433,7 @@ async def cb_set_weight_pick(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await state.set_state(SetRoutingWeight.waiting_weight)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -502,7 +503,7 @@ async def cb_reset_weights(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_net_health(
     callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Здоровье сети", "enterprise"),
@@ -561,7 +562,7 @@ async def cb_net_broadcast(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Сетевая рассылка (legacy)", "enterprise"),
@@ -623,7 +624,7 @@ async def cb_net_broadcast_confirm(
     if not text:
         await callback.answer("Текст не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     users = await db.get_unique_network_users(pool, callback.from_user.id)
     if not users:
@@ -671,7 +672,7 @@ async def cb_net_broadcast_confirm(
 
 @router.callback_query(NetworkCb.filter(F.action == "broadcast_cancel"))
 async def cb_net_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К сети", callback_data=NetworkCb(action="menu"))
@@ -686,7 +687,7 @@ async def cb_net_broadcast_cancel(callback: CallbackQuery, state: FSMContext) ->
 @router.callback_query(NetworkCb.filter(F.action == "clone"))
 async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Клонирование настроек", "enterprise"),
@@ -726,7 +727,7 @@ async def cb_net_clone_pick_dest(
     if not src_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     src_label = (
         f"@{src_row['username']}" if src_row["username"] else src_row["first_name"]
     )
@@ -794,7 +795,7 @@ async def cb_net_clone_confirm(
 @router.callback_query(NetworkCb.filter(F.action == "overlap"))
 async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
             locked_text("Пересечение аудиторий", "enterprise"),

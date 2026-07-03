@@ -23,6 +23,7 @@ from bot.keyboards import (
 )
 from bot.utils.subscription import require_plan, locked_text
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ class AddGlobalTag(StatesGroup):
 async def cb_crm_menu(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.message.edit_text(
             locked_text("CRM & автоматизация", "starter"),
@@ -116,7 +117,7 @@ async def cb_crm_menu(
 async def cb_add_tag_global(
     callback: CallbackQuery, callback_data: CrmCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddGlobalTag.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     kb = InlineKeyboardBuilder()
@@ -170,7 +171,7 @@ async def msg_global_tag_name(
 async def cb_tag_detail(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tag = callback_data.tag or ""
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     user_ids = await db.get_users_by_tag(pool, callback_data.bot_id, tag)
@@ -185,7 +186,7 @@ async def cb_tag_detail(
 async def cb_delete_tag_confirm(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tag = callback_data.tag or ""
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     user_ids = await db.get_users_by_tag(pool, callback_data.bot_id, tag)
@@ -245,7 +246,7 @@ async def cb_delete_tag_all(
 async def cb_auto_menu(
     callback: CallbackQuery, callback_data: AutoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.message.edit_text(
             locked_text("Автоматизация", "starter"),
@@ -293,7 +294,7 @@ async def cb_auto_menu(
 async def cb_auto_view(
     callback: CallbackQuery, callback_data: AutoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     rules = await db.get_automation_rules(pool, callback_data.bot_id)
     rule = next((r for r in rules if r["id"] == callback_data.rule_id), None)
     if not rule:
@@ -366,7 +367,7 @@ async def cb_auto_toggle(
 async def cb_auto_delete_confirm(
     callback: CallbackQuery, callback_data: AutoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     rules = await db.get_automation_rules(pool, callback_data.bot_id)
     rule = next((r for r in rules if r["id"] == callback_data.rule_id), None)
     safe_name = (
@@ -415,7 +416,7 @@ async def cb_auto_delete(
 async def cb_auto_add(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddAutoRule.choosing_trigger)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -446,7 +447,7 @@ ACTION_LABELS = {
 async def _set_trigger(
     callback: CallbackQuery, state: FSMContext, trigger_type: str, needs_value: bool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(trigger_type=trigger_type, trigger_value=None)
     data = await state.get_data()
     bot_id = data.get("bot_id", 0)
@@ -555,7 +556,7 @@ async def msg_trigger_value(message: Message, state: FSMContext) -> None:
 async def cb_choose_action(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     action_map = {
         "act_send": "send_message",
         "act_add_tag": "add_tag",
@@ -588,7 +589,7 @@ async def cb_act_deal(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
     """Action: create CRM deal. action_value = deal title prefix."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(action_type="create_deal")
     await state.set_state(AddAutoRule.waiting_action_value)
     data = await state.get_data()
@@ -611,7 +612,7 @@ async def cb_act_webhook(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
     """Action: send webhook POST. action_value = URL."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(action_type="webhook")
     await state.set_state(AddAutoRule.waiting_action_value)
     data = await state.get_data()
@@ -636,7 +637,7 @@ async def cb_act_funnel(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     bot_id = data.get("bot_id", callback_data.bot_id)
     await state.update_data(action_type="subscribe_funnel")
@@ -664,7 +665,7 @@ async def cb_sel_funnel(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     funnel_id = callback_data.rule_id
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     funnel = next((f for f in funnels if f["id"] == funnel_id), None)
@@ -767,7 +768,7 @@ def _crm_dashboard_kb() -> InlineKeyboardBuilder:
 async def cb_crm_dashboard(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     stats = await db.get_crm_dashboard_stats(pool, owner_id)
@@ -801,7 +802,7 @@ async def cb_crm_dashboard(
 async def cb_crm_pipeline(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     deals = await db.get_crm_deals(pool, owner_id)
@@ -882,7 +883,7 @@ async def cb_deal_view(
     if not deal:
         await callback.answer("Сделка не найдена.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     activities = await db.get_crm_activity(pool, deal["id"], limit=5)
     stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])
@@ -966,7 +967,7 @@ async def cb_deal_move(
 async def cb_deal_add(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddDeal.waiting_title)
     await state.update_data(csv_mode=False)
     kb = InlineKeyboardBuilder()
@@ -1001,7 +1002,7 @@ async def msg_deal_title_or_csv(message: Message, state: FSMContext, pool: async
 
 @router.callback_query(CrmCb.filter(F.action == "deal_skip_contact"))
 async def cb_deal_skip_contact(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(deal_contact="")
     await state.set_state(AddDeal.waiting_value)
     kb = InlineKeyboardBuilder()
@@ -1029,7 +1030,7 @@ async def msg_deal_contact(message: Message, state: FSMContext) -> None:
 async def cb_deal_skip_value(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _finish_deal_creation(callback.message, state, pool, callback.from_user.id, 0.0)
 
 
@@ -1084,7 +1085,7 @@ async def _finish_deal_creation(
 async def cb_deal_note_prompt(
     callback: CallbackQuery, callback_data: CrmCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddDealNote.waiting_note)
     await state.update_data(deal_id=callback_data.deal_id)
     kb = InlineKeyboardBuilder()
@@ -1121,7 +1122,7 @@ async def msg_deal_note(message: Message, state: FSMContext, pool: asyncpg.Pool)
 
 @router.callback_query(CrmCb.filter(F.action == "deal_delete_confirm"))
 async def cb_deal_delete_confirm(callback: CallbackQuery, callback_data: CrmCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(
         text="✅ Да, удалить",
@@ -1157,7 +1158,7 @@ async def cb_deal_delete(
 
 @router.callback_query(CrmCb.filter(F.action == "csv_import_prompt"))
 async def cb_csv_import_prompt(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddDeal.waiting_title)
     await state.update_data(csv_mode=True)
     kb = InlineKeyboardBuilder()

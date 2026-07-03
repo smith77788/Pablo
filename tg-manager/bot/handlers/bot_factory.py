@@ -16,6 +16,7 @@ from bot.callbacks import BotCb, BotFactCb, EcoPickCb
 from bot.states import BotCloneSettingsFSM, BotCreateFSM, BotTokenImportFSM, BotValidateFSM
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -80,7 +81,7 @@ def _factory_menu_kb() -> object:
 
 @router.callback_query(BotFactCb.filter(F.action == "menu"))
 async def cb_factory_menu(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🤖 <b>Bot Factory</b>\n\nВыберите действие:",
         parse_mode="HTML",
@@ -96,7 +97,7 @@ async def cb_factory_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     """Step 1: выбор аккаунта для управления BotFather."""
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.op_helpers import _get_active_accounts, _acc_label
 
     accounts = await _get_active_accounts(pool, callback.from_user.id)
@@ -153,7 +154,7 @@ async def cb_factory_create_acc(
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(acc_id=acc["id"], acc_label=_acc_label(acc))
     await state.set_state(BotCreateFSM.waiting_count)
 
@@ -222,7 +223,7 @@ async def fsm_botcreate_name_tpl(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(BotFactCb.filter(F.action == "create_skip_uname"))
 async def cb_botcreate_skip_uname(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(uname_template="")
     await _show_botcreate_confirm(callback, state)
 
@@ -356,7 +357,7 @@ async def cb_factory_do_create_bots(
 
 @router.callback_query(BotFactCb.filter(F.action == "import_tokens"))
 async def cb_factory_import(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BotTokenImportFSM.waiting_tokens)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
@@ -434,7 +435,7 @@ async def msg_import_tokens(
 async def cb_import_save(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     valid_bots: list[dict] = data.get("valid_bots", [])
     user_id: int = data.get("user_id", callback.from_user.id)
@@ -527,7 +528,7 @@ async def cb_import_save(
 
 @router.callback_query(BotFactCb.filter(F.action == "import_cancel"))
 async def cb_import_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
         "🤖 <b>Bot Factory</b>\n\nВыберите действие:",
@@ -541,7 +542,7 @@ async def cb_import_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(BotFactCb.filter(F.action == "validate"))
 async def cb_factory_validate(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BotValidateFSM.waiting_tokens)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
@@ -688,7 +689,7 @@ def _bots_targets_kb(
 async def cb_factory_clone(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         kb = InlineKeyboardBuilder()
@@ -716,7 +717,7 @@ async def cb_clone_src_page(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
     await callback.message.edit_reply_markup(
         reply_markup=_bots_source_kb(bots, page=callback_data.page)
@@ -727,7 +728,7 @@ async def cb_clone_src_page(
 async def cb_clone_src(
     callback: CallbackQuery, callback_data: BotFactCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         src_bot_id=callback_data.bot_id,
         selected_fields=list(k for k, _ in CLONE_FIELDS),  # all selected by default
@@ -747,7 +748,7 @@ async def cb_clone_src(
 async def cb_clone_field_toggle(
     callback: CallbackQuery, callback_data: BotFactCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # Extract field key from action e.g. "clone_field_name" -> "name"
     field_key = callback_data.action[len("clone_field_") :]
     data = await state.get_data()
@@ -768,7 +769,7 @@ async def cb_clone_fields_done(
     if not data.get("selected_fields"):
         await callback.answer("Выберите хотя бы одно поле!", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     bots = await db.get_bots(pool, callback.from_user.id)
     src_bot_id = data.get("src_bot_id", 0)
@@ -788,7 +789,7 @@ async def cb_clone_tgt_page(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     bots = await db.get_bots(pool, callback.from_user.id)
     src_bot_id = data.get("src_bot_id", 0)
@@ -807,7 +808,7 @@ async def cb_clone_tgt(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected_targets: set[int] = set(data.get("selected_targets", []))
     tgt_id = callback_data.bot_id
@@ -833,7 +834,7 @@ async def cb_clone_targets_done(
     if not selected_targets:
         await callback.answer("Выберите хотя бы одного целевого бота!", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     src_bot_id = data.get("src_bot_id", 0)
     selected_fields: list[str] = data.get("selected_fields", [])
@@ -871,7 +872,7 @@ async def cb_clone_confirm(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     src_bot_id: int = data.get("src_bot_id", 0)
     selected_targets: list[int] = data.get("selected_targets", [])
@@ -988,7 +989,7 @@ async def cb_clone_confirm(
 
 @router.callback_query(BotFactCb.filter(F.action == "stats"))
 async def cb_factory_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:

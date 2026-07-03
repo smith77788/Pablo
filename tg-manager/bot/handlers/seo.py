@@ -18,6 +18,7 @@ from bot.states import SeoFSM
 from database import db
 from services import bot_api
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -156,7 +157,7 @@ async def cb_seo_menu(
 ) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO и аналитика поиска", "starter"),
             parse_mode="HTML",
@@ -173,7 +174,7 @@ async def cb_seo_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     bot_uname = row.get("username") or ""
     label = f"@{bot_uname}" if bot_uname else (row.get("first_name") or "бот")
     uname_status = (
@@ -241,7 +242,7 @@ async def cb_seo_analyze(
     http: aiohttp.ClientSession,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO-анализ", "starter"),
             parse_mode="HTML",
@@ -372,7 +373,7 @@ async def cb_seo_keywords(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO — ключевые слова", "starter"),
             parse_mode="HTML",
@@ -382,7 +383,7 @@ async def cb_seo_keywords(
         )
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     keywords = await db.get_top_keywords(pool, callback_data.bot_id, limit=20)
     summary = await db.get_keyword_stats_summary(pool, callback_data.bot_id)
     kb = InlineKeyboardBuilder()
@@ -419,7 +420,7 @@ async def cb_seo_keywords(
 
 @router.callback_query(SeoCb.filter(F.action == "tips"))
 async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(
         text="📊 Запустить анализ",
@@ -692,7 +693,7 @@ async def cb_seo_chan_menu(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO-оптимизация канала", "starter"),
             parse_mode="HTML",
@@ -716,7 +717,7 @@ async def cb_seo_chan_menu(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     name = (
         f"@{chan['username']}"
@@ -784,7 +785,7 @@ async def cb_seo_chan_analyze(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO-анализ канала", "starter"),
             parse_mode="HTML",
@@ -809,7 +810,7 @@ async def cb_seo_chan_analyze(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     # Show progress message before the long Telethon call
     progress_msg = await callback.message.edit_text(
@@ -937,7 +938,7 @@ async def cb_seo_chan_export_txt(
 ) -> None:
     """Send SEO analysis as a plain-text message for easy copy-paste."""
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Экспорт SEO-анализа", "starter"),
             parse_mode="HTML",
@@ -1038,7 +1039,7 @@ async def cb_seo_chan_ai(
     state: FSMContext,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("AI SEO-оптимизация", "starter"),
             parse_mode="HTML",
@@ -1415,7 +1416,7 @@ async def fsm_seo_feedback(
 async def cb_seo_ask_username(
     callback: CallbackQuery, callback_data: SeoCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         seo_chan_id=callback_data.chan_id, seo_acc_id=callback_data.acc_id
     )
@@ -1719,7 +1720,7 @@ async def cb_seo_apply(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO-оптимизация", "starter"),
             parse_mode="HTML",
@@ -1732,7 +1733,7 @@ async def cb_seo_apply(
     action = callback_data.action
 
     if action == "chan_apply":
-        await callback.answer()
+        await safe_answer(callback)
         kb = InlineKeyboardBuilder()
         kb.button(
             text="📛 Изменить название",
@@ -1829,7 +1830,7 @@ _SEO_EDIT_PROMPTS = {
 async def cb_seo_edit_field(
     callback: CallbackQuery, callback_data: SeoCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     action = callback_data.action
     field, prompt = _SEO_EDIT_PROMPTS[action]
     await state.update_data(
@@ -1989,7 +1990,7 @@ _FULL_GUIDE_PAGES = [
     SeoCb.filter(F.action.in_({"full_guide", "full_guide_p2", "full_guide_p3"}))
 )
 async def cb_seo_full_guide(callback: CallbackQuery, callback_data: SeoCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page_map = {"full_guide": 0, "full_guide_p2": 1, "full_guide_p3": 2}
     page = page_map.get(callback_data.action, 0)
     text = _FULL_GUIDE_PAGES[page]
@@ -2043,7 +2044,7 @@ async def cb_seo_preview(
     http: aiohttp.ClientSession,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO-превью", "starter"),
             parse_mode="HTML",
@@ -2139,7 +2140,7 @@ async def cb_seo_chan_preview(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("SEO-превью канала", "starter"),
             parse_mode="HTML",
@@ -2159,7 +2160,7 @@ async def cb_seo_chan_preview(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     # Тянем реальные подписчики + описание из Telegram (было: плейсхолдеры "N подписчиков")
     await callback.message.edit_text(
@@ -2251,7 +2252,7 @@ async def cb_seo_momentum(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Динамика позиций", "starter"),
             parse_mode="HTML",
@@ -2267,7 +2268,7 @@ async def cb_seo_momentum(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     keywords = await db.get_tracked_keywords(pool, bot_id)
     if not keywords:
@@ -2380,7 +2381,7 @@ async def cb_seo_content_gap(
     http: aiohttp.ClientSession,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Keyword Gap анализ", "starter"),
             parse_mode="HTML",
@@ -2478,7 +2479,7 @@ async def cb_seo_chan_content_gap(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Keyword Gap — канал", "starter"),
             parse_mode="HTML",
@@ -2501,7 +2502,7 @@ async def cb_seo_chan_content_gap(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     about = ""
     if acc_id:
@@ -2606,7 +2607,7 @@ async def cb_seo_uname_alts(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Альтернативы username", "starter"),
             parse_mode="HTML",
@@ -2647,7 +2648,7 @@ async def cb_seo_uname_alts(
         current = row.get("username") or ""
         base = current or row.get("first_name") or "bot"
         back_cb = SeoCb(action="menu", bot_id=callback_data.bot_id)
-    await callback.answer()
+    await safe_answer(callback)
 
     from services.username_engine import generate_username_variants
 
@@ -2692,7 +2693,7 @@ async def cb_seo_bot_history(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     """Show SEO check history for a bot."""
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
     history = await db.get_seo_score_history(
         pool, callback.from_user.id, "bot", bot_id, limit=10
@@ -2733,7 +2734,7 @@ async def cb_seo_chan_history(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     """Show SEO check history for a channel."""
-    await callback.answer()
+    await safe_answer(callback)
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
     history = await db.get_seo_score_history(

@@ -45,6 +45,7 @@ from bot.utils.op_helpers import (
 
 from services import task_registry as _treg
 from database.db import fetch_bots
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -193,7 +194,7 @@ async def _intel_block(
 @router.callback_query(MassOpCb.filter(F.action == "menu"))
 async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(text="🛠️ Построитель операций", callback_data=MassOpCb(action="build"))
     kb.button(
@@ -239,7 +240,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_mass_publish_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
@@ -279,7 +280,7 @@ async def cb_mass_publish_start(
 async def cb_mp_target_chosen(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     _op_type = callback_data.op_type or ""
     await state.update_data(mp_target=_op_type)
     await state.set_state(MassPublishFSM.choosing_selector)
@@ -322,7 +323,7 @@ async def cb_mp_filter_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     filter_type = callback_data.op_type or ""
     await state.update_data(mp_filter=filter_type)
     data = await state.get_data()
@@ -424,7 +425,7 @@ async def cb_mp_filter_chosen(
 async def cb_mp_acc_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(mp_acc_id=callback_data.op_id, mp_cluster=None)
     data = await state.get_data()
     target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
@@ -435,7 +436,7 @@ async def cb_mp_acc_picked(
 async def cb_mp_cluster_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         mp_cluster=callback_data.op_type or "", mp_acc_id=None, mp_pool=None
     )
@@ -448,7 +449,7 @@ async def cb_mp_cluster_picked(
 async def cb_mp_pool_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(
         mp_pool=callback_data.op_type or "", mp_acc_id=None, mp_cluster=None
     )
@@ -554,7 +555,7 @@ async def cb_mp_timing(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     delay = int(callback_data.op_type or "0")
     await state.update_data(mp_delay=delay)
     await state.set_state(MassPublishFSM.previewing)
@@ -849,7 +850,7 @@ async def cb_op_detail(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
     """Показать детальный лог шагов операции из таблицы operation_log."""
-    await callback.answer()
+    await safe_answer(callback)
     op_id = callback_data.op_id
     user_id = callback.from_user.id
 
@@ -947,7 +948,7 @@ async def cb_op_detail(
 async def cb_dry_run(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
 
     target = data.get("mp_target", "channels")
@@ -1020,7 +1021,7 @@ async def cb_queue(
     # Silently skip if the query was already answered (cb_queue is re-used as a
     # delegate from cb_cancel_op / cb_retry_op which may have answered it first).
     try:
-        await callback.answer()
+        await safe_answer(callback)
     except Exception:
         pass
     page = callback_data.page
@@ -1277,7 +1278,7 @@ async def cb_bulk_bot_edit_start(
     from bot.keyboards import subscription_locked_markup
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await safe_edit(
             callback,
             "🔒 <b>Массовое редактирование ботов — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
@@ -1286,7 +1287,7 @@ async def cb_bulk_bot_edit_start(
             ),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkBotEditFSM.choosing_field)
 
     kb = InlineKeyboardBuilder()
@@ -1316,7 +1317,7 @@ async def cb_bulk_bot_edit_start(
 async def cb_bbe_field_chosen(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     field = callback_data.op_type or ""
     await state.update_data(bbe_field=field)
     await state.set_state(BulkBotEditFSM.waiting_value)
@@ -1594,7 +1595,7 @@ async def _count_targets(
 async def cb_bulk_join_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
@@ -1770,7 +1771,7 @@ async def cb_bulk_join_accs(
     if not acc_ids:
         await callback.answer("Нет активных аккаунтов", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     # Show preview + delay selector
     link_preview = "\n".join(f"• {html.escape(ln)}" for ln in links[:5])
@@ -1821,7 +1822,7 @@ _DELAY_LABELS = {
 @router.callback_query(MassOpCb.filter(F.action == "bj_redelay"))
 async def cb_bulk_join_redelay(callback: CallbackQuery, state: FSMContext) -> None:
     """Вернуться к выбору задержки в bulk_join (сохраняя выбранные аккаунты)."""
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     links = sd.get("bj_links", [])
     acc_label = sd.get("bj_acc_label", "?")
@@ -1867,7 +1868,7 @@ async def cb_bulk_join_delay(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     links = sd.get("bj_links", [])
     acc_ids = sd.get("bj_acc_ids", [])
@@ -1933,7 +1934,7 @@ async def cb_bulk_join_confirm(
     if warn:
         await callback.answer(warn, show_alert=False)
     else:
-        await callback.answer()
+        await safe_answer(callback)
 
     params = {"links": links, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
@@ -1976,7 +1977,7 @@ async def cb_bulk_join_confirm(
 async def cb_bulk_leave_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
@@ -2133,7 +2134,7 @@ async def cb_bulk_leave_accs(
     if not acc_ids:
         await callback.answer("Нет активных аккаунтов", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     ch_preview = "\n".join(f"• {html.escape(ch)}" for ch in channels[:5])
     if len(channels) > 5:
@@ -2185,7 +2186,7 @@ _DELAY_LABELS_LEAVE = {
 @router.callback_query(MassOpCb.filter(F.action == "bl_redelay"))
 async def cb_bulk_leave_redelay(callback: CallbackQuery, state: FSMContext) -> None:
     """Вернуться к выбору задержки в bulk_leave (сохраняя выбранные аккаунты)."""
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     channels = sd.get("bl_channels", [])
     acc_label = sd.get("bl_acc_label", "?")
@@ -2231,7 +2232,7 @@ async def cb_bulk_leave_delay(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     channels = sd.get("bl_channels", [])
     acc_ids = sd.get("bl_acc_ids", [])
@@ -2297,7 +2298,7 @@ async def cb_bulk_leave_confirm(
     if warn:
         await callback.answer(warn, show_alert=False)
     else:
-        await callback.answer()
+        await safe_answer(callback)
 
     params = {"channels": channels, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
@@ -2371,7 +2372,7 @@ _OP_TYPE_META = {
 async def cb_build_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await state.set_state(OpBuilderFSM.choosing_op_type)
 
@@ -2417,7 +2418,7 @@ async def cb_ob_type_chosen(
     # Проверка подписки
     required_plan = meta["plan"]
     if not await require_plan(pool, callback.from_user.id, required_plan):
-        await callback.answer()
+        await safe_answer(callback)
         plan_label = "💎 ПОДПИСКА"
         await safe_edit(
             callback,
@@ -2428,7 +2429,7 @@ async def cb_ob_type_chosen(
         )
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(ob_op_type=op_type)
     await state.set_state(OpBuilderFSM.choosing_targets)
 
@@ -2511,7 +2512,7 @@ async def cb_ob_target_chosen(
     callback_data: MassOpCb,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     target = callback_data.op_type or ""
     await state.update_data(ob_target=target)
     sd = await state.get_data()

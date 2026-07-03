@@ -22,6 +22,7 @@ from services.gift_transfer import GiftTransferService
 from services.gift_report import GiftTransferReportService
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router(name="gift_transfer")
@@ -93,7 +94,7 @@ def make_gt_kb(*rows) -> InlineKeyboardMarkup:
 @router.callback_query(F.data == "gt:main")
 async def cb_gift_transfer_main(callback: CallbackQuery, state: FSMContext, pool):
     """Show gift transfer main menu."""
-    await callback.answer()
+    await safe_answer(callback)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔍 Сканировать подарки", callback_data="gt:scan")
@@ -123,7 +124,7 @@ async def cb_gift_transfer_main(callback: CallbackQuery, state: FSMContext, pool
 @router.callback_query(F.data == "gt:scan")
 async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
     """Show account selection for scanning."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
 
@@ -193,7 +194,7 @@ async def cb_toggle_account(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "gt:scan_all", GiftTransferFSM.selecting_accounts)
 async def cb_scan_all(callback: CallbackQuery, state: FSMContext, pool):
     """Select all accounts."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
     try:
@@ -281,7 +282,7 @@ async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:inventory")
 async def cb_view_inventory(callback: CallbackQuery, state: FSMContext, pool):
     """View gift inventory."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
     summary = await GiftInventoryService.get_inventory_summary(pool, user_id)
@@ -322,7 +323,7 @@ async def cb_view_inventory(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:transfer")
 async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
     """Start transfer flow - select accounts with gifts."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
 
@@ -382,7 +383,7 @@ async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
 )
 async def cb_transfer_toggle(callback: CallbackQuery, state: FSMContext):
     """Toggle transfer account selection."""
-    await callback.answer()
+    await safe_answer(callback)
 
     data = await state.get_data()
     accounts = data.get("transfer_accounts", [])
@@ -399,7 +400,7 @@ async def cb_transfer_toggle(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "gt:transfer_all", GiftTransferFSM.selecting_accounts)
 async def cb_transfer_all(callback: CallbackQuery, state: FSMContext, pool):
     """Select all accounts with gifts."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
     try:
@@ -437,7 +438,7 @@ async def cb_select_recipient(callback: CallbackQuery, state: FSMContext, pool):
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
 
     # Get saved recipients
     recipients = await db.get_gift_recipients(pool, user_id)
@@ -474,7 +475,7 @@ async def cb_select_recipient(callback: CallbackQuery, state: FSMContext, pool):
 )
 async def cb_enter_username(callback: CallbackQuery, state: FSMContext):
     """Ask user to enter username."""
-    await callback.answer()
+    await safe_answer(callback)
 
     await callback.message.edit_text(
         "📝 <b>Введите получателя</b>\n\n"
@@ -495,13 +496,13 @@ async def cb_enter_username(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "gt:ignore")
 async def cb_gt_ignore(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
 
 @router.callback_query(F.data == "gt:save_recipient", GiftTransferFSM.selecting_recipient)
 async def cb_save_recipient(callback: CallbackQuery, state: FSMContext) -> None:
     """Prompt user to enter @username to save as a persistent recipient."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(GiftTransferFSM.adding_saved_recipient)
     await callback.message.edit_text(
         "💾 <b>Сохранить получателя</b>\n\n"
@@ -534,7 +535,7 @@ async def msg_add_saved_recipient(message: Message, state: FSMContext, pool) -> 
 @router.callback_query(F.data == "gt:add_recipient", GiftTransferFSM.main_menu)
 async def cb_add_recipient(callback: CallbackQuery, state: FSMContext) -> None:
     """Add a new saved recipient from the recipients management screen."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(GiftTransferFSM.adding_saved_recipient)
     await callback.message.edit_text(
         "➕ <b>Добавить получателя</b>\n\n"
@@ -590,7 +591,7 @@ async def msg_handle_username(message: Message, state: FSMContext, pool):
 )
 async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
     """Use a saved recipient."""
-    await callback.answer()
+    await safe_answer(callback)
 
     recipient_id = int(callback.data.split(":")[2])
     try:
@@ -632,7 +633,7 @@ async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
 )
 async def cb_select_payment(callback: CallbackQuery, state: FSMContext, pool):
     """Handle payment source selection."""
-    await callback.answer()
+    await safe_answer(callback)
 
     payment_map = {
         "gt:payment_stars": "stars",
@@ -808,7 +809,7 @@ async def _show_transfer_preview(message, state, user_id, pool):
 @router.callback_query(F.data == "gt:check_progress", GiftTransferFSM.executing)
 async def cb_check_progress(callback: CallbackQuery, state: FSMContext, pool):
     """Check transfer progress."""
-    await callback.answer()
+    await safe_answer(callback)
 
     data = await state.get_data()
     plan_id = data.get("plan_id")
@@ -870,7 +871,7 @@ async def cb_check_progress(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:retry_failed", GiftTransferFSM.executing)
 async def cb_retry_failed(callback: CallbackQuery, state: FSMContext, pool):
     """Retry failed transfers."""
-    await callback.answer()
+    await safe_answer(callback)
 
     data = await state.get_data()
     plan_id = data.get("plan_id")
@@ -918,7 +919,7 @@ async def cb_retry_failed(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:view_report", GiftTransferFSM.executing)
 async def cb_view_report(callback: CallbackQuery, state: FSMContext, pool):
     """View final report."""
-    await callback.answer()
+    await safe_answer(callback)
 
     data = await state.get_data()
     plan_id = data.get("plan_id")
@@ -973,7 +974,7 @@ async def cb_view_report(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:recipients", GiftTransferFSM.main_menu)
 async def cb_manage_recipients(callback: CallbackQuery, state: FSMContext, pool):
     """Manage saved recipients."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
     recipients = await db.get_gift_recipients(pool, user_id)
@@ -1007,7 +1008,7 @@ async def cb_manage_recipients(callback: CallbackQuery, state: FSMContext, pool)
 @router.callback_query(F.data.startswith("gt:edit_recipient:"))
 async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
     """Карточка сохранённого получателя с возможностью удаления."""
-    await callback.answer()
+    await safe_answer(callback)
     try:
         recipient_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
@@ -1055,7 +1056,7 @@ async def cb_del_recipient(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:reports", GiftTransferFSM.main_menu)
 async def cb_view_reports(callback: CallbackQuery, state: FSMContext, pool):
     """View transfer reports."""
-    await callback.answer()
+    await safe_answer(callback)
 
     user_id = callback.from_user.id
     reports = await GiftTransferReportService.get_reports_for_user(pool, user_id)
@@ -1088,7 +1089,7 @@ async def cb_view_reports(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data.startswith("gt:report_detail:"))
 async def cb_report_detail(callback: CallbackQuery, state: FSMContext, pool):
     """Детали конкретного отчёта о передаче подарков."""
-    await callback.answer()
+    await safe_answer(callback)
     try:
         report_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
@@ -1129,7 +1130,7 @@ async def cb_report_detail(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:help", GiftTransferFSM.main_menu)
 async def cb_help(callback: CallbackQuery, state: FSMContext):
     """Show help information."""
-    await callback.answer()
+    await safe_answer(callback)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data="gt:main")

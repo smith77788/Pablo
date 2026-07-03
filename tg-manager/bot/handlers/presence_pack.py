@@ -20,6 +20,7 @@ from database import db
 from services import presence_setup
 from services import task_registry as _treg
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -64,7 +65,7 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     # cb_pack_menu is re-used as a delegate from cb_pack_delete and cb_pack_cancel_fsm
     # which may have already answered the query; silently skip the double-answer.
     try:
-        await callback.answer()
+        await safe_answer(callback)
     except Exception:
         pass
     if not await require_plan(pool, callback.from_user.id, "starter"):
@@ -117,7 +118,7 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(PackCb.filter(F.action == "create"))
 async def cb_pack_create(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PresencePackFSM.entering_name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
@@ -164,7 +165,7 @@ async def fsm_pack_name(
 async def cb_pack_skip_description(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _go_to_bot_step(callback, state, pool)
 
 
@@ -230,7 +231,7 @@ async def cb_pack_pick_bot(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.pack_id
     bot_username = None
     if bot_id:
@@ -320,7 +321,7 @@ async def cb_pack_toggle_ch(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     selected: list[int] = list(sd.get("pack_channel_ids") or [])
     ch_id = callback_data.pack_id
@@ -338,7 +339,7 @@ async def cb_pack_toggle_ch(
 async def cb_pack_channels_done(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PresencePackFSM.selecting_groups)
     await _render_group_step(callback, state, pool)
 
@@ -417,7 +418,7 @@ async def cb_pack_toggle_gr(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     selected: list[int] = list(sd.get("pack_group_ids") or [])
     gr_id = callback_data.pack_id
@@ -433,7 +434,7 @@ async def cb_pack_toggle_gr(
     PackCb.filter(F.action == "groups_done"), PresencePackFSM.selecting_groups
 )
 async def cb_pack_groups_done(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PresencePackFSM.entering_target)
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=PackCb(action="skip_target"))
@@ -467,7 +468,7 @@ async def fsm_pack_target(message: Message, state: FSMContext, pool: asyncpg.Poo
     PackCb.filter(F.action == "skip_target"), PresencePackFSM.entering_target
 )
 async def cb_pack_skip_target(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(pack_target_url=None, pack_target_label=None)
     await state.set_state(PresencePackFSM.previewing)
     await _render_preview_cb(callback, state, pool=pool)
@@ -572,7 +573,7 @@ async def cb_pack_confirm_create(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await state.clear()
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Presence Pack", "starter"),
             parse_mode="HTML",
@@ -645,7 +646,7 @@ async def cb_pack_view(
     if not pack:
         await callback.answer("Пакет не найден", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     ch_ids = _jlist(pack["channel_ids"])
     gr_ids = _jlist(pack["group_ids"])
@@ -746,7 +747,7 @@ async def cb_pack_seed(
     from services import operation_bus
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Presence Pack", "starter"),
             parse_mode="HTML",
@@ -765,7 +766,7 @@ async def cb_pack_seed(
         await callback.answer("Нет каналов в пакете", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         op_id = await operation_bus.submit(
@@ -822,7 +823,7 @@ async def cb_pack_promote(
         await callback.answer("Нет каналов/групп в пакете", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         channels = await pool.fetch(
@@ -933,7 +934,7 @@ async def cb_pack_confirm_delete(
     if not pack:
         await callback.answer("Не найден", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -959,7 +960,7 @@ async def cb_pack_delete(
     callback_data: PackCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await db.delete_presence_pack(pool, callback_data.pack_id, callback.from_user.id)
     await cb_pack_menu(callback, pool)
 
@@ -971,7 +972,7 @@ async def cb_pack_delete(
 async def cb_pack_cancel_fsm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await cb_pack_menu(callback, pool)
 
@@ -984,7 +985,7 @@ async def cb_pack_back_to_bot(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     """Вернуться к шагу выбора бота из шага каналов."""
-    await callback.answer()
+    await safe_answer(callback)
     await _go_to_bot_step(callback, state, pool)
 
 
@@ -993,7 +994,7 @@ async def cb_pack_back_to_channels(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     """Вернуться к шагу каналов из шага групп."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PresencePackFSM.selecting_channels)
     await _render_channel_step(callback, state, pool)
 
@@ -1022,7 +1023,7 @@ async def cb_bot_admin_panel(
     if not bot_row:
         await callback.answer("Бот не найден", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         user_count = (
@@ -1181,7 +1182,7 @@ async def cb_bot_list_replies(
     callback_data: BotAdminCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
     rules = await db.get_auto_replies(pool, bot_id)
 

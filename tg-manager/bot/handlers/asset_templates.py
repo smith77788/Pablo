@@ -45,6 +45,7 @@ from bot.utils.op_helpers import _get_active_accounts
 from bot.utils.subscription import require_plan, locked_text
 from bot.utils.template_validator import validate_asset_template
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -309,7 +310,7 @@ async def _delete_template(pool: asyncpg.Pool, tpl_id: int, owner_id: int) -> bo
 @router.callback_query(AssetTplCb.filter(F.action == "menu"))
 async def cb_menu(callback: CallbackQuery, callback_data: AssetTplCb, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "📄 <b>Шаблоны ассетов</b>\n\n"
         "Здесь вы можете создавать и управлять шаблонами для быстрого создания "
@@ -325,7 +326,7 @@ async def cb_list(
     callback_data: AssetTplCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     asset_type = callback_data.asset_type or ""
     label = _TYPE_LABELS.get(asset_type, asset_type)
     templates = await _get_templates(pool, callback.from_user.id, asset_type)
@@ -354,7 +355,7 @@ async def cb_view(
     callback_data: AssetTplCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not tpl:
         await callback.message.edit_text(
@@ -407,14 +408,14 @@ async def cb_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AssetTemplateFSM.choosing_type)
     await callback.message.edit_text(
         "➕ <b>Создание шаблона</b>\n\nВыберите тип ассета:",
@@ -429,7 +430,7 @@ async def cb_create(
 async def cb_choose_type(
     callback: CallbackQuery, callback_data: AssetTplCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     asset_type = callback_data.asset_type or ""
     await state.update_data(asset_type=asset_type)
     await state.set_state(AssetTemplateFSM.waiting_name)
@@ -578,14 +579,14 @@ async def cb_save(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await state.clear()
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     asset_type = data.get("asset_type", callback_data.asset_type or "")
     name = data.get("name", "")
@@ -638,7 +639,7 @@ async def cb_apply(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not tpl:
         await callback.message.edit_text(
@@ -875,7 +876,7 @@ async def cb_delete_confirm(
     callback_data: AssetTplCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not tpl:
         await callback.message.edit_text(
@@ -900,7 +901,7 @@ async def cb_delete(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
@@ -1081,7 +1082,7 @@ async def cb_apply_bot_exec(
     http: aiohttp.ClientSession,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
@@ -1134,7 +1135,7 @@ _LIB_PAGE_SIZE = 5
 
 @router.callback_query(LibCb.filter(F.action == "menu"))
 async def cb_lib_menu(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_presets
 
     kb = InlineKeyboardBuilder()
@@ -1156,7 +1157,7 @@ async def cb_lib_menu(callback: CallbackQuery) -> None:
 
 @router.callback_query(LibCb.filter(F.action == "type"))
 async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_presets
 
     atype = callback_data.asset_type or "channel"
@@ -1185,7 +1186,7 @@ async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
 async def cb_lib_preview(
     callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_preset_by_key
 
     key = callback_data.preset_key or ""
@@ -1256,14 +1257,14 @@ async def cb_lib_clone(
     callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_preset_by_key
 
     key = callback_data.preset_key or ""
@@ -1309,7 +1310,7 @@ async def cb_lib_apply(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_preset_by_key
 
     key = callback_data.preset_key or ""
@@ -1502,7 +1503,7 @@ async def cb_lib_bot_pick(
     callback_data: LibCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
@@ -1517,7 +1518,7 @@ async def cb_lib_bot_customize(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
@@ -1556,7 +1557,7 @@ async def cb_lib_bot_customize(
 
 @router.callback_query(BotTplCustomizeFSM.company_name, F.data == "btcz_skip_company")
 async def cb_btcz_skip_company(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     fields = data.get("tpl_customize_fields", [])
     default = fields[0]["default"] if fields else ""
@@ -1603,7 +1604,7 @@ async def _ask_working_hours(target: Message, state: FSMContext, data: dict) -> 
 
 @router.callback_query(BotTplCustomizeFSM.working_hours, F.data == "btcz_skip_hours")
 async def cb_btcz_skip_hours(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     fields = data.get("tpl_customize_fields", [])
     field = next((f for f in fields if f["key"] == "HOURS"), None)
@@ -1648,7 +1649,7 @@ async def _ask_operator(target: Message, state: FSMContext, data: dict) -> None:
 async def cb_btcz_skip_operator(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     subs = data.get("tpl_subs", {})
     subs["OPERATOR"] = ""
@@ -1774,7 +1775,7 @@ async def cb_btcz_apply(
 @router.callback_query(AssetTplCb.filter(F.action == "back"))
 async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     # Delegate back navigation to the caller; show menu as fallback
     await callback.message.edit_text(
         "📄 <b>Шаблоны ассетов</b>",

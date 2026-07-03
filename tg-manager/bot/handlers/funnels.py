@@ -25,6 +25,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import broadcaster
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -126,7 +127,7 @@ async def cb_fn_list(
 ) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Цепочки сообщений", "starter"),
             parse_mode="HTML",
@@ -139,7 +140,7 @@ async def cb_fn_list(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
 
@@ -191,7 +192,7 @@ async def cb_fn_list(
 async def cb_fn_view(
     callback: CallbackQuery, callback_data: FunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_funnel_view(
         callback.message, pool, callback_data.bot_id, callback_data.funnel_id
     )
@@ -208,14 +209,14 @@ async def cb_fn_create(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Воронки", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CreateFunnel.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -262,7 +263,7 @@ async def cb_fn_trig_start(
     pool: asyncpg.Pool,
 ) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     funnel_name = data.get("funnel_name", "Новая цепочка")
     bot_id = callback_data.bot_id or data.get("bot_id", 0)
@@ -300,7 +301,7 @@ async def cb_fn_trig_join(
     pool: asyncpg.Pool,
 ) -> None:
     """Trigger: first message from a new user (join)."""
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     funnel_name = data.get("funnel_name", "Новая цепочка")
     bot_id = callback_data.bot_id or data.get("bot_id", 0)
@@ -334,7 +335,7 @@ async def cb_fn_trig_join(
 async def cb_fn_trig_keyword(
     callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     bot_id = callback_data.bot_id or data.get("bot_id", 0)
     await state.update_data(bot_id=bot_id)
@@ -399,7 +400,7 @@ async def msg_fn_keyword(
 async def cb_fn_add_step(
     callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CreateFunnel.waiting_step_text)
     await state.update_data(
         bot_id=callback_data.bot_id,
@@ -571,7 +572,7 @@ async def cb_fn_broadcast(
     state: FSMContext,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Воронки", "starter"),
             parse_mode="HTML",
@@ -588,7 +589,7 @@ async def cb_fn_broadcast(
     if not user_ids:
         await callback.answer("У цепочки нет подписчиков.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(FunnelBroadcast.waiting_message)
     await state.update_data(
         bot_id=callback_data.bot_id,
@@ -670,7 +671,7 @@ async def cb_fn_copy_from(
     if not others:
         await callback.answer("Нет других ботов для копирования.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = (
         f"@{row['username']}"
@@ -737,7 +738,7 @@ async def cb_fn_copy_single(
             show_alert=True,
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     kb = InlineKeyboardBuilder()
     for b in others[:8]:
@@ -920,7 +921,7 @@ async def cb_fn_steps_manage(
     callback: CallbackQuery, callback_data: FunnelCb, pool: asyncpg.Pool
 ) -> None:
     """Показать список шагов с кнопками управления."""
-    await callback.answer()
+    await safe_answer(callback)
     await _render_steps_manage(callback, callback_data, pool)
 
 
@@ -934,7 +935,7 @@ async def cb_fn_step_preview(
     if not step:
         await callback.answer("Шаг не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     delay_label = (
         f"{step['delay_minutes']} мин" if step["delay_minutes"] > 0 else "сразу"
     )
@@ -1052,7 +1053,7 @@ async def cb_fn_step_up(
     if callback_data.step == 0:
         await callback.answer("Шаг уже первый.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _swap_step_content(
         pool, callback_data.funnel_id, callback_data.step, callback_data.step - 1
     )
@@ -1071,7 +1072,7 @@ async def cb_fn_step_down(
     if callback_data.step >= len(steps) - 1:
         await callback.answer("Шаг уже последний.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _swap_step_content(
         pool, callback_data.funnel_id, callback_data.step, callback_data.step + 1
     )

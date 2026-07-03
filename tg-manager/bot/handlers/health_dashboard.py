@@ -34,6 +34,7 @@ from services.account_manager import (
 )
 from services.logger import log_exc_swallow
 from database.db import fetch_bots
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -230,7 +231,7 @@ async def _fetch_flood_events_7d(pool: asyncpg.Pool, owner_id: int) -> int:
 
 @router.callback_query(HealthCb.filter(F.action == "menu"))
 async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     stats = await _fetch_account_stats(pool, user_id)
@@ -427,7 +428,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(HealthCb.filter(F.action == "accounts"))
 async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -632,7 +633,7 @@ async def cb_health_real_check(
     pool: asyncpg.Pool,
 ) -> None:
     """Run check_account_status_full() for all accounts — actual Telegram verification."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -801,7 +802,7 @@ async def _check_bot_alive(
 
 @router.callback_query(HealthCb.filter(F.action == "bots_health"))
 async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -850,7 +851,7 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(HealthCb.filter(F.action == "flood_log"))
 async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -895,7 +896,7 @@ async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(HealthCb.filter(F.action == "trust_trend"))
 async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -952,7 +953,7 @@ async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(HealthCb.filter(F.action == "health_trend"))
 async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Show health_score trends from account_health_history."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -1034,7 +1035,7 @@ async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(HealthCb.filter(F.action == "sparklines"))
 async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Sparkline charts for health score trends over 14 days per account."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -1122,7 +1123,7 @@ async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 @router.callback_query(HealthCb.filter(F.action == "compare"))
 async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Side-by-side comparison chart of all accounts."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -1197,7 +1198,7 @@ async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 async def cb_health_recommendations(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     now = datetime.now(timezone.utc)
 
@@ -1407,7 +1408,7 @@ async def cb_health_recommendations(
 @router.callback_query(HealthCb.filter(F.action == "auto_rotate_confirm"))
 async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Show confirmation before auto-rotating unhealthy accounts."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -1620,7 +1621,7 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 @router.callback_query(HealthCb.filter(F.action == "pressure"))
 async def cb_pressure_score(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services import infra_pressure
 
     uid = callback.from_user.id
@@ -1652,7 +1653,7 @@ _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
 
 @router.callback_query(HealthCb.filter(F.action == "advisor"))
 async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services import infra_advisor
 
     recs = await infra_advisor.get_recommendations(pool, callback.from_user.id)
@@ -1686,7 +1687,7 @@ async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(HealthCb.filter(F.action == "reconnect_menu"))
 async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Список аккаунтов с неактивными сессиями для переподключения."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -1744,7 +1745,7 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 @router.callback_query(HealthCb.filter(F.action == "set_cooldown_menu"))
 async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Выбор аккаунта для ручной установки кулдауна."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -1803,7 +1804,7 @@ async def cb_set_cooldown_confirm(
     callback: CallbackQuery, callback_data: HealthCb, pool: asyncpg.Pool
 ) -> None:
     """Устанавливает кулдаун 24ч на выбранный аккаунт."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     acc_id = callback_data.page  # используем page как acc_id
 
@@ -1861,7 +1862,7 @@ async def cb_set_cooldown_confirm(
 @router.callback_query(HealthCb.filter(F.action == "reset_cooldown_menu"))
 async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Показывает аккаунты с активными кулдаунами и кнопки для сброса."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     now = datetime.now(timezone.utc)
@@ -1924,7 +1925,7 @@ async def cb_reset_cooldown_one(
     callback: CallbackQuery, callback_data: HealthCb, pool: asyncpg.Pool
 ) -> None:
     """Сбрасывает кулдаун для одного аккаунта."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     acc_id = callback_data.page
 
@@ -1981,7 +1982,7 @@ async def cb_reset_cooldown_one(
 @router.callback_query(HealthCb.filter(F.action == "reset_cooldown_all"))
 async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Сбрасывает кулдаун для всех аккаунтов пользователя."""
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     # Собрать ID аккаунтов с кулдауном ДО очистки — для сброса in-memory.

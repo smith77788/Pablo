@@ -35,6 +35,7 @@ from bot.utils.op_helpers import (
     _get_active_accounts,
 )
 from services import task_registry as _treg
+from bot.utils.op_helpers import safe_answer
 
 
 log = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 
 @router.callback_query(ChanFactCb.filter(F.action == "menu"))
 async def cb_chanf_menu(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "📡 <b>Channel Factory — менеджер каналов</b>\n\n"
         "• <b>Создать канал</b> — новый Telegram-канал через ваш аккаунт\n"
@@ -105,7 +106,7 @@ async def cb_chanf_menu(callback: CallbackQuery) -> None:
 @router.callback_query(ChanFactCb.filter(F.action == "back_to_ops"))
 async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
     from bot.callbacks import BmCb, MassPubCb
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(text="🏗 Активы & Сети", callback_data=BmCb(action="assets"))
     kb.button(text="📤 Публикация", callback_data=MassPubCb(action="menu"))
@@ -126,7 +127,7 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
 @router.callback_query(ChanFactCb.filter(F.action == "import"))
 async def cb_chanf_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: выбор аккаунта для импорта каналов."""
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
@@ -256,7 +257,7 @@ async def cb_chanf_import_all_accs(callback: CallbackQuery, pool: asyncpg.Pool) 
     if not accounts:
         await callback.answer("Нет активных аккаунтов.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     from services import operation_bus
 
@@ -282,7 +283,7 @@ async def cb_chanf_import_all_accs(callback: CallbackQuery, pool: asyncpg.Pool) 
 @router.callback_query(ChanFactCb.filter(F.action == "mass_pub_redirect"))
 async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
     """Redirect user to mass publish wizard."""
-    await callback.answer()
+    await safe_answer(callback)
     from bot.callbacks import MassPubCb
 
     kb = InlineKeyboardBuilder()
@@ -306,7 +307,7 @@ async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
 async def cb_chanf_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
@@ -349,7 +350,7 @@ async def cb_chanf_create_acc_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         acc = await pool.fetchrow(
             "SELECT id, phone, first_name, username, session_str "
@@ -422,7 +423,7 @@ async def fsm_chanf_title(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(ChanFactCb.filter(F.action == "skip_about"))
 async def cb_chanf_skip_about(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(about="")
     await state.set_state(ChannelFactoryFSM.waiting_username)
     await _ask_username(callback.message, edit=True)
@@ -461,7 +462,7 @@ async def _ask_username(msg, edit: bool) -> None:
 async def cb_chanf_skip_username(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(channel_username="")
     await _show_chanf_cluster_or_confirm(callback, state, pool)
 
@@ -544,7 +545,7 @@ async def cb_chanf_pick_cluster(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         cl = await pool.fetchrow(
             "SELECT id, name FROM clusters WHERE id=$1", callback_data.channel_id
@@ -562,7 +563,7 @@ async def cb_chanf_pick_cluster(
 
 @router.callback_query(ChanFactCb.filter(F.action == "skip_cluster"))
 async def cb_chanf_skip_cluster(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(cluster_id=None, cluster_name="")
     await state.set_state(ChannelFactoryFSM.confirming)
     await _show_chanf_confirm(callback, state)
@@ -753,7 +754,7 @@ async def cb_chanf_do_create(
 async def cb_chanf_bulk_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
@@ -809,7 +810,7 @@ async def cb_chanf_bulk_create_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(acc_id=acc["id"], acc_label=_acc_label(acc))
     await state.set_state(BulkChannelCreateFSM.waiting_count)
     kb = InlineKeyboardBuilder()
@@ -870,7 +871,7 @@ async def fsm_bulk_chan_prefix(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(ChanFactCb.filter(F.action == "bulk_skip_about"))
 async def cb_chanf_bulk_skip_about(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(about="")
     await state.set_state(BulkChannelCreateFSM.confirming)
     await _show_bulk_confirm(callback, state)
@@ -994,7 +995,7 @@ async def cb_chanf_do_bulk_create(
 async def cb_chanf_bulk_edit_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
@@ -1023,7 +1024,7 @@ async def cb_chanf_bulk_edit_start(
 async def cb_chanf_be_field(
     callback: CallbackQuery, callback_data: ChanFactCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     field = "title" if callback_data.action == "be_field_title" else "about"
     await state.update_data(edit_field=field)
     await state.set_state(EditChannelBulkFSM.choosing_scope)
@@ -1047,7 +1048,7 @@ async def cb_chanf_be_field(
 async def cb_chanf_be_scope_all(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     await state.update_data(be_scope="all", be_acc_ids=[a["id"] for a in accounts])
     await state.set_state(EditChannelBulkFSM.waiting_value)
@@ -1066,7 +1067,7 @@ async def cb_chanf_be_scope_all(
 async def cb_chanf_be_scope_acc(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -1094,7 +1095,7 @@ async def cb_chanf_be_scope_acc(
 async def cb_chanf_be_pick_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(be_scope="account", be_acc_ids=[callback_data.acc_id])
     await state.set_state(EditChannelBulkFSM.waiting_value)
     data = await state.get_data()
@@ -1202,7 +1203,7 @@ async def cb_chanf_be_confirm(
 async def cb_chanf_gen_links(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -1344,7 +1345,7 @@ async def cb_chanf_gen_link(
 @router.callback_query(ChanFactCb.filter(F.action == "stats"))
 async def cb_chanf_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: choose account to list channels from."""
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -1541,7 +1542,7 @@ _SEO_PAGE = 8
 async def cb_chanf_seo_pick_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     accounts = await _get_active_accounts(pool, user_id)
     if not accounts:
@@ -1574,7 +1575,7 @@ async def cb_chanf_seo_pick_acc(
 async def cb_chanf_seo_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_seo_chan_picker(
         callback, pool, callback_data.acc_id, callback.from_user.id, page=0
     )
@@ -1584,7 +1585,7 @@ async def cb_chanf_seo_acc(
 async def cb_chanf_seo_chan_page(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_seo_chan_picker(
         callback,
         pool,

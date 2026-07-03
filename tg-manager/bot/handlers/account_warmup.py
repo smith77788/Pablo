@@ -25,6 +25,7 @@ from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
 from bot.utils.event_status import mark_handled_error
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -48,7 +49,7 @@ def _back_kb() -> InlineKeyboardBuilder:
 @router.callback_query(WarmupCb.filter(F.action == "menu"))
 async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     from services.account_warmer import get_active_plans
 
     plans = await get_active_plans(pool, callback.from_user.id)
@@ -107,7 +108,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSM
 
 @router.callback_query(WarmupCb.filter(F.action == "create_list"))
 async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         accounts = await pool.fetch(
@@ -170,7 +171,7 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
 async def cb_warmup_select_plan(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.account_id
 
     kb = InlineKeyboardBuilder()
@@ -201,7 +202,7 @@ async def cb_warmup_select_plan(
 async def cb_warmup_select_all_plan(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         count = await pool.fetchval(
@@ -303,7 +304,7 @@ async def cb_warmup_start(
     Used when the user taps a Start button with an explicit account_id.
     Falls back to the account picker flow if no account_id is provided.
     """
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.account_id
 
     if not acc_id:
@@ -360,7 +361,7 @@ async def cb_warmup_start(
 async def cb_warmup_create_plan(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.account_warmer import create_warmup_plan
 
     plan_type = callback_data.action.replace("plan_", "")
@@ -401,7 +402,7 @@ async def cb_warmup_create_plan(
 
 @router.callback_query(WarmupCb.filter(F.action == "active_plans"))
 async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.account_warmer import get_active_plans
 
     plans = await get_active_plans(pool, callback.from_user.id)
@@ -512,7 +513,7 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
 async def cb_warmup_delete_plan(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         await pool.execute(
             "UPDATE account_warmup_plans SET status='cancelled' WHERE id=$1 AND owner_id=$2",
@@ -660,7 +661,7 @@ _ACTION_LABELS = {
 async def cb_warmup_plan_log(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.account_id
     plan_id = callback_data.plan_id
 
@@ -823,7 +824,7 @@ async def _show_account_picker(
 async def cb_wu_new_session(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WarmupSessionFSM.choosing_accounts)
     await state.update_data(sel_acc_ids=[], sel_tgt_ids=[])
     await _show_account_picker(callback, state, pool)
@@ -838,7 +839,7 @@ async def cb_wu_toggle_acc(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected: list[int] = data.get("sel_acc_ids", [])
     acc_id = callback_data.account_id
@@ -858,7 +859,7 @@ async def cb_wu_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
     if not data.get("sel_acc_ids"):
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WarmupSessionFSM.choosing_target_type)
 
     kb = InlineKeyboardBuilder()
@@ -958,7 +959,7 @@ async def _show_infra_picker(
 async def cb_wu_tgt_infra(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WarmupSessionFSM.picking_infra)
     await state.update_data(sel_tgt_refs=[], target_type="infra")
     await _show_infra_picker(callback, state, pool)
@@ -973,7 +974,7 @@ async def cb_wu_toggle_tgt(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     res_map: dict = data.get("_infra_map", {})
     ref = res_map.get(str(callback_data.account_id), "")
@@ -996,7 +997,7 @@ async def cb_wu_infra_done(callback: CallbackQuery, state: FSMContext) -> None:
     if not data.get("sel_tgt_refs"):
         await callback.answer("Выберите хотя бы одну цель", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _show_mode_picker(callback, state)
 
 
@@ -1009,7 +1010,7 @@ async def cb_wu_back_to_targets(
     Works from any FSM state (picking_infra, choosing_mode, confirming).
     Restores choosing_target_type without losing account selection.
     """
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WarmupSessionFSM.choosing_target_type)
     data = await state.get_data()
     n = len(data.get("sel_acc_ids", []))
@@ -1042,7 +1043,7 @@ async def cb_wu_back_to_targets(
 async def cb_wu_tgt_manual(
     callback: CallbackQuery, callback_data: WarmupCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WarmupSessionFSM.entering_targets)
     is_list = callback_data.action == "tgt_list"
     await state.update_data(target_type="manual", sel_tgt_refs=[])
@@ -1104,7 +1105,7 @@ async def fsm_wu_targets_text(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(WarmupCb.filter(F.action == "tgts_text_done"))
 async def cb_wu_tgts_text_done(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_mode_picker(callback, state)
 
 
@@ -1141,7 +1142,7 @@ async def cb_wu_mode(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     plan_type = callback_data.action.replace("sess_mode_", "")
     await state.update_data(plan_type=plan_type)
     await state.set_state(WarmupSessionFSM.confirming)
@@ -1252,7 +1253,7 @@ async def cb_wu_sess_start(
 
 @router.callback_query(WarmupCb.filter(F.action == "session_list"))
 async def cb_wu_session_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         sessions = await pool.fetch(
@@ -1350,7 +1351,7 @@ async def cb_wu_sess_detail(
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         logs = await pool.fetch(
@@ -1502,7 +1503,7 @@ async def cb_wu_sess_resume(
 async def cb_wu_sess_delete(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sess_id = callback_data.session_id
     try:
         await pool.execute(
@@ -1558,7 +1559,7 @@ def _ract_back_kb() -> InlineKeyboardBuilder:
 @router.callback_query(ResourceActCb.filter(F.action == "menu"))
 async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     try:
         active_count = (
@@ -1661,7 +1662,7 @@ async def _show_ract_account_picker(
 async def cb_ract_new(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ResourceActivityFSM.choosing_accounts)
     await state.update_data(ract_acc_ids=[])
     await _show_ract_account_picker(callback, state, pool)
@@ -1676,7 +1677,7 @@ async def cb_ract_toggle_acc(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected: list[int] = data.get("ract_acc_ids", [])
     acc_id = callback_data.account_id
@@ -1697,7 +1698,7 @@ async def cb_ract_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
     if not data.get("ract_acc_ids"):
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ResourceActivityFSM.choosing_profile)
 
     kb = InlineKeyboardBuilder()
@@ -1737,7 +1738,7 @@ async def cb_ract_profile(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = callback_data.action.replace("profile_", "")
     await state.update_data(ract_profile=profile)
     await state.set_state(ResourceActivityFSM.confirming)
@@ -1854,7 +1855,7 @@ async def cb_ract_start(
 
 @router.callback_query(ResourceActCb.filter(F.action == "list"))
 async def cb_ract_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     try:
@@ -1947,7 +1948,7 @@ async def cb_ract_detail(
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         logs = await pool.fetch(
@@ -2098,7 +2099,7 @@ async def cb_ract_resume(
 async def cb_ract_delete(
     callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         await pool.execute(
             "DELETE FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
