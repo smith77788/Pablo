@@ -2,13 +2,18 @@ name: tests
 
 on:
   push:
-    branches: ["**"]
     paths:
       - "tg-manager/**"
       - ".github/workflows/tests.yml"
   pull_request:
     paths:
       - "tg-manager/**"
+
+# Отменяем устаревшие прогоны для той же ветки — при частых push (параллельные
+# агенты) очередь не копится и не задерживает проверки/деплой.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pytest:
