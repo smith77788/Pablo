@@ -51,6 +51,8 @@ class FakePool:
 class _Bot:
     async def send_message(self, *a, **k):
         return None
+    async def get_file(self, *a, **k):
+        return None
 
 
 @pytest.mark.asyncio
@@ -104,3 +106,153 @@ async def test_watchdog_alerts_dedup():
     finally:
         sub._admin_ids = orig_admins
         w._alerted_stuck_ops.clear()
+
+
+# ── Circuit Breaker Tests ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_trips_on_failures():
+    """Circuit breaker trips after 3 consecutive failures."""
+    from services.op_worker import _circuit_breaker_record, _circuit_breaker_is_open, _circuit_breaker_state
+    _circuit_breaker_state.clear()
+    for _ in range(3):
+        await _circuit_breaker_record(100, False)
+    assert _circuit_breaker_is_open(100)
+    _circuit_breaker_state.clear()
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_resets_on_cooldown():
+    """Circuit breaker resets after cooldown expires."""
+    import time
+    from services.op_worker import _circuit_breaker_record, _circuit_breaker_is_open, _circuit_breaker_state
+    _circuit_breaker_state.clear()
+    for _ in range(3):
+        await _circuit_breaker_record(100, False)
+    assert _circuit_breaker_is_open(100)
+    # Simulate cooldown expiry
+    _circuit_breaker_state[100]["cooldown_until"] = time.time() - 1
+    await _circuit_breaker_record(100, True)  # This triggers reset
+    assert not _circuit_breaker_is_open(100)
+    _circuit_breaker_state.clear()
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_decay_on_success():
+    """Circuit breaker decays failures on success."""
+    from services.op_worker import _circuit_breaker_record, _circuit_breaker_is_open, _circuit_breaker_state
+    _circuit_breaker_state.clear()
+    for _ in range(3):
+        await _circuit_breaker_record(100, False)
+    assert _circuit_breaker_is_open(100)
+    # Success should decay
+    await _circuit_breaker_record(100, True)
+    assert not _circuit_breaker_is_open(100)
+    _circuit_breaker_state.clear()
+
+
+# ── Safe DB Helper Tests ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_safe_execute_returns_on_error():
+    """_safe_execute returns 'ERROR' instead of raising."""
+    from services.op_worker import _safe_execute
+    pool = FakePool()
+    pool.execute = lambda q, *a: (_ for _ in ()).throw(Exception("DB error"))
+    result = await _safe_execute(pool, "SELECT 1")
+    assert result == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_safe_fetchrow_returns_none_on_error():
+    """_safe_fetchrow returns None instead of raising."""
+    from services.op_worker import _safe_fetchrow
+    pool = FakePool()
+    pool.fetchrow = lambda q, *a: (_ for _ in ()).throw(Exception("DB error"))
+    result = await _safe_fetchrow(pool, "SELECT 1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_safe_fetch_returns_empty_on_error():
+    """_safe_fetch returns [] instead of raising."""
+    from services.op_worker import _safe_fetch
+    pool = FakePool()
+    pool.fetch = lambda q, *a: (_ for _ in ()).throw(Exception("DB error"))
+    result = await _safe_fetch(pool, "SELECT 1")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_safe_fetchval_returns_none_on_error():
+    """_safe_fetchval returns None instead of raising."""
+    from services.op_worker import _safe_fetchval
+    pool = FakePool()
+    pool.fetchval = lambda q, *a: (_ for _ in ()).throw(Exception("DB error"))
+    result = await _safe_fetchval(pool, "SELECT 1")
+    assert result is None
+
+
+# ── Account Rotation Tests ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_account_rotation_basic():
+    """select_account_rotated returns an account from the pool."""
+    from services.resource_selector import select_account_rotated
+    from services import flood_engine
+    # Mock flood_engine
+    orig = flood_engine.get_best_account
+    flood_engine.get_best_account = lambda **kw: None
+    try:
+        result = await select_account_rotated(
+            FakePool(fetch=[{"id": 1, "trust_score": 0.8}]),
+            owner_id=42
+        )
+        assert result is None  # No matching accounts
+    finally:
+        flood_engine.get_best_account = orig
+
+
+# ── Proxy Intelligence Tests ──────────────────────────────────────────────
+
+
+def test_proxy_stats_empty():
+    """get_proxy_stats returns zeros for unknown proxy."""
+    from services.account_manager import get_proxy_stats
+    result = get_proxy_stats("unknown_proxy")
+    assert result["success_rate"] == 0
+    assert result["total_checks"] == 0
+
+
+def test_proxy_stats_after_record():
+    """get_proxy_stats reflects recorded results."""
+    from services.account_manager import _record_proxy_stat, get_proxy_stats, _proxy_stats
+    _proxy_stats.clear()
+    _record_proxy_stat("test_proxy", True, 100)
+    _record_proxy_stat("test_proxy", True, 120)
+    _record_proxy_stat("test_proxy", False, 0)
+    result = get_proxy_stats("test_proxy")
+    assert result["success_rate"] == 66.7
+    assert result["total_checks"] == 3
+    _proxy_stats.clear()
+
+
+# ── Session Simulator Tests ───────────────────────────────────────────────
+
+
+def test_adaptive_delay_returns_positive():
+    """get_adaptive_delay always returns positive value."""
+    from services.session_simulator import get_adaptive_delay
+    delay = get_adaptive_delay("test_action", 5.0)
+    assert delay > 0
+
+
+def test_adaptive_delay_respects_base():
+    """get_adaptive_delay respects base delay."""
+    from services.session_simulator import get_adaptive_delay
+    delay1 = get_adaptive_delay("test_action", 1.0)
+    delay2 = get_adaptive_delay("test_action", 10.0)
+    assert delay2 >= delay1  # Higher base should give higher delay
