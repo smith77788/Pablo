@@ -458,6 +458,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="sec-btn" onclick="goTab('more')">Все →</span>
     </div>
     <div class="lst" id="actList"><div class="spin-wrap"><div class="spin"></div></div></div>
+
+    <!-- Quick Broadcast -->
+    <div class="sec-row" style="margin-top:12px">
+      <div class="sec">📢 Быстрая рассылка</div>
+    </div>
+    <div style="padding:0 0 8px">
+      <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки..." style="width:100%;padding:10px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px;resize:vertical"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1">📢 Отправить всем</button>
+        <button class="btn btn-s" onclick="openBcastPick()" style="flex:0;padding:10px 16px">⚙️ Настроить</button>
+      </div>
+      <div id="quickBcErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
+    </div>
   </div>
 </div>
 
@@ -4293,6 +4306,25 @@ async function submitBotBroadcast() {
     const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify(_p)});
     toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
     closeModal('mo-bot-broadcast'); toggleBotSelMode();
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
+}
+
+async function submitQuickBroadcast() {
+  const text=document.getElementById('quickBcText').value.trim();
+  const errEl=document.getElementById('quickBcErr'); errEl.textContent='';
+  if(!text){ errEl.textContent='Введите текст'; return; }
+  if(!BOTS.length){ errEl.textContent='Нет ботов. Добавьте бота в разделе 🤖'; return; }
+  const preview=`Разослать сообщение всем ${BOTS.length} ботам?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`;
+  if(!await askConfirm(preview)) return;
+  const btn=document.getElementById('quickBcBtn'); btn.disabled=true; btn.textContent='⏳ Отправка…';
+  try {
+    const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify({text,bot_ids:BOTS.map(b=>b.bot_id)})});
+    toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOTS.length} ботов, ${r.total_recipients||0} получателей`);
+    document.getElementById('quickBcText').value='';
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='📢 Отправить всем'; }
+}
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Запустить рассылку'; }
 }
