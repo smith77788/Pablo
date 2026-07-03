@@ -471,6 +471,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div id="quickBcErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
+
+    <!-- Quick Channel Add -->
+    <div class="sec-row" style="margin-top:12px">
+      <div class="sec">📡 Добавить канал</div>
+    </div>
+    <div style="padding:0 0 8px">
+      <div style="display:flex;gap:8px">
+        <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+        <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0;padding:10px 16px">➕</button>
+      </div>
+      <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
+    </div>
   </div>
 </div>
 
@@ -4324,6 +4336,19 @@ async function submitQuickBroadcast() {
     document.getElementById('quickBcText').value='';
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📢 Отправить всем'; }
+}
+
+async function submitQuickChannel() {
+  const link=document.getElementById('quickChLink').value.trim();
+  const errEl=document.getElementById('quickChErr'); errEl.textContent='';
+  if(!link){ errEl.textContent='Введите ссылку на канал'; return; }
+  if(!link.startsWith('http') && !link.startsWith('@')){ errEl.textContent='Формат: https://t.me/channel или @username'; return; }
+  try {
+    const r=await api('/api/miniapp/channel/add',{method:'POST',body:JSON.stringify({channel_identifier:link})});
+    toast(`✅ Канал ${r.title||link} добавлен!`);
+    document.getElementById('quickChLink').value='';
+    loadChannels();
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
 }
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Запустить рассылку'; }
