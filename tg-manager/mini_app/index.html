@@ -3720,7 +3720,7 @@ let REF_CODE = null;
     loadSub();
     loadRef();
     loadBots();
-    loadChannels();
+    openChannels();
     loadAdminSection();
   } catch(e) {
     document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
@@ -4361,7 +4361,7 @@ async function submitQuickChannel() {
     const r=await api('/api/miniapp/channel/add',{method:'POST',body:JSON.stringify({channel_identifier:link})});
     toast(`✅ Канал ${r.title||link} добавлен!`);
     document.getElementById('quickChLink').value='';
-    loadChannels();
+    openChannels();
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
 }
 
@@ -5081,7 +5081,7 @@ async function openChannels() {
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Добавьте канал через меню в Telegram')); return; }
     renderChannels(CUR_CHANNELS);
   } catch(e) {
-    txt('chList', errHtml(e.message,'loadChannels()'));
+    txt('chList', errHtml(e.message,'openChannels()'));
   }
 }
 
