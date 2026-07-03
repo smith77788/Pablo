@@ -10737,7 +10737,7 @@ function initPayment(planKey, label, price) {
     toast(`Для оплаты перейдите в бот и выберите тариф "${label}" (${price})`);
   }
 }
-</script>
+
 // ── Admin Panel ──────────────────────────────────────
 async function loadAdminSection() {
   try {
@@ -10822,5 +10822,6 @@ async function submitAdminBroadcast() {
     back();
   } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
 }
+</script>
 </body>
 </html>
