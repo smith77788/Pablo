@@ -200,20 +200,25 @@ async def test_safe_fetchval_returns_none_on_error():
 
 @pytest.mark.asyncio
 async def test_account_rotation_basic():
-    """select_account_rotated returns an account from the pool."""
-    from services.resource_selector import select_account_rotated
-    from services import flood_engine
-    # Mock flood_engine
-    orig = flood_engine.get_best_account
-    flood_engine.get_best_account = lambda **kw: None
-    try:
-        result = await select_account_rotated(
-            FakePool(fetch=[{"id": 1, "trust_score": 0.8}]),
-            owner_id=42
-        )
-        assert result is None  # No matching accounts
-    finally:
-        flood_engine.get_best_account = orig
+    """select_account_rotated выбирает аккаунт из кандидатов по скорингу."""
+    from services.resource_selector import select_account_rotated, _account_usage
+    _account_usage.clear()
+    # Один кандидат → он и должен вернуться (ротация работает).
+    result = await select_account_rotated(
+        FakePool(fetch=[{"id": 1, "trust_score": 0.8}]),
+        owner_id=42,
+    )
+    assert result is not None
+    assert result["id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_account_rotation_empty():
+    """Нет кандидатов → None."""
+    from services.resource_selector import select_account_rotated, _account_usage
+    _account_usage.clear()
+    result = await select_account_rotated(FakePool(fetch=[]), owner_id=42)
+    assert result is None
 
 
 # ── Proxy Intelligence Tests ──────────────────────────────────────────────

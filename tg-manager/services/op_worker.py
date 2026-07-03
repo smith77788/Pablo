@@ -111,6 +111,11 @@ async def _circuit_breaker_record(owner_id: int, success: bool) -> bool:
         
         if success:
             state["failures"] = max(0, state["failures"] - 1)  # decay on success
+            # Восстановление: если ошибок стало меньше порога — закрываем цепь
+            # (не держим паузу до конца cooldown, раз аккаунты снова работают).
+            if state["failures"] < _CIRCUIT_BREAKER_THRESHOLD:
+                state["tripped_at"] = None
+                state["cooldown_until"] = None
             return False
         
         state["failures"] += 1

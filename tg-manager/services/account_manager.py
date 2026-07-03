@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 import logging
 import random
 import re
+import time
 from typing import Any, Optional
+
+import asyncpg  # noqa: F401 — используется в аннотациях "asyncpg.Pool"
 from config import TG_API_ID, TG_API_HASH, TG_PROXY, CF_RELAY_URL
 from services.logger import log_exc_swallow
 
