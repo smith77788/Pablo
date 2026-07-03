@@ -7306,6 +7306,17 @@ async def _exec_niche_growth_post(
         log.warning("niche_growth_post: keyword gen failed: %s", exc)
         keywords = [search_description]
 
+    # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
+    # исключаем, чтобы повторные запуски не заходили и не постили повторно в
+    # те же группы (лишний риск спам-флага без дополнительного охвата).
+    try:
+        prior_rows = await pool.fetch(
+            "SELECT group_id FROM niche_growth_targets WHERE owner_id=$1", owner_id
+        )
+        exclude_ids = {int(r["group_id"]) for r in prior_rows}
+    except Exception:
+        exclude_ids = set()
+
     # Ищем группы
     try:
         groups = await niche_searcher.search_niche_groups(
@@ -7313,6 +7324,7 @@ async def _exec_niche_growth_post(
             keywords,
             min_members=50,
             max_per_keyword=5,
+            exclude_ids=exclude_ids,
             _acc=search_acc,
         )
     except Exception as exc:
@@ -7403,6 +7415,16 @@ async def _exec_niche_growth_post(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
             continue
+
+        # Запоминаем группу как уже посещённую — чтобы будущие запуски Growth
+        # Agent для этого владельца не заходили и не постили сюда повторно.
+        if grp_id:
+            await _safe_execute(
+                pool,
+                "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
+                "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
+                owner_id, grp_id, grp_title,
+            )
 
         # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
         join_to_post_delay = random.uniform(180, 480)
