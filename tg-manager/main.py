@@ -575,6 +575,12 @@ async def main() -> None:
         # broadcaster.run пропускает уже доставленных через delivery log — без дублей.
         from services import broadcaster as _broadcaster
         asyncio.create_task(_broadcaster.resume_interrupted(pool))
+        # Session Health Monitor — проверка сессий каждые 6 часов
+        from services.account_manager import run_session_health_monitor
+        asyncio.create_task(_resilient("session_health_monitor", run_session_health_monitor, pool))
+        # Pool Monitor — проверка пула соединений каждые 5 минут
+        from database.db import run_pool_monitor
+        asyncio.create_task(_resilient("pool_monitor", run_pool_monitor, pool))
         log.info("TG Manager started")
 
         # ── Webhook or long-polling ───────────────────────────────────────────
