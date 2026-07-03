@@ -7657,6 +7657,115 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp(checks)
     app.router.add_get("/api/miniapp/sys_health", api_health)
 
+    # ── Admin endpoints (только для админов) ────────────────────────────────
+
+    async def admin_users(request: web.Request) -> web.Response:
+        """Список пользователей платформы (только для админов)."""
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            rows = await pool.fetch(
+                """SELECT user_id, username, first_name, current_plan, plan_expires_at,
+                          created_at, last_active_at
+                   FROM platform_users ORDER BY created_at DESC LIMIT 100""")
+            return _json_resp({"users": [dict(r) for r in rows]})
+        except Exception as e:
+            log.exception("admin_users uid=%d", uid)
+            return _err(str(e), 500)
+
+    async def admin_stats(request: web.Request) -> web.Response:
+        """Системная статистика (только для админов)."""
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            stats = {}
+            stats["total_users"] = int(await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0)
+            stats["active_subs"] = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now()") or 0)
+            stats["total_bots"] = int(await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE is_active=true") or 0)
+            stats["total_channels"] = int(await pool.fetchval("SELECT COUNT(*) FROM managed_channels") or 0)
+            stats["total_accounts"] = int(await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE is_active=true") or 0)
+            stats["ops_today"] = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE created_at > now() - INTERVAL '1 day'") or 0)
+            stats["ops_pending"] = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE status='pending'") or 0)
+            stats["ops_running"] = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE status='running'") or 0)
+            return _json_resp(stats)
+        except Exception as e:
+            log.exception("admin_stats uid=%d", uid)
+            return _err(str(e), 500)
+
+    async def admin_user_detail(request: web.Request) -> web.Response:
+        """Детали пользователя (только для админов)."""
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            target_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return _err("bad user_id", 400)
+        try:
+            user = await pool.fetchrow(
+                "SELECT * FROM platform_users WHERE user_id=$1", target_id)
+            if not user:
+                return _err("User not found", 404)
+            bots = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=true", target_id) or 0
+            channels = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", target_id) or 0
+            accounts = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=true", target_id) or 0
+            return _json_resp({
+                "user": dict(user),
+                "bots": int(bots),
+                "channels": int(channels),
+                "accounts": int(accounts),
+            })
+        except Exception as e:
+            log.exception("admin_user_detail uid=%d target=%d", uid, target_id)
+            return _err(str(e), 500)
+
+    async def admin_broadcast(request: web.Request) -> web.Response:
+        """Рассылка всем пользователям (только для админов)."""
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        text = (body.get("text") or "").strip()
+        if not text:
+            return _err("text required")
+        try:
+            users = await pool.fetch("SELECT user_id FROM platform_users")
+            if not users:
+                return _json_resp({"ok": True, "sent": 0})
+            from database import db as _db
+            sent = 0
+            for u in users:
+                try:
+                    from aiogram import Bot as _Bot
+                    from config import BOT_TOKEN as _tok
+                    _b = _Bot(token=_tok)
+                    await _b.send_message(u["user_id"], text, parse_mode="HTML")
+                    sent += 1
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    pass
+            return _json_resp({"ok": True, "sent": sent})
+        except Exception as e:
+            log.exception("admin_broadcast uid=%d", uid)
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/admin/users", admin_users)
+    app.router.add_get("/api/miniapp/admin/stats", admin_stats)
+    app.router.add_get("/api/miniapp/admin/user/{user_id}", admin_user_detail)
+    app.router.add_post("/api/miniapp/admin/broadcast", admin_broadcast)
+
     async def miniapp_config(request: web.Request) -> web.Response:
         """Public config endpoint — no auth required. Returns bot info for frontend."""
         bot_username = await _resolve_bot_username()

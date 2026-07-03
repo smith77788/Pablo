@@ -1050,6 +1050,28 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
     </div>
 
+    <!-- Админ-панель (только для админов) -->
+    <div id="adminSection" style="display:none">
+      <div class="sec">Админ-панель</div>
+      <div class="mgmt-grid">
+        <div class="mgmt-tile" onclick="openAdminStats()">
+          <div class="mgmt-tile-ico">📊</div>
+          <div class="mgmt-tile-lbl">Статистика</div>
+          <div class="mgmt-tile-val"></div>
+        </div>
+        <div class="mgmt-tile" onclick="openAdminUsers()">
+          <div class="mgmt-tile-ico">👥</div>
+          <div class="mgmt-tile-lbl">Пользователи</div>
+          <div class="mgmt-tile-val" id="m-admin-users-val"></div>
+        </div>
+        <div class="mgmt-tile" onclick="openAdminBroadcast()">
+          <div class="mgmt-tile-ico">📢</div>
+          <div class="mgmt-tile-lbl">Рассылка</div>
+          <div class="mgmt-tile-val"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Подвал платформы -->
     <div class="platform-footer">
       <div class="pf-brand">⚡ Infragram OS</div>
@@ -1067,6 +1089,46 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <span style="display:none" id="m-at-val"></span>
     <span style="display:none" id="m-massops-val"></span>
 
+  </div>
+</div>
+
+<!-- ══════════════════════ ADMIN STATS ══════════════════════ -->
+<div class="screen" id="s-admin-stats">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📊 Статистика</div>
+  </div>
+  <div class="sb" id="adm-stats-body"></div>
+</div>
+
+<!-- ══════════════════════ ADMIN USERS ══════════════════════ -->
+<div class="screen" id="s-admin-users">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👥 Пользователи</div>
+  </div>
+  <div class="sb" id="adm-users-body"></div>
+</div>
+
+<!-- ══════════════════════ ADMIN USER DETAIL ══════════════════════ -->
+<div class="screen" id="s-admin-user-detail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👤 Детали</div>
+  </div>
+  <div class="sb" id="adm-ud-body"></div>
+</div>
+
+<!-- ══════════════════════ ADMIN BROADCAST ══════════════════════ -->
+<div class="screen" id="s-admin-broadcast">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📢 Рассылка</div>
+  </div>
+  <div class="sb">
+    <div class="sec">Рассылка всем пользователям</div>
+    <textarea id="adm-bc-text" rows="5" placeholder="Введите текст сообщения..." style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
+    <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="submitAdminBroadcast()">📢 Отправить</button>
   </div>
 </div>
 
@@ -3585,6 +3647,7 @@ let REF_CODE = null;
     openSSE();
     loadSub();
     loadRef();
+    loadAdminSection();
   } catch(e) {
     document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
@@ -10675,5 +10738,89 @@ function initPayment(planKey, label, price) {
   }
 }
 </script>
+// ── Admin Panel ──────────────────────────────────────
+async function loadAdminSection() {
+  try {
+    const stats = await api('/api/miniapp/admin/stats');
+    document.getElementById('adminSection').style.display = 'block';
+    document.getElementById('m-admin-users-val').textContent = stats.total_users + ' юзеров';
+  } catch(e) {
+    // Not an admin — keep section hidden
+  }
+}
+
+async function openAdminStats() {
+  push('s-admin-stats');
+  txt('adm-stats-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const s = await api('/api/miniapp/admin/stats');
+    let html = '<div class="mgmt-grid">';
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">👥</div><div class="mgmt-tile-lbl">Юзеры</div><div class="mgmt-tile-val">${s.total_users||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">💳</div><div class="mgmt-tile-lbl">Подписки</div><div class="mgmt-tile-val">${s.active_subs||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">🤖</div><div class="mgmt-tile-lbl">Боты</div><div class="mgmt-tile-val">${s.total_bots||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">📡</div><div class="mgmt-tile-lbl">Каналы</div><div class="mgmt-tile-val">${s.total_channels||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">📱</div><div class="mgmt-tile-lbl">Аккаунты</div><div class="mgmt-tile-val">${s.total_accounts||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">⚙️</div><div class="mgmt-tile-lbl">Операции/день</div><div class="mgmt-tile-val">${s.ops_today||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">⏳</div><div class="mgmt-tile-lbl">В очереди</div><div class="mgmt-tile-val">${s.ops_pending||0}</div></div>`;
+    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">🔄</div><div class="mgmt-tile-lbl">Выполняется</div><div class="mgmt-tile-val">${s.ops_running||0}</div></div>`;
+    html += '</div>';
+    txt('adm-stats-body', html);
+  } catch(e) { txt('adm-stats-body', errHtml(e.message)); }
+}
+
+async function openAdminUsers() {
+  push('s-admin-users');
+  txt('adm-users-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/admin/users');
+    const users = d.users || [];
+    let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+    for (const u of users) {
+      html += `<div class="mgmt-tile" style="cursor:pointer" onclick="openAdminUserDetail(${u.user_id})">
+        <div class="mgmt-tile-ico">👤</div>
+        <div class="mgmt-tile-body">
+          <div class="mgmt-tile-lbl">${esc(u.first_name||u.username||u.user_id)}</div>
+          <div class="mgmt-tile-val">${u.current_plan||'free'} · ${u.created_at?new Date(u.created_at).toLocaleDateString('ru-RU'):''}</div>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    txt('adm-users-body', html);
+  } catch(e) { txt('adm-users-body', errHtml(e.message)); }
+}
+
+async function openAdminUserDetail(userId) {
+  push('s-admin-user-detail');
+  txt('adm-ud-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/admin/user/' + userId);
+    const u = d.user;
+    let html = `<div class="sec">Пользователь ${u.user_id}</div>`;
+    html += `<div style="padding:12px 16px;background:var(--bg);border-radius:14px">`;
+    html += `<div>👤 ${esc(u.first_name||'')} ${esc(u.username?'@'+u.username:'')}</div>`;
+    html += `<div>💳 Подписка: <b>${u.current_plan||'free'}</b></div>`;
+    html += `<div>🤖 Ботов: <b>${d.bots}</b></div>`;
+    html += `<div>📡 Каналов: <b>${d.channels}</b></div>`;
+    html += `<div>📱 Аккаунтов: <b>${d.accounts}</b></div>`;
+    html += `<div>📅 Регистрация: ${u.created_at?new Date(u.created_at).toLocaleDateString('ru-RU'):'—'}</div>`;
+    html += '</div>';
+    txt('adm-ud-body', html);
+  } catch(e) { txt('adm-ud-body', errHtml(e.message)); }
+}
+
+async function openAdminBroadcast() {
+  push('s-admin-broadcast');
+}
+
+async function submitAdminBroadcast() {
+  const text = document.getElementById('adm-bc-text')?.value?.trim();
+  if (!text) { toast('Введите текст'); return; }
+  if (!await askConfirm('Разослать сообщение всем пользователям?')) return;
+  try {
+    const r = await api('/api/miniapp/admin/broadcast', {method:'POST', body:JSON.stringify({text})});
+    toast('✅ Отправлено: ' + (r.sent||0) + ' юзерам');
+    back();
+  } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
+}
 </body>
 </html>
