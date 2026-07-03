@@ -483,6 +483,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
+
+    <!-- Quick Bot Add -->
+    <div class="sec-row" style="margin-top:12px">
+      <div class="sec">🤖 Добавить бота</div>
+    </div>
+    <div style="padding:0 0 8px">
+      <div style="display:flex;gap:8px">
+        <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx..." style="flex:1;padding:10px;border-radius:12px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px;font-family:monospace">
+        <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0;padding:10px 16px">➕</button>
+      </div>
+      <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
+    </div>
   </div>
 </div>
 
@@ -4348,6 +4360,18 @@ async function submitQuickChannel() {
     toast(`✅ Канал ${r.title||link} добавлен!`);
     document.getElementById('quickChLink').value='';
     loadChannels();
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+}
+
+async function submitQuickBot() {
+  const token=document.getElementById('quickBotToken').value.trim();
+  const errEl=document.getElementById('quickBotErr'); errEl.textContent='';
+  if(!token){ errEl.textContent='Введите токен бота'; return; }
+  try {
+    const r=await api('/api/miniapp/bot/add',{method:'POST',body:JSON.stringify({token})});
+    toast(r.already_exists?`✅ Бот @${r.username} уже добавлен`:`✅ Бот @${r.username} добавлен!`);
+    document.getElementById('quickBotToken').value='';
+    loadBots();
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
 }
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
