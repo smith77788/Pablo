@@ -8,6 +8,7 @@ import asyncpg
 from bot.callbacks import NoteCb
 from bot.keyboards import back_to_bot
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -28,7 +29,7 @@ async def cb_note_edit(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     raw_note = row.get("note") or "(нет заметки)"
     current = raw_note.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await state.set_state(EditNote.waiting_text)

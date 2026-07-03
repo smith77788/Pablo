@@ -20,6 +20,7 @@ from bot.states import Broadcast
 from services import bot_api as _bot_api
 from database import db
 from services import broadcaster
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -40,7 +41,7 @@ async def cb_bc_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     count = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -63,7 +64,7 @@ async def cb_bc_menu(
 async def cb_compose(
     callback: CallbackQuery, callback_data: BroadcastCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -187,7 +188,7 @@ async def cb_confirm(
         await state.clear()
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     segment_user_ids = data.get("segment_user_ids")
     if segment_user_ids:
@@ -275,7 +276,7 @@ async def cb_test(
 async def cb_add_button(
     callback: CallbackQuery, callback_data: BroadcastCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(Broadcast.waiting_button_text)
     await callback.message.edit_text(
         "🔗 <b>Добавить кнопку к рассылке</b>\n\nВведите текст кнопки:",
@@ -357,7 +358,7 @@ async def msg_button_url(
 
 @router.callback_query(BroadcastCb.filter(F.action == "cancel"))
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
     bot_id = data.get("bot_id", 0)
@@ -377,7 +378,7 @@ async def cb_status(
         await callback.answer("Бот не найден.", show_alert=True)
         return
     history = await db.get_recent_broadcasts(pool, row["bot_id"], limit=10)
-    await callback.answer()
+    await safe_answer(callback)
     if not history:
         from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
 
@@ -418,7 +419,7 @@ async def cb_detail(
     if not bc:
         await callback.answer("Рассылка не найдена.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "partial": "⚠️", "cancelled": "❌", "failed": "❌"}
     emoji = status_emoji.get(bc["status"], "❓")
     preview = bc["message_text"][:300] if bc["message_text"] else ""
@@ -471,7 +472,7 @@ async def cb_bc_summary(
     if not history:
         await callback.answer("Рассылок пока не было.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -520,7 +521,7 @@ async def cb_bc_stat(
     if not bc:
         await callback.answer("Рассылка не найдена.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     started = (
         bc["created_at"].strftime("%d.%m.%Y %H:%M") if bc.get("created_at") else "—"
@@ -566,7 +567,7 @@ async def cb_from_template(
             "У вас нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "📋 <b>Выберите шаблон для рассылки:</b>",
         parse_mode="HTML",
@@ -599,7 +600,7 @@ async def cb_use_template(
         await callback.answer("У бота нет аудитории для рассылки.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(Broadcast.confirming)
     await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
 
@@ -635,7 +636,7 @@ async def cb_segment(
     if not languages:
         await callback.answer("Аудитория пуста.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
@@ -676,7 +677,7 @@ async def cb_segment_select(
     if not user_ids:
         await callback.answer("Нет пользователей в этом сегменте.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(
         bot_id=callback_data.bot_id, segment_lang=lang, segment_user_ids=user_ids

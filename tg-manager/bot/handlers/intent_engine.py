@@ -37,6 +37,7 @@ from services.intent_planner import (
     format_plan_card,
 )
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router(name="intent_engine")
@@ -221,13 +222,13 @@ async def cmd_intent(message: Message, pool: asyncpg.Pool, state: FSMContext) ->
 async def cb_intent_menu(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_intent_main(callback, pool, state, edit=True)
 
 
 @router.callback_query(IntentCb.filter(F.action == "new"))
 async def cb_intent_new(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(IntentFSM.describing)
     kb = InlineKeyboardBuilder()
     kb.button(text="📍 Навигатор", callback_data=IntentCb(action="menu"))
@@ -266,7 +267,7 @@ async def cb_intent_preset(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     key = callback_data.value or ""
     description = _PRESET_DESCRIPTIONS.get(key, key)
@@ -774,7 +775,7 @@ async def cb_intent_manual(
     if not row:
         await callback.answer("План не найден", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _navigate_to_tool(callback, _as_dict(row["plan"]))
 
 
@@ -798,7 +799,7 @@ async def cb_intent_cancel(
 async def cb_intent_history(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     intents = await db.list_intents(pool, callback.from_user.id, limit=10)
     if not intents:
@@ -828,7 +829,7 @@ async def cb_intent_detail(
     if not row:
         await callback.answer("Не найдено", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     if callback.message:
         await _show_plan_card(
             callback.message,

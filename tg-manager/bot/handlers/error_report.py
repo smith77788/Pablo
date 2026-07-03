@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ErrorReportCb
 from bot.states import ErrorReportFSM
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ router = Router()
 @router.callback_query(ErrorReportCb.filter(F.action == "start"))
 async def cb_start_error_report(callback: CallbackQuery, state: FSMContext) -> None:
     """Начало процесса отправки отчёта об ошибке."""
-    await callback.answer()
+    await safe_answer(callback)
     text = (
         "🐛 <b>Отправить отчёт об ошибке</b>\n\n"
         "Опишите что произошло:\n"
@@ -153,6 +154,6 @@ async def msg_error_screenshot_invalid(message: Message) -> None:
 @router.callback_query(ErrorReportCb.filter(F.action == "cancel"))
 async def cb_cancel_error_report(callback: CallbackQuery, state: FSMContext) -> None:
     """Отмена отправки отчёта об ошибке."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text("❌ Отправка отчёта отменена.")

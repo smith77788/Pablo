@@ -11,6 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import BotCb, RefCb, BmCb
 from bot.utils.op_helpers import _progress_bar
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -95,7 +96,7 @@ async def cmd_referral(message: Message) -> None:
 
 @router.callback_query(RefCb.filter(F.action == "menu"))
 async def cb_ref_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     stats = await db.get_referral_stats(pool, uid)
     me = await callback.bot.get_me()
@@ -115,7 +116,7 @@ async def cb_ref_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(RefCb.filter(F.action == "leaderboard"))
 async def cb_ref_leaderboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     rows = await db.get_referral_leaderboard_platform(pool, limit=10)
 
     if not rows:

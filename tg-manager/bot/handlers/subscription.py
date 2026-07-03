@@ -17,6 +17,7 @@ from bot.states import PaymentSettingsFSM, PromoSettingsFSM
 from bot.utils import subscription as sub_utils
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -312,7 +313,7 @@ async def cmd_subscription(message: Message, pool: asyncpg.Pool) -> None:
 async def cb_sub_menu(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     try:
         disc, until = await _get_promo(pool)
@@ -382,7 +383,7 @@ async def cb_plan_features(
     if not features:
         plan = "paid"
         features = PLAN_DETAILED_FEATURES.get("paid", [])
-    await callback.answer()
+    await safe_answer(callback)
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     price = PLAN_PRICES_USD.get(plan, PLAN_PRICES_USD["paid"])
     bot_limit = sub_utils.BOT_LIMITS.get(plan, 9999)
@@ -428,7 +429,7 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb, pool: as
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
-    await callback.answer()
+    await safe_answer(callback)
     base = PLAN_PRICES_USD[plan]
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     promo, promo_until = await _get_promo(pool)
@@ -481,7 +482,7 @@ async def cb_choose_period(
     ton = _ton_wallet()
     tron = _tron_wallet()
     promo, _ = await _get_promo(pool)
-    await callback.answer()
+    await safe_answer(callback)
 
     if not ton and not tron:
         # No wallets configured
@@ -558,7 +559,7 @@ async def cb_pay(
             "Кошелёк не настроен. Обратитесь к администратору.", show_alert=True
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     promo, _ = await _get_promo(pool)
     usd, crypto = _calc(plan, months, currency, promo)
@@ -635,7 +636,7 @@ async def cb_pay(
 
 @router.callback_query(SubCb.filter(F.action == "check_status"))
 async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         row = await pool.fetchrow(
             "SELECT * FROM payments WHERE user_id=$1 "
@@ -686,7 +687,7 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(SubCb.filter(F.action == "request_sub"))
 async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
@@ -763,7 +764,7 @@ async def cb_admin_grant(
     if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
@@ -881,7 +882,7 @@ async def cb_payment_settings(callback: CallbackQuery, state: FSMContext) -> Non
     if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
         _payment_settings_text(),
@@ -901,7 +902,7 @@ async def cb_pay_edit(
     if key not in _PAY_SETTING_LABELS:
         await callback.answer("Неизвестный параметр.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     label = _PAY_SETTING_LABELS[key]
     cur = os.getenv(key, "")
@@ -1056,7 +1057,7 @@ async def cb_promo_settings(
     if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     text, markup = await _promo_settings_text_kb(pool)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
@@ -1069,7 +1070,7 @@ async def cb_promo_clear(
     if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     from database.db import set_platform_setting
     await set_platform_setting(pool, "promo_discount", "0")
     await set_platform_setting(pool, "promo_until", "")
@@ -1084,7 +1085,7 @@ async def cb_promo_set(
     if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PromoSettingsFSM.waiting_discount)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=SubCb(action="promo_settings"))

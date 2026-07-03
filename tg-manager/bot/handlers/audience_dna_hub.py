@@ -15,6 +15,7 @@ from bot.callbacks import BotCb, DnaCb, BmCb
 from database import db
 from services import audience_dna as dna_svc
 from services.audience_dna import AudienceDNA, generate_recommendations
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -81,7 +82,7 @@ def _format_dna_report(dna: AudienceDNA, bot_name: str) -> str:
 async def cb_dna_menu(
     callback: CallbackQuery, callback_data: DnaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         kb = InlineKeyboardBuilder()
@@ -116,7 +117,7 @@ async def cb_dna_menu(
 async def cb_dna_report(
     callback: CallbackQuery, callback_data: DnaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
         await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())
@@ -174,7 +175,7 @@ async def cb_dna_report(
 async def cb_dna_recs(
     callback: CallbackQuery, callback_data: DnaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
         await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())
@@ -270,7 +271,7 @@ async def cb_dna_compute(
 async def cb_dna_history(
     callback: CallbackQuery, callback_data: DnaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
         await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())

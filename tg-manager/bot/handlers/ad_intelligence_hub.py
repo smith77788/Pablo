@@ -29,6 +29,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AdIntelCb, BmCb
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router(name="ad_intelligence_hub")
@@ -109,7 +110,7 @@ def _quality_label(score: float) -> str:
 
 @router.callback_query(AdIntelCb.filter(F.action == "menu"))
 async def cb_adi_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
 
     from services.ad_intelligence import get_dashboard_stats
@@ -181,7 +182,7 @@ async def cmd_ad_intel(message: Message, pool: asyncpg.Pool, state: FSMContext) 
 async def cb_adi_add_channel(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AdIntelFSM.waiting_channel)
 
     text = (
@@ -304,7 +305,7 @@ async def cb_adi_top_channels(
     callback_data: AdIntelCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     page = callback_data.page
     offset = page * _PAGE_SIZE
@@ -392,7 +393,7 @@ async def cb_adi_placement_detail(
     callback_data: AdIntelCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     async with pool.acquire() as conn:
         r = await conn.fetchrow(
@@ -538,7 +539,7 @@ async def cb_adi_rescan_channel(
 async def cb_adi_recommendations(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AdIntelFSM.waiting_budget)
 
     await callback.message.edit_text(
@@ -632,7 +633,7 @@ async def cb_adi_advertisers(
     callback_data: AdIntelCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     page = callback_data.page
     offset = page * _PAGE_SIZE
@@ -705,7 +706,7 @@ async def cb_adi_advertisers(
 async def cb_adi_market_report(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AdIntelFSM.waiting_niche)
 
     await callback.message.edit_text(

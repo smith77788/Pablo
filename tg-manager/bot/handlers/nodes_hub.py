@@ -38,6 +38,7 @@ from bot.states import (
 )
 from services import nodes_engine
 from services.nodes_engine import ENTITY_LABELS, NODE_TYPE_LABELS
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -79,7 +80,7 @@ def _cancel_node_kb(node_id: int) -> object:
 async def cb_nodes_menu(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     workspaces = await nodes_engine.get_workspaces(pool, owner)
 
@@ -109,7 +110,7 @@ async def cb_nodes_menu(
 
 @router.callback_query(NodesCb.filter(F.action == "add"))
 async def cb_nodes_add(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(NodesAddFSM.waiting_chat_id)
     await callback.message.edit_text(
         "<b>📡 Новый воркспейс — шаг 1/3</b>\n\n"
@@ -174,7 +175,7 @@ async def cb_nodes_add_type(
         await callback.answer("Неизвестный тип.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     default_name = NODE_TYPE_LABELS[node_type]
 
@@ -273,7 +274,7 @@ async def cb_nodes_view(
     callback_data: NodesCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     node = await nodes_engine.get_node_by_id(pool, callback_data.node_id, owner)
     if not node:
@@ -340,7 +341,7 @@ async def cb_nodes_threads(
     callback_data: NodesCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     node = await nodes_engine.get_node_by_id(pool, callback_data.node_id, owner)
     if not node:
@@ -387,7 +388,7 @@ async def cb_thread_view(
     callback_data: NodesCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     thread = await pool.fetchrow(
         "SELECT * FROM bm_node_threads WHERE id=$1 AND node_id=$2",
         callback_data.thread_id, callback_data.node_id,
@@ -432,7 +433,7 @@ async def cb_nodes_provision(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     node = await nodes_engine.get_node_by_id(pool, callback_data.node_id, owner)
     if not node:
@@ -475,7 +476,7 @@ async def cb_prov_type(
         await state.clear()
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(entity_type=entity_type)
     await state.set_state(NodesProvisionFSM.waiting_entity_id)
 
@@ -591,7 +592,7 @@ async def cb_nodes_bulk_create(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     node = await nodes_engine.get_node_by_id(pool, callback_data.node_id, owner)
     if not node:
@@ -635,7 +636,7 @@ async def cb_bulk_etype(
         await state.clear()
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(entity_type=entity_type)
     await state.set_state(NodesBulkFSM.waiting_ids)
 
@@ -727,7 +728,7 @@ async def cb_nodes_broadcast(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     node = await nodes_engine.get_node_by_id(pool, callback_data.node_id, owner)
     if not node:
@@ -875,7 +876,7 @@ async def cb_thread_close(
     pool: asyncpg.Pool,
     bot: Bot,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
 
     thread = await pool.fetchrow(
@@ -916,7 +917,7 @@ async def cb_nodes_remove(
     callback_data: NodesCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(
         text="⚠️ Да, деактивировать",
@@ -939,7 +940,7 @@ async def cb_nodes_remove_confirm(
     callback_data: NodesCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner = callback.from_user.id
     ok = await nodes_engine.deactivate_workspace(pool, callback_data.node_id, owner)
 

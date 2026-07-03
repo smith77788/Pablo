@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ApprovalCb
 from bot.utils.event_status import mark_handled_error
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ async def cb_approval_confirm(
     if not op or op["owner_id"] != callback.from_user.id:
         await callback.answer("Операция не найдена или нет прав.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     try:
         await pool.execute(
             "UPDATE operation_queue SET requires_approval=FALSE, approved_at=now(), approved_by=$1, status='pending' WHERE id=$2 AND status='waiting_approval'",
@@ -103,7 +104,7 @@ async def cb_approval_cancel(
     except Exception:
         await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     from bot.callbacks import BmCb
 
     _kb = InlineKeyboardBuilder()

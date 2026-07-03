@@ -14,6 +14,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import PersonaCb, BmCb
 from bot.states import PersonaCreateFSM
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -120,7 +121,7 @@ def _ts(dt: datetime | None) -> str:
 
 @router.callback_query(PersonaCb.filter(F.action == "menu"))
 async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         personas = await _list_personas(pool, callback.from_user.id)
     except Exception as e:
@@ -174,7 +175,7 @@ async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(PersonaCb.filter(F.action == "create"))
 async def cb_persona_create(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await pool.fetch(
         "SELECT id, phone, username, first_name FROM tg_accounts "
         "WHERE owner_id = $1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id",
@@ -251,7 +252,7 @@ async def fsm_persona_bio(message: Message, state: FSMContext) -> None:
 
 
 async def _ask_interests(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PersonaCreateFSM.entering_interests)
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=PersonaCb(action="skip_interests"))
@@ -299,7 +300,7 @@ async def fsm_persona_interests(message: Message, state: FSMContext) -> None:
 
 
 async def _ask_niche(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PersonaCreateFSM.entering_niche)
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=PersonaCb(action="skip_niche"))
@@ -345,7 +346,7 @@ async def fsm_persona_niche(message: Message, state: FSMContext) -> None:
 
 
 async def _ask_speech_style(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PersonaCreateFSM.entering_speech_style)
     kb = InlineKeyboardBuilder()
     for key, (icon, label) in _SPEECH_STYLES.items():
@@ -398,7 +399,7 @@ async def cb_persona_set_style(
 
 
 async def _ask_backstory(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PersonaCreateFSM.entering_backstory)
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=PersonaCb(action="skip_backstory"))
@@ -429,7 +430,7 @@ async def fsm_persona_backstory(message: Message, state: FSMContext) -> None:
 
 
 async def _show_confirm(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(PersonaCreateFSM.confirming)
     sd = await state.get_data()
     text = _build_preview(sd)
@@ -483,7 +484,7 @@ async def cb_persona_do_create(
     If FSM data contains ``_edit_persona_id`` (set by the edit flow), the
     existing record is updated instead of inserting a new one.
     """
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     await state.clear()
 
@@ -614,7 +615,7 @@ async def cb_persona_do_create(
 async def cb_persona_view(
     callback: CallbackQuery, callback_data: PersonaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     persona_id = callback_data.persona_id
     p = await _get_persona_row(pool, persona_id, callback.from_user.id)
     if not p:
@@ -684,7 +685,7 @@ async def cb_persona_view(
 async def cb_persona_toggle(
     callback: CallbackQuery, callback_data: PersonaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     persona_id = callback_data.persona_id
     new_state = callback_data.action == "activate"
     await pool.execute(
@@ -705,7 +706,7 @@ async def cb_persona_toggle(
 async def cb_persona_edit(
     callback: CallbackQuery, callback_data: PersonaCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     persona_id = callback_data.persona_id
     p = await _get_persona_row(pool, persona_id, callback.from_user.id)
     if not p:
@@ -743,7 +744,7 @@ async def cb_persona_edit(
 async def cb_persona_delete(
     callback: CallbackQuery, callback_data: PersonaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     persona_id = callback_data.persona_id
     p = await _get_persona_row(pool, persona_id, callback.from_user.id)
     if not p:
@@ -770,7 +771,7 @@ async def cb_persona_delete(
 async def cb_persona_delete_confirm(
     callback: CallbackQuery, callback_data: PersonaCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     persona_id = callback_data.persona_id
     p = await _get_persona_row(pool, persona_id, callback.from_user.id)
     if not p:

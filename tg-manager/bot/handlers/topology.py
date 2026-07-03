@@ -27,6 +27,7 @@ from bot.callbacks import AccCb, BotCb, TopoCb, BmCb
 from database import db
 from services.account_manager import effective_account_status
 from services import behavioral_engine
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -45,7 +46,7 @@ def _has_account_session(acc: dict) -> bool:
 
 @router.callback_query(TopoCb.filter(F.action == "menu"))
 async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     # Gather stats
@@ -104,7 +105,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(TopoCb.filter(F.action == "overview"))
 async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     accounts = await db.get_tg_accounts(pool, owner_id)
@@ -210,7 +211,7 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_topo_acc_list(
     callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     page = callback_data.page
 
@@ -305,7 +306,7 @@ async def cb_topo_acc_view(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     channels = await db.get_managed_channels(pool, owner_id, acc_id)
 
@@ -408,7 +409,7 @@ async def cb_topo_acc_view(
 async def cb_topo_chan_list(
     callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     page = callback_data.page
 
@@ -469,7 +470,7 @@ async def cb_topo_chan_view(
     if not ch:
         await callback.answer("Канал не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     acc = await db.get_tg_account(pool, ch.get("acc_id"), owner_id) if ch.get("acc_id") else None
 
@@ -553,7 +554,7 @@ async def cmd_topology(message: Message) -> None:
 
 @router.callback_query(TopoCb.filter(F.action == "noop"))
 async def cb_topo_noop(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
 
 # ── Rebuild graph — compute account→channel edges ─────────────────────────────

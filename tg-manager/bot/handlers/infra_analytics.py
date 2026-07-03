@@ -26,6 +26,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb, BmCb
 from services import infra_pressure
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
     "accounts": ("📱 Аккаунты", AccCb(action="menu")),
@@ -52,7 +53,7 @@ def _back_kb() -> InlineKeyboardBuilder:
 
 @router.callback_query(InfraCb.filter(F.action == "menu"))
 async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     # Быстрые метрики — каждый запрос независим, ошибка одного не обнуляет остальные
@@ -173,7 +174,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(InfraCb.filter(F.action == "health"))
 async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.account_health import load_from_db, get_health_summary
 
     uid = callback.from_user.id
@@ -242,7 +243,7 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(InfraCb.filter(F.action == "flood"))
 async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.flood_engine import get_risk_summary
 
     uid = callback.from_user.id
@@ -309,7 +310,7 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_infra_audit(
     callback: CallbackQuery, callback_data: InfraCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
     uid = callback.from_user.id
 
@@ -415,7 +416,7 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     запрос переписан на operation_audit (заполняется op_worker/warmup/etc.)
     и account_flood_log для подсчёта flood-событий за сегодня.
     """
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     today = date.today()
 
@@ -482,7 +483,7 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 @router.callback_query(InfraCb.filter(F.action == "capabilities"))
 async def cb_infra_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     try:
@@ -614,7 +615,7 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="monitoring")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     # Parallel aggregation queries
@@ -796,7 +797,7 @@ def _classify_account(acc: dict) -> str | None:
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_preview"))
 async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     try:
@@ -872,7 +873,7 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 @router.callback_query(InfraCb.filter(F.action == "advisor"))
 async def cb_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services import infra_advisor
 
     recs = await infra_advisor.get_recommendations(pool, callback.from_user.id)
@@ -902,7 +903,7 @@ async def cb_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(InfraCb.filter(F.action == "copilot"))
 async def cb_infra_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     try:
         from services import infra_copilot
@@ -1033,7 +1034,7 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     from bot.keyboards import subscription_locked_markup
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             "🔒 <b>Авто-балансировка — Starter+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",

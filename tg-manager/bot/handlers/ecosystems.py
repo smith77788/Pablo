@@ -29,6 +29,7 @@ from bot.states import EcosystemCreateFSM, EcosystemDnaFSM, EcosystemCloneFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -158,7 +159,7 @@ async def cb_eco_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(EcoCb.filter(F.action == "create"))
 async def cb_eco_create(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EcosystemCreateFSM.name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=EcoCb(action="menu"))
@@ -203,7 +204,7 @@ async def fsm_eco_desc(message: Message, state: FSMContext) -> None:
 
 
 async def _show_type_picker(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EcosystemCreateFSM.ecosystem_type)
     kb = InlineKeyboardBuilder()
     for key, (icon, label) in _ECO_TYPES.items():
@@ -350,7 +351,7 @@ async def cb_eco_factory(
     if not eco:
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 Создать канал", callback_data=ChanFactCb(action="create"))
@@ -403,7 +404,7 @@ async def cb_eco_health(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     health = await _eb.compute_health(pool, eco_id, callback.from_user.id)
 
     bar_h = _eb.format_health_bar(health.health_score)
@@ -453,7 +454,7 @@ async def cb_eco_pressure(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     p = await _eb.compute_pressure(pool, eco_id, callback.from_user.id)
     bar = _eb.format_health_bar(p.score / 100)
 
@@ -499,7 +500,7 @@ async def cb_eco_risk(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     risk = await _eb.compute_risk(pool, eco_id, callback.from_user.id)
 
     bar_o = _eb.format_health_bar(1.0 - risk.operational_risk)
@@ -645,7 +646,7 @@ async def cb_eco_members(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     members = await _eb.get_members(pool, eco_id)
 
     lines = [f"👥 <b>Участники: {html.escape(eco['name'])}</b>\n"]
@@ -850,7 +851,7 @@ async def cb_eco_history(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     try:
         events = await pool.fetch(
             """SELECT event_type, severity, title, occurred_at
@@ -946,7 +947,7 @@ async def cb_eco_archive_ask(
     callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
 ) -> None:
     """Экран подтверждения перед архивацией (действие необратимо)."""
-    await callback.answer()
+    await safe_answer(callback)
     eco_id = callback_data.eco_id
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Да, архивировать", callback_data=EcoCb(action="archive", eco_id=eco_id))
@@ -1261,7 +1262,7 @@ async def cb_eco_dna_save(
 async def cb_eco_dna_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     import json as _json
 
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:
@@ -1506,7 +1507,7 @@ async def cb_eco_clone_start(
     if not eco:
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(clone_source_id=eco_id)
     await state.set_state(EcosystemCloneFSM.naming)
 
@@ -1556,7 +1557,7 @@ async def cb_eco_clone_skip_region(
     source_id = sd.get("clone_source_id", 0)
     new_name = sd.get("clone_new_name", "Клон")
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     try:
         new_id = await _eb.clone_ecosystem(
             pool, source_id, callback.from_user.id, new_name
@@ -1681,7 +1682,7 @@ async def cb_eco_dna_capture(
     if not eco:
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(dna_source_eco_id=eco_id)
 
     kb = InlineKeyboardBuilder()
@@ -1780,7 +1781,7 @@ async def cb_eco_dna_view(
     if not dna:
         await callback.answer("DNA не найдена", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     td = dna.get("template_data") or {}
     if isinstance(td, str):
@@ -1960,7 +1961,7 @@ async def cb_ecopick_list(
 
     object_type = callback_data.object_type
     object_id = callback_data.object_id
-    await callback.answer()
+    await safe_answer(callback)
 
     ecosystems = await _eb.list_ecosystems(pool, callback.from_user.id)
 

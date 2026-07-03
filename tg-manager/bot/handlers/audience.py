@@ -23,6 +23,7 @@ from bot.states import SendToUser
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -36,7 +37,7 @@ async def cb_aud_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     count = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
@@ -66,7 +67,7 @@ async def cb_refresh(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await callback.message.edit_text("⏳ Собираю обновления…")
 
@@ -95,7 +96,7 @@ async def cb_stats(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     stats = await db.get_audience_stats(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
@@ -310,7 +311,7 @@ async def cb_scan(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     await callback.message.edit_text("⚡ Сканирую все доступные апдейты…")
 
@@ -353,7 +354,7 @@ async def cb_compare_pick(
             "Нужен хотя бы ещё один бот для сравнения.", show_alert=True
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "⚖️ Выберите второй бот для сравнения аудиторий:",
         reply_markup=bots_pick(bots, exclude_bot_id=callback_data.bot_id),
@@ -370,7 +371,7 @@ async def cb_compare_result(
     if not row_a or not row_b:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     stats = await db.compare_audiences(pool, row_a["bot_id"], row_b["bot_id"])
     label_a = f"@{row_a['username']}" if row_a["username"] else row_a["first_name"]
@@ -397,7 +398,7 @@ async def cb_send_user(
 ) -> None:
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SendToUser.waiting_user_id)
     await state.update_data(bot_id=callback_data.bot_id)
     kb = _Kb()
@@ -470,7 +471,7 @@ async def cb_bot_export_audience(
 ) -> None:
     """Export all bot users as a CSV file. Available from STARTER plan."""
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Экспорт аудитории", "starter"),
             parse_mode="HTML",

@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, PhysicsCb
 from services import physics_engine
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -142,7 +143,7 @@ async def cb_physics_menu(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     text, markup = await _menu_text_kb(pool, callback.from_user.id, callback_data.page)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
@@ -154,7 +155,7 @@ async def cb_physics_detail(
     callback_data: PhysicsCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     account_id = callback_data.account_id
 
     try:

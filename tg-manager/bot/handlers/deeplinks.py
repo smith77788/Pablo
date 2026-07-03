@@ -15,6 +15,7 @@ from bot.states import CreateDeepLink
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -29,7 +30,7 @@ def _dl_cancel_kb(bot_id: int) -> object:
 async def cb_dl_menu(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.message.edit_text(
             locked_text("Диплинки и рефералы", "starter"),
@@ -79,7 +80,7 @@ async def cb_dl_menu(
 async def cb_dl_view(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.message.edit_text(
@@ -125,7 +126,7 @@ async def cb_dl_view(
 async def cb_dl_create(
     callback: CallbackQuery, callback_data: DeepLinkCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CreateDeepLink.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -233,7 +234,7 @@ async def cb_dl_delete(
 async def cb_dl_leaders(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     leaders = await db.get_referral_leaderboard(pool, callback_data.bot_id, limit=10)
     total = await db.get_referral_total(pool, callback_data.bot_id)
     from aiogram.utils.keyboard import InlineKeyboardBuilder

@@ -18,6 +18,7 @@ from bot.keyboards import (
 from bot.states import AddAutoReply
 from bot.utils.subscription import get_plan
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 # Auto-reply rule limits per plan
 _AR_LIMITS: dict[str, int] = {"free": 5, "starter": 20, "pro": 100, "enterprise": 9999}
@@ -56,7 +57,7 @@ async def cb_ar_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     if not replies:
@@ -87,7 +88,7 @@ async def cb_ar_menu(
 async def cb_ar_add(
     callback: CallbackQuery, callback_data: AutoReplyCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddAutoReply.choosing_trigger)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -101,7 +102,7 @@ async def cb_ar_add(
 async def cb_trig_start(
     callback: CallbackQuery, callback_data: AutoReplyCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(trigger_type="start", keyword=None)
     await state.set_state(AddAutoReply.waiting_text)
     await callback.message.edit_text(
@@ -115,7 +116,7 @@ async def cb_trig_start(
 async def cb_trig_keyword(
     callback: CallbackQuery, callback_data: AutoReplyCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(trigger_type="keyword")
     await state.set_state(AddAutoReply.waiting_keyword)
     await callback.message.edit_text(
@@ -135,7 +136,7 @@ async def cb_trig_keyword(
 async def cb_trig_any(
     callback: CallbackQuery, callback_data: AutoReplyCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(trigger_type="any", keyword=None)
     await state.set_state(AddAutoReply.waiting_text)
     await callback.message.edit_text(
@@ -229,7 +230,7 @@ async def cb_ar_view(
     if not r:
         await callback.answer("Правило не найдено.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     keyword_escaped = _html.escape(r["keyword"] or "") if r.get("keyword") else ""
     trigger = {
         "start": "/start",
@@ -277,7 +278,7 @@ async def cb_ar_toggle(
 async def cb_ar_delete_confirm(
     callback: CallbackQuery, callback_data: AutoReplyCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     r = next((x for x in replies if x["id"] == callback_data.reply_id), None)
     trigger_info = ""
@@ -351,7 +352,7 @@ async def cb_ar_copy_to(
     if not others:
         await callback.answer("Нет других ботов для копирования.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"📋 <b>Копировать авто-ответы из {label}</b>\n\nВыберите бот-получатель:",
@@ -417,7 +418,7 @@ async def cb_trig_inactivity(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
     """Trigger: user inactive for N days."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(trigger_type="inactivity", bot_id=callback_data.bot_id)
     await state.set_state(AddAutoRuleExt.waiting_trigger_value)
     await callback.message.edit_text(
@@ -475,7 +476,7 @@ async def cb_ext_act_webhook(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
     """Action: webhook (from inactivity flow) — ask for URL."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(action_type="webhook")
     await callback.message.edit_text(
         "🔗 <b>Действие: Webhook</b>\n\n"
@@ -493,7 +494,7 @@ async def cb_ext_act_send(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
     """Action: send_message (from inactivity flow) — ask for text."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(action_type="send_message")
     await callback.message.edit_text(
         "💬 <b>Действие: Отправить сообщение</b>\n\n"
@@ -508,7 +509,7 @@ async def cb_act_ai_reply(
     callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
 ) -> None:
     """Action: send_ai_reply — ask for system prompt."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(action_type="send_ai_reply", bot_id=callback_data.bot_id)
     await state.set_state(AddAutoRuleExt.waiting_action_value)
     await callback.message.edit_text(

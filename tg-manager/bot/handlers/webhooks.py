@@ -8,6 +8,7 @@ from bot.callbacks import WebhookCb
 from bot.keyboards import webhook_menu, back_to_bot
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -21,7 +22,7 @@ async def cb_webhook_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     text = (
@@ -50,7 +51,7 @@ async def cb_webhook_info(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     info = await bot_api.get_webhook_info(http, row["token"])
     url = info.get("url", "") or "не установлен"
@@ -92,7 +93,7 @@ async def cb_webhook_disable(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     result = await bot_api.delete_webhook(http, row["token"])
     if result.get("ok"):
         await callback.message.edit_text(

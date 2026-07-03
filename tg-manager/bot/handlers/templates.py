@@ -24,6 +24,7 @@ from bot.utils.template_validator import (
 )
 from database import db
 from bot.utils.subscription import locked_text, require_plan
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ async def cb_templates_list(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
 ) -> None:
 
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
     templates = await db.get_templates(pool, callback.from_user.id)
     count = len(templates)
@@ -118,7 +119,7 @@ async def cb_templates_list(
 async def cb_template_add(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddTemplate.waiting_name)
     bot_id = callback_data.bot_id
     await state.update_data(bot_id=bot_id)
@@ -231,7 +232,7 @@ async def msg_template_text(
 async def cb_template_view(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         kb = InlineKeyboardBuilder()
@@ -257,7 +258,7 @@ async def cb_template_view(
 async def cb_template_delete(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     deleted = await db.delete_template(
         pool, callback_data.template_id, callback.from_user.id
     )
@@ -295,7 +296,7 @@ async def cb_template_use(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         kb = InlineKeyboardBuilder()
@@ -423,7 +424,7 @@ async def cb_template_ai_gen(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.message.edit_text(
             locked_text("AI-генерация шаблонов", "starter"),
@@ -559,7 +560,7 @@ async def cb_template_ai_regen(
 async def cb_template_ai_save(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     generated_text = data.get("generated_text", "")
     bot_id = callback_data.bot_id
@@ -595,7 +596,7 @@ async def cb_template_edit(
     if not tpl:
         await callback.answer("❌ Шаблон не найден", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditTemplate.waiting_name)
     await state.update_data(
         template_id=callback_data.template_id,
@@ -619,7 +620,7 @@ async def cb_template_edit(
 async def cb_template_edit_keep_name(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.set_state(EditTemplate.waiting_text)
     kb = InlineKeyboardBuilder()
@@ -638,7 +639,7 @@ async def cb_template_edit_keep_name(
 async def cb_template_edit_keep_text(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
     ok = await db.update_template(
@@ -697,7 +698,7 @@ async def cb_edit_keep_text_fsm(
         data["old_text"],
     )
     if ok:
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             "✅ Шаблон обновлён.",
             parse_mode="HTML",

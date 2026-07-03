@@ -14,6 +14,7 @@ from bot.states import AddBot
 from bot.utils.subscription import get_bot_limit
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 _TOKEN_RE = re.compile(r"^\d{8,10}:[A-Za-z0-9_-]{35,}$")
 
@@ -29,7 +30,7 @@ def _bot_label(row: asyncpg.Record) -> str:
 
 @router.callback_query(BotCb.filter(F.action == "main"))
 async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import is_platform_admin
 
     admin = is_platform_admin(callback.from_user.id)
@@ -56,7 +57,7 @@ async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_list(
     callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
     hint = (
         "\n\n📌 <b>Что это?</b>\n"
@@ -101,7 +102,7 @@ async def cb_list(
 async def cb_add(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import get_plan, get_effective_bot_count
 
     current_plan = await get_plan(pool, callback.from_user.id)
@@ -258,7 +259,7 @@ async def cb_select(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = _bot_label(row)
     count = await db.get_audience_count(pool, row["bot_id"])
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -291,7 +292,7 @@ async def cb_delete(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     safe_label = (
         _bot_label(row).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
@@ -307,7 +308,7 @@ async def cb_delete(
 async def cb_confirm_delete(
     callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:
         await callback.message.edit_text(
@@ -334,7 +335,7 @@ async def cb_pset_list(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     presets = get_presets("bot")
     bot_label = html.escape(f"@{row['username']}" if row.get("username") else row.get("first_name", "бот"))
     kb = InlineKeyboardBuilder()
@@ -369,7 +370,7 @@ async def cb_pset_view(
     if idx < 0 or idx >= len(presets):
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     preset = presets[idx]
     tpl = preset["template"]
     cmds = tpl.get("commands", [])

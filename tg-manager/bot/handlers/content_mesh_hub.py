@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ContentMeshCb, BmCb
 from bot.states import ContentMeshFSM
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -50,7 +51,7 @@ async def _get_account_name(pool: asyncpg.Pool, account_id: int | None) -> str:
 
 @router.callback_query(ContentMeshCb.filter(F.action == "menu"))
 async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         meshes = await pool.fetch(
             "SELECT * FROM content_meshes WHERE owner_id=$1 ORDER BY id",
@@ -105,7 +106,7 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_mesh_create(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ContentMeshFSM.waiting_name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ContentMeshCb(action="menu"))
@@ -197,7 +198,7 @@ async def _show_mesh(msg_or_cb, pool: asyncpg.Pool, mesh, owner_id: int, edit: b
 async def cb_mesh_view(
     callback: CallbackQuery, callback_data: ContentMeshCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
         await callback.answer("Mesh не найдена.", show_alert=True)
@@ -233,7 +234,7 @@ async def cb_mesh_toggle(
 async def cb_mesh_set_source(
     callback: CallbackQuery, callback_data: ContentMeshCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
         await callback.answer("Mesh не найдена.", show_alert=True)
@@ -326,7 +327,7 @@ async def cb_mesh_pick_account(
 async def cb_mesh_targets(
     callback: CallbackQuery, callback_data: ContentMeshCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
         await callback.answer("Mesh не найдена.", show_alert=True)
@@ -357,7 +358,7 @@ async def cb_mesh_targets(
 async def cb_mesh_add_target(
     callback: CallbackQuery, callback_data: ContentMeshCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ContentMeshFSM.waiting_target_channel)
     await state.update_data(mesh_id=callback_data.mesh_id)
     kb = InlineKeyboardBuilder()
@@ -450,7 +451,7 @@ async def cb_mesh_del_target(
 async def cb_mesh_settings(
     callback: CallbackQuery, callback_data: ContentMeshCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
         await callback.answer("Mesh не найдена.", show_alert=True)
@@ -510,7 +511,7 @@ async def msg_mesh_settings(
 async def cb_mesh_logs(
     callback: CallbackQuery, callback_data: ContentMeshCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
         await callback.answer("Mesh не найдена.", show_alert=True)
@@ -554,7 +555,7 @@ async def cb_mesh_logs(
 async def cb_mesh_del(
     callback: CallbackQuery, callback_data: ContentMeshCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
         await callback.answer("Mesh не найдена.", show_alert=True)

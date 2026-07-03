@@ -15,6 +15,7 @@ from bot.callbacks import CloneAdaptCb, BmCb
 from bot.states import CloneAdaptFSM
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -98,7 +99,7 @@ def _targets_kb(all_bots, targets: list, source_bot_id: int, page: int = 0) -> I
 
 @router.callback_query(CloneAdaptCb.filter(F.action == "menu"))
 async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     try:
         rows = await pool.fetch(
@@ -159,7 +160,7 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
 
 @router.callback_query(CloneAdaptCb.filter(F.action == "start"))
 async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_data(_default_state())
     bots = await pool.fetch(
         "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
@@ -197,7 +198,7 @@ async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
 async def cb_ca_source(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await _ensure_state(state)
     data["source_bot_id"] = callback_data.bot_id
     data["step"] = "fields"
@@ -239,7 +240,7 @@ async def cb_ca_toggle_field(
     data = await _ensure_state(state)
     field = callback_data.extra
     if field not in _ALL_FIELDS:
-        await callback.answer()
+        await safe_answer(callback)
         return
     fields = list(data.get("fields", []))
     if field in fields:
@@ -261,7 +262,7 @@ async def cb_ca_toggle_field(
 async def cb_ca_suffix_ask(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await _ensure_state(state)
     if not data.get("fields"):
         await callback.answer("Выберите хотя бы одно поле.", show_alert=True)
@@ -305,7 +306,7 @@ async def msg_ca_suffix(
 async def cb_ca_no_suffix(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(None)
     data = await _ensure_state(state)
     data["name_suffix"] = ""
@@ -356,7 +357,7 @@ async def cb_ca_toggle_target(
     try:
         tid = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer()
+        await safe_answer(callback)
         return
     targets = list(data.get("targets", []))
     if tid in targets:
@@ -417,7 +418,7 @@ async def cb_ca_targets_none(
 async def cb_ca_targets_page(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await _ensure_state(state)
     bots = await pool.fetch(
         "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
@@ -440,7 +441,7 @@ async def cb_ca_targets_page(
 async def cb_ca_preview(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await _ensure_state(state)
     targets = data.get("targets", [])
     fields = data.get("fields", [])
@@ -548,7 +549,7 @@ async def cb_ca_run(
     callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext,
     pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await _ensure_state(state)
     targets = data.get("targets", [])
     fields = data.get("fields", [])

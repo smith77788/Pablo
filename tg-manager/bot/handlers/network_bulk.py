@@ -16,6 +16,7 @@ from bot.utils.subscription import require_plan, locked_text, is_platform_admin
 from database import db
 from services import bot_api
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 async def _check_enterprise(callback: CallbackQuery, pool: asyncpg.Pool) -> bool:
     if await require_plan(pool, callback.from_user.id, "enterprise"):
         return True
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         locked_text("Массовые операции", "enterprise"),
         parse_mode="HTML",
@@ -112,7 +113,7 @@ async def cb_bulk_check(
     if not bots:
         await callback.answer("Нет ботов для проверки.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
     log.info(
         "network_bulk: bulk_check user=%s bots=%d", callback.from_user.id, len(bots)
@@ -151,7 +152,7 @@ async def cb_bulk_check(
 async def cb_bulk_name(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_name)
@@ -193,7 +194,7 @@ async def cb_bulk_name_lang(
 ) -> None:
     if not await _check_enterprise(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🌍 <b>Имя по GEO — выберите язык</b>\n\nКакому языку задать имя?",
         parse_mode="HTML",
@@ -227,7 +228,7 @@ async def msg_bulk_localized_name(
 async def cb_bulk_desc(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_desc)
@@ -267,7 +268,7 @@ async def cb_bulk_desc_lang(
 ) -> None:
     if not await _check_enterprise(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🌍 <b>Описание по GEO — выберите язык</b>\n\nКакому языку задать описание?",
         parse_mode="HTML",
@@ -301,7 +302,7 @@ async def msg_bulk_localized_desc(
 async def cb_bulk_short(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_short)
@@ -341,7 +342,7 @@ async def cb_bulk_short_lang(
 ) -> None:
     if not await _check_enterprise(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🌍 <b>Краткое описание по GEO — выберите язык</b>\n\nКакому языку задать краткое описание?",
         parse_mode="HTML",
@@ -375,7 +376,7 @@ async def msg_bulk_localized_short(
 async def cb_bulk_commands(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_commands)
@@ -422,7 +423,7 @@ async def cb_bulk_commands_lang(
 ) -> None:
     if not await _check_enterprise(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🌍 <b>Команды по GEO — выберите язык</b>\n\nДля какого языка задать команды?",
         parse_mode="HTML",
@@ -440,7 +441,7 @@ async def cb_netgeo_lang_select(
         await callback.answer("Неверный формат.", show_alert=True)
         return
     _, field, code = parts
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(lang=code)
 
     _state_map = {
@@ -490,7 +491,7 @@ async def msg_bulk_localized_commands(
 async def cb_bulk_import(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # Import доступен без подписки
     await state.set_state(ImportBots.waiting_tokens)
     kb = InlineKeyboardBuilder()

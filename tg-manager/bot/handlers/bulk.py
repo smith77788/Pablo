@@ -14,6 +14,7 @@ from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -73,14 +74,14 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 @router.callback_query(BulkCb.filter(F.action == "menu"))
 async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Массовые операции с ботами", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="bulk_ops")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     try:
         bots = await db.get_bots(pool, callback.from_user.id)
     except Exception:
@@ -115,7 +116,7 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_check(
     callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         bots = await db.get_bots(pool, callback.from_user.id)
     except Exception:
@@ -160,7 +161,7 @@ async def cb_check(
 
 @router.callback_query(BulkCb.filter(F.action == "name"))
 async def cb_bulk_name(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -198,7 +199,7 @@ async def msg_bulk_name(
 
 @router.callback_query(BulkCb.filter(F.action == "name_lang"))
 async def cb_bulk_name_lang(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_name_lang)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -252,7 +253,7 @@ async def msg_bulk_localized_name(
 
 @router.callback_query(BulkCb.filter(F.action == "desc"))
 async def cb_bulk_desc(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_desc)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -290,7 +291,7 @@ async def msg_bulk_desc(
 
 @router.callback_query(BulkCb.filter(F.action == "desc_lang"))
 async def cb_bulk_desc_lang(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_desc_lang)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -340,7 +341,7 @@ async def msg_bulk_localized_desc(
 
 @router.callback_query(BulkCb.filter(F.action == "short"))
 async def cb_bulk_short(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_short)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -378,7 +379,7 @@ async def msg_bulk_short(
 
 @router.callback_query(BulkCb.filter(F.action == "short_lang"))
 async def cb_bulk_short_lang(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_short_lang)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -428,7 +429,7 @@ async def msg_bulk_localized_short(
 
 @router.callback_query(BulkCb.filter(F.action == "commands"))
 async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_commands)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -478,7 +479,7 @@ async def msg_bulk_commands(
 
 @router.callback_query(BulkCb.filter(F.action == "commands_lang"))
 async def cb_bulk_commands_lang(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(BulkEdit.waiting_commands_lang)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
@@ -542,7 +543,7 @@ async def msg_bulk_localized_commands(
 
 @router.callback_query(BulkCb.filter(F.action == "import"))
 async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ImportBots.waiting_tokens)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))

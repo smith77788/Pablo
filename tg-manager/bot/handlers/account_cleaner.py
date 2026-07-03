@@ -17,6 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import CleanerCb, BmCb
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -40,7 +41,7 @@ def _back_kb() -> InlineKeyboardBuilder:
 
 @router.callback_query(CleanerCb.filter(F.action == "menu"))
 async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🚪 Выйти из всех чатов", callback_data=CleanerCb(action="leave_all")
@@ -102,7 +103,7 @@ async def _pick_account_kb(
 
 @router.callback_query(CleanerCb.filter(F.action == "leave_all"))
 async def cb_cleaner_leave_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = await _pick_account_kb(pool, callback.from_user.id, "do_leave_all")
     await callback.message.edit_text(
         "🚪 <b>Выйти из всех чатов</b>\n\nВыберите аккаунт:",
@@ -113,7 +114,7 @@ async def cb_cleaner_leave_all(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 @router.callback_query(CleanerCb.filter(F.action == "del_contacts"))
 async def cb_cleaner_del_contacts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = await _pick_account_kb(pool, callback.from_user.id, "confirm_del_contacts")
     await callback.message.edit_text(
         "👥 <b>Удалить контакты</b>\n\nВыберите аккаунт:",
@@ -127,7 +128,7 @@ async def cb_confirm_del_contacts(
     callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
 ) -> None:
     """Confirmation step before deleting all contacts."""
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.account_id
 
     try:
@@ -159,7 +160,7 @@ async def cb_confirm_del_contacts(
 
 @router.callback_query(CleanerCb.filter(F.action == "list_chats"))
 async def cb_cleaner_list_chats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = await _pick_account_kb(pool, callback.from_user.id, "show_chats")
     await callback.message.edit_text(
         "📋 <b>Просмотр чатов</b>\n\nВыберите аккаунт:",
@@ -172,7 +173,7 @@ async def cb_cleaner_list_chats(callback: CallbackQuery, pool: asyncpg.Pool) -> 
 async def cb_do_leave_all(
     callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.account_id
 
     # Confirm step

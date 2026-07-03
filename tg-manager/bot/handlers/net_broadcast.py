@@ -19,6 +19,7 @@ from bot.keyboards import subscription_locked_markup
 from database import db
 from database.db import fetch_bots
 from services import operation_bus
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ async def cb_net_bc_cluster(
     callback: CallbackQuery, callback_data: NetBcCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     """Entry point from cluster view: pre-select a cluster for broadcast."""
-    await callback.answer()
+    await safe_answer(callback)
     cluster_name = callback_data.cluster_name or ""
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
@@ -109,7 +110,7 @@ async def cb_net_bc_menu(
 async def cb_net_bc_target(
     callback: CallbackQuery, callback_data: NetBcCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         from bot.callbacks import NetworkCb
 
@@ -142,7 +143,7 @@ async def cb_net_bc_target(
 
 @router.callback_query(NetBcCb.filter(F.action == "choose_lang"))
 async def cb_net_bc_lang(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🌍 <b>Рассылка по языку — вся сеть</b>\n\nВыберите язык:",
         parse_mode="HTML",
@@ -183,7 +184,7 @@ async def cb_net_bc_choose_bots(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         kb = InlineKeyboardBuilder()
@@ -227,7 +228,7 @@ async def cb_net_bc_toggle_bot(
             )
             return
         selected.append(bid)
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(selected_bot_ids=selected)
     bots = await db.get_bots(pool, callback.from_user.id)
     await callback.message.edit_reply_markup(
@@ -246,7 +247,7 @@ async def cb_net_bc_bots_confirmed(
     if not selected:
         await callback.answer("Выберите хотя бы одного бота.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     bots = await db.get_bots(pool, callback.from_user.id)
     bots_map = {b["bot_id"]: b for b in bots}
     chosen = [bots_map[bid] for bid in selected if bid in bots_map]
@@ -280,7 +281,7 @@ async def cb_net_bc_segment(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     segment = callback_data.segment
     bots = await db.get_bots(pool, callback.from_user.id)
 
@@ -312,7 +313,7 @@ async def cb_net_bc_type_msg(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     segment = callback_data.segment
     lang = callback_data.lang or ""
 
@@ -422,7 +423,7 @@ async def cb_net_bc_confirm(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
     text = data.get("text", "")
@@ -585,7 +586,7 @@ async def cb_net_bc_confirm(
 
 @router.callback_query(NetBcCb.filter(F.action == "cancel"))
 async def cb_net_bc_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))

@@ -42,6 +42,7 @@ from bot.callbacks import (
 from bot.handlers.admin import notify_new_platform_user
 from services.logger import log_exc_swallow
 import logging
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -235,7 +236,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(BotCb.filter(F.action == "help"))
 async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     try:
         plan = await get_plan(pool, uid)

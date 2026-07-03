@@ -13,6 +13,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.states import ReactivateBroadcast
 from database import db
 from services import broadcaster
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -37,7 +38,7 @@ async def cb_engage_menu(
 ) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         from bot.callbacks import BotCb as _BotCb
 
         await callback.message.edit_text(
@@ -52,7 +53,7 @@ async def cb_engage_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     segs = await db.get_activity_segments(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -93,14 +94,14 @@ async def cb_reactivate_cold(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Реактивация аудитории", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="cold")
     kb = InlineKeyboardBuilder()
@@ -128,14 +129,14 @@ async def cb_reactivate_lost(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Реактивация аудитории", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="lost")
     kb = InlineKeyboardBuilder()
@@ -159,7 +160,7 @@ async def cb_reactivate_lost(
 async def cb_engage_cancel_fsm(
     callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
         "❌ Отменено.",
@@ -219,14 +220,14 @@ async def cb_engage_heatmap(
     callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Аналитика активности", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     data = await db.get_activity_heatmap(pool, callback_data.bot_id, days=7)
     chart = _heatmap_chart(data)
     kb = InlineKeyboardBuilder()
@@ -248,14 +249,14 @@ async def cb_engage_top(
     callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Аналитика активности", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     users = await db.get_top_active_users(pool, callback_data.bot_id, limit=10)
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -284,7 +285,7 @@ async def cb_engage_autotag(
     callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Авто-теги по активности", "enterprise"),
             parse_mode="HTML",

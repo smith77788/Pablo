@@ -26,6 +26,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.event_status import mark_handled_error
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -67,7 +68,7 @@ def _cancel_kb() -> InlineKeyboardBuilder:
 async def _require_proxy_manager(callback: CallbackQuery, pool: asyncpg.Pool) -> bool:
     if await require_plan(pool, callback.from_user.id, _PROXY_PLAN):
         return True
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         locked_text("Управление прокси", _PROXY_PLAN),
         parse_mode="HTML",
@@ -143,7 +144,7 @@ async def _detect_proxy_geo(proxy_url: str) -> dict:
 async def cb_proxy_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await _require_proxy_manager(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🌐 <b>Менеджер прокси</b>\n\n"
         "Управляйте прокси-серверами для аккаунтов и ботов.",
@@ -159,7 +160,7 @@ async def cb_proxy_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await _require_proxy_manager(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -236,7 +237,7 @@ async def cb_proxy_add(
 ) -> None:
     if not await _require_proxy_manager(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AddProxyFSM.waiting_url)
     await callback.message.edit_text(
         "🌐 <b>Добавить прокси</b>\n\n"
@@ -288,7 +289,7 @@ async def cb_skip_label(
 ) -> None:
     if not await _require_proxy_manager(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     proxy_url = data.get("proxy_url", "")
     await _save_proxy(
@@ -583,7 +584,7 @@ async def cb_proxy_delete(
     if not row:
         await callback.answer("Прокси не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     try:
         await pool.execute(
@@ -616,7 +617,7 @@ async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Show free proxy pool stats and trigger manual refresh."""
     if not await _require_proxy_manager(callback, pool):
         return
-    await callback.answer()
+    await safe_answer(callback)
     from services import proxy_scraper as _ps
 
     stats = await _ps.get_pool_stats(pool)

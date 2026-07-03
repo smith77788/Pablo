@@ -15,6 +15,7 @@ import asyncpg
 from bot.callbacks import BmCb, MemCb
 from database import db
 from services import semantic_memory
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ async def cb_mem_menu(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
 
     # If no bot_id supplied, show list of user's bots to pick from
@@ -172,7 +173,7 @@ async def cb_mem_search(
     callback_data: MemCb,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(MemSearch.waiting_user_id)
     await state.update_data(bot_id=callback_data.bot_id)
 
@@ -258,7 +259,7 @@ async def cb_mem_view_user(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
     user_id = callback_data.user_id
 
@@ -305,7 +306,7 @@ async def cb_mem_stats(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
 
     row = await _resolve_bot(pool, bot_id, callback.from_user.id)
@@ -345,7 +346,7 @@ async def cb_mem_settings(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
 
     row = await _resolve_bot(pool, bot_id, callback.from_user.id)
@@ -388,7 +389,7 @@ async def cb_mem_toggle_enabled(
     if not row:
         await callback.answer("❌ Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     settings = await semantic_memory.get_settings(pool, bot_id)
     new_enabled = not settings.get("enabled", True)
@@ -432,7 +433,7 @@ async def cb_mem_toggle_extract(
     if not row:
         await callback.answer("❌ Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     settings = await semantic_memory.get_settings(pool, bot_id)
     new_extract = not settings.get("auto_extract_facts", True)
@@ -465,7 +466,7 @@ async def cb_mem_set_days(
     callback_data: MemCb,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(MemSetDays.waiting_days)
     await state.update_data(bot_id=callback_data.bot_id)
 
@@ -515,7 +516,7 @@ async def cb_mem_clear_confirm(
     callback: CallbackQuery,
     callback_data: MemCb,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback_data.user_id
     bot_id = callback_data.bot_id
     await callback.message.edit_text(
@@ -532,7 +533,7 @@ async def cb_mem_clear_do(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     bot_id = callback_data.bot_id
     user_id = callback_data.user_id
 

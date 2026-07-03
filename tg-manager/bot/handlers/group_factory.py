@@ -26,6 +26,7 @@ from bot.utils.op_helpers import _acc_label, _get_active_accounts
 from bot.utils.subscription import locked_text, require_plan
 from services import task_registry as _treg
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -51,7 +52,7 @@ def _no_accounts_kb() -> InlineKeyboardBuilder:
 
 @router.callback_query(GroupFCb.filter(F.action == "menu"))
 async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Создать группу", callback_data=GroupFCb(action="create"))
@@ -80,7 +81,7 @@ async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_group_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
             locked_text("Создание групп", "pro"),
@@ -135,7 +136,7 @@ async def cb_group_create_acc_chosen(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(acc_id=acc["id"], session_str=acc["session_str"])
 
     sd = await state.get_data()
@@ -190,7 +191,7 @@ async def fsm_group_title(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(GroupFCb.filter(F.action == "skip_about"))
 async def cb_group_skip_about(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(about="")
     await _show_type_choice(callback.message, state, edit=True)
 
@@ -230,7 +231,7 @@ async def _show_type_choice(msg, state: FSMContext, edit: bool = False) -> None:
 async def cb_group_type_chosen(
     callback: CallbackQuery, callback_data: GroupFCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     is_super = callback_data.action == "type_super"
     await state.update_data(is_super=is_super)
     await _show_group_confirm(callback.message, state, edit=True)
@@ -360,7 +361,7 @@ async def cb_group_do_create(
 async def cb_group_list_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -450,7 +451,7 @@ async def cb_group_list_acc(
 
 @router.callback_query(GroupFCb.filter(F.action == "members"))
 async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -616,7 +617,7 @@ async def cb_group_members_list(
 @router.callback_query(GroupFCb.filter(F.action == "import"))
 async def cb_group_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: выбор аккаунта для импорта групп."""
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.op_helpers import _get_active_accounts, _acc_label
 
     accounts = await _get_active_accounts(pool, callback.from_user.id)
@@ -728,7 +729,7 @@ async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     if not accounts:
         await callback.answer("Нет активных аккаунтов.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     from services import operation_bus
 
@@ -756,7 +757,7 @@ async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 async def cb_group_announce_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.message.edit_text(
             locked_text("Объявление во все группы", "starter"),
@@ -808,7 +809,7 @@ async def cb_group_announce_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(acc_id=acc["id"], session_str=acc["session_str"])
     await state.set_state(AnnounceGroupFSM.waiting_text)
 

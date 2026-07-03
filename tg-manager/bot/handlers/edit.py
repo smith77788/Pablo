@@ -11,6 +11,7 @@ from bot.keyboards import edit_menu, back_to_bot
 from bot.states import EditProfile, UpdateToken
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -41,7 +42,7 @@ async def cb_edit_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"✏️ <b>Редактирование {label}</b>\n\nВыберите что изменить:",
@@ -57,7 +58,7 @@ async def cb_edit_menu(
 async def cb_name(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditProfile.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -93,7 +94,7 @@ async def msg_name(
 async def cb_desc(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditProfile.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -128,7 +129,7 @@ async def msg_desc(
 async def cb_short(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditProfile.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -163,7 +164,7 @@ async def msg_short(
 async def cb_photo(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(EditProfile.waiting_photo)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -241,7 +242,7 @@ async def cb_del_photo(
 async def cb_update_token(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(UpdateToken.waiting_token)
     await state.update_data(old_bot_id=callback_data.bot_id)
     await callback.message.edit_text(

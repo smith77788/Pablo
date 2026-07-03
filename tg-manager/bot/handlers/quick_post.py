@@ -29,6 +29,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.utils.event_status import mark_handled_error
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -186,7 +187,7 @@ async def cmd_post(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(QuickPostCb.filter(F.action == "start"))
 async def cb_qp_start(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.writing_text)
     await state.update_data(selected_chan_ids=[])
     await _show_step1(callback.message)
@@ -343,7 +344,7 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 
 @router.callback_query(QuickPostCb.filter(F.action == "back_to_text"))
 async def cb_qp_back_text(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.writing_text)
     await _show_step1(callback.message)
 
@@ -357,7 +358,7 @@ async def cb_qp_from_template(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     templates = await _load_post_templates(pool, callback.from_user.id)
     if not templates:
         kb = InlineKeyboardBuilder()
@@ -406,7 +407,7 @@ async def cb_qp_from_template(
 
 @router.callback_query(QuickPostCb.filter(F.action == "back_to_step1_prompt"))
 async def cb_qp_back_step1_prompt(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.writing_text)
     await _show_step1(callback.message)
 
@@ -474,7 +475,7 @@ async def cb_qp_toggle(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     selected_ids: list[int] = list(sd.get("selected_chan_ids", []))
     chan_id = callback_data.val
@@ -496,7 +497,7 @@ async def cb_qp_page(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     selected_ids = sd.get("selected_chan_ids", [])
     channels = await _load_channels(pool, callback.from_user.id)
@@ -559,7 +560,7 @@ async def cb_qp_chans_done(
     if not sel:
         await callback.answer("⚠️ Выберите хотя бы один канал!", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.uploading_media)
     await _show_step3_media(callback.message)
 
@@ -570,7 +571,7 @@ async def cb_qp_back_chans(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.picking_channels)
     sd = await state.get_data()
     selected_ids = sd.get("selected_chan_ids", [])
@@ -656,7 +657,7 @@ async def cb_qp_media_remove(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.callback_query(QuickPostCb.filter(F.action == "media_skip"), QuickPostFSM.uploading_media)
 async def cb_qp_media_skip(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.picking_timing)
     sd = await state.get_data()
     sel = sd.get("selected_chan_ids", [])
@@ -676,7 +677,7 @@ async def cb_qp_media_skip(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(QuickPostCb.filter(F.action == "back_to_media"))
 async def cb_qp_back_to_media(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.uploading_media)
     sd = await state.get_data()
     has_media = bool(sd.get("media_file_id"))
@@ -691,7 +692,7 @@ async def cb_qp_timing(
     callback_data: QuickPostCb,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     delay_s = callback_data.val
     await state.update_data(delay_s=delay_s)
     await state.set_state(QuickPostFSM.confirming)
@@ -742,7 +743,7 @@ async def cb_qp_back_timing(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(QuickPostFSM.picking_timing)
     sd = await state.get_data()
     sel = sd.get("selected_chan_ids", [])
@@ -790,7 +791,7 @@ async def cb_qp_publish(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await state.clear()
         await callback.message.edit_text(
             locked_text("Публикация в каналы", "starter"),

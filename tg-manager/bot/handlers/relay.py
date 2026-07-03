@@ -11,6 +11,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from database.db import fetchrow_bot
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ async def cb_relay_menu(
     callback: CallbackQuery, callback_data: RelayCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Диалоги / Relay", "starter"),
             parse_mode="HTML",
@@ -49,7 +50,7 @@ async def cb_relay_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     sessions = await db.get_relay_sessions(pool, callback_data.bot_id)
     text, markup = await _relay_menu_text(row, sessions)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
@@ -60,7 +61,7 @@ async def cb_relay_toggle(
     callback: CallbackQuery, callback_data: RelayCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Диалоги / Relay", "starter"),
             parse_mode="HTML",
@@ -142,7 +143,7 @@ async def cb_relay_session(
         await callback.answer("Диалог не найден.", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     messages = await db.get_relay_session_messages(pool, session_id, limit=10)
 
     user_label = (

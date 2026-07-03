@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ApiHubCb, BmCb
 from bot.states import ApiKeyFSM
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -91,7 +92,7 @@ async def cb_api_menu(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     keys = await _list_keys(pool, callback.from_user.id)
     text = _menu_text(keys)
@@ -118,7 +119,7 @@ async def cb_api_create(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     count = await _count_keys(pool, callback.from_user.id)
     if count >= _MAX_KEYS:
         await callback.answer(f"Максимум {_MAX_KEYS} ключей.", show_alert=True)
@@ -193,7 +194,7 @@ async def cb_api_revoke(
     callback_data: ApiHubCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     key_id = callback_data.item_id
 
     kb = InlineKeyboardBuilder()
@@ -216,7 +217,7 @@ async def cb_api_revoke_confirm(
     callback_data: ApiHubCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     key_id = callback_data.item_id
     try:
         await pool.execute(
@@ -247,7 +248,7 @@ async def cb_api_revoke_confirm(
 async def cb_api_docs(
     callback: CallbackQuery,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     text = (
         "📖 <b>Infragram Compute API</b>\n\n"
         "<b>Аутентификация:</b>\n"

@@ -16,6 +16,7 @@ from bot.states import WorkspaceFSM
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -64,13 +65,13 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
         from bot.utils.subscription import locked_text
         from bot.keyboards import subscription_locked_markup
 
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Workspaces", "enterprise"),
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="settings")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     workspaces = await db.get_user_workspaces(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
     for ws in workspaces:
@@ -100,7 +101,7 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
 async def cb_ws_view(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     ws = await db.get_workspace(pool, callback_data.ws_id)
     if not ws:
         kb = InlineKeyboardBuilder()
@@ -129,7 +130,7 @@ async def cb_ws_view(
 async def cb_ws_members(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     members = await db.get_workspace_members(pool, callback_data.ws_id)
     lines = []
     for m in members:
@@ -155,7 +156,7 @@ async def cb_ws_members(
 async def cb_ws_invite(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     code = await db.create_workspace_invite(
         pool, callback_data.ws_id, callback.from_user.id
     )
@@ -175,7 +176,7 @@ async def cb_ws_invite(
 
 @router.callback_query(WorkspaceCb.filter(F.action == "create"))
 async def cb_ws_create(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WorkspaceFSM.entering_name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=WorkspaceCb(action="menu"))
@@ -240,7 +241,7 @@ async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 async def cb_ws_skip_desc(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     name = data.get("ws_name", "Workspace")
     await state.clear()
@@ -261,7 +262,7 @@ async def cb_ws_skip_desc(
 
 @router.callback_query(WorkspaceCb.filter(F.action == "join"))
 async def cb_ws_join(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WorkspaceFSM.entering_invite_code)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=WorkspaceCb(action="menu"))
@@ -314,7 +315,7 @@ async def msg_ws_invite_code(
 async def cb_ws_leave(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     ws = await db.get_workspace(pool, callback_data.ws_id)
     if ws and ws["owner_id"] == callback.from_user.id:
         kb = InlineKeyboardBuilder()

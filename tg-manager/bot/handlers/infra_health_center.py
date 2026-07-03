@@ -25,6 +25,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import InfraHCCb
 from bot.utils.op_helpers import safe_edit
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -180,7 +181,7 @@ async def _show_hc_menu(
 
 @router.callback_query(InfraHCCb.filter(F.action == "menu"))
 async def cb_hc_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_hc_menu(callback, pool, callback.from_user.id)
 
 
@@ -190,7 +191,7 @@ async def cb_hc_anomalies(
     callback_data: InfraHCCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     page = callback_data.page
 
@@ -264,7 +265,7 @@ async def cb_hc_resolve_anomaly(
     if ok:
         await callback.answer("✅ Аномалия разрешена", show_alert=True)
     else:
-        await callback.answer()
+        await safe_answer(callback)
     await _show_hc_menu(callback, pool, owner_id)
 
 
@@ -274,7 +275,7 @@ async def cb_hc_recoveries(
     callback_data: InfraHCCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     page = callback_data.page
 
@@ -403,7 +404,7 @@ async def cb_hc_health_trend(
     callback: CallbackQuery,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:
@@ -487,7 +488,7 @@ async def cb_hc_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(InfraHCCb.filter(F.action == "back"))
 async def cb_hc_back(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.callbacks import BmCb
 
     kb = InlineKeyboardBuilder()

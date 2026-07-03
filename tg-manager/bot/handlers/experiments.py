@@ -17,6 +17,7 @@ from bot.keyboards import (
 )
 from bot.utils.subscription import require_plan, locked_text
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -137,7 +138,7 @@ async def _exp_text(exp, variants: list) -> str:
 async def cb_exp_list(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
@@ -187,7 +188,7 @@ async def cb_exp_view(
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -215,14 +216,14 @@ async def cb_exp_create(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="analytics")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CreateExperiment.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -236,7 +237,7 @@ async def cb_exp_create(
 async def cb_exp_type(
     callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     exp_type = "start_message" if callback_data.action == "type_start" else "auto_reply"
     await state.update_data(exp_type=exp_type)
     await state.set_state(CreateExperiment.waiting_name)
@@ -335,7 +336,7 @@ async def msg_variant_content(
 async def cb_add_variant(
     callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CreateExperiment.waiting_variant_name)
     await state.update_data(bot_id=callback_data.bot_id, exp_id=callback_data.exp_id)
     cancel_kb = InlineKeyboardBuilder()
@@ -355,7 +356,7 @@ async def cb_exp_start(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
@@ -365,7 +366,7 @@ async def cb_exp_start(
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     # Guard: don't start if already active
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
@@ -432,7 +433,7 @@ async def cb_exp_resume(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
@@ -463,7 +464,7 @@ async def cb_pick_winner(
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if not variants:
         await callback.message.edit_text("❌ Нет вариантов.", parse_mode="HTML")

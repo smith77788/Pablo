@@ -14,6 +14,7 @@ from bot.callbacks import StarsCb
 from bot.states import StarsExperimentFSM
 from database import db
 from services import stars_optimizer
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def _main_kb() -> InlineKeyboardBuilder:
 @router.callback_query(StarsCb.filter(F.action == "menu"))
 @router.callback_query(StarsCb.filter(F.action == "dashboard"))
 async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     try:
@@ -128,7 +129,7 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(StarsCb.filter(F.action == "list_experiments"))
 async def cb_list_experiments(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     try:
@@ -176,7 +177,7 @@ async def cb_list_experiments(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
 @router.callback_query(StarsCb.filter(F.action == "detail"))
 async def cb_detail(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     exp_id = callback_data.experiment_id
 
     row = await pool.fetchrow("SELECT * FROM stars_experiments WHERE id = $1", exp_id)
@@ -288,7 +289,7 @@ async def cb_resume(callback: CallbackQuery, callback_data: StarsCb, pool: async
 
 @router.callback_query(StarsCb.filter(F.action == "delete_confirm"))
 async def cb_delete_confirm(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     row = await pool.fetchrow("SELECT name FROM stars_experiments WHERE id = $1", callback_data.experiment_id)
     name = row["name"] if row else "?"
     kb = InlineKeyboardBuilder()
@@ -321,7 +322,7 @@ async def cb_delete_do(callback: CallbackQuery, callback_data: StarsCb, pool: as
 
 @router.callback_query(StarsCb.filter(F.action == "recommendations"))
 async def cb_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
 
     # Get the first bot of the user for context (recommendations are per-owner).
@@ -342,7 +343,7 @@ async def cb_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 @router.callback_query(StarsCb.filter(F.action == "create_start"))
 async def cb_create_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     uid = callback.from_user.id
     bots = await db.get_bots(pool, uid)
 
@@ -375,7 +376,7 @@ async def cb_create_start(callback: CallbackQuery, state: FSMContext, pool: asyn
 
 @router.callback_query(StarsCb.filter(F.action == "create_pick_bot"))
 async def cb_create_pick_bot(callback: CallbackQuery, callback_data: StarsCb, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(bot_id=callback_data.bot_id)
     await state.set_state(StarsExperimentFSM.waiting_name)
     kb = InlineKeyboardBuilder()
@@ -416,7 +417,7 @@ async def fsm_waiting_name(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("strs:create_ctype_"), StateFilter(StarsExperimentFSM.waiting_ctype))
 async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # Extract ctype from callback data string
     raw = callback.data  # e.g. "strs:create_ctype_message:0:0"
     parts = raw.split(":")

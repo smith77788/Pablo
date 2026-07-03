@@ -23,6 +23,7 @@ from bot.states import NarrativeFSM
 from services import narrative_engine
 from services.ai_providers import configured_providers
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router(name="narrative_hub")
@@ -123,7 +124,7 @@ async def _get_user_channels(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
 @router.callback_query(NarrCb.filter(F.action == "menu"))
 async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
 
     try:
@@ -182,7 +183,7 @@ async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
 
 @router.callback_query(NarrCb.filter(F.action == "create"))
 async def cb_narr_create(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(NarrativeFSM.waiting_topic)
 
     kb = InlineKeyboardBuilder()
@@ -279,7 +280,7 @@ async def msg_narr_core(message: Message, state: FSMContext, pool: asyncpg.Pool)
 async def cb_narr_channel_toggle(
     callback: CallbackQuery, callback_data: NarrCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected: list[int] = data.get("selected_channels", [])
     channel_id = callback_data.campaign_id  # repurposed field
@@ -326,7 +327,7 @@ async def cb_narr_channels_back(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     """Back navigation to channel selection step, preserving FSM data."""
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected: list[int] = data.get("selected_channels", [])
 
@@ -362,7 +363,7 @@ async def cb_narr_channels_back(
 async def cb_narr_type_pick(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     selected = data.get("selected_channels", [])
 
@@ -399,7 +400,7 @@ async def cb_narr_type_pick(
 async def cb_narr_set_type(
     callback: CallbackQuery, callback_data: NarrCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     ctype = callback_data.action.replace("set_type_", "")
     if ctype not in _TYPE_LABELS:
         await callback.answer("Неверный тип", show_alert=True)
@@ -435,7 +436,7 @@ async def cb_narr_set_type(
 async def cb_narr_set_spread(
     callback: CallbackQuery, callback_data: NarrCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         spread_hours = int(callback_data.action.replace("set_spread_", ""))
     except ValueError:
@@ -569,7 +570,7 @@ async def cb_narr_set_spread(
 async def cb_narr_launch(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
 
     topic = data.get("topic", "")
@@ -721,7 +722,7 @@ async def _create_campaign_with_posts(
 async def cb_narr_detail(
     callback: CallbackQuery, callback_data: NarrCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     campaign_id = callback_data.campaign_id
     owner_id = callback.from_user.id
 
@@ -805,7 +806,7 @@ async def cb_narr_detail(
 async def cb_narr_preview(
     callback: CallbackQuery, callback_data: NarrCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     campaign_id = callback_data.campaign_id
     owner_id = callback.from_user.id
 
@@ -875,7 +876,7 @@ async def cb_narr_resume(
 async def cb_narr_confirm_cancel(
     callback: CallbackQuery, callback_data: NarrCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     campaign_id = callback_data.campaign_id
 
     kb = InlineKeyboardBuilder()

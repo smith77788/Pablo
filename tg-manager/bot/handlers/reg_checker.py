@@ -51,6 +51,7 @@ from bot.callbacks import BmCb, RegCb
 from bot.states import RegCheckFSM
 from services import registration_checker as rc
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router(name="reg_checker")
@@ -208,7 +209,7 @@ async def cmd_analyze(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 @router.callback_query(RegCb.filter(F.action == "menu"))
 async def cb_reg_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     try:
         await callback.message.edit_text(
             _HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb()
@@ -221,7 +222,7 @@ async def cb_reg_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(RegCb.filter(F.action == "start"))
 async def cb_reg_start(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(RegCheckFSM.waiting_entity)
     prompt = (
         "📨 <b>Перешли сообщение</b> или отправь @username / t.me/... ссылку:\n\n"
@@ -241,7 +242,7 @@ async def cb_reg_start(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(RegCb.filter(F.action == "analyze_start"))
 async def cb_analyze_start(callback: CallbackQuery, state: FSMContext) -> None:
     """Inline entry point for full analysis — mirrors /analyze command."""
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(RegCheckFSM.waiting_entity)
     await state.update_data(mode="analyze")
     prompt = (
@@ -277,7 +278,7 @@ async def cb_reg_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_reg_settings(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from database import db
 
     # Текущий выбранный пул из FSM
@@ -345,7 +346,7 @@ async def cb_reg_settings(
 async def cb_reg_set_pool(
     callback: CallbackQuery, callback_data: RegCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     chosen = callback_data.entity_type  # мы кладём pool_name в entity_type
     if chosen == "__all__":
         await state.update_data(reg_pool_name=None)
@@ -371,7 +372,7 @@ async def cb_reg_set_pool(
 async def cb_reg_history(
     callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
     limit = 10
     offset = page * limit
@@ -1213,7 +1214,7 @@ async def cb_analyze(
 async def cb_analyze_page(
     callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     entity_id = callback_data.entity_id
     entity_type = callback_data.entity_type or ""
     page = callback_data.page
@@ -1234,7 +1235,7 @@ async def cb_analyze_page(
 async def cb_analyze_export(
     callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     entity_id = callback_data.entity_id
     entity_type = callback_data.entity_type or ""
 

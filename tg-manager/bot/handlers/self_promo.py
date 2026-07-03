@@ -25,6 +25,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import BmCb, DmCb, SelfPromoCb
 from database import db
 from services import account_manager
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -185,7 +186,7 @@ async def cmd_self_promo(message: Message, state: FSMContext) -> None:
 @router.callback_query(SelfPromoCb.filter(F.action == "menu"))
 async def cb_sp_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
     text = (
         "🎯 <b>Самопиар & Реклама</b>\n\n"
         "Система для продвижения Infragram через управляемые каналы и аудиторию.\n\n"
@@ -203,7 +204,7 @@ async def cb_sp_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(SelfPromoCb.filter(F.action == "list"))
 async def cb_sp_list(callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
     is_adm = _is_admin(callback.from_user.id)
     all_rows = await _visible_templates(pool, callback.from_user.id, is_adm)
@@ -230,7 +231,7 @@ async def cb_sp_list(callback: CallbackQuery, callback_data: SelfPromoCb, pool: 
 
 @router.callback_query(SelfPromoCb.filter(F.action == "view"))
 async def cb_sp_view(callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     is_adm = _is_admin(callback.from_user.id)
     tpl = await _get_template_for_user(pool, callback_data.item_id, callback.from_user.id, is_adm)
     if not tpl:
@@ -263,7 +264,7 @@ async def cb_sp_del_confirm(callback: CallbackQuery, callback_data: SelfPromoCb,
     if not _is_admin(callback.from_user.id):
         await callback.answer("Только для администраторов", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     tpl = await pool.fetchrow("SELECT title FROM self_promo_templates WHERE id=$1", callback_data.item_id)
     if not tpl:
         await callback.answer("Не найден", show_alert=True)
@@ -307,7 +308,7 @@ async def cb_sp_add_ask(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(callback.from_user.id):
         await callback.answer("Только для администраторов", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SelfPromoFSM.add_style)
     try:
         await callback.message.edit_text(
@@ -325,7 +326,7 @@ async def cb_sp_add_ask(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(SelfPromoCb.filter(F.action == "add_style"), SelfPromoFSM.add_style)
 async def cb_sp_add_style(callback: CallbackQuery, callback_data: SelfPromoCb, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(style=callback_data.style)
     await state.set_state(SelfPromoFSM.add_title)
     badge = "🎯 Прямая" if callback_data.style == "direct" else "💡 Нативная"
@@ -375,7 +376,7 @@ async def fsm_sp_add_content(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(SelfPromoCb.filter(F.action == "add_skip_cta"), SelfPromoFSM.add_cta_text)
 async def cb_sp_skip_cta(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await _save_template(pool, data, cta_text=None, cta_url=None)
     await state.clear()
@@ -402,7 +403,7 @@ async def fsm_sp_add_cta_text(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(SelfPromoCb.filter(F.action == "add_skip_url"), SelfPromoFSM.add_cta_url)
 async def cb_sp_skip_url(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await _save_template(pool, data, cta_text=data.get("cta_text"), cta_url=None)
     await state.clear()
@@ -440,7 +441,7 @@ async def _save_template(pool: asyncpg.Pool, data: dict, cta_text, cta_url) -> N
 
 @router.callback_query(SelfPromoCb.filter(F.action == "launch_channel"))
 async def cb_sp_launch_channel(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     is_adm = _is_admin(callback.from_user.id)
     rows = (await _visible_templates(pool, callback.from_user.id, is_adm))[:10]
     if not rows:
@@ -473,7 +474,7 @@ async def cb_sp_launch_channel(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 async def cb_sp_run_confirm(
     callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     is_adm = _is_admin(callback.from_user.id)
     tpl = await _get_template_for_user(pool, callback_data.item_id, callback.from_user.id, is_adm)
     if not tpl:
@@ -609,7 +610,7 @@ async def _post_to_channels_bg(
 
 @router.callback_query(SelfPromoCb.filter(F.action == "share_link"))
 async def cb_sp_share_link(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     try:
         me = await callback.bot.get_me()
@@ -643,7 +644,7 @@ async def cb_sp_share_link(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_sp_history(
     callback: CallbackQuery, callback_data: SelfPromoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     page = callback_data.page
     limit = 10

@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, GraphCb
 from services import graph_engine
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -23,7 +24,7 @@ async def cb_graph_menu(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
 
     stats = await graph_engine.get_node_stats(pool)
@@ -52,7 +53,7 @@ async def cb_graph_overlaps(
     pool: asyncpg.Pool,
     callback_data: GraphCb,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     page     = callback_data.page
     per_page = 8
@@ -101,7 +102,7 @@ async def cb_graph_my_nodes(
     callback: CallbackQuery,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     nodes = await graph_engine.get_user_nodes(pool, callback.from_user.id)
 

@@ -25,6 +25,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ShieldCb, BmCb
 from services import account_shield
 from services import physics_engine
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -81,7 +82,7 @@ async def _get_summary(pool: asyncpg.Pool, owner_id: int) -> dict:
 
 @router.callback_query(ShieldCb.filter(F.action == "menu"))
 async def cb_shield_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     stats = await _get_summary(pool, owner_id)
     cfg = await account_shield.get_shield_config(pool, owner_id)
@@ -114,7 +115,7 @@ async def cb_shield_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(ShieldCb.filter(F.action == "top10"))
 async def cb_shield_top10(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:
@@ -190,13 +191,13 @@ async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(ShieldCb.filter(F.action == "settings"))
 async def cb_shield_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await _show_settings(callback, pool)
 
 
 @router.callback_query(ShieldCb.filter(F.action == "toggle_ap"))
 async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     cfg = await account_shield.get_shield_config(pool, owner_id)
     new_val = not cfg.auto_pause
@@ -215,7 +216,7 @@ async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
 @router.callback_query(ShieldCb.filter(F.action == "toggle_na"))
 async def cb_shield_toggle_na(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
     cfg = await account_shield.get_shield_config(pool, owner_id)
     new_val = not cfg.notify_admin
@@ -237,7 +238,7 @@ async def cb_shield_toggle_na(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
 @router.callback_query(ShieldCb.filter(F.action == "history"))
 async def cb_shield_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     owner_id = callback.from_user.id
 
     try:

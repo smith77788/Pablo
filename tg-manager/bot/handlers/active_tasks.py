@@ -9,6 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import TaskCb
 from services import task_registry
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -76,7 +77,7 @@ async def cmd_tasks(message: Message) -> None:
 
 @router.callback_query(TaskCb.filter(F.action == "list"))
 async def cb_task_list(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     text, kb = _build_text_and_kb(callback.from_user.id)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
 

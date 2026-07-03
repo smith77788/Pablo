@@ -13,6 +13,7 @@ from bot.callbacks import AutoFunnelCb, BmCb
 from bot.states import AutoFunnelFSM
 from database import db
 from services import auto_funnel as af_service
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -46,7 +47,7 @@ def _back_to_menu():
 
 @router.callback_query(AutoFunnelCb.filter(F.action == "menu"))
 async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         funnels = await pool.fetch(
             "SELECT f.*, b.username AS bot_uname, b.first_name AS bot_name FROM auto_funnels f LEFT JOIN managed_bots b ON b.bot_id = f.bot_id WHERE f.owner_id=$1 ORDER BY f.id",
@@ -106,7 +107,7 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(AutoFunnelCb.filter(F.action == "create"))
 async def cb_af_create(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AutoFunnelFSM.waiting_name)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AutoFunnelCb(action="menu"))
@@ -157,7 +158,7 @@ async def msg_af_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 async def cb_af_pick_bot(
     callback: CallbackQuery, callback_data: AutoFunnelCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         bot_id = int(callback_data.extra)
     except (ValueError, TypeError):
@@ -186,7 +187,7 @@ async def cb_af_pick_bot(
 async def cb_af_pick_segment(
     callback: CallbackQuery, callback_data: AutoFunnelCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         bot_id_str, segment = callback_data.extra.split(":", 1)
         bot_id = int(bot_id_str)
@@ -275,7 +276,7 @@ async def _show_funnel(msg_or_cb, pool, funnel, edit: bool = True) -> None:
 async def cb_af_view(
     callback: CallbackQuery, callback_data: AutoFunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
     if not funnel:
         await callback.answer("Воронка не найдена.", show_alert=True)
@@ -311,7 +312,7 @@ async def cb_af_toggle(
 async def cb_af_steps(
     callback: CallbackQuery, callback_data: AutoFunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
     if not funnel:
         await callback.answer("Воронка не найдена.", show_alert=True)
@@ -343,7 +344,7 @@ async def cb_af_steps(
 async def cb_af_add_step(
     callback: CallbackQuery, callback_data: AutoFunnelCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AutoFunnelFSM.waiting_step_delay)
     await state.update_data(funnel_id=callback_data.funnel_id)
     kb = InlineKeyboardBuilder()
@@ -401,7 +402,7 @@ async def msg_af_step_text(message: Message, state: FSMContext) -> None:
 async def cb_af_step_no_btn(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
     await _save_step(callback.message, pool, data, btn_text=None, btn_url=None, edit=True)
@@ -505,7 +506,7 @@ async def cb_af_del_step(
 async def cb_af_launch(
     callback: CallbackQuery, callback_data: AutoFunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
     if not funnel:
         await callback.answer("Воронка не найдена.", show_alert=True)
@@ -537,7 +538,7 @@ async def cb_af_launch(
 async def cb_af_launch_confirm(
     callback: CallbackQuery, callback_data: AutoFunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     segment = callback_data.extra
     await callback.message.edit_text("⏳ Запускаю…", parse_mode="HTML")
     try:
@@ -570,7 +571,7 @@ async def cb_af_launch_confirm(
 async def cb_af_stats(
     callback: CallbackQuery, callback_data: AutoFunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
     if not funnel:
         await callback.answer("Воронка не найдена.", show_alert=True)
@@ -624,7 +625,7 @@ async def cb_af_stats(
 async def cb_af_del(
     callback: CallbackQuery, callback_data: AutoFunnelCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
     if not funnel:
         await callback.answer("Воронка не найдена.", show_alert=True)

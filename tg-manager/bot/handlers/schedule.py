@@ -17,6 +17,7 @@ from bot.states import ScheduleBroadcast
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -39,7 +40,7 @@ async def cb_schedule_menu(
     callback: CallbackQuery, callback_data: ScheduleCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Расписание рассылок", "starter"),
             parse_mode="HTML",
@@ -51,7 +52,7 @@ async def cb_schedule_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     schedules = await db.get_bot_schedules(pool, callback_data.bot_id, limit=10)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -83,7 +84,7 @@ async def cb_schedule_menu(
 async def cb_schedule_create(
     callback: CallbackQuery, callback_data: ScheduleCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ScheduleBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -209,7 +210,7 @@ async def cb_schedule_from_template(
             "Нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "📋 <b>Выберите шаблон для планирования:</b>",
         parse_mode="HTML",
@@ -232,7 +233,7 @@ async def cb_schedule_use_template(
     if not template:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ScheduleBroadcast.waiting_datetime)
     await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
     safe_name = (

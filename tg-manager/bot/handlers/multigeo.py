@@ -18,6 +18,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.states import MultigeoEdit
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -46,7 +47,7 @@ async def cb_multigeo_menu(
 ) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Мультигео (редактирование по языкам)", "pro"),
             parse_mode="HTML",
@@ -59,7 +60,7 @@ async def cb_multigeo_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"🌍 <b>Мультигео — {label}</b>\n\n"
@@ -88,7 +89,7 @@ async def cb_multigeo_names(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
         *(bot_api.get_my_name(http, row["token"], code) for code, _, _ in LANGUAGES),
@@ -120,7 +121,7 @@ async def cb_multigeo_short(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
         *(
@@ -155,7 +156,7 @@ async def cb_multigeo_desc(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
         *(
@@ -182,7 +183,7 @@ async def cb_multigeo_desc(
 async def cb_multigeo_cancel_fsm(
     callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
         "❌ Отменено.",
@@ -199,14 +200,14 @@ async def cb_lang_name(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(MultigeoEdit.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -270,14 +271,14 @@ async def cb_lang_short(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(MultigeoEdit.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -341,14 +342,14 @@ async def cb_lang_desc(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(MultigeoEdit.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()

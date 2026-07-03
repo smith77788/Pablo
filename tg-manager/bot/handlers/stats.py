@@ -9,6 +9,7 @@ import asyncpg
 from bot.callbacks import StatsCb, BotCb
 from bot.keyboards import back_to_bot
 from database import db
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -17,7 +18,7 @@ router = Router()
 async def cb_stats_menu(
     callback: CallbackQuery, callback_data: StatsCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         kb = InlineKeyboardBuilder()

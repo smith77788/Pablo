@@ -22,6 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import BmCb, GrowthCb
 from bot.states import GrowthAgentFSM
 from services import operation_bus
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -67,7 +68,7 @@ def _back_kb() -> object:
 
 @router.callback_query(GrowthCb.filter(F.action == "menu"))
 async def cb_growth_menu(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
         "🌱 <b>Growth Agent</b>\n\n"
@@ -91,7 +92,7 @@ async def cb_growth_menu(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_growth_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     # Если уже есть niche и promo_text — это повторное подтверждение
     if data.get("niche") and data.get("promo_text"):
@@ -140,7 +141,7 @@ async def on_niche_input(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(GrowthCb.filter(F.action == "skip_geo"), GrowthAgentFSM.waiting_geo)
 async def cb_growth_skip_geo(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(geo="")
     await _go_to_promo_step(callback.message, state, is_edit=True, callback=callback)
 
@@ -321,7 +322,7 @@ async def _launch_campaign(
 async def cb_growth_history(
     callback: CallbackQuery, callback_data: GrowthCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     rows = await pool.fetch(
         """SELECT id, status, done_items, total_items,
                   params->>'niche' AS niche,

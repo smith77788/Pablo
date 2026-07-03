@@ -31,6 +31,7 @@ from bot.utils.op_helpers import (
     _progress_text as _progress_text_base,
 )
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -76,7 +77,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 
 @router.callback_query(MassPubCb.filter(F.action == "menu"))
 async def cb_mpub_menu(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "📤 <b>Массовая публикация — рассылка в каналы</b>\n\n"
         "Отправляет один пост одновременно во все ваши каналы.\n\n"
@@ -93,7 +94,7 @@ async def cb_mpub_menu(callback: CallbackQuery) -> None:
 
 @router.callback_query(MassPubCb.filter(F.action == "back_to_factory"))
 async def cb_mpub_back_factory(callback: CallbackQuery) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.callbacks import ChanFactCb
 
     kb = InlineKeyboardBuilder()
@@ -117,7 +118,7 @@ async def cb_mpub_start(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
@@ -203,7 +204,7 @@ async def cb_mpub_start(
 async def cb_mpub_pick_account(
     callback: CallbackQuery, callback_data: MassPubCb, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     sd = await state.get_data()
     prefill = sd.get("tpl_prefill") or {}
     prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
@@ -309,7 +310,7 @@ async def cb_mpub_timing(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     # Extract timing key from action: "timing_delay_5s" → "delay_5s"
     timing_key = callback_data.action[len("timing_") :]
     delay_s = _TIMING_OPTIONS.get(timing_key, ("", 30))[1]
@@ -593,7 +594,7 @@ async def cb_mpub_retry_failed(
 async def cb_mpub_dry_run(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from bot.utils.subscription import require_plan
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
@@ -639,7 +640,7 @@ async def cb_mpub_dry_run(
 
 @router.callback_query(MassPubCb.filter(F.action == "history"))
 async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     rows: list[asyncpg.Record] = []
     try:
         rows = await pool.fetch(

@@ -12,6 +12,7 @@ from aiogram.filters.callback_data import CallbackData
 from bot.utils.subscription import is_platform_admin
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 
 def _is_admin(uid: int) -> bool:
@@ -97,7 +98,7 @@ async def cb_users_list(
         await callback.answer("⛔️ Только администратор", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
 
     text, total, users = await _users_list_text(pool, page)
@@ -147,7 +148,7 @@ async def cb_filter_plan(callback: CallbackQuery) -> None:
         await callback.answer("⛔️", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     kb = InlineKeyboardBuilder()
@@ -180,7 +181,7 @@ async def cb_plan_list(
         await callback.answer("⛔️", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     page = callback_data.page
     plan = callback_data.plan
 
@@ -231,7 +232,7 @@ async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.answer("⛔️", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     users = await db.get_all_platform_users(pool, limit=20, is_banned=True)
 
     text = f"🚫 <b>Забаненные пользователи</b> (всего: {len(users)})\n\n"
@@ -271,7 +272,7 @@ async def cb_user_actions(
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     username = html.escape(user["username"] or f"#{user_id}")
     emoji = _format_plan_emoji(user["current_plan"])
@@ -332,7 +333,7 @@ async def cb_grant_plan(
         await callback.answer("⛔️", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AdminUserFSM.choosing_months)
     await state.update_data(user_id=callback_data.user_id)
 
@@ -375,7 +376,7 @@ async def cb_plan_months(
         await callback.answer("⛔️", show_alert=True)
         return
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.update_data(plan=callback_data.plan)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -883,7 +884,7 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.clear()
-    await callback.answer()
+    await safe_answer(callback)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 

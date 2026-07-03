@@ -18,6 +18,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BoostCb, BmCb
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -266,7 +267,7 @@ async def cb_pick_emoji(
         parse_mode="HTML",
         reply_markup=_cancel_kb(),
     )
-    await callback.answer()
+    await safe_answer(callback)
 
 
 @router.message(BoostReactions.acc_count)

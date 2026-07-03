@@ -10,6 +10,7 @@ from bot.keyboards import commands_menu, back_to_bot
 from bot.states import SetCommands
 from database import db
 from services import bot_api
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 
@@ -44,7 +45,7 @@ async def cb_commands_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     cmds = await bot_api.get_my_commands(http, row["token"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     hint = (
@@ -71,7 +72,7 @@ async def cb_commands_add(
 ) -> None:
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SetCommands.waiting_add)
     await state.update_data(bot_id=callback_data.bot_id)
     kb = _Kb()
@@ -147,7 +148,7 @@ async def cb_commands_set_all(
 ) -> None:
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
 
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(SetCommands.waiting_commands)
     await state.update_data(bot_id=callback_data.bot_id)
     kb = _Kb()

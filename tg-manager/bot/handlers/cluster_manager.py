@@ -19,6 +19,7 @@ from bot.keyboards import subscription_locked_markup
 from services.logger import log_exc_swallow
 from bot.states import CreateClusterFSM
 from bot.utils.subscription import require_plan, locked_text
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -56,14 +57,14 @@ def _cancel_kb() -> InlineKeyboardBuilder:
 async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Кластеры ботов", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="assets")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.edit_text(
         "🔗 <b>Кластеры ботов</b>\n\n"
         "Группируйте ботов по кластерам для совместного управления.",
@@ -77,7 +78,7 @@ async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FS
 
 @router.callback_query(ClustMCb.filter(F.action == "list"))
 async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -129,7 +130,7 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(ClustMCb.filter(F.action == "stats"))
 async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
 
     try:
@@ -183,14 +184,14 @@ async def cb_cluster_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Кластеры ботов", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="assets")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CreateClusterFSM.waiting_name)
     await callback.message.edit_text(
         "🔗 <b>Создать кластер</b>\n\n"
@@ -231,7 +232,7 @@ async def fsm_cluster_name(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(ClustMCb.filter(F.action == "skip_desc"))
 async def cb_skip_desc(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     name = data.get("cluster_name", "")
     await _finish_cluster_create(callback.message, name, pool, callback.from_user.id)
@@ -288,7 +289,7 @@ async def _finish_cluster_create(
 async def cb_cluster_view(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
 
@@ -353,7 +354,7 @@ async def cb_cluster_view(
 async def cb_cluster_broadcast(
     callback: CallbackQuery, callback_data: ClustMCb
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     cluster_name = callback_data.cluster_name or ""
     # Redirect to network broadcast with cluster segment
     await callback.message.edit_text(
@@ -375,7 +376,7 @@ async def cb_cluster_broadcast(
 async def cb_cluster_delete_confirm(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
 
@@ -423,7 +424,7 @@ async def cb_cluster_delete_confirm(
 async def cb_cluster_delete(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
 
@@ -460,7 +461,7 @@ async def cb_cluster_delete(
 async def cb_cluster_add_bot_pick(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
 

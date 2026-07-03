@@ -34,6 +34,7 @@ from config import ADMIN_SECRET
 from database import db
 from services import railway_api
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -366,7 +367,7 @@ async def cb_admin(
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     action = callback.data.removeprefix("adm:")
 
     if action == "main":
@@ -3254,7 +3255,7 @@ async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await _ai_keys_menu(callback, pool)
 
 
@@ -3264,7 +3265,7 @@ async def cb_adm_budget(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     from services.account_budget import get_daily_budget, DEFAULT_DAILY_BUDGET
     cur = await get_daily_budget(pool)
     kb = InlineKeyboardBuilder()
@@ -3316,7 +3317,7 @@ async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
     if not meta:
         await callback.answer("Неизвестный провайдер", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(AiKeyFSM.waiting_key)
     await state.update_data(ai_provider=pid)
     kb = InlineKeyboardBuilder()
@@ -3397,7 +3398,7 @@ async def cb_adm_gate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     channels = await db.get_subscription_gate_channels(pool)
     gate_on = get_gate_enabled()
     await callback.message.edit_text(
@@ -3432,7 +3433,7 @@ async def cb_adm_gate_add_ask(callback: CallbackQuery, state: FSMContext) -> Non
     if not _is_admin(callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(GateAddFSM.waiting_username)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data="adm:gate")
@@ -3506,7 +3507,7 @@ async def cb_adm_gate_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except ValueError:
         await callback.answer("Некорректный ID.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     await db.remove_subscription_gate_channel(pool, channel_id)
     channels = await db.get_subscription_gate_channels(pool)
     set_gate_channels(channels)
@@ -3685,7 +3686,7 @@ async def cb_bm_post_confirm(callback: CallbackQuery, state: FSMContext, pool: a
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
     text = data.get("post_text", "")

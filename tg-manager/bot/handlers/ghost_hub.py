@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import GhostCb, BmCb
 from bot.states import GhostConfigFSM
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -65,7 +66,7 @@ async def _get_account_name(pool: asyncpg.Pool, account_id: int) -> str:
 async def cb_ghost_menu(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     try:
         profiles = await pool.fetch(
             """
@@ -121,7 +122,7 @@ async def cb_ghost_menu(
 async def cb_ghost_add(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     already = {
         r["account_id"]
         for r in await pool.fetch(
@@ -167,7 +168,7 @@ async def cb_ghost_add(
 async def cb_ghost_pick_acc(
     callback: CallbackQuery, callback_data: GhostCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     acc_id = callback_data.account_id
     try:
         await pool.execute(
@@ -270,7 +271,7 @@ async def _show_profile(
 async def cb_ghost_view(
     callback: CallbackQuery, callback_data: GhostCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = await _get_profile(pool, callback_data.profile_id, callback.from_user.id)
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)
@@ -306,7 +307,7 @@ async def cb_ghost_toggle(
 async def cb_ghost_personality(
     callback: CallbackQuery, callback_data: GhostCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = await _get_profile(pool, callback_data.profile_id, callback.from_user.id)
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)
@@ -353,7 +354,7 @@ async def cb_ghost_set_personality(
 async def cb_ghost_hours(
     callback: CallbackQuery, callback_data: GhostCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = await _get_profile(pool, callback_data.profile_id, callback.from_user.id)
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)
@@ -415,7 +416,7 @@ async def msg_ghost_hours(
 async def cb_ghost_cap(
     callback: CallbackQuery, callback_data: GhostCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = await _get_profile(pool, callback_data.profile_id, callback.from_user.id)
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)
@@ -477,7 +478,7 @@ async def msg_ghost_cap(
 async def cb_ghost_logs(
     callback: CallbackQuery, callback_data: GhostCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = await _get_profile(pool, callback_data.profile_id, callback.from_user.id)
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)
@@ -523,7 +524,7 @@ async def cb_ghost_logs(
 async def cb_ghost_del(
     callback: CallbackQuery, callback_data: GhostCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     profile = await _get_profile(pool, callback_data.profile_id, callback.from_user.id)
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)

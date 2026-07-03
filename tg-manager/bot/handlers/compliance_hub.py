@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, ComplianceCb
 from services import compliance_engine
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -25,7 +26,7 @@ async def cb_compliance_menu(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.clear()
 
     report = await compliance_engine.get_report(pool, callback.from_user.id, days=30)
@@ -68,7 +69,7 @@ async def cb_compliance_history(
     callback_data: ComplianceCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     page   = callback_data.page
     offset = page * _PAGE_SIZE
 
@@ -118,7 +119,7 @@ async def cb_compliance_export(
     callback: CallbackQuery,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     report_text = await compliance_engine.export_text(pool, callback.from_user.id, days=30)
 

@@ -10,6 +10,7 @@ from bot.keyboards import swarm_menu, back_to_bot, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ async def cb_swarm_menu(
 ) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Swarm (умный роутинг трафика)", "enterprise"),
             parse_mode="HTML",
@@ -48,7 +49,7 @@ async def cb_swarm_menu(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     swarm_status = "🟢 Активен в Swarm" if row.get("swarm_enabled") else "⚫ Не в Swarm"
     role = ROLE_LABELS.get(row.get("bot_role", "general"), "⚙️ General")
@@ -78,7 +79,7 @@ async def cb_swarm_toggle(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
@@ -148,7 +149,7 @@ async def cb_swarm_stats(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
     try:
         stats = await db.get_routing_stats(pool, callback_data.bot_id, days=7)
         metrics = await pool.fetchrow(
@@ -201,7 +202,7 @@ async def cb_swarm_role(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
@@ -275,14 +276,14 @@ async def cb_set_mode(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
-    await callback.answer()
+    await safe_answer(callback)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import SwarmCb as SC
 
@@ -315,7 +316,7 @@ async def cb_change_mode(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        await callback.answer()
+        await safe_answer(callback)
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",

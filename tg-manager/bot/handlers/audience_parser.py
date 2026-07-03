@@ -34,6 +34,7 @@ from bot.callbacks import ParserCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -81,7 +82,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
 
 @router.callback_query(ParserCb.filter(F.action == "menu"))
 async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
@@ -136,7 +137,7 @@ async def cb_parser_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer("🔒 Требуется PRO", show_alert=True)
         return
-    await callback.answer()
+    await safe_answer(callback)
 
     parse_type = "members" if callback_data.action == "start_members" else "active"
     await state.update_data(parse_type=parse_type)
@@ -204,7 +205,7 @@ async def fsm_parser_source(
 async def cb_parser_limit_quick(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     limit = int(callback.data.split(":")[-1])
     await _start_parse(callback.message, state, pool, callback.from_user.id, limit)
 
@@ -357,7 +358,7 @@ async def _start_parse(
 
 @router.callback_query(ParserCb.filter(F.action == "runs"))
 async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.parser import get_run_history
 
     runs = await get_run_history(pool, callback.from_user.id, limit=15)
@@ -408,7 +409,7 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_parser_audience(
     callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.parser import get_parsed_audience
 
     run_id = callback_data.run_id or None
@@ -547,7 +548,7 @@ async def cb_parser_export(
 
 @router.callback_query(ParserCb.filter(F.action == "clear_all"))
 async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     kb = InlineKeyboardBuilder()
     kb.button(text="🗑 Да, очистить всё", callback_data=ParserCb(action="confirm_clear"))
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
@@ -573,7 +574,7 @@ async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(ParserCb.filter(F.action == "confirm_clear"))
 async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     from services.parser import delete_audience
 
     deleted = await delete_audience(pool, callback.from_user.id)
@@ -588,7 +589,7 @@ async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
 
 @router.callback_query(ParserCb.filter(F.action == "start_geo"))
 async def cb_parser_geo_start(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(ParserFSM.geo_coords)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
@@ -634,7 +635,7 @@ async def msg_parser_geo_coords(message: Message, state: FSMContext) -> None:
 async def cb_parser_geo_radius(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
+    await safe_answer(callback)
     radius = int(callback.data.split(":")[-1])
     await state.update_data(geo_radius=radius)
     data = await state.get_data()
