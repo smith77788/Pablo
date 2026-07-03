@@ -6151,6 +6151,76 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("global_presence_plan_detail uid=%d plan=%d", uid, plan_id)
             return _err(str(exc), 500)
 
+    async def global_presence_create(request: web.Request) -> web.Response:
+        """Create a new Global Presence plan with channels/groups/bots."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        
+        asset_type = body.get("asset_type", "channel")
+        name_pattern = (body.get("name_pattern") or "").strip()
+        username_pattern = (body.get("username_pattern") or "").strip()
+        countries = body.get("countries") or []
+        account_ids = body.get("account_ids") or []
+        
+        if asset_type not in ("channel", "group", "bot", "package", "full_package"):
+            return _err("Invalid asset_type: must be channel/group/bot/package/full_package", 400)
+        if not name_pattern:
+            return _err("name_pattern required", 400)
+        if not countries:
+            return _err("At least one country required", 400)
+        
+        # Create the plan
+        try:
+            plan_id = await pool.fetchval(
+                """INSERT INTO global_presence_plans
+                   (owner_id, asset_type, name_pattern, username_pattern,
+                    countries, account_ids, status)
+                   VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'pending')
+                   RETURNING id""",
+                uid, asset_type, name_pattern, username_pattern,
+                json.dumps(countries), json.dumps([int(x) for x in account_ids]),
+            )
+            return _json_resp({"ok": True, "plan_id": plan_id, "asset_type": asset_type, "name_pattern": name_pattern})
+        except Exception as exc:
+            log.exception("global_presence_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def global_presence_launch(request: web.Request) -> web.Response:
+        """Launch a Global Presence plan — creates targets and queues operations."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        try:
+            plan = await pool.fetchrow(
+                "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
+            )
+            if not plan:
+                return _err("Plan not found", 404)
+            if plan["status"] not in ("pending", "failed"):
+                return _err("Plan already running or completed", 400)
+            
+            # Queue the operation
+            from services import operation_bus
+            op_type = f"global_presence_{plan['asset_type']}"
+            op_id = await operation_bus.submit(
+                pool, uid, op_type,
+                {"plan_id": plan_id, "asset_type": plan["asset_type"]},
+                total_items=0,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "plan_id": plan_id})
+        except Exception as exc:
+            log.exception("global_presence_launch uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
+
     # ── Mass Ops ──────────────────────────────────────────────────────────────
 
     async def mass_ops_overview(request: web.Request) -> web.Response:
@@ -7609,6 +7679,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Global Presence
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
+    app.router.add_post("/api/miniapp/global_presence", global_presence_create)
+    app.router.add_post("/api/miniapp/global_presence/{plan_id}/launch", global_presence_launch)
     # Mass Ops
     app.router.add_get("/api/miniapp/mass_ops", mass_ops_overview)
     # Ecosystems

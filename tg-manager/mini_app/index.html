@@ -1287,7 +1287,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openGpCreateModal()">+ Создать</button></div>
+  </div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Бот <b>создаёт НОВЫЕ</b> каналы/группы/боты сразу по многим городам с локализованными названиями. Чтобы объединить уже существующие — раздел «🔗 Связки».</div>
     <div class="sec">Мои планы гео-сети</div>
@@ -1299,6 +1301,42 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-gpdetail">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="gpdetail-name">План</div></div>
   <div class="sub-sb" id="gpdetail-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ GP CREATE MODAL ══════════════════════ -->
+<div class="modal-bg" id="mo-gp-create">
+  <div class="modal">
+    <div class="modal-hdr">🌍 Создать гео-сеть</div>
+    <div style="padding:16px">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:12px">Создайте новые каналы/группы/боты по городам с локализованными названиями.</div>
+      
+      <label style="font-size:13px;color:var(--hint);display:block;margin-bottom:4px">Тип актива</label>
+      <select id="gpAssetType" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+        <option value="channel">📡 Каналы</option>
+        <option value="group">👥 Группы</option>
+        <option value="bot">🤖 Боты (BotFather)</option>
+        <option value="package">📦 Пакет (Канал+Группа)</option>
+        <option value="full_package">🎁 Полный пакет (К+Г+Б)</option>
+      </select>
+      
+      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Шаблон имени</label>
+      <input type="text" id="gpNamePattern" placeholder="Новости {{city}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">{{city}} — город, {{country}} — страна, {{lang}} — язык</div>
+      
+      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Шаблон username (опционально)</label>
+      <input type="text" id="gpUsernamePattern" placeholder="novosti_{{city}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      
+      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Страны (через запятую)</label>
+      <input type="text" id="gpCountries" placeholder="Россия, Украина, Казахстан" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      
+      <div id="gpCreateErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
+      
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-s" onclick="closeModal('mo-gp-create')" style="flex:1">Отмена</button>
+        <button class="btn btn-p" onclick="submitGpCreate()" style="flex:1">🌍 Создать</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ══════════════════════ MASS OPS ══════════════════════ -->
@@ -9444,6 +9482,40 @@ async function openGlobalPresence() {
     const active = rows.filter(r=>r.status==='running').length;
     document.getElementById('m-gp-val').textContent = active?`${active} активных`:rows.length+' планов';
   } catch(e) { txt('gpList', empty('⚠️','Ошибка',e.message)); }
+}
+
+async function openGpCreateModal() {
+  showModal('mo-gp-create');
+}
+
+async function submitGpCreate() {
+  const assetType = document.getElementById('gpAssetType').value;
+  const namePattern = document.getElementById('gpNamePattern').value.trim();
+  const usernamePattern = document.getElementById('gpUsernamePattern').value.trim();
+  const countries = document.getElementById('gpCountries').value.trim().split(',').map(s=>s.trim()).filter(Boolean);
+  const errEl = document.getElementById('gpCreateErr');
+  errEl.textContent = '';
+  
+  if (!namePattern) { errEl.textContent = 'Введите шаблон имени'; return; }
+  if (!countries.length) { errEl.textContent = 'Введите хотя бы одну страну'; return; }
+  
+  const preview = `Создать ${GP_TYPES[assetType]||asset_type}?\n\nШаблон: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nСтраны: ${countries.join(', ')}`;
+  if (!await askConfirm(preview)) return;
+  
+  try {
+    const r = await api('/api/miniapp/global_presence', {
+      method: 'POST',
+      body: JSON.stringify({
+        asset_type: assetType,
+        name_pattern: namePattern,
+        username_pattern: usernamePattern,
+        countries: countries,
+      })
+    });
+    toast(`✅ План #${r.plan_id} создан!`);
+    closeModal('mo-gp-create');
+    openGlobalPresence();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
 }
 async function openGpDetail(planId, planName) {
   push('s-gpdetail');
