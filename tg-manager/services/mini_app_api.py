@@ -83,7 +83,19 @@ def _admin_ids() -> set[int]:
 
 
 def _is_admin(uid: int | None) -> bool:
-    return bool(uid) and uid in _admin_ids()
+    if not uid:
+        return False
+    # Check permanent admin IDs from environment
+    if uid in _admin_ids():
+        return True
+    # Check session admins (authenticated via ADMIN_SECRET in bot)
+    try:
+        from bot.handlers.admin import _session_admins
+        if uid in _session_admins:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _jlist(val) -> list:
