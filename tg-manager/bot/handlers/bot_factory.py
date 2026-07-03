@@ -292,7 +292,10 @@ async def cb_factory_do_create_bots(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     """Submit bot_factory operation to queue."""
-    await callback.answer("⏳ Ставлю в очередь...")
+    try:
+        await callback.answer("⏳ Ставлю в очередь...")
+    except Exception:
+        pass
     data = await state.get_data()
     await state.clear()
 
