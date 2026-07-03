@@ -4374,9 +4374,6 @@ async function submitQuickBot() {
     loadBots();
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
 }
-  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
-  finally { btn.disabled=false; btn.textContent='Запустить рассылку'; }
-}
 
 async function openBot(botId) {
   const b = BOTS.find(x=>x.bot_id==botId);
