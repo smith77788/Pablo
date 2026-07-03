@@ -705,8 +705,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;-ms-overflow-style:none;scrollbar-width:none"></div>
     <div id="moreNoResult" style="display:none;text-align:center;color:var(--hint);padding:20px;font-size:13px">Ничего не найдено</div>
 
-    <!-- Быстрые действия -->
-    <div class="sec">Быстрые действия</div>
+    <!-- ⚡ Быстрые действия (всегда наверху) -->
+    <div class="sec" style="color:var(--accent)">⚡ Быстрые действия</div>
     <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openNewUsers()">
         <div class="mgmt-tile-ico">🆕</div>
@@ -728,11 +728,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Быстрый пост</div>
         <div class="mgmt-tile-val"></div>
       </div>
-    </div>
-
-    <!-- Управление -->
-    <div class="sec">Управление</div>
-    <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openBotFactory()">
         <div class="mgmt-tile-ico">🏭</div>
         <div class="mgmt-tile-lbl">Создать ботов</div>
@@ -743,21 +738,86 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Создать каналы</div>
         <div class="mgmt-tile-val"></div>
       </div>
+    </div>
+
+    <!-- Основное -->
+    <div class="sec">Основное</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openNewUsers()">
+        <div class="mgmt-tile-ico">🆕</div>
+        <div class="mgmt-tile-lbl">Новые подписчики</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openDiag()">
+        <div class="mgmt-tile-ico">🩺</div>
+        <div class="mgmt-tile-lbl">Диагностика</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="goTab('bots')">
+        <div class="mgmt-tile-ico">🤖</div>
+        <div class="mgmt-tile-lbl">Боты</div>
+        <div class="mgmt-tile-val" id="m-bots-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="goTab('accounts')">
+        <div class="mgmt-tile-ico">📱</div>
+        <div class="mgmt-tile-lbl">Аккаунты</div>
+        <div class="mgmt-tile-val" id="m-acc-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openChannels()">
+        <div class="mgmt-tile-ico">📡</div>
+        <div class="mgmt-tile-lbl">Каналы</div>
+        <div class="mgmt-tile-val" id="m-ch-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="goTab('broadcasts')">
+        <div class="mgmt-tile-ico">📨</div>
+        <div class="mgmt-tile-lbl">Рассылки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openOps()">
+        <div class="mgmt-tile-ico">⚙️</div>
+        <div class="mgmt-tile-lbl">Операции</div>
+        <div class="mgmt-tile-val" id="m-ops-cnt"></div>
+      </div>
       <div class="mgmt-tile" onclick="openProxies()">
         <div class="mgmt-tile-ico">🌐</div>
         <div class="mgmt-tile-lbl">Прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
       </div>
-      <div class="mgmt-tile" onclick="openWarmup()">
-        <div class="mgmt-tile-ico">🌱</div>
-        <div class="mgmt-tile-lbl">Прогрев аккаунтов</div>
-        <div class="mgmt-tile-val" id="m-warmup-val"></div>
-      </div>
     </div>
 
-    <!-- Продвижение -->
-    <div class="sec">Продвижение</div>
+    <!-- Инструменты ботов -->
+    <div class="sec">Инструменты ботов</div>
     <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openAutoFunnels()">
+        <div class="mgmt-tile-ico">🔀</div>
+        <div class="mgmt-tile-lbl">Авто-воронки</div>
+        <div class="mgmt-tile-val" id="m-af-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openTemplates()">
+        <div class="mgmt-tile-ico">📝</div>
+        <div class="mgmt-tile-lbl">Шаблоны</div>
+        <div class="mgmt-tile-val" id="m-tpl-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMassPub()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Mass Pub</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openBotFactory()">
+        <div class="mgmt-tile-ico">🏭</div>
+        <div class="mgmt-tile-lbl">Bot Factory</div>
+        <div class="mgmt-tile-val" id="m-botfactory-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openQuickPost()">
+        <div class="mgmt-tile-ico">✍️</div>
+        <div class="mgmt-tile-lbl">Quick Post</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSelfPromo()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Self Promo</div>
+        <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openBoost()">
         <div class="mgmt-tile-ico">🚀</div>
         <div class="mgmt-tile-lbl">Накрутка</div>
@@ -768,29 +828,49 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Growth Agent</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openSelfPromo()">
-        <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Самопиар</div>
-        <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
+    </div>
+
+    <!-- Управление аккаунтами -->
+    <div class="sec">Управление аккаунтами</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openWarmup()">
+        <div class="mgmt-tile-ico">🌱</div>
+        <div class="mgmt-tile-lbl">Прогрев</div>
+        <div class="mgmt-tile-val" id="m-warmup-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openPromo()">
-        <div class="mgmt-tile-ico">🔍</div>
-        <div class="mgmt-tile-lbl">Топ поиска</div>
-        <div class="mgmt-tile-val" id="m-promo-val"></div>
+      <div class="mgmt-tile" onclick="openProfileSetter()">
+        <div class="mgmt-tile-ico">🎨</div>
+        <div class="mgmt-tile-lbl">Профили</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCleaner()">
+        <div class="mgmt-tile-ico">🧹</div>
+        <div class="mgmt-tile-lbl">Очистка</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGhost()">
+        <div class="mgmt-tile-ico">👻</div>
+        <div class="mgmt-tile-lbl">Ghost</div>
+        <div class="mgmt-tile-val" id="m-ghost-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openPersonas()">
+        <div class="mgmt-tile-ico">🎭</div>
+        <div class="mgmt-tile-lbl">Персоны</div>
+        <div class="mgmt-tile-val" id="m-persona-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAutoreg()">
+        <div class="mgmt-tile-ico">📱</div>
+        <div class="mgmt-tile-lbl">Авторег</div>
+        <div class="mgmt-tile-val" id="m-autoreg-val"></div>
       </div>
     </div>
 
-    <!-- Аналитика -->
-    <div class="sec">Аналитика</div>
+    <!-- Аналитика и CRM -->
+    <div class="sec">Аналитика и CRM</div>
     <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openAnalytics()">
         <div class="mgmt-tile-ico">📊</div>
         <div class="mgmt-tile-lbl">Статистика</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openDiag()">
-        <div class="mgmt-tile-ico">🩺</div>
-        <div class="mgmt-tile-lbl">Диагностика</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openKeywordsScreen()">
@@ -798,7 +878,68 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Позиции</div>
         <div class="mgmt-tile-val" id="kw-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openCRM()">
+        <div class="mgmt-tile-ico">👤</div>
+        <div class="mgmt-tile-lbl">CRM</div>
+        <div class="mgmt-tile-val" id="m-crm-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAudienceDna()">
+        <div class="mgmt-tile-ico">🔬</div>
+        <div class="mgmt-tile-lbl">Audience DNA</div>
+        <div class="mgmt-tile-val" id="m-dna-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCompetitors()">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Конкуренты</div>
+        <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAiMemory()">
+        <div class="mgmt-tile-ico">🧠</div>
+        <div class="mgmt-tile-lbl">AI Память</div>
+        <div class="mgmt-tile-val" id="m-aimem-val"></div>
+      </div>
     </div>
+
+    <!-- Продвижение -->
+    <div class="sec">Продвижение</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openPromo()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Топ поиска</div>
+        <div class="mgmt-tile-val" id="m-promo-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openMultigeo()">
+        <div class="mgmt-tile-ico">🌍</div>
+        <div class="mgmt-tile-lbl">Мультигео</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSeo()">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">SEO</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNarrative()">
+        <div class="mgmt-tile-ico">📖</div>
+        <div class="mgmt-tile-lbl">Narrative</div>
+        <div class="mgmt-tile-val" id="m-narr-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openContentMesh()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Content Mesh</div>
+        <div class="mgmt-tile-val" id="m-mesh-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openGlobalPresence()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
+        <div class="mgmt-tile-val" id="m-gp-val"></div>
+      </div>
+    </div>
+
+    <!-- Безопасность -->
+    <div class="sec">Безопасность</div>
+    <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openShield()">
+        <div class="mgmt-tile-ico">🛡</div>
         <div class="mgmt-tile-lbl">Shield</div>
         <div class="mgmt-tile-val" id="m-shield-val"></div>
       </div>
