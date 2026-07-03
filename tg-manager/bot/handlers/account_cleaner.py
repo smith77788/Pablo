@@ -33,6 +33,26 @@ async def _get_telethon_account(
     return await db.get_account_for_telethon(pool, account_id, owner_id)
 
 
+async def _managed_channel_whitelist(pool: asyncpg.Pool, acc_id: int) -> list[str]:
+    """Channel/group IDs this account administers in the system, normalized to
+    the short positive form Telethon dialog entities use (managed_channels
+    stores the full -100xxxxxxxxxx form) — passed as leave_all_chats'
+    whitelist so "leave all chats" can't silently break channels the account
+    is supposed to be posting to/administering.
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT channel_id FROM managed_channels WHERE acc_id=$1", acc_id
+        )
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        raw = str(abs(int(r["channel_id"])))
+        out.append(raw[3:] if raw.startswith("100") and len(raw) > 10 else raw)
+    return out
+
+
 def _back_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
@@ -228,7 +248,10 @@ async def cb_dry_leave(
 
     from services.account_cleaner import leave_all_chats
 
-    result = await leave_all_chats(acc["session_str"], dict(acc), dry_run=True)
+    whitelist = await _managed_channel_whitelist(pool, acc_id)
+    result = await leave_all_chats(
+        acc["session_str"], dict(acc), whitelist=whitelist, dry_run=True
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -238,10 +261,15 @@ async def cb_dry_leave(
     kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
 
+    protected_note = (
+        f"🛡 Из них {len(whitelist)} управляемых каналов будут сохранены\n"
+        if whitelist else ""
+    )
     await callback.message.edit_text(
         f"📋 <b>Предварительный просмотр</b>\n\n"
         f"Будет покинуто: <b>{result['left']}</b> чатов\n"
-        f"Пропущено: <b>{result['skipped']}</b>\n\n"
+        f"Пропущено: <b>{result['skipped']}</b>\n"
+        f"{protected_note}\n"
         "Подтвердите выход:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -282,7 +310,11 @@ async def cb_confirm_leave(
     if asset_count > 0:
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="⚠️ Всё равно очистить",
+            text=f"🛡 Выйти, оставив {asset_count} управляемых",
+            callback_data=CleanerCb(action="leave_safe", account_id=acc_id),
+        )
+        kb.button(
+            text="⚠️ Выйти вообще из всех, включая управляемые",
             callback_data=CleanerCb(action="force_leave", account_id=acc_id),
         )
         kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
@@ -291,8 +323,9 @@ async def cb_confirm_leave(
             f"⚠️ <b>Внимание: активы обнаружены!</b>\n\n"
             f"Аккаунт <b>{html.escape(label)}</b> управляет "
             f"<b>{asset_count}</b> каналами/группами в системе.\n\n"
-            "Очистка аккаунта может нарушить работу этих ресурсов.\n"
-            "Сначала открепите каналы от этого аккаунта.",
+            "Массовый выход может нарушить работу этих ресурсов. Можно "
+            "выйти из всего остального, сохранив управляемые каналы за "
+            "аккаунтом, либо выйти совсем из всего.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -324,7 +357,9 @@ async def cb_confirm_leave(
     await _do_leave(callback.message, acc, pool)
 
 
-async def _do_leave(message, acc: asyncpg.Record, pool: asyncpg.Pool) -> None:
+async def _do_leave(
+    message, acc: asyncpg.Record, pool: asyncpg.Pool, whitelist: list[str] | None = None
+) -> None:
     """Execute leave_all_chats and display result."""
     label = acc.get("first_name") or acc["phone"]
     msg = await message.edit_text("⏳ Выхожу из чатов...")
@@ -343,7 +378,9 @@ async def _do_leave(message, acc: asyncpg.Record, pool: asyncpg.Pool) -> None:
 
     from services.account_cleaner import leave_all_chats
 
-    result = await leave_all_chats(acc["session_str"], dict(acc), progress_cb=progress)
+    result = await leave_all_chats(
+        acc["session_str"], dict(acc), whitelist=whitelist, progress_cb=progress
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
@@ -357,6 +394,29 @@ async def _do_leave(message, acc: asyncpg.Record, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "leave_safe"))
+async def cb_leave_safe(
+    callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
+) -> None:
+    """Leave all chats except this account's managed channels/groups."""
+    await callback.answer("⏳ Очистка с защитой управляемых каналов...")
+    acc_id = callback_data.account_id
+
+    try:
+        acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "leave_safe fetchrow failed")
+        acc = None
+    if not acc:
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
+        )
+        return
+
+    whitelist = await _managed_channel_whitelist(pool, acc_id)
+    await _do_leave(callback.message, acc, pool, whitelist=whitelist)
 
 
 @router.callback_query(CleanerCb.filter(F.action == "force_leave"))
