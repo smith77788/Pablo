@@ -1,86 +1,136 @@
-# BotMother — Architecture
+# Architecture — Архитектура Infragram
 
-## Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Bot Framework | aiogram 3.13.1 + Pydantic v2 |
-| Database | PostgreSQL via asyncpg (Railway) |
-| Telegram API | Telethon (userbot) + Bot API |
-| Deploy | Railway, Root Dir = `/tg-manager`, auto-deploy |
-| Branch | `claude/telegram-bot-services-xfAh6` |
-
-## File structure
+## Обзор
 
 ```
-tg-manager/
-├── main.py                        # entry point, router + service registration
-├── config.py                      # BOT_TOKEN, DB_URL, ADMIN_IDS, ENCRYPTION_KEY
-├── database/
-│   ├── db.py                      # 163+ functions, create_pool() auto-migrates schema_v*.sql
-│   └── schema_v*.sql              # incremental migrations (current: v33)
-├── bot/
-│   ├── callbacks.py               # ALL CallbackData classes (46 prefixes)
-│   ├── states.py                  # ALL FSMState classes
-│   ├── keyboards.py               # shared keyboards
-│   └── handlers/                  # 44+ handler files
-└── services/                      # 12 background services
-    ├── account_manager.py         # ALL Telethon ops (singleton pattern)
-    ├── behavioral_engine.py       # behavioral scores (every 15 min)
-    ├── session_simulator.py       # human-like delays (beta distribution)
-    └── [10 more services]
+┌─────────────────────────────────────────────────────┐
+│                   ПОЛЬЗОВАТЕЛЬ                        │
+│            Telegram Bot · Mini App                    │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│                   ОБРАБОТЧИКИ                         │
+│  bot/handlers/*.py · services/mini_app_api.py        │
+│  operation_bus.submit() → operation_queue             │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│                   ДВИЖОК ОПЕРАЦИЙ                     │
+│  services/op_worker.py                               │
+│  Circuit Breaker · Smart Retry · Progress Monitor    │
+│  Adaptive Pacing · Safe DB Helpers                   │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│                   СЕРВИСЫ                             │
+│  account_manager · strike_engine · ecosystem_brain   │
+│  resource_selector · session_simulator · behavioral   │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│                   БАЗА ДАННЫХ                         │
+│  PostgreSQL · asyncpg pool (15-50 connections)       │
+│  Caching Layer · DB Optimizer                        │
+└─────────────────────────────────────────────────────┘
 ```
 
-## Key patterns
+---
 
-- **CallbackData**: Pydantic v2, Optional fields (never `str = ""`), all in `callbacks.py`
-- **FSM states**: all in `states.py`
-- **Subscription gate**: `require_plan()` + `locked_text()` + `subscription_locked_markup()`
-- **Telethon ops**: always pass `_acc=acc` for device fingerprint isolation
-- **Common helpers**: `op_helpers.py` — `_acc_label`, `_progress_bar`, `_format_duration`
-- **SQL**: always parameterized `$1, $2` via asyncpg
+## Ключевые принципы
 
-## Database
+### 1. Telegram-native
 
-- Auto-migration: `create_pool()` runs all `schema_v*.sql` files in version order
-- Current version: v33
-- Rule: new schema → new file `schema_v{N+1}.sql`
-- 57+ tables: infrastructure, operations, visibility, behavioral, users, billing
+Весь интерфейс — в Telegram. Mini App только для:
+- Таблиц > 50 строк
+- Сложных графиков
+- Топологических карт
+- Продвинутой аналитики
 
-## Background services (12 active)
+### 2. Mass Operations = Продукт
 
-scheduler, auto_responder, relay_service, funnel_runner, payment_checker,
-ranking_checker, search_observer, account_monitor, trust_engine,
-shadowban_monitor, op_worker, behavioral_engine
+Если человек может сделать в Telegram вручную → Infragram поддерживает:
+- На одном объекте
+- На_MANY объектах
+- По тегу/региону/экосистеме
+- С превью и подтверждением
+- С безопасным таймингом
+- С прогрессом и retry
 
-## Router registration order
+### 3. Operation Queue
 
-More specific first; admin_handler last; relay_handler second-to-last.
-44+ routers total — see CLAUDE.md section 6 for exact order.
+Все действия проходят через `operation_queue`:
+- Очередь с приоритетами
+- Параллельное выполнение (до 8 операций)
+- Circuit Breaker для автопаузы
+- Progress Monitor с ETA
+- Audit trail для каждого действия
 
-## Anti-ban system
+---
 
-- 20 unique Android device profiles per account (schema_v23)
-- `generate_device_fingerprint()` → random profile on creation
-- `_make_client(session_str, _acc)` → uses account's saved profile
-- `session_simulator.chaos_factor()` — 0.7–1.3 multiplier
+## Слои
 
-## Reusable patterns
+### Бот Handlers (bot/handlers/)
 
-1. Op Queue (`operation_queue` table + `op_worker`) — all mass ops go here
-2. Asset Templates (`asset_templates.py`) — reusable configs for bots/channels/groups/posts
-3. Subscription Gate — uniform locking of features by plan tier
-4. Behavioral Events — unified log for all user interactions with entities
-5. Import from Telegram — accounts can sync existing channels/groups
+- 90+ файлов обработчиков
+- Каждый экран имеет Cancel/Back кнопки
+- FSM-машины с timeout
+- `safe_answer()` для всех callback
 
-## Known risks
+### Mini App API (services/mini_app_api.py)
 
-- Router order mistakes cause silent handler conflicts (first registered wins)
-- `str=""` in CallbackData breaks aiogram 3.13 deserialization
-- Telethon without `_acc` → shared fingerprint → ban risk
-- f-string SQL → injection risk (always use `$1, $2`)
+- 120+ REST endpoints
+- SSE для real-time обновлений
+- JWT аутентификация
+- Rate limiting
 
-## Deployment
+### Operation Engine (services/op_worker.py)
 
-- Platform: Railway, Branch: `claude/telegram-bot-services-xfAh6`
-- Verify after deploy: `/version` in the bot
+- 53 op_type
+- 50 exec функций
+- 182 safe DB-хелпера
+- Circuit Breaker
+- Adaptive Pacing
+- Progress Monitor с ETA
+
+### Сервисы (services/)
+
+- account_manager (5225 строк) — управление аккаунтами
+- strike_engine (3196 строк) — система жалоб
+- ecosystem_brain (1765 строк) — экосистемы
+- behavioral_engine (770 строк) — аналитика
+- session_simulator (300 строк) — имитация поведения
+- cache.py — кэширование
+- db_optimizer — оптимизация БД
+
+---
+
+## Поток данных
+
+### Создание операции
+
+```
+1. Пользователь нажимает кнопку
+2. Handler → operation_bus.submit()
+3. INSERT INTO operation_queue (status='pending')
+4. op_worker.poll() забирает из очереди
+5. _run_op_task() выполняет
+6. Progress Monitor отправляет обновления
+7. Результат → Telegram уведомление + SSE
+```
+
+### Circuit Breaker
+
+```
+3+ ошибки подряд → trip (30мин cooldown)
+Cooldown истёк → reset (автопродолжение)
+Успех → decay (1 ошибка убирается)
+```
+
+### Adaptive Pacing
+
+```
+История операций → learning
+Высокий fail rate → замедление
+Низкий fail rate → ускорение
+±20% jitter для anti-detection
+```
