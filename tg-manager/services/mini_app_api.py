@@ -6179,11 +6179,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             plan_id = await pool.fetchval(
                 """INSERT INTO global_presence_plans
                    (owner_id, asset_type, name_pattern, username_pattern,
-                    countries, account_ids, status)
-                   VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'pending')
+                    geo_selection, account_selection, status)
+                   VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'draft')
                    RETURNING id""",
                 uid, asset_type, name_pattern, username_pattern,
-                json.dumps(countries), json.dumps([int(x) for x in account_ids]),
+                json.dumps({"countries": countries}),
+                json.dumps({"account_ids": [int(x) for x in account_ids]}),
             )
             return _json_resp({"ok": True, "plan_id": plan_id, "asset_type": asset_type, "name_pattern": name_pattern})
         except Exception as exc:
