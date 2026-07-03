@@ -1801,9 +1801,15 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
     """Проверить все активные сессии и обновить статусы."""
     from database import db as _db
     
+    # Fetch full account record including proxy info to avoid AUTH_KEY collision
     accounts = await pool.fetch(
-        "SELECT id, owner_id, session_str, phone, acc_status "
-        "FROM tg_accounts WHERE is_active=TRUE AND session_str IS NOT NULL"
+        """SELECT a.id, a.owner_id, a.session_str, a.phone, a.acc_status,
+                  a.device_model, a.system_version, a.app_version,
+                  a.lang_code, a.system_lang_code,
+                  a.proxy_id, p.proxy_url, p.geo_country
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+           WHERE a.is_active = TRUE AND a.session_str IS NOT NULL"""
     )
     if not accounts:
         return
@@ -1815,7 +1821,7 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
             continue
         try:
             result = await check_account_status_full(
-                acc["session_str"], check_spambot=False
+                acc["session_str"], _acc=dict(acc), check_spambot=False
             )
             new_status = result["status"]
             old_status = acc["acc_status"] or "active"
