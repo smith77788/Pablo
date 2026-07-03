@@ -1,92 +1,32 @@
 # Testing — Тестирование
 
-## Типы тестов
-
-### 1. Syntax Check (обязательно)
-
+## Автоматические проверки
 ```bash
-# Все .py файлы
+# Syntax check
 python3 -c "import ast; ast.parse(open('file.py').read())"
 
-# Массовая проверка
-for f in services/*.py bot/handlers/*.py; do
-  python3 -c "import ast; ast.parse(open('$f').read())" && echo "$f: OK" || echo "$f: FAIL"
-done
-```
-
-### 2. Protected DB Calls
-
-```bash
-# Нет unprotected pool-вызовов
+# Protected DB calls (должно быть 0)
 grep -n "await pool\." services/op_worker.py | grep -v "_safe_" | wc -l
-# Должно быть: 0
+
+# Navigation buttons (должно быть 0)
+grep -rn "edit_text.*Ошибка" bot/handlers/ | grep -v "kb\|markup" | wc -l
 ```
-
-### 3. Navigation Buttons
-
-```bash
-# Нет сообщений без кнопок
-grep -rn "edit_text.*Ошибка\|edit_text.*не найден" bot/handlers/ | grep -v "kb\|markup" | wc -l
-# Должно быть: 0
-```
-
----
 
 ## Ручные тесты
+1. `/start` → меню открывается
+2. Каждая кнопка → нет ошибок
+3. FSM-флоу → Cancel работает
+4. Операция → прогресс отображается
+5. Mini App → загружается, SSE 🟢
 
-### Бот
-
-1. `/start` — главное меню открывается
-2. Нажать каждую кнопку — нет ошибок
-3. FSM-флоу — Cancel работает
-4. Операция — прогресс отображается
-
-### Mini App
-
-1. Открывается без ошибок
-2. Dashboard загружается
-3. SSE подключается (🟢)
-4. Операции отображаются
-
----
-
-## Автоматические тесты
-
-### CI (pytest)
-
+## CI
 ```bash
-# Запуск тестов
 pytest tests/
-
-# Только критические
-pytest tests/ -k "critical"
 ```
 
-### Тестовые сценарии
-
-| Сценарий | Ожидаемый результат |
-|----------|---------------------|
-| Создание операции | op_id возвращён |
-| Circuit Breaker trip | операции пропускаются |
-| Session Health Monitor | статус обновляется |
-| Proxy fail | auto-switch |
-| FloodWait | ожидание + retry |
-
----
-
-## Мониторинг после деплоя
-
-### Метрики
-
+## Мониторинг
 - Operation success rate
 - Op_worker crashes
 - Proxy error rate
 - API response time
-- Cache hit rate
 - Circuit breaker trips
-
-### Алерты
-
-- `utilization > 80%` — высокая нагрузка на пул
-- `circuit_breaker tripped` — автопауза
-- `session_health: status changed` — смена статуса аккаунта
