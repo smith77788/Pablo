@@ -76,16 +76,31 @@ async def _save_account(
     phone: str,
     session_str: str,
     info: dict,
+    proxy_id: int | None = None,
 ) -> int:
-    """Сохраняет/обновляет аккаунт в tg_accounts, возвращает id."""
+    """Сохраняет/обновляет аккаунт в tg_accounts, возвращает id.
+
+    device_model/system_version/app_version/lang_code/system_lang_code берутся
+    из info — реального фингерпринта, сгенерированного и использованного при
+    входе (start_login → get_client_info_and_session). Раньше здесь были
+    захардкожены литералы 'Infragram'/'9.0'/'en', из-за чего все
+    авторегистрированные аккаунты получали ОДИНАКОВЫЙ отпечаток устройства,
+    а устройство при регистрации не совпадало с устройством всех последующих
+    сессий (get_account_for_telethon читает эти же колонки).
+    proxy_id — прокси, через которую шла регистрация (см. pick_registration_proxy);
+    сохраняется, чтобы все последующие сессии аккаунта шли через тот же
+    IP/гео, что и при регистрации.
+    """
     acc_id = await pool.fetchval(
         """INSERT INTO tg_accounts
            (owner_id, phone, session_str, tg_user_id, first_name, username,
             device_model, system_version, app_version, lang_code, system_lang_code,
-            is_active, trust_score, acc_status, added_at)
-           VALUES ($1,$2,$3,$4,$5,$6,'Infragram','9.0','9.0','en','en-US',TRUE,1.0,'active',NOW())
+            proxy_id, is_active, trust_score, acc_status, added_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,1.0,'active',NOW())
            ON CONFLICT (owner_id, phone) DO UPDATE
              SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
+                 device_model=$7, system_version=$8, app_version=$9,
+                 lang_code=$10, system_lang_code=$11, proxy_id=$12,
                  is_active=TRUE, acc_status='active', status_reason=NULL,
                  status_checked_at=now(), last_used=now()
            RETURNING id""",
@@ -95,6 +110,12 @@ async def _save_account(
         info.get("tg_user_id"),
         info.get("first_name", ""),
         info.get("username", ""),
+        info.get("device_model", "Samsung SM-S911B"),
+        info.get("system_version", "Android 14"),
+        info.get("app_version", "11.5.3"),
+        info.get("lang_code", "ru"),
+        info.get("system_lang_code", "ru-RU"),
+        proxy_id,
     )
     # Регистрируем связь телефон→владелец для анти-абуз системы
     try:
@@ -439,10 +460,15 @@ async def _start_single_register(
     phone: str = order["phone"]
     order_id: str = order["id"]
 
-    # 2. Отправка кода в Telegram
+    # 2. Отправка кода в Telegram — со своей прокси и локалью, подобранными
+    # под страну номера (иначе все аккаунты выглядят зарегистрированными
+    # с одного устройства/IP из России независимо от реальной страны номера).
     try:
-        from services.account_manager import start_login
-        phone_code_hash, hint = await asyncio.wait_for(start_login(phone), timeout=20)
+        from services.account_manager import start_login, country_code_from_phone, pick_registration_proxy
+        cc = country_code_from_phone(phone)
+        picked = await pick_registration_proxy(pool, owner_id, cc)
+        proxy_id, proxy_url = picked if picked else (None, None)
+        phone_code_hash, hint = await asyncio.wait_for(start_login(phone, proxy_url), timeout=20)
     except Exception as exc:
         await sms_client.cancel_order(order_id)
         await cb.message.edit_text(
@@ -468,6 +494,7 @@ async def _start_single_register(
         sms_client=sms_client,
         status_msg=status_msg,
         state=state,
+        proxy_id=proxy_id,
     ))
 
 
@@ -480,6 +507,7 @@ async def _wait_and_confirm(
     sms_client,
     status_msg,
     state: FSMContext,
+    proxy_id: int | None = None,
 ) -> None:
     """Ждёт SMS, подтверждает код. При 2FA — переводит FSM в enter_2fa."""
     from services.account_manager import confirm_code, get_client_info_and_session, cleanup_pending
@@ -529,6 +557,7 @@ async def _wait_and_confirm(
             "phone": phone,
             "order_id": order_id,
             "sms_client": sms_client,
+            "proxy_id": proxy_id,
         }
         await state.set_state(AutoRegFSM.enter_2fa)
         await state.update_data(phone=phone)
@@ -563,7 +592,7 @@ async def _wait_and_confirm(
     finally:
         await cleanup_pending(phone)
 
-    acc_id = await _save_account(pool, owner_id, phone, session_str, info)
+    acc_id = await _save_account(pool, owner_id, phone, session_str, info, proxy_id=proxy_id)
     try:
         await status_msg.edit_text(
             f"✅ <b>Аккаунт зарегистрирован!</b>\n\n"
@@ -596,6 +625,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
     phone: str = pending["phone"]
     order_id: str = pending["order_id"]
     sms_client = pending["sms_client"]
+    proxy_id = pending.get("proxy_id")
     password = (msg.text or "").strip()
 
     if not password:
@@ -638,7 +668,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
         await cleanup_pending(phone)
 
     await state.clear()
-    acc_id = await _save_account(pool, owner_id, phone, session_str, info)
+    acc_id = await _save_account(pool, owner_id, phone, session_str, info, proxy_id=proxy_id)
     await msg.answer(
         f"✅ <b>Аккаунт с 2FA зарегистрирован!</b>\n\n"
         f"{_format_acc(info, phone)}\n"
@@ -693,7 +723,10 @@ async def _do_batch_register(
     status_msg,
 ) -> None:
     """Регистрирует cnt аккаунтов последовательно. 2FA-номера пропускаются."""
-    from services.account_manager import start_login, confirm_code, get_client_info_and_session, cleanup_pending
+    from services.account_manager import (
+        start_login, confirm_code, get_client_info_and_session, cleanup_pending,
+        country_code_from_phone, pick_registration_proxy,
+    )
 
     ok_accs: list[str] = []
     failed: list[str] = []
@@ -718,8 +751,12 @@ async def _do_batch_register(
             phone = order["phone"]
             order_id = order["id"]
 
-            # Запрашиваем код в TG
-            phone_code_hash, _ = await asyncio.wait_for(start_login(phone), timeout=20)
+            # Запрашиваем код в TG — своя прокси и локаль под страну номера
+            # на каждую регистрацию, чтобы батч не сидел весь на одном IP.
+            cc = country_code_from_phone(phone)
+            picked = await pick_registration_proxy(pool, owner_id, cc)
+            proxy_id, proxy_url = picked if picked else (None, None)
+            phone_code_hash, _ = await asyncio.wait_for(start_login(phone, proxy_url), timeout=20)
 
             # Ждём SMS
             code = await sms_client.get_sms(order_id, timeout_sec=_SMS_WAIT_SEC)
@@ -740,7 +777,7 @@ async def _do_batch_register(
             # Сохраняем
             session_str, info = await get_client_info_and_session(phone)
             await cleanup_pending(phone)
-            acc_id = await _save_account(pool, owner_id, phone, session_str, info)
+            acc_id = await _save_account(pool, owner_id, phone, session_str, info, proxy_id=proxy_id)
             ok_accs.append(f"{phone} → id{acc_id}")
 
         except Exception as exc:

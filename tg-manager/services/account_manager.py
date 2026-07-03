@@ -470,6 +470,36 @@ def _locale_for_country(country_code: str | None) -> tuple[str, str]:
     return _COUNTRY_LOCALES.get(country_code.strip().upper(), ("en", "en-US"))
 
 
+# E.164 calling-code prefixes → ISO 3166-1 alpha-2. Longest prefix first so
+# multi-digit codes (e.g. "44" GB) aren't shadowed by a shorter one that isn't
+# actually a prefix of it. Covers _COUNTRY_LOCALES plus the SMS-provider
+# "popular" country list (auto_registrar.py) so auto-registered numbers get a
+# locale/device fingerprint that actually matches the phone's real country
+# instead of defaulting to ru-RU regardless of where the number is from.
+_CALLING_CODES: list[tuple[str, str]] = sorted(
+    [
+        ("7", "RU"), ("380", "UA"), ("375", "BY"), ("77", "KZ"),
+        ("49", "DE"), ("43", "AT"), ("41", "CH"), ("33", "FR"),
+        ("32", "BE"), ("39", "IT"), ("34", "ES"), ("48", "PL"),
+        ("90", "TR"), ("44", "GB"), ("353", "IE"), ("1", "US"),
+        ("91", "IN"), ("62", "ID"), ("55", "BR"), ("63", "PH"),
+    ],
+    key=lambda pair: len(pair[0]),
+    reverse=True,
+)
+
+
+def country_code_from_phone(phone: str | None) -> str | None:
+    """Best-effort ISO country code from an E.164 phone number's calling code."""
+    digits = re.sub(r"\D", "", phone or "")
+    if not digits:
+        return None
+    for prefix, iso in _CALLING_CODES:
+        if digits.startswith(prefix):
+            return iso
+    return None
+
+
 def _normalize_device_profile(device: dict | None = None) -> dict[str, Any]:
     payload = dict(device or {})
     lang_code = payload.get("lang_code")
@@ -482,6 +512,34 @@ def _normalize_device_profile(device: dict | None = None) -> dict[str, Any]:
     payload.setdefault("system_version", "Android 14")
     payload.setdefault("app_version", "11.5.3")
     return payload
+
+
+async def pick_registration_proxy(
+    pool: Any, owner_id: int, country_code: str | None = None
+) -> tuple[int, str] | None:
+    """Pick a proxy from the owner's pool for a *new* account registration.
+
+    Prefers a proxy geo-matched to `country_code`, falling back to any active
+    proxy for the owner. Picks the least-loaded one (fewest accounts already
+    on it) so a batch of registrations spreads across the pool instead of
+    reusing a single proxy for every number. Returns (proxy_id, proxy_url) or
+    None if the owner has no usable proxies — callers fall back to the
+    existing global/free-pool behavior in _make_client, same as before.
+    """
+    rows = await pool.fetch(
+        """SELECT p.id, p.proxy_url,
+                  (SELECT COUNT(*) FROM tg_accounts a WHERE a.proxy_id = p.id) AS load
+           FROM user_proxies p
+           WHERE p.owner_id = $1 AND p.is_active = TRUE
+             AND (p.is_alive IS NULL OR p.is_alive = TRUE)
+           ORDER BY (UPPER(p.geo_country) = UPPER($2)) DESC NULLS LAST, load ASC
+           LIMIT 1""",
+        owner_id, country_code or "",
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    return int(row["id"]), str(row["proxy_url"])
 
 
 def _resolve_client_proxy(device: dict[str, Any]) -> Any:
@@ -577,8 +635,17 @@ def _make_client(session_string: str = "", device: dict | None = None):
     )
 
 
-async def start_login(phone: str) -> tuple[str, str]:
+async def start_login(phone: str, proxy_url: str | None = None) -> tuple[str, str]:
     """Начинает авторизацию по номеру телефона.
+
+    Device fingerprint's locale is derived from the phone's own calling code
+    (country_code_from_phone) so it actually matches where the number is
+    from, instead of always defaulting to ru-RU. proxy_url, when given, binds
+    this login (and therefore the saved account) to that proxy — callers
+    doing mass/auto-registration should pass a per-registration proxy (see
+    pick_registration_proxy) so numbers from different countries/batches
+    don't all connect through the same IP.
+
     Возвращает (phone_code_hash, delivery_hint) где delivery_hint — строка о способе доставки.
     """
     from telethon.errors import FloodWaitError
@@ -587,7 +654,9 @@ async def start_login(phone: str) -> tuple[str, str]:
         raise ValueError(
             "TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды."
         )
-    device = generate_device_fingerprint()
+    device = generate_device_fingerprint(country_code_from_phone(phone))
+    if proxy_url:
+        device["proxy_url"] = proxy_url
     _pending_device[phone] = device
     client = _make_client("", device)
     try:
