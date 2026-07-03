@@ -416,6 +416,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        try:
+            limit = min(int(request.rel_url.query.get("limit", "500")), 5000)
+        except (ValueError, TypeError):
+            limit = 500
         rows = await _safe_fetch(pool,
             """SELECT mb.bot_id, mb.username, mb.first_name, mb.is_active,
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
@@ -424,7 +428,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
                WHERE mb.added_by=$1
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active
-               ORDER BY subscriber_count DESC LIMIT 50""", uid)
+               ORDER BY subscriber_count DESC LIMIT $2""", uid, limit)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
         return _json_resp({"bots": rows, "total": int(total or 0)})
@@ -682,17 +686,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        try:
+            limit = min(int(request.rel_url.query.get("limit", "500")), 5000)
+        except (ValueError, TypeError):
+            limit = 500
+        try:
+            offset = max(int(request.rel_url.query.get("offset", "0")), 0)
+        except (ValueError, TypeError):
+            offset = 0
         rows = await _safe_fetch(pool,
             """SELECT channel_id AS id, channel_id, username, title,
                       COALESCE(members_count, 0) AS member_count,
                       type, added_at
                FROM managed_channels WHERE owner_id=$1
-               ORDER BY members_count DESC NULLS LAST LIMIT 50""", uid)
-        # total — истинное число каналов (список ограничен LIMIT 50);
-        # иначе подпись «N каналов» показывала бы максимум 50 вместо реального.
+               ORDER BY members_count DESC NULLS LAST
+               LIMIT $2 OFFSET $3""", uid, limit, offset)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
-        return _json_resp({"channels": rows, "total": int(total or 0)})
+        return _json_resp({"channels": rows, "total": int(total or 0), "offset": offset, "limit": limit})
 
     # ── Campaigns / Funnels ──────────────────────────────────────────────────
 
