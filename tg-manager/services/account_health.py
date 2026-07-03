@@ -392,15 +392,19 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
     from services.account_manager import check_account_status_full
 
     # Аккаунты с session_str, не проверявшиеся более 6 часов
+    # Важно: JOIN user_proxies для получения proxy_url — иначе проверка идёт
+    # без прокси и вызывает AUTH_KEY collision.
     accounts = await pool.fetch(
-        """SELECT id, session_str, phone, first_name, username,
-                  device_model, system_version, app_version, proxy_id
-           FROM tg_accounts
-           WHERE is_active=TRUE
-             AND session_str IS NOT NULL AND session_str != ''
-             AND (last_real_check_at IS NULL
-                  OR last_real_check_at < NOW() - INTERVAL '6 hours')
-           ORDER BY COALESCE(last_real_check_at, '2000-01-01') ASC
+        """SELECT a.id, a.session_str, a.phone, a.first_name, a.username,
+                  a.device_model, a.system_version, a.app_version,
+                  a.proxy_id, p.proxy_url, p.geo_country
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+           WHERE a.is_active=TRUE
+             AND a.session_str IS NOT NULL AND a.session_str != ''
+             AND (a.last_real_check_at IS NULL
+                  OR a.last_real_check_at < NOW() - INTERVAL '6 hours')
+           ORDER BY COALESCE(a.last_real_check_at, '2000-01-01') ASC
            LIMIT 10""",
     )
     if not accounts:

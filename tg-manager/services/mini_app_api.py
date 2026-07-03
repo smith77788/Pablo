@@ -369,8 +369,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             stats["recent_activity"] = []
         try:
+            # Health: average trust_score, but floor at 50% for accounts that
+            # simply haven't been used recently (trust_score decays to 0 for
+            # inactive accounts, but that doesn't mean they're unhealthy).
             acc_health = await pool.fetchval(
-                "SELECT ROUND(AVG(COALESCE(trust_score, 100))) FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+                """SELECT ROUND(AVG(
+                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
+                         ELSE COALESCE(trust_score, 1.0)
+                    END
+                ) * 100) FROM tg_accounts WHERE owner_id=$1 AND is_active=true""",
                 uid)
             stats["acc_health"] = int(acc_health) if acc_health is not None else 100
         except Exception:
