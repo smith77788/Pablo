@@ -754,7 +754,11 @@ async def _start_create_channel_fsm(
 async def fsm_create_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title or len(title) > 128:
-        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import ChanCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:", reply_markup=kb.as_markup())
         return
     await state.update_data(title=title)
     await state.set_state(CreateChannelFSM.waiting_about)
@@ -914,7 +918,11 @@ async def cb_bulk_create_start(
 async def fsm_bulk_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title or len(title) > 128:
-        await message.answer("⚠️ Название от 1 до 128 символов:")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import ChanCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        await message.answer("⚠️ Название от 1 до 128 символов:", reply_markup=kb.as_markup())
         return
     await state.update_data(title=title)
     await state.set_state(BulkCreateFSM.waiting_about)
@@ -1484,7 +1492,11 @@ async def fsm_bpchans_text(
     await state.clear()
 
     if not acc_id or not selected_ids:
-        await message.answer("❌ Данные операции устарели. Начните заново.")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await message.answer("❌ Данные операции устарели. Начните заново.", reply_markup=kb.as_markup())
         return
 
     total = len(selected_ids)
