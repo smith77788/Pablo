@@ -16,6 +16,7 @@ from services import resource_selector
 from services import infra_memory as _infra_mem
 from services import session_simulator
 from services.pacing_engine import get_pacing_engine
+from services.behavioral_engine import get_behavioral_engine
 
 log = logging.getLogger(__name__)
 
@@ -2173,6 +2174,7 @@ async def _exec_mass_publish(
                     await record_success(acc["id"], "publish")
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_success failed")
+                get_behavioral_engine().record_event(acc["id"], "publish", True)
                 # Persist resolved access_hash so future publishes use fast path
                 _resolved_hash = result.get("resolved_access_hash", 0)
                 if _resolved_hash and not dialog.get("access_hash"):
@@ -2327,6 +2329,7 @@ async def _exec_mass_publish(
                         )
                     except Exception:
                         log_exc_swallow(log, "mass_publish: record_flood failed")
+                    get_behavioral_engine().record_event(acc["id"], "publish", False, is_flood=True, duration_ms=int(flood_wait * 1000))
                     await asyncio.sleep(flood_wait + random.uniform(2, 8))
                     continue  # retry
                 # Non-retryable failure or second attempt failed
@@ -2359,6 +2362,7 @@ async def _exec_mass_publish(
                     await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_flood failed")
+                get_behavioral_engine().record_event(acc["id"], "publish", False, is_flood=True, duration_ms=int(flood_wait * 1000))
             await _safe_execute(
                     pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -2561,6 +2565,7 @@ async def _exec_bulk_join_inner(
                     _infra_mem.record_account_op(
                         acc["id"], "join", success=False, error="PeerFlood"
                     )
+                    get_behavioral_engine().record_event(acc["id"], "join", False, is_peer_flood=True, duration_ms=int(_peer_flood_wait * 1000))
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'error',$4)",
@@ -2619,6 +2624,7 @@ async def _exec_bulk_join_inner(
                         log,
                         f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}",
                     )
+                get_behavioral_engine().record_event(acc["id"], "join", True, duration_ms=dur_ms)
                 _infra_mem.record_account_op(
                     acc["id"], "join", success=True, duration_s=dur_ms / 1000
                 )
@@ -2651,6 +2657,7 @@ async def _exec_bulk_join_inner(
                             log,
                             f"Сбой записи flood в flood_engine для аккаунта {acc['id']}",
                         )
+                    get_behavioral_engine().record_event(acc["id"], "join", False, is_flood=True, duration_ms=int(flood_wait * 1000))
                 else:
                     log.warning(
                         "op_worker bulk_join: link=%s acc=%s error: %s",
@@ -2658,6 +2665,7 @@ async def _exec_bulk_join_inner(
                         acc_dict.get("phone"),
                         err_str,
                     )
+                    get_behavioral_engine().record_event(acc["id"], "join", False)
                 await _safe_execute(
                         pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -2868,6 +2876,7 @@ async def _exec_bulk_leave(
                         log,
                         f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}",
                     )
+                get_behavioral_engine().record_event(acc["id"], "leave", True, duration_ms=dur_ms)
                 _infra_mem.record_account_op(
                     acc["id"], "leave", success=True, duration_s=dur_ms / 1000
                 )
@@ -2891,6 +2900,7 @@ async def _exec_bulk_leave(
                             log,
                             f"Сбой записи flood в flood_engine для аккаунта {acc['id']}",
                         )
+                    get_behavioral_engine().record_event(acc["id"], "leave", False, is_flood=True, duration_ms=int(flood_wait * 1000))
                 else:
                     log.warning(
                         "op_worker bulk_leave: channel=%s acc=%s error: %s",

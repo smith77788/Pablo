@@ -8001,6 +8001,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/team/members", team_members)
     app.router.add_get("/api/miniapp/audit", audit_trail)
 
+    # ── Session Import ───────────────────────────────────────────────────────
+
+    async def import_sessions_api(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            raw = data.get("sessions", "")
+            proxy = data.get("proxy_url")
+            from services.session_importer import import_sessions
+            result = await import_sessions(pool, uid, raw, proxy)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
+
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
