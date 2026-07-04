@@ -3966,7 +3966,7 @@ async def _exec_bulk_create_channels(
             )
             # Set username if pattern provided — 60-120s delay prevents geo-ban detection
             if username:
-                await asyncio.sleep(random.uniform(60, 120))
+                await asyncio.sleep(random.uniform(30, 60))
                 err = await account_manager.set_channel_username(
                     acc["session_str"], ch_id, username, _acc=acc
                 )
@@ -4029,7 +4029,7 @@ async def _exec_bulk_create_channels(
             tod_factor = session_simulator.time_of_day_factor()
             chaos = session_simulator.chaos_factor()
             if i % 5 == 4:
-                cooldown = random.uniform(300, 600) * chaos * tod_factor
+                cooldown = random.uniform(120, 240) * chaos * tod_factor
                 log.info(
                     "op_worker bulk_channels: cooldown %.0fs after %d items",
                     cooldown,
@@ -4037,7 +4037,7 @@ async def _exec_bulk_create_channels(
                 )
                 await asyncio.sleep(cooldown)
             else:
-                delay = random.uniform(45, 90) * chaos * tod_factor
+                delay = random.uniform(15, 30) * chaos * tod_factor
                 await asyncio.sleep(delay)
 
         # Progress update every 5 channels
