@@ -27,7 +27,7 @@ Telegram-native infrastructure and mass-action operating system. Maximum Telegra
 - Semantic memory and intent planner
 
 ### Spintax Randomizer (`/spin`)
-- Turns a plain script into 5 maximally-randomized spintax templates via the
+- Turns a plain script into 2 maximally-randomized spintax templates via the
   already-connected LLM providers (OpenRouter/Groq/Gemini/Ollama)
 - Synonym groups `{вариант1|вариант2}`, nesting, matching capitalization,
   no more than two unspun words in a row
