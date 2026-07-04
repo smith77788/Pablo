@@ -1887,4 +1887,178 @@ async def balance_content(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) 
     except Exception as e:
         log.warning("balance_content failed for eco=%d: %s", ecosystem_id, e)
         return {"balanced": True, "distribution": {}, "recommendations": []}
+
+
+# ── Channel Relationship Discovery ────────────────────────────────────────────
+
+
+async def discover_channel_relationships(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+    channels = await pool.fetch(
+        """SELECT DISTINCT channel_id, COALESCE(title, username, channel_id::text) AS label
+           FROM managed_channels WHERE owner_id=$1""",
+        owner_id,
+    )
+    if len(channels) < 2:
+        return []
+
+    channel_ids = [r["channel_id"] for r in channels]
+    channel_labels = {r["channel_id"]: r["label"] for r in channels}
+
+    memberships = await pool.fetch(
+        """SELECT user_id, channel_id
+           FROM channel_members
+           WHERE channel_id = ANY($1)
+             AND user_id IN (
+                 SELECT user_id FROM channel_members
+                 WHERE channel_id = ANY($1)
+                 GROUP BY user_id
+                 HAVING COUNT(DISTINCT channel_id) >= 2
+             )""",
+        channel_ids,
+    )
+
+    shared_users: dict[tuple[int, int], int] = {}
+    for uid, cids in _group_users_by_subs(memberships).items():
+        for i in range(len(cids)):
+            for j in range(i + 1, len(cids)):
+                pair = (min(cids[i], cids[j]), max(cids[i], cids[j]))
+                shared_users[pair] = shared_users.get(pair, 0) + 1
+
+    results: list[dict] = []
+    for (ch_a, ch_b), count in sorted(shared_users.items(), key=lambda x: -x[1]):
+        results.append({
+            "channel_a": ch_a,
+            "channel_b": ch_b,
+            "label_a": channel_labels.get(ch_a, str(ch_a)),
+            "label_b": channel_labels.get(ch_b, str(ch_b)),
+            "shared_subscribers": count,
+        })
+
+    return results
+
+
+def _group_users_by_subs(memberships: list[dict]) -> dict[int, list[int]]:
+    user_to_channels: dict[int, list[int]] = {}
+    for row in memberships:
+        user_to_channels.setdefault(row["user_id"], []).append(row["channel_id"])
+    return user_to_channels
+
+
+# ── Audience Overlap Analysis ─────────────────────────────────────────────────
+
+
+async def analyze_audience_overlap(pool: asyncpg.Pool, channel_ids: list[int]) -> dict:
+    if len(channel_ids) < 2:
+        return {"pairs": [], "total_subscribers": 0, "unique_subscribers": 0}
+
+    memberships = await pool.fetch(
+        """SELECT user_id, channel_id
+           FROM channel_members
+           WHERE channel_id = ANY($1)""",
+        channel_ids,
+    )
+
+    subs_by_channel: dict[int, set[int]] = {}
+    for row in memberships:
+        subs_by_channel.setdefault(row["channel_id"], set()).add(row["user_id"])
+
+    all_users: set[int] = set()
+    for s in subs_by_channel.values():
+        all_users |= s
+
+    pairs: list[dict] = []
+    for i in range(len(channel_ids)):
+        for j in range(i + 1, len(channel_ids)):
+            ch_a = channel_ids[i]
+            ch_b = channel_ids[j]
+            set_a = subs_by_channel.get(ch_a, set())
+            set_b = subs_by_channel.get(ch_b, set())
+            intersection = set_a & set_b
+            union = set_a | set_b
+            overlap_pct = len(intersection) / len(union) * 100 if union else 0.0
+            pairs.append({
+                "channel_a": ch_a,
+                "channel_b": ch_b,
+                "shared": len(intersection),
+                "overlap_pct": round(overlap_pct, 1),
+            })
+
+    pairs.sort(key=lambda p: -p["shared"])
+
+    return {
+        "pairs": pairs,
+        "total_subscribers": sum(len(s) for s in subs_by_channel.values()),
+        "unique_subscribers": len(all_users),
+    }
+
+
+# ── Ecosystem Recommendations (global) ───────────────────────────────────────
+
+
+async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> list[str]:
+    recs: list[str] = []
+
+    eco_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1 AND status='active'",
+        owner_id,
+    ) or 0
+    if eco_count == 0:
+        recs.append("Создайте первую экосистему для управления ресурсами")
+        return recs
+
+    acc_count = await pool.fetchval(
+        """SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+        owner_id,
+    ) or 0
+    if acc_count == 0:
+        recs.append("Добавьте активные аккаунты — без них экосистема не работает")
+
+    ch_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+        owner_id,
+    ) or 0
+    if ch_count > 0 and acc_count < 3:
+        recs.append(f"У вас {ch_count} каналов, но только {acc_count} аккаунтов — добавьте больше")
+
+    ops_7d = await pool.fetchval(
+        """SELECT COUNT(*) FROM operation_queue
+           WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '7 days'""",
+        owner_id,
+    ) or 0
+    if ops_7d == 0 and acc_count > 0:
+        recs.append("Нет операций за неделю — запустите публикации или рассылки")
+
+    failed_7d = await pool.fetchval(
+        """SELECT COUNT(*) FROM operation_queue
+           WHERE owner_id=$1 AND status='failed'
+             AND created_at > NOW()-INTERVAL '7 days'""",
+        owner_id,
+    ) or 0
+    if failed_7d > 3:
+        recs.append(f"{failed_7d} ошибок за неделю — проверьте аккаунты и прокси")
+
+    frozen_accs = await pool.fetchval(
+        """SELECT COUNT(*) FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=TRUE
+             AND cooldown_until > NOW()+INTERVAL '12 hours'""",
+        owner_id,
+    ) or 0
+    if frozen_accs > 0:
+        recs.append(f"{frozen_accs} аккаунтов на длительном кулдауне — рассмотрите замену")
+
+    channels_no_subs = await pool.fetchval(
+        """SELECT COUNT(*) FROM managed_channels mc
+           WHERE mc.owner_id=$1
+             AND NOT EXISTS (
+                 SELECT 1 FROM channel_members cm
+                 WHERE cm.channel_id=mc.channel_id
+             )""",
+        owner_id,
+    ) or 0
+    if channels_no_subs > 0:
+        recs.append(f"{channels_no_subs} каналов без подписчиков — продвигайте или удалите")
+
+    if not recs:
+        recs.append("Экосистема в хорошем состоянии — продолжайте в том же духе")
+
     return recs

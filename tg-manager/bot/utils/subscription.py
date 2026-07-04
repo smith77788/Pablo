@@ -281,6 +281,70 @@ def locked_text(feature: str, required_plan: str) -> str:
     )
 
 
+async def count_operations_by_type(pool: asyncpg.Pool, user_id: int, period_days: int = 30) -> dict:
+    rows = await pool.fetch(
+        """SELECT op_type, COUNT(*) AS cnt
+           FROM operation_queue
+           WHERE owner_id=$1
+             AND created_at > NOW() - ($2 || ' days')::INTERVAL
+           GROUP BY op_type""",
+        user_id,
+        period_days,
+    )
+    result: dict[str, int] = {}
+    for r in rows:
+        result[r["op_type"]] = r["cnt"]
+    return result
+
+
+_OPERATION_LIMITS: dict[str, dict[str, int]] = {
+    "free": {
+        "mass_publish": 10,
+        "bulk_edit": 10,
+        "dm_campaign": 5,
+        "join_leave": 20,
+        "post_view": 50,
+        "boost": 5,
+        "comment": 10,
+        "react": 20,
+    },
+    "paid": {
+        "mass_publish": 9999,
+        "bulk_edit": 9999,
+        "dm_campaign": 9999,
+        "join_leave": 9999,
+        "post_view": 9999,
+        "boost": 9999,
+        "comment": 9999,
+        "react": 9999,
+    },
+}
+
+
+async def check_operation_limit(pool: asyncpg.Pool, user_id: int, op_type: str) -> dict:
+    plan = await get_plan(pool, user_id)
+    normalized = coerce_plan(plan)
+    limits = _OPERATION_LIMITS.get(normalized, _OPERATION_LIMITS["free"])
+    limit = limits.get(op_type, limits.get("mass_publish", 10))
+
+    used = await pool.fetchval(
+        """SELECT COUNT(*) FROM operation_queue
+           WHERE owner_id=$1 AND op_type=$2
+             AND created_at > NOW()-INTERVAL '30 days'""",
+        user_id,
+        op_type,
+    ) or 0
+
+    return {
+        "plan": normalized,
+        "op_type": op_type,
+        "used": used,
+        "limit": limit,
+        "remaining": max(limit - used, 0),
+        "exceeded": used >= limit,
+    }
+
+
 def locked_text_with_social_proof(feature: str, required_plan: str, active_subs: int = 0) -> str:
     """Locked screen с социальным доказательством (кол-во подписчиков)."""
     required_plan = coerce_plan(required_plan)
