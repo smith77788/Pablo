@@ -2098,6 +2098,74 @@ def aggregate_results(results: list[dict]) -> dict:
     return s
 
 
+async def get_randomized_interval(base_interval: float) -> float:
+    jitter = random.uniform(0.7, 1.3)
+    return base_interval * jitter
+
+
+async def rotate_proxy_for_strike(pool, account_id: int) -> str | None:
+    try:
+        row = await pool.fetchrow(
+            "SELECT proxy_url FROM user_proxies WHERE is_active=TRUE ORDER BY RANDOM() LIMIT 1"
+        )
+        return row["proxy_url"] if row else None
+    except Exception as e:
+        log.warning("rotate_proxy_for_strike: %s", e)
+        return None
+
+
+async def generate_strike_report(pool, operation_id: int) -> dict:
+    report: dict = {
+        "operation_id": operation_id,
+        "status_counts": {},
+        "total_actions": 0,
+        "success_count": 0,
+        "fail_count": 0,
+        "success_rate": 0.0,
+        "duration_s": 0.0,
+    }
+    try:
+        rows = await pool.fetch(
+            "SELECT status, COUNT(*) as cnt FROM operation_log WHERE op_id=$1 GROUP BY status",
+            operation_id,
+        )
+        for row in rows:
+            status = row["status"]
+            cnt = row["cnt"]
+            report["status_counts"][status] = cnt
+            report["total_actions"] += cnt
+            if status == "success":
+                report["success_count"] = cnt
+            elif status in ("error", "failed", "timeout"):
+                report["fail_count"] += cnt
+        if report["total_actions"] > 0:
+            report["success_rate"] = report["success_count"] / report["total_actions"]
+        duration_row = await pool.fetchrow(
+            "SELECT EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at))) as dur FROM operation_log WHERE op_id=$1",
+            operation_id,
+        )
+        if duration_row and duration_row["dur"]:
+            report["duration_s"] = float(duration_row["dur"])
+    except Exception as e:
+        log.warning("generate_strike_report: %s", e)
+    return report
+
+
+async def is_strike_allowed(pool, target_id: int, min_interval_hours: int = 4) -> bool:
+    try:
+        row = await pool.fetchrow(
+            """SELECT 1 FROM strike_history
+               WHERE target_id=$1 AND created_at > NOW() - INTERVAL '1 hour' * $2
+               LIMIT 1""",
+            target_id,
+            min_interval_hours,
+        )
+        return row is None
+    except Exception as e:
+        log.warning("is_strike_allowed: %s", e)
+        return True
+
+
 def _build_vector_diagnostics(r: StrikeResult) -> list[str]:
     """Build compact diagnostics for vectors that produced zero effect."""
     notes: list[str] = []

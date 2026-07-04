@@ -36,6 +36,12 @@ class _Any:
     def __getattr__(self, _n):
         return _Any()
 
+    def __or__(self, other):
+        return _Any()
+
+    def __ror__(self, other):
+        return _Any()
+
 
 import importlib.abc
 import importlib.util
@@ -72,6 +78,35 @@ def _install_telethon_stubs() -> None:
 
 
 _install_telethon_stubs()
+
+
+class _DependencyFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Stub finder for heavy dependencies (aiogram, asyncpg, aiohttp)."""
+
+    def __init__(self, prefix: str):
+        self._prefix = prefix
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == self._prefix or fullname.startswith(self._prefix + "."):
+            return importlib.util.spec_from_loader(fullname, self)
+        return None
+
+    def create_module(self, spec):
+        m = _stub(spec.name)
+        m.__getattr__ = lambda _n: _Any()
+        return m
+
+    def exec_module(self, module):
+        return None
+
+
+def _install_dependency_stubs() -> None:
+    for prefix in ("aiogram", "asyncpg", "aiohttp"):
+        if prefix not in sys.modules:
+            sys.meta_path.insert(0, _DependencyFinder(prefix))
+
+
+_install_dependency_stubs()
 
 # Проект-корень в path (tests/ лежит внутри tg-manager/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

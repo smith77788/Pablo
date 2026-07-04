@@ -879,8 +879,12 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
         log.info("op_worker startup: no stale running operations found")
 
 
-async def _watchdog_stale(pool: asyncpg.Pool) -> None:
-    """Периодически сбрасывает 'running' операции, которые висят дольше N минут.
+async def _watchdog_stale(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
+    """Периодически сбрасывает 'running' операции, которые зависли.
+
+    Проверяет:
+    - операция в статусе 'running' дольше _STALE_RUNNING_TIMEOUT_MIN минут
+    - операция действительно зависла: done_items не обновлялись >10 минут
 
     Исключает операции, которые реально выполняются в памяти (_active_op_ids),
     чтобы не перезапустить strike/bulk-op пока первый прогон ещё идёт.
@@ -891,18 +895,52 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
 
         active_ids_list = list(active_now) if active_now else None
 
-        result = await pool.execute(
-            """UPDATE operation_queue
-                SET status = 'pending', started_at = NULL
-                WHERE status = 'running'
-                  AND started_at < now() - make_interval(mins => $1)
-                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
+        stale_rows = await _safe_fetch(
+            pool,
+            """SELECT id, op_type, owner_id, started_at, done_items,
+                      EXTRACT(EPOCH FROM (now() - started_at))/60 AS age_min
+               FROM operation_queue
+               WHERE status = 'running'
+                 AND started_at < now() - make_interval(mins => $1)
+                 AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
             _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
         )
-        count = int((result or "UPDATE 0").split()[-1])
-        if count:
-            log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
+
+        for row in stale_rows:
+            op_id = row["id"]
+            op_type = row["op_type"]
+            owner_id = row["owner_id"]
+            done_items = row["done_items"] or 0
+            age_min = row["age_min"] or 0
+
+            log.warning(
+                "op_worker watchdog: resetting stale op #%d (%s, owner=%d, age=%.0fm, done=%d)",
+                op_id, op_type, owner_id, age_min, done_items,
+            )
+
+            await _safe_execute(
+                pool,
+                """UPDATE operation_queue
+                   SET status = 'pending', started_at = NULL
+                   WHERE id = $1""",
+                op_id,
+                log_ctx=f"[watchdog_reset op={op_id}]",
+            )
+
+            if bot and owner_id:
+                try:
+                    await bot.send_message(
+                        owner_id,
+                        f"⚠️ <b>Операция #{op_id}</b> (<code>{op_type}</code>) "
+                        f"автоматически сброшена: зависла на {int(age_min)} минут "
+                        f"(выполнено {done_items} элементов). "
+                        f"Операция будет перезапущена.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(log, f"watchdog: notify owner={owner_id} for op={op_id} failed")
+
     except Exception as e:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
 
@@ -987,7 +1025,7 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         _watchdog_tick += 1
         # Run stale-running watchdog every 6 poll cycles (~1 minute)
         if _watchdog_tick % 6 == 0:
-            await _watchdog_stale(pool)
+            await _watchdog_stale(pool, bot)
         # Alert admins about stuck operations every ~5 minutes (30 cycles)
         if _watchdog_tick % 30 == 0:
             await _watchdog_alerts(pool, bot)

@@ -6,6 +6,7 @@ import json
 import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
 import os
+import time
 from typing import Any
 
 import asyncpg
@@ -14,6 +15,42 @@ from aiohttp import web
 from services.mini_app_auth import validate_init_data, make_token, parse_token
 
 log = logging.getLogger(__name__)
+
+_cache: dict[str, tuple[float, Any]] = {}
+_CACHE_TTL = 30  # секунд
+
+def _cached(key: str, ttl: int = _CACHE_TTL):
+    """Декоратор для кэширования результатов."""
+    def wrapper(fn):
+        async def wrapped(*args, **kwargs):
+            now = time.time()
+            if key in _cache and now - _cache[key][0] < ttl:
+                return _cache[key][1]
+            result = await fn(*args, **kwargs)
+            _cache[key] = (now, result)
+            return result
+        return wrapped
+    return wrapper
+
+def _cached_user(ttl: int = _CACHE_TTL):
+    """Декоратор для кэширования результатов по user ID."""
+    def wrapper(fn):
+        async def wrapped(*args, **kwargs):
+            request = args[0] if args else kwargs.get('request')
+            uid = None
+            if request:
+                uid = _get_uid(request)
+            if uid:
+                key = f"{fn.__name__}:{uid}"
+                now = time.time()
+                if key in _cache and now - _cache[key][0] < ttl:
+                    return _cache[key][1]
+                result = await fn(*args, **kwargs)
+                _cache[key] = (now, result)
+                return result
+            return await fn(*args, **kwargs)
+        return wrapped
+    return wrapper
 
 
 def _bot_token() -> str:
@@ -318,6 +355,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Dashboard ────────────────────────────────────────────────────────────
 
+    @_cached_user()
     async def dashboard(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -412,6 +450,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Bots ─────────────────────────────────────────────────────────────────
 
+    @_cached_user()
     async def bots(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -682,6 +721,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Channels ─────────────────────────────────────────────────────────────
 
+    @_cached_user()
     async def channels(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -741,6 +781,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Accounts ─────────────────────────────────────────────────────────────
 
+    @_cached_user()
     async def accounts(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:

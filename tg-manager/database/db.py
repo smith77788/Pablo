@@ -109,10 +109,11 @@ def _has_sql_content(stmt: str) -> bool:
 async def create_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=15,
-        max_size=50,
+        min_size=5,
+        max_size=20,
         max_inactive_connection_lifetime=300,
         command_timeout=30,
+        keepalive=30,
     )
     async with pool.acquire() as conn:
         # Run all schema migration files in order — search both root and database/ subdir

@@ -14,6 +14,7 @@ Account Warming System — постепенный разогрев новых а
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import random
 import time
@@ -498,6 +499,16 @@ def _actions_for_day_count(day: int, target_daily: int) -> int:
     if day <= 9:
         return max(4, (target_daily * 3) // 4)
     return target_daily
+
+def _time_of_day_multiplier() -> float:
+    now_utc = datetime.datetime.utcnow()
+    kyiv_hour = (now_utc + datetime.timedelta(hours=2)).hour
+    if 0 <= kyiv_hour < 6:
+        return 1 / 3
+    if 10 <= kyiv_hour < 18:
+        return 1.5
+    return 1.0
+
 
 # In-memory guards: предотвращают одновременный запуск прогрева одного и того же плана/сессии
 _active_plan_ids: set[int] = set()
@@ -1152,6 +1163,9 @@ async def _run_daily_warmup_impl(
     # Рампа объёма действий: свежий аккаунт (день 0-1) делает мало действий,
     # объём растёт с возрастом. Это ключевая защита от бана.
     day_actions_n = _actions_for_day_count(current_day, daily_actions)
+    _tod_mult = _time_of_day_multiplier()
+    if _tod_mult != 1.0:
+        day_actions_n = max(1, int(day_actions_n * _tod_mult))
 
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
@@ -1197,6 +1211,8 @@ async def _run_daily_warmup_impl(
 
                 elif action == "send_comment":
                     target = channels[i % len(channels)]
+                    await asyncio.sleep(random.uniform(2.0, 8.0))
+                    await asyncio.sleep(random.uniform(1.0, 4.0))
                     success = await asyncio.wait_for(
                         _perform_send_comment(client, target), timeout=90
                     )
@@ -1258,6 +1274,7 @@ async def _run_daily_warmup_impl(
                         _perform_open_chat(client, target), timeout=60
                     )
                 elif action == "send_reaction":
+                    await asyncio.sleep(random.uniform(2.0, 8.0))
                     success = await asyncio.wait_for(
                         _perform_send_reaction(client, target), timeout=60
                     )
@@ -1427,6 +1444,8 @@ async def _run_daily_warmup_impl(
                     consecutive_fails = 0
                 elif consecutive_fails >= 2:
                     base_pause = random.uniform(60, 120)
+                elif (i + 1) % 5 == 0 and random.random() < 0.15:
+                    base_pause = random.uniform(300, 1800)
                 elif (i + 1) % 5 == 0:
                     base_pause = random.uniform(120, 300)
                 else:
@@ -1644,6 +1663,9 @@ async def _run_warmup_session_impl(
     # Рампа: на ранних днях каждый аккаунт делает меньше действий
     _target_per_acc = max(1, daily_actions // len(account_ids))
     actions_per_acc = _actions_for_day_count(current_day, _target_per_acc)
+    _tod_mult = _time_of_day_multiplier()
+    if _tod_mult != 1.0:
+        actions_per_acc = max(1, int(actions_per_acc * _tod_mult))
     total_ok = 0
     total_fail = 0
 
@@ -1702,6 +1724,15 @@ async def _run_warmup_session_impl(
         client = account_manager._make_client(acc_row["session_str"], device)
         available_actions = _get_actions_for_day(current_day)
 
+        # Progressive trust: ограничиваем действия по trust_score аккаунта
+        trust_score = float(acc_row.get("trust_score") or 0.3)
+        if trust_score < 0.3:
+            available_actions = [a for a in available_actions if a in ("update_presence", "browse_dialogs", "read_channel")]
+        elif trust_score < 0.5:
+            available_actions = [a for a in available_actions if a not in ("send_comment", "send_reaction", "forward_to_saved")]
+        elif trust_score < 0.7:
+            available_actions = [a for a in available_actions if a != "send_comment"]
+
         try:
             await asyncio.wait_for(client.connect(), timeout=15)
 
@@ -1711,6 +1742,14 @@ async def _run_warmup_session_impl(
                 success = False
                 error_str: Optional[str] = None
                 t0 = time.monotonic()
+
+                # Human-like delays: имитация чтения, typing, пауз
+                _human_delay = random.uniform(1.0, 4.0)
+                if action in ("read_channel", "browse_dialogs"):
+                    _human_delay = random.uniform(3.0, 12.0)  # чтение — дольше
+                elif action in ("send_comment", "send_reaction"):
+                    _human_delay = random.uniform(0.5, 2.0)  # реакция — быстрее
+                await asyncio.sleep(_human_delay)
 
                 try:
                     if action in ("update_presence", "browse_dialogs"):
@@ -1723,10 +1762,13 @@ async def _run_warmup_session_impl(
                     elif action == "read_channel" and target:
                         success = await _perform_read_channel(client, target)
                     elif action == "send_reaction" and target:
+                        await asyncio.sleep(random.uniform(2.0, 8.0))
                         success = await _perform_send_reaction(client, target)
                     elif action == "mark_read" and target:
                         success = await _perform_mark_read(client, target)
                     elif action == "send_comment" and target:
+                        await asyncio.sleep(random.uniform(2.0, 8.0))
+                        await asyncio.sleep(random.uniform(1.0, 4.0))
                         success = await _perform_send_comment(client, target)
                     elif action == "forward_to_saved" and target:
                         success = await _perform_forward_to_saved(client, target)
@@ -1839,7 +1881,10 @@ async def _run_warmup_session_impl(
 
                 # Human-like delay between actions: 30-120s (was 8-25s).
                 # Sub-30s inter-action intervals are a Telegram automation signal.
-                await asyncio.sleep(random.uniform(30, 120))
+                if (i + 1) % 5 == 0 and random.random() < 0.15:
+                    await asyncio.sleep(random.uniform(300, 1800))
+                else:
+                    await asyncio.sleep(random.uniform(30, 120))
 
         except Exception as exc:
             log.warning("warmup_session acc=%d: %s", acc_id, exc)
@@ -1971,9 +2016,18 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     Один запуск в сутки на план/сессию (проверяем last_action_at > 20ч).
     Планы и сессии запускаются ПАРАЛЛЕЛЬНО (до _MAX_PARALLEL_WARMUP одновременно),
     но не более одного аккаунта на один proxy_id в одном батче.
+    Smart scheduling: не запускаем прогрев ночью (00:00-06:00 UTC+2).
     """
+    import datetime
     while True:
         try:
+            # Smart scheduling: skip warmup during night hours (00:00-06:00 Kyiv time)
+            now_utc = datetime.datetime.utcnow()
+            kyiv_hour = (now_utc + datetime.timedelta(hours=2)).hour
+            if 0 <= kyiv_hour < 6:
+                log.debug("warmup loop: night time (hour=%d), skipping", kyiv_hour)
+                await asyncio.sleep(interval_hours * 3600)
+                continue
             # Одиночные планы разогрева — включаем proxy_id для proxy-correlation
             rows = await pool.fetch(
                 """SELECT wp.*, a.owner_id, a.proxy_id
