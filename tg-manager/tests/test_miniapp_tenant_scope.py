@@ -40,3 +40,16 @@ def test_audit_trail_filters_by_owner():
         "audit_trail должен фильтровать по oq.owner_id (иначе видны чужие операции)"
     )
     assert "uid" in body
+
+
+def test_ecosystem_overlaps_checks_ownership():
+    src = _src()
+    m = re.search(
+        r"async def ecosystem_overlaps\(.*?\n(.*?)async def ", src, re.DOTALL
+    )
+    assert m, "ecosystem_overlaps handler not found"
+    body = m.group(1)
+    # eco_id из пути должен проверяться на владение перед чтением каналов
+    assert "FROM ecosystems WHERE id=$1 AND owner_id=$2" in body, (
+        "ecosystem_overlaps должен проверять владение eco_id (иначе утечка чужой экосистемы)"
+    )

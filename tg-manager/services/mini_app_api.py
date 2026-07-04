@@ -7897,6 +7897,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services import ecosystem_brain as _eb
             eco_id = request.match_info.get("eco_id")
             if eco_id:
+                # Проверка владения: eco_id из пути нельзя доверять — иначе
+                # любой юзер прочитает каналы и overlap чужой экосистемы.
+                owns = await pool.fetchval(
+                    "SELECT 1 FROM ecosystems WHERE id=$1 AND owner_id=$2",
+                    int(eco_id),
+                    uid,
+                )
+                if not owns:
+                    return _err("not found", 404)
                 ch_rows = await pool.fetch(
                     "SELECT channel_id FROM ecosystem_channels WHERE ecosystem_id=$1", int(eco_id)
                 )
