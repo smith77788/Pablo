@@ -154,6 +154,55 @@ def _circuit_breaker_status(owner_id: int) -> dict:
     return {"status": "open", "failures": state.get("failures", 0), "cooldown_remaining_s": remaining}
 
 
+# ── Adaptive Pacing (адаптивные задержки) ─────────────────────────────────────
+# Система учитывает время суток, день недели и паттерны целевого канала
+# для оптимальных задержек между действиями.
+
+import datetime
+
+# Множители задержек по часам суток (0-23). Ночью — усиленные паузы, днём — нормальные.
+_HOUR_MULTIPLIER = [
+    2.0, 2.0, 2.0, 2.0, 2.0, 1.8,  # 00-05: ночь,很少 активных пользователей
+    1.5, 1.2, 1.0, 1.0, 1.0, 1.0,  # 06-11: утро, норма
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.1,  # 12-17: день, норма
+    1.2, 1.3, 1.5, 1.8, 2.0, 2.0,  # 18-23: вечер, усиленные паузы
+]
+
+# Множители по дню недели (0=пн, 6=вс)
+_DAY_MULTIPLIER = [1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.5]  # выходные — усиленные паузы
+
+
+def get_adaptive_delay(base_delay: float, tz_offset: int = 2) -> float:
+    """Рассчитать адаптивную задержку с учётом времени суток и дня недели.
+    
+    tz_offset: смещение часового пояса относительно UTC (по умолчанию UTC+2, Киев)
+    """
+    now = datetime.datetime.utcnow() + datetime.timedelta(hours=tz_offset)
+    hour = now.hour
+    weekday = now.weekday()  # 0=пн, 6=вс
+    
+    hour_mult = _HOUR_MULTIPLIER[hour]
+    day_mult = _DAY_MULTIPLIER[weekday]
+    
+    # Базовая задержка * множитель часа * множитель дня + случайный jitter ±15%
+    jitter = random.uniform(0.85, 1.15)
+    delay = base_delay * hour_mult * day_mult * jitter
+    
+    log.debug(
+        "adaptive_pacing: base=%.1f h_mult=%.1f d_mult=%.1f → delay=%.1fs (hour=%d, weekday=%d)",
+        base_delay, hour_mult, day_mult, delay, hour, weekday,
+    )
+    return delay
+
+
+def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int = 2) -> float:
+    """Адаптивная задержка для батч-операций с учётом размера батча."""
+    base = get_adaptive_delay(base_delay, tz_offset)
+    # Большие батчи — увеличиваем задержку пропорционально
+    batch_factor = 1.0 + (batch_size / 100) * 0.3  # +30% за каждые 100 аккаунтов
+    return base * batch_factor
+
+
 async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
     """Сбросить все зависшие in_operation=TRUE после рестарта бота."""
     try:
@@ -414,7 +463,7 @@ async def _deactivate_dead_session(
     """
     msg = str(exc)
     name = type(exc).__name__
-    if not (name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg):
+    if not (name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg or "USER_DEACTIVATED" in msg):
         return
     account_ids = params.get("account_ids") or []
     if not account_ids:
@@ -440,6 +489,42 @@ async def _deactivate_dead_session(
             log.warning(
                 "op_worker: failed to deactivate account_id=%s: %s", acc_id, db_err
             )
+
+
+async def _mark_channel_private(
+    pool: asyncpg.Pool, channel_identifier: str, operation_id: int
+) -> None:
+    """Пометить канал как приватный в БД при ошибке CHANNEL_PRIVATE.
+    
+    Это предотвращает повторные попытки доступа к приватному каналу
+    в будущих операциях.
+    """
+    if not channel_identifier:
+        return
+    try:
+        # Попытка обновить канал в tg_channels если он существует
+        result = await pool.execute(
+            """UPDATE tg_channels 
+               SET is_private = TRUE, updated_at = NOW()
+               WHERE username = $1 OR title ILIKE $1""",
+            channel_identifier,
+        )
+        if result == "UPDATE 0":
+            # Канала нет в БД — просто логируем
+            log.info(
+                "op_worker: CHANNEL_PRIVATE for '%s' (op=%d) — channel not in DB, skipping",
+                channel_identifier, operation_id,
+            )
+        else:
+            log.info(
+                "op_worker: marked channel '%s' as PRIVATE (op=%d)",
+                channel_identifier, operation_id,
+            )
+    except Exception as e:
+        log.debug(
+            "op_worker: failed to mark channel_private for '%s': %s",
+            channel_identifier, e,
+        )
 
 
 async def _maybe_requeue(

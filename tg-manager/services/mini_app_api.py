@@ -804,6 +804,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "recent_ops": recent_ops,
         })
 
+    async def accounts_export(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT id, phone, first_name, username, tg_user_id,
+                      is_active, added_at, last_used,
+                      COALESCE(trust_score, 100) AS trust_score,
+                      COALESCE(acc_status, 'ok') AS acc_status,
+                      cooldown_until
+               FROM tg_accounts WHERE owner_id=$1
+               ORDER BY is_active DESC, last_used DESC NULLS LAST""", uid)
+        header = ["id", "phone", "first_name", "username", "tg_user_id",
+                  "is_active", "trust_score", "acc_status", "cooldown_until",
+                  "last_used", "added_at"]
+        csv_rows = []
+        for r in rows:
+            cd = r.get("cooldown_until")
+            csv_rows.append([
+                r.get("id"),
+                r.get("phone"),
+                r.get("first_name"),
+                r.get("username"),
+                r.get("tg_user_id"),
+                r.get("is_active"),
+                r.get("trust_score"),
+                r.get("acc_status"),
+                cd.isoformat() if cd else "",
+                r.get("last_used"),
+                r.get("added_at"),
+            ])
+        return _csv_resp("accounts_export.csv", header, csv_rows)
+
     async def bot_subscribers(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -7404,17 +7437,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return []
 
+        _seen_completed: set[int] = set()
+
+        async def fetch_completed_ops() -> list:
+            try:
+                rows = await pool.fetch(
+                    """SELECT id, op_type, COALESCE(label, op_type) AS label,
+                              total_items, done_items, status, error_msg
+                       FROM operation_queue WHERE owner_id=$1 AND status IN ('done','failed')
+                         AND finished_at > now() - make_interval(minutes => 30)
+                       ORDER BY finished_at DESC LIMIT 20""",
+                    uid)
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
         try:
             data = await _stats(pool, uid)
             await push("stats", data)
             await push("activity", {"items": await fetch_activity()})
             await push("op_progress", {"items": await fetch_op_progress()})
             while True:
-                await asyncio.sleep(15)  # Faster updates for real-time feel
+                await asyncio.sleep(15)
                 data = await _stats(pool, uid)
                 await push("stats", data)
                 await push("activity", {"items": await fetch_activity()})
                 await push("op_progress", {"items": await fetch_op_progress()})
+                completed = await fetch_completed_ops()
+                for op in completed:
+                    op_id = op["id"]
+                    if op_id not in _seen_completed:
+                        _seen_completed.add(op_id)
+                        await push("op_complete", {
+                            "id": op_id,
+                            "op_type": op["op_type"],
+                            "label": op["label"],
+                            "status": op["status"],
+                            "total": op["total_items"],
+                            "done": op["done_items"],
+                            "error_msg": op.get("error_msg"),
+                        })
+                if len(_seen_completed) > 500:
+                    _seen_completed.clear()
                 await response.write(b": keepalive\n\n")
         except (asyncio.CancelledError, ConnectionResetError):
             pass
@@ -7448,6 +7512,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/funnels", funnels_all)
     # Accounts
     app.router.add_get("/api/miniapp/accounts", accounts)
+    app.router.add_get("/api/miniapp/accounts/export", accounts_export)
     app.router.add_get("/api/miniapp/account/{acc_id}", account_detail)
     # Channels
     app.router.add_get("/api/miniapp/channel/{ch_id}", channel_detail)
@@ -7736,6 +7801,102 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/toggle", auto_funnel_toggle)
     app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_detail)
     app.router.add_delete("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_delete)
+    # ── Circuit Breaker & Adaptive Pacing ─────────────────────────────────────
+    async def circuit_breaker_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import op_worker as _opw
+            status = _opw._circuit_breaker_status(uid)
+            return _json_resp(status)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def proxy_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import account_manager as _am
+            rows = await pool.fetch(
+                "SELECT id, proxy_url, geo_country, is_active FROM user_proxies WHERE owner_id=$1",
+                uid,
+            )
+            stats = []
+            for r in rows:
+                s = _am.get_proxy_stats(r["proxy_url"])
+                stats.append({
+                    "id": r["id"],
+                    "url": r["proxy_url"][:30] + "..." if len(r["proxy_url"] or "") > 30 else r["proxy_url"],
+                    "geo": r["geo_country"],
+                    "active": r["is_active"],
+                    **s,
+                })
+            return _json_resp({"proxies": stats})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ecosystem_recommendations(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import ecosystem_brain as _eb
+            recs = await _eb.get_ecosystem_recommendations(pool, uid)
+            return _json_resp({"recommendations": recs})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ecosystem_overlaps(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import ecosystem_brain as _eb
+            eco_id = request.match_info.get("eco_id")
+            if eco_id:
+                ch_rows = await pool.fetch(
+                    "SELECT channel_id FROM ecosystem_channels WHERE ecosystem_id=$1", int(eco_id)
+                )
+                ch_ids = [r["channel_id"] for r in ch_rows]
+                if ch_ids:
+                    overlaps = await _eb.analyze_audience_overlap(pool, ch_ids)
+                    return _json_resp(overlaps)
+            return _json_resp({"overlaps": {}})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def operation_export(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        fmt = request.query.get("format", "csv")
+        try:
+            rows = await pool.fetch(
+                """SELECT id, op_type, label, status, total_items, done_items,
+                          err_cnt, created_at, finished_at
+                   FROM operation_queue WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 500""",
+                uid,
+            )
+            if fmt == "json":
+                return _json_resp({"operations": [dict(r) for r in rows]})
+            header = ["ID", "Тип", "Метка", "Статус", "Всего", "Сделано", "Ошибок", "Создано", "Завершено"]
+            data = [[
+                r["id"], r["op_type"], r["label"] or "", r["status"],
+                r["total_items"] or 0, r["done_items"] or 0, r["err_cnt"] or 0,
+                str(r["created_at"] or ""), str(r["finished_at"] or ""),
+            ] for r in rows]
+            return _csv_resp("operations.csv", header, data)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
+    app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
+    app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)
+    app.router.add_get("/api/miniapp/ecosystem/{eco_id}/overlaps", ecosystem_overlaps)
+    app.router.add_get("/api/miniapp/operations/export", operation_export)
+
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
