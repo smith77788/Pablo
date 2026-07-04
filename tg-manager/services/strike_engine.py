@@ -3352,3 +3352,88 @@ def format_mini_result(r: dict) -> str:
         lines.append(f"\n⚠️ Ошибки: <code>{_html.escape(errs[:200])}</code>")
 
     return "\n".join(lines)
+
+
+# ── Smart Presets ─────────────────────────────────────────────────────────────
+# Адаптивные пресеты на основе типа контента и платформы
+
+SMART_PRESETS = {
+    "channel_report": {
+        "vectors": ["report"],
+        "delay_range": (30, 90),
+        "accounts_needed": 3,
+        "description": "Массовая жалоба на канал",
+    },
+    "channel_join_report": {
+        "vectors": ["join", "report"],
+        "delay_range": (60, 180),
+        "accounts_needed": 5,
+        "description": "Вступление + жалоба",
+    },
+    "group_infiltrate": {
+        "vectors": ["join", "read_history", "report"],
+        "delay_range": (120, 360),
+        "accounts_needed": 10,
+        "description": "Инфильтрация группы",
+    },
+    "spam_flood": {
+        "vectors": ["join", "message", "report"],
+        "delay_range": (5, 15),
+        "accounts_needed": 20,
+        "description": "Массовая рассылка",
+    },
+    "subtle_report": {
+        "vectors": ["report"],
+        "delay_range": (300, 600),
+        "accounts_needed": 1,
+        "description": "Одиночная жалоба с большой паузой",
+    },
+}
+
+
+def get_smart_preset(preset_name: str) -> dict | None:
+    return SMART_PRESETS.get(preset_name)
+
+
+def get_preset_for_target(target_type: str, platform: str = "telegram") -> dict:
+    if target_type == "channel":
+        return SMART_PRESETS["channel_report"]
+    elif target_type == "group":
+        return SMART_PRESETS["group_infiltrate"]
+    elif target_type == "user":
+        return SMART_PRESETS["subtle_report"]
+    return SMART_PRESETS["channel_report"]
+
+
+_preset_stats: dict[str, dict] = {}
+
+
+def record_preset_result(preset_name: str, success: bool) -> None:
+    stats = _preset_stats.setdefault(preset_name, {"success": 0, "fail": 0})
+    if success:
+        stats["success"] += 1
+    else:
+        stats["fail"] += 1
+
+
+def get_preset_effectiveness(preset_name: str) -> dict:
+    stats = _preset_stats.get(preset_name, {"success": 0, "fail": 0})
+    total = stats["success"] + stats["fail"]
+    return {
+        "preset": preset_name,
+        "total_runs": total,
+        "success_rate": round(stats["success"] / max(total, 1) * 100, 1),
+        **stats,
+    }
+
+
+def get_best_preset_for_target(target_type: str) -> str:
+    candidates = []
+    for name, preset in SMART_PRESETS.items():
+        if target_type in name or target_type in preset.get("description", ""):
+            eff = get_preset_effectiveness(name)
+            candidates.append((eff["success_rate"], name))
+    if candidates:
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+    return "channel_report"

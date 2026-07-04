@@ -2063,3 +2063,65 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
         recs.append("Экосистема в хорошем состоянии — продолжайте в том же духе")
 
     return recs
+
+
+# ── Auto-Management ───────────────────────────────────────────────────────────
+
+async def auto_add_channels(pool: asyncpg.Pool, owner_id: int, ecosystem_id: int) -> dict:
+    new_channels = await pool.fetch(
+        """SELECT id, username FROM tg_channels 
+           WHERE owner_id=$1 AND id NOT IN 
+             (SELECT channel_id FROM ecosystem_channels WHERE ecosystem_id=$2)
+           AND created_at > NOW() - INTERVAL '7 days'""",
+        owner_id, ecosystem_id,
+    )
+    added = 0
+    for ch in new_channels:
+        try:
+            await pool.execute(
+                "INSERT INTO ecosystem_channels (ecosystem_id, channel_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                ecosystem_id, ch["id"],
+            )
+            added += 1
+        except Exception as e:
+            log.warning("auto_add_channels: failed for ch=%d: %s", ch["id"], e)
+    return {"added": added, "total_new": len(new_channels)}
+
+
+async def auto_remove_dead_channels(pool: asyncpg.Pool, ecosystem_id: int, inactive_days: int = 30) -> dict:
+    dead = await pool.fetch(
+        """SELECT ec.channel_id FROM ecosystem_channels ec
+           JOIN tg_channels ch ON ch.id = ec.channel_id
+           WHERE ec.ecosystem_id=$1
+             AND (ch.last_post_at IS NULL OR ch.last_post_at < NOW() - ($2 || ' days')::INTERVAL)""",
+        ecosystem_id, inactive_days,
+    )
+    removed = 0
+    for d in dead:
+        try:
+            await pool.execute(
+                "DELETE FROM ecosystem_channels WHERE ecosystem_id=$1 AND channel_id=$2",
+                ecosystem_id, d["channel_id"],
+            )
+            removed += 1
+        except Exception:
+            pass
+    return {"removed": removed, "total_dead": len(dead)}
+
+
+async def auto_post_scheduling(pool: asyncpg.Pool, ecosystem_id: int) -> dict:
+    channels = await pool.fetch(
+        """SELECT ch.id, ch.username FROM tg_channels ch
+           JOIN ecosystem_channels ec ON ec.channel_id = ch.id
+           WHERE ec.ecosystem_id=$1 AND ch.is_active=TRUE""",
+        ecosystem_id,
+    )
+    scheduled = 0
+    for ch in channels:
+        existing = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE target=$1 AND status IN ('pending','running') AND op_type='mass_publish'",
+            str(ch["id"]),
+        )
+        if existing == 0:
+            scheduled += 1
+    return {"channels_ready": len(channels), "scheduled": scheduled}
