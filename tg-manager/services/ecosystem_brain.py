@@ -1851,6 +1851,7 @@ async def balance_content(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) 
             return {"balanced": True, "distribution": {}, "recommendations": []}
         
         # Analyze activity distribution
+        from datetime import datetime, timezone
         now = datetime.now(tz=timezone.utc)
         active_count = 0
         inactive_count = 0
