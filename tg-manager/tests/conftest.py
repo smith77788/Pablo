@@ -79,10 +79,77 @@ def _install_telethon_stubs() -> None:
 
 _install_telethon_stubs()
 
-# ВАЖНО: aiogram / asyncpg / aiohttp НЕЛЬЗЯ стабить — хендлеры наследуются от
-# реальных классов (class X(CallbackData), Router и т.п.); стаб отдаёт не-класс
-# → TypeError: __mro_entries__ и падение ВСЕХ тестов. Эти зависимости реально
-# устанавливаются (CI и локально), поэтому используем их напрямую.
+# asyncpg C extension (protocol.protocol) не компилируется на Python 3.13.
+# Стабим protocol-подмодуль чтобы import asyncpg проходил.
+try:
+    import asyncpg
+    import asyncpg.protocol  # noqa: F401
+except (ImportError, ModuleNotFoundError):
+    _asyncpg = types.ModuleType("asyncpg")
+    _asyncpg.__path__ = []
+    _asyncpg.__version__ = "0.0.0-stub"
+    _asyncpg.Pool = _Any
+    _asyncpg.Record = dict
+    _asyncpg.Connection = _Any
+    _asyncpg.create_pool = _Any
+    sys.modules.setdefault("asyncpg", _asyncpg)
+    _asyncpg_proto = types.ModuleType("asyncpg.protocol")
+    _asyncpg_proto.__path__ = []
+    _asyncpg_proto.Protocol = _Any
+    _asyncpg_proto.NO_TIMEOUT = None
+    _asyncpg_proto.BUILTIN_TYPE_NAME_MAP = {}
+    sys.modules["asyncpg.protocol"] = _asyncpg_proto
+    _asyncpg_proto_mod = types.ModuleType("asyncpg.protocol.protocol")
+    _asyncpg_proto_mod.Protocol = _Any
+    _asyncpg_proto_mod.NO_TIMEOUT = None
+    _asyncpg_proto_mod.BUILTIN_TYPE_NAME_MAP = {}
+    sys.modules["asyncpg.protocol.protocol"] = _asyncpg_proto_mod
+
+# aiohttp / aiogram не установлены на Python 3.13 — стабим для импорта сервисов
+_STUB_MODULES = {
+    "aiohttp": {"ClientSession": _Any, "ClientTimeout": _Any, "TCPConnector": _Any, "ClientError": Exception},
+    "aiohttp.web": {"Response": _Any, "Request": _Any, "Application": _Any},
+    "aiohttp_socks": {},
+    "aiogram": {"Bot": _Any, "Dispatcher": _Any, "Router": _Any, "F": _Any},
+    "aiogram.client": {"default": _Any},
+    "aiogram.client.default": {"DefaultBotProperties": _Any},
+    "aiogram.client.session": {},
+    "aiogram.client.session.aiohttp": {"AiohttpSession": _Any},
+    "aiogram.enums": {"ParseMode": _Any},
+    "aiogram.filters": {"Command": _Any, "CommandStart": _Any, "StateFilter": _Any},
+    "aiogram.filters.callback_data": {"CallbackData": type("CallbackData", (), {"__init_subclass__": lambda cls, **kw: None, "pack": lambda self: "", "unpack": classmethod(lambda cls, d: cls()), "filter": classmethod(lambda cls, *a, **kw: lambda c: True)})},
+    "aiogram.fsm.context": {"FSMContext": _Any},
+    "aiogram.fsm.state": {"State": _Any, "StatesGroup": _Any},
+    "aiogram.fsm.storage.base": {"BaseStorage": _Any, "StorageKey": _Any, "StateType": _Any},
+    "aiogram.fsm.storage.memory": {"MemoryStorage": _Any},
+    "aiogram.types": {"Message": _Any, "CallbackQuery": _Any, "InlineKeyboardButton": _Any, "InlineKeyboardMarkup": _Any, "KeyboardButton": _Any, "ReplyKeyboardMarkup": _Any, "BufferedInputFile": _Any, "ErrorEvent": _Any},
+    "aiogram.utils.keyboard": {"InlineKeyboardBuilder": _Any, "ReplyKeyboardBuilder": _Any},
+}
+
+for mod_name, attrs in _STUB_MODULES.items():
+    if mod_name not in sys.modules:
+        try:
+            __import__(mod_name)
+        except ImportError:
+            m = types.ModuleType(mod_name)
+            m.__path__ = []
+            for k, v in attrs.items():
+                setattr(m, k, v)
+            sys.modules[mod_name] = m
+            # Stub sub-modules
+            parts = mod_name.split(".")
+            for i in range(1, len(parts)):
+                parent = ".".join(parts[:i])
+                child = ".".join(parts[:i+1])
+                if parent in sys.modules and child not in sys.modules:
+                    cm = types.ModuleType(child)
+                    cm.__path__ = []
+                    sys.modules[child] = cm
+
+# Termux site-packages для Python 3.13 (пакеты установлены через pip в termux)
+_TERMUX_SITE = "/data/data/com.termux/files/usr/lib/python3.13/site-packages"
+if os.path.isdir(_TERMUX_SITE) and _TERMUX_SITE not in sys.path:
+    sys.path.insert(0, _TERMUX_SITE)
 
 # Проект-корень в path (tests/ лежит внутри tg-manager/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
