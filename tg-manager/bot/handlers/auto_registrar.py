@@ -691,24 +691,33 @@ async def _do_batch_register(
     cnt: int,
     sms_client,
     status_msg,
-) -> None:
-    """Регистрирует cnt аккаунтов последовательно. 2FA-номера пропускаются."""
+    progress_cb=None,
+) -> dict:
+    """Регистрирует cnt аккаунтов последовательно. 2FA-номера пропускаются.
+    status_msg может быть None (headless-вызов из воркера). progress_cb(i, ok, failed)
+    — необязательный колбэк прогресса. Возвращает {'ok': [...], 'failed': [...]}."""
     from services.account_manager import start_login, confirm_code, get_client_info_and_session, cleanup_pending
 
     ok_accs: list[str] = []
     failed: list[str] = []
 
     for i in range(1, cnt + 1):
-        progress = (
-            f"📦 <b>Батч-регистрация</b> · {country}\n\n"
-            f"⏳ Аккаунт <b>{i}/{cnt}</b>…\n"
-            + (f"✅ Готово: {len(ok_accs)}\n" if ok_accs else "")
-            + (f"⚠️ Пропущено: {len(failed)}\n" if failed else "")
-        )
-        try:
-            await status_msg.edit_text(progress, parse_mode="HTML")
-        except Exception:
-            pass
+        if status_msg is not None:
+            progress = (
+                f"📦 <b>Батч-регистрация</b> · {country}\n\n"
+                f"⏳ Аккаунт <b>{i}/{cnt}</b>…\n"
+                + (f"✅ Готово: {len(ok_accs)}\n" if ok_accs else "")
+                + (f"⚠️ Пропущено: {len(failed)}\n" if failed else "")
+            )
+            try:
+                await status_msg.edit_text(progress, parse_mode="HTML")
+            except Exception:
+                pass
+        if progress_cb is not None:
+            try:
+                await progress_cb(i, len(ok_accs), len(failed))
+            except Exception:
+                pass
 
         phone = ""
         order_id = ""
@@ -770,14 +779,16 @@ async def _do_batch_register(
         f"{ok_lines}\n\n"
         + (f"<b>Пропущено:</b>\n{fail_lines}" if failed else "")
     )
-    try:
-        await status_msg.edit_text(
-            report,
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardBuilder()
-            .button(text="📦 Ещё батч", callback_data=AutoRegCb(action="batch_ask"))
-            .button(text="◀️ Главное", callback_data=AutoRegCb(action="menu"))
-            .adjust(1).as_markup(),
-        )
-    except Exception:
-        pass
+    if status_msg is not None:
+        try:
+            await status_msg.edit_text(
+                report,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardBuilder()
+                .button(text="📦 Ещё батч", callback_data=AutoRegCb(action="batch_ask"))
+                .button(text="◀️ Главное", callback_data=AutoRegCb(action="menu"))
+                .adjust(1).as_markup(),
+            )
+        except Exception:
+            pass
+    return {"ok": ok_accs, "failed": failed}

@@ -2478,13 +2478,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        # Auto-registration requires interactive SMS verification and must be done
-        # through the bot (/reg command). The Mini App cannot handle this flow.
-        return _err(
-            "Авторегистрация выполняется только через бота: /reg\n"
-            "Введите /reg в диалоге с ботом и следуйте инструкциям.",
-            400,
-        )
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        try:
+            count = max(1, min(50, int(body.get("count") or 1)))
+        except (TypeError, ValueError):
+            return _err("Некорректное количество", 400)
+        country = str(body.get("country") or "RU").strip()[:4] or "RU"
+        # Проверяем, что SMS-сервис настроен (иначе операция гарантированно упадёт)
+        try:
+            from bot.handlers.auto_registrar import _get_sms_client
+            _client, _service = await _get_sms_client(pool)
+        except Exception:
+            _client, _service = None, "?"
+        if not _client:
+            return _err(f"SMS-сервис не настроен ({_service}). Обратитесь к администратору платформы.", 400)
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'auto_register','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"count": count, "country": country}), count,
+                f"Авторег {count} акк. ({country})",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "count": count})
+        except Exception as exc:
+            log.exception("autoreg_submit uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Phone Checker ─────────────────────────────────────────────────────────
 

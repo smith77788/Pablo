@@ -7032,7 +7032,19 @@ async function openAutoreg() {
 }
 async function submitAutoreg() {
   const errEl = document.getElementById('autoregErr');
-  errEl.textContent = 'Авторегистрация выполняется через бота: введите /reg в диалоге с ботом и следуйте инструкциям.';
+  errEl.textContent = '';
+  const count = parseInt(document.getElementById('autoregCount').value) || 1;
+  const country = document.getElementById('autoregCountry').value;
+  if (count < 1 || count > 50) { errEl.textContent = 'Количество: от 1 до 50'; return; }
+  if (!await askConfirm(`Зарегистрировать ${count} аккаунт(ов) через SMS-сервис? Списываются средства сервиса за номера.`)) return;
+  const btn = document.getElementById('autoregBtn');
+  btn.disabled = true; btn.textContent = 'Запускаю…';
+  try {
+    const r = await api('/api/miniapp/autoreg', {method:'POST', body:JSON.stringify({count, country})});
+    toast(`📱 Авторегистрация ${r.count} акк. запущена (#${r.op_id}). Прогресс — в разделе Операции.`);
+    openAutoreg();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+  finally { btn.disabled = false; btn.textContent = '📱 Зарегистрировать'; }
 }
 
 // ── Phone Checker ────────────────────────────────────────
