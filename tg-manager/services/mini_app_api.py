@@ -6360,8 +6360,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         asset_type = body.get("asset_type", "channel")
         name_pattern = (body.get("name_pattern") or "").strip()
         username_pattern = (body.get("username_pattern") or "").strip()
+        description = (body.get("description") or "").strip()
+        short_desc = (body.get("short_description") or "").strip()
         countries = body.get("countries") or []
         account_ids = body.get("account_ids") or []
+        ecosystem_id = body.get("ecosystem_id")
         
         if asset_type not in ("channel", "group", "bot", "package", "full_package"):
             return _err("Invalid asset_type: must be channel/group/bot/package/full_package", 400)
@@ -6379,9 +6382,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'draft')
                    RETURNING id""",
                 uid, asset_type, name_pattern, username_pattern,
-                json.dumps({"countries": countries}),
+                json.dumps({"countries": countries, "description": description, "short_description": short_desc}),
                 json.dumps({"account_ids": [int(x) for x in account_ids]}),
             )
+            # Привязка к экосистеме
+            if ecosystem_id:
+                try:
+                    await pool.execute(
+                        "INSERT INTO ecosystem_global_presence (ecosystem_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                        int(ecosystem_id), plan_id,
+                    )
+                except Exception:
+                    pass
             return _json_resp({"ok": True, "plan_id": plan_id, "asset_type": asset_type, "name_pattern": name_pattern})
         except Exception as exc:
             log.exception("global_presence_create uid=%d", uid)
