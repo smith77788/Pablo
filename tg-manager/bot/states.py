@@ -635,3 +635,8 @@ class NodesBulkFSM(StatesGroup):
 
 class NodesBroadcastFSM(StatesGroup):
     waiting_message = State()       # текст алерта
+
+
+class SpinFlow(StatesGroup):
+    waiting_script = State()   # ждём обычный текст сценария для авто-спина
+    waiting_expand = State()   # ждём готовый spintax-шаблон для раскрытия

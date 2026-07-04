@@ -38,6 +38,7 @@ from bot.callbacks import (
     RegCb,
     DmCb,
     QuickPostCb,
+    SpinCb,
 )
 from bot.handlers.admin import notify_new_platform_user
 from services.logger import log_exc_swallow
@@ -463,6 +464,7 @@ _NAV_MAP: list[tuple[list[str], str, str]] = [
     (["регистрация", "дата", "regdate", "возраст"], "🔍 Дата регистрации", RegCb(action="start").pack()),
     (["анализ", "analyse", "analyze"], "🔬 Полный анализ", RegCb(action="analyze_start").pack()),
     (["dm", "директ", "личное сообщение"], "📨 DM-кампании", DmCb(action="menu").pack()),
+    (["spin", "спин", "спинтакс", "spintax", "рандомизация", "синонимы", "уникализация"], "🎲 Spintax", SpinCb(action="menu").pack()),
 ]
 
 

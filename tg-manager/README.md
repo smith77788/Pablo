@@ -26,6 +26,14 @@ Telegram-native infrastructure and mass-action operating system. Maximum Telegra
 - OpenRouter backend with rate limiting
 - Semantic memory and intent planner
 
+### Spintax Randomizer (`/spin`)
+- Turns a plain script into 5 maximally-randomized spintax templates via the
+  already-connected LLM providers (OpenRouter/Groq/Gemini/Ollama)
+- Synonym groups `{вариант1|вариант2}`, nesting, matching capitalization,
+  no more than two unspun words in a row
+- Every template is validated by the vendored engine
+  (`services/spintax_engine/`); ready templates expand into random variants
+
 ### Billing & Subscriptions
 - Crypto payments (TON, TRON)
 - Plan management with usage-based pricing

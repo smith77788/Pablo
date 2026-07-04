@@ -700,3 +700,10 @@ class GrowthCb(CallbackData, prefix="gh"):
     action: str   # menu|create|history
     op_id: int = 0
 
+
+
+class SpinCb(CallbackData, prefix="spin"):
+    """Spintax-модуль — авто-генерация и раскрытие spintax-шаблонов."""
+
+    action: str   # menu|new|more|expand|cancel
+    idx: int = 0  # индекс шаблона (для «ещё пример»)
