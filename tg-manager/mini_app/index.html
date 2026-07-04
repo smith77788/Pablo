@@ -3735,6 +3735,29 @@ let CUR_ACCS = [];     // cached accounts
 let CUR_CHANNELS = []; // cached channels
 let REF_CODE = null;
 
+// ── Offline cache ──────────────────────────────────────
+const CACHE_TTL = 300000;
+function getCached(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (Date.now() - d.ts > CACHE_TTL) { localStorage.removeItem(key); return null; }
+    return d.data;
+  } catch(_) { return null; }
+}
+function setCache(key, data) {
+  try { localStorage.setItem(key, JSON.stringify({ts: Date.now(), data})); } catch(_) {}
+}
+function clearAllCache() {
+  ['infragram_cache_home','infragram_cache_bots','infragram_cache_accounts','infragram_cache_channels'].forEach(k=>localStorage.removeItem(k));
+}
+function forceRefresh() {
+  clearAllCache();
+  loadHome();
+  toast('🔄 Данные обновлены');
+}
+
 // ── Boot ───────────────────────────────────────────────
 (async function boot() {
   const u = tg.initDataUnsafe?.user;
@@ -4137,14 +4160,16 @@ function loadTab(tab) {
 
 // ── Home ───────────────────────────────────────────────
 async function loadHome() {
-  modernizeIcons(document.getElementById('s-home'));  // SVG-иконки в быстрых действиях
+  modernizeIcons(document.getElementById('s-home'));
+  const cached = getCached('infragram_cache_home');
+  if (cached) { renderCards(cached); renderAct(cached.recent_activity||[]); }
   try {
     const d = await api('/api/miniapp/dashboard');
+    setCache('infragram_cache_home', d);
     renderCards(d);
     renderAct(d.recent_activity||[]);
-    updateMoreStats(d);
   } catch(e) {
-    document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
+    if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
 }
 
@@ -5456,6 +5481,17 @@ async function sendBcast() {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
     tg.HapticFeedback?.notificationOccurred('error');
   } finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
+}
+
+function explainError(msg) {
+  if (!msg) return 'Неизвестная ошибка';
+  const m = msg.toLowerCase();
+  if (m.includes('floodwait') || m.includes('flood_wait')) return '⏳ Ожидание из-за ограничений Telegram';
+  if (m.includes('peer_flood') || m.includes('peerflood')) return '🚫 Слишком много запросов — подождите 48ч';
+  if (m.includes('channel_private')) return '🔒 Канал приватный';
+  if (m.includes('auth_key') || m.includes('session')) return '🔑 Сессия устарела — нужен ре-импорт';
+  if (m.includes('proxy')) return '🌐 Прокси недоступен';
+  return '❌ ' + msg.substring(0, 80);
 }
 
 // ── Operations ─────────────────────────────────────────
