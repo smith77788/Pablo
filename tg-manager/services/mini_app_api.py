@@ -8046,22 +8046,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not text:
             return _err("text required")
         try:
-            users = await pool.fetch("SELECT user_id FROM platform_users")
+            # Не шлём забаненным.
+            users = await pool.fetch(
+                "SELECT user_id FROM platform_users WHERE COALESCE(is_banned, false) = false"
+            )
             if not users:
-                return _json_resp({"ok": True, "sent": 0})
-            from database import db as _db
+                return _json_resp({"ok": True, "sent": 0, "failed": 0})
+            from aiogram import Bot as _Bot
+            from aiogram.client.default import DefaultBotProperties
+            from aiogram.enums import ParseMode
+            from config import BOT_TOKEN as _tok
+            # ОДИН Bot на всю рассылку (раньше создавался на каждого юзера —
+            # утечка aiohttp-сессий). Закрываем сессию в finally.
+            _b = _Bot(token=_tok, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
             sent = 0
-            for u in users:
-                try:
-                    from aiogram import Bot as _Bot
-                    from config import BOT_TOKEN as _tok
-                    _b = _Bot(token=_tok)
-                    await _b.send_message(u["user_id"], text, parse_mode="HTML")
-                    sent += 1
+            failed = 0
+            try:
+                for u in users:
+                    try:
+                        await _b.send_message(u["user_id"], text)
+                        sent += 1
+                    except Exception:
+                        failed += 1
                     await asyncio.sleep(0.05)
+            finally:
+                try:
+                    await _b.session.close()
                 except Exception:
                     pass
-            return _json_resp({"ok": True, "sent": sent})
+            return _json_resp({"ok": True, "sent": sent, "failed": failed})
         except Exception as e:
             log.exception("admin_broadcast uid=%d", uid)
             return _err(str(e), 500)
