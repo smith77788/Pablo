@@ -2920,7 +2920,7 @@ async def notify_new_platform_user(
     # Также уведомляем сессионных админов (вход через ADMIN_SECRET без ADMIN_IDS),
     # иначе владелец без заданного ADMIN_IDS не получает уведомлений вообще.
     admin_ids |= set(_session_admins)
-    if not _NOTIFY_NEW_USERS:
+    if not _NOTIFY_NEW_USERS and not admin_ids:
         log.info(
             "new_platform_user: уведомления ВЫКЛ (toggle), пропуск user_id=%s", user_id
         )
