@@ -1310,9 +1310,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ GP CREATE MODAL ══════════════════════ -->
-<div class="modal-bg" id="mo-gp-create">
+<div class="mbg" id="mo-gp-create" onclick="if(event.target===this)closeModal('mo-gp-create')">
   <div class="modal">
-    <div class="modal-hdr">🌍 Создать гео-сеть</div>
+    <div class="modal-x" onclick="closeModal('mo-gp-create')">✕</div>
+    <div class="modal-title">🌍 Создать гео-сеть</div>
     <div style="padding:16px">
       <div style="font-size:12px;color:var(--hint);margin-bottom:12px">Создайте новые каналы/группы/боты по городам с локализованными названиями.</div>
       
