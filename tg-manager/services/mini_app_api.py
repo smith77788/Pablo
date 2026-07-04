@@ -7944,9 +7944,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Только команда самого пользователя: он сам + участники рабочих
+            # пространств, которыми он владеет или в которых состоит.
+            # НЕЛЬЗЯ отдавать весь список platform_users — это утечка данных.
             rows = await pool.fetch(
-                "SELECT user_id, username, first_name, current_plan, created_at, last_active_at "
-                "FROM platform_users ORDER BY last_active_at DESC LIMIT 50")
+                """SELECT DISTINCT pu.user_id, pu.username, pu.first_name,
+                          pu.current_plan, pu.created_at, pu.last_active_at
+                   FROM platform_users pu
+                   WHERE pu.user_id = $1
+                      OR pu.user_id IN (
+                          SELECT wm.user_id
+                          FROM workspace_members wm
+                          JOIN workspaces w ON w.id = wm.workspace_id
+                          WHERE w.owner_id = $1
+                             OR w.id IN (
+                                 SELECT workspace_id FROM workspace_members
+                                 WHERE user_id = $1
+                             )
+                      )
+                   ORDER BY last_active_at DESC NULLS LAST
+                   LIMIT 50""",
+                uid,
+            )
             return _json_resp({"members": [dict(r) for r in rows]})
         except Exception as e:
             return _err(str(e), 500)
@@ -7956,11 +7975,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Только операции самого пользователя (oq.owner_id = uid).
+            # Без этого фильтра юзер видел бы аудит ВСЕХ владельцев — утечка.
             rows = await pool.fetch(
                 "SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at, "
                 "oq.owner_id, oq.op_type, oq.label "
                 "FROM operation_log ol JOIN operation_queue oq ON oq.id = ol.op_id "
-                "WHERE ol.created_at > NOW() - INTERVAL '7 days' ORDER BY ol.created_at DESC LIMIT 200")
+                "WHERE oq.owner_id = $1 AND ol.created_at > NOW() - INTERVAL '7 days' "
+                "ORDER BY ol.created_at DESC LIMIT 200",
+                uid,
+            )
             return _json_resp({"entries": [dict(r) for r in rows]})
         except Exception as e:
             return _err(str(e), 500)
