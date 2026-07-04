@@ -180,3 +180,34 @@ def get_behavioral_engine() -> BehavioralEngine:
     if _engine is None:
         _engine = BehavioralEngine()
     return _engine
+
+
+async def run(pool: asyncpg.Pool, bot) -> None:
+    """Background service: analyze account behavior, send anomaly alerts."""
+    import asyncio
+    await asyncio.sleep(600)
+    while True:
+        try:
+            engine = get_behavioral_engine()
+            accounts = await pool.fetch(
+                "SELECT id, owner_id FROM tg_accounts WHERE is_active=TRUE LIMIT 200"
+            )
+            critical = []
+            for acc in accounts:
+                risk = engine.get_ban_risk(acc["id"])
+                if risk["level"] == "critical":
+                    critical.append(acc)
+            if critical:
+                from config import ADMIN_IDS
+                admin_ids = [int(x.strip()) for x in str(ADMIN_IDS).split(",") if x.strip().isdigit()]
+                for admin_id in admin_ids:
+                    try:
+                        await bot.send_message(
+                            admin_id,
+                            f"⚠️ Behavioral Engine: {len(critical)} аккаунтов в критическом риске бана",
+                        )
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.warning("behavioral_engine.run error: %s", e)
+        await asyncio.sleep(3600)
