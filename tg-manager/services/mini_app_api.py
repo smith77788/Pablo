@@ -7489,6 +7489,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("auto_funnel_delete uid=%d fid=%d", uid, fid)
             return _err(str(exc), 500)
 
+    async def topology_nodes(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channels = await pool.fetch(
+                "SELECT id, username, title, is_active FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
+            )
+            bots = await pool.fetch(
+                "SELECT bot_id, username, first_name, is_active FROM managed_bots WHERE owner_id=$1 LIMIT 50", uid
+            )
+            nodes = []
+            for ch in channels:
+                nodes.append({"id": f"ch_{ch['id']}", "type": "channel", "name": ch['username'] or ch['title'] or f"#{ch['id']}", "active": ch['is_active']})
+            for b in bots:
+                nodes.append({"id": f"bot_{b['bot_id']}", "type": "bot", "name": f"@{b['username']}" if b['username'] else b['first_name'] or f"#{b['bot_id']}", "active": b['is_active']})
+            return _json_resp({"nodes": nodes})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def topology_links(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            links = await pool.fetch(
+                """SELECT a.channel_id as ch1, b.channel_id as ch2,
+                          COUNT(DISTINCT a.user_id) as strength
+                   FROM channel_members a
+                   JOIN channel_members b ON a.user_id = b.user_id AND a.channel_id < b.channel_id
+                   WHERE a.channel_id IN (SELECT id FROM tg_channels WHERE owner_id=$1)
+                   GROUP BY a.channel_id, b.channel_id
+                   HAVING COUNT(DISTINCT a.user_id) > 5
+                   ORDER BY strength DESC LIMIT 30""",
+                uid
+            )
+            return _json_resp({"links": [{"from": f"ch_{l['ch1']}", "to": f"ch_{l['ch2']}", "strength": l['strength']} for l in links]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def schedule_post(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            channel_id = data.get("channel_id")
+            text = data.get("text", "")
+            scheduled_at = data.get("scheduled_at")
+            if not channel_id or not text or not scheduled_at:
+                return _err("Missing channel_id, text, or scheduled_at")
+            await pool.execute(
+                """INSERT INTO operation_queue (owner_id, op_type, label, status, params, scheduled_for)
+                   VALUES ($1, 'mass_publish', $2, 'pending', $3, $4)""",
+                uid, f"Scheduled post to #{channel_id}",
+                json.dumps({"channel_ids": [channel_id], "text": text}),
+                scheduled_at
+            )
+            return _json_resp({"status": "scheduled"})
+        except Exception as e:
+            return _err(str(e), 500)
+
     # ── SSE ──────────────────────────────────────────────────────────────────
 
     async def events(request: web.Request) -> web.StreamResponse:
@@ -7676,6 +7735,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/template/{tpl_id}", delete_template)
     # Mass Publish
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
+    app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # Proxies
     app.router.add_get("/api/miniapp/proxies", proxies)
     app.router.add_post("/api/miniapp/proxy", add_proxy)
@@ -7772,6 +7832,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/health", health_overview)
     # Topology Map
     app.router.add_get("/api/miniapp/topology", topology_overview)
+    app.router.add_get("/api/miniapp/topology/nodes", topology_nodes)
     app.router.add_get("/api/miniapp/topology/links", topology_links)
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
@@ -8096,6 +8157,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 500)
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
+
+    async def team_audit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid): return _err("Forbidden", 403)
+        try:
+            rows = await pool.fetch(
+                """SELECT ol.op_id, ol.target, ol.status, ol.message, ol.created_at,
+                          oq.owner_id, oq.op_type, oq.label
+                   FROM operation_log ol
+                   JOIN operation_queue oq ON oq.id = ol.op_id
+                   WHERE ol.created_at > NOW() - INTERVAL '7 days'
+                   ORDER BY ol.created_at DESC LIMIT 200"""
+            )
+            return _json_resp({"entries": [dict(r) for r in rows]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def user_activity_log(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT ol.target, ol.status, ol.message, ol.created_at, oq.op_type
+                   FROM operation_log ol
+                   JOIN operation_queue oq ON oq.id = ol.op_id
+                   WHERE oq.owner_id = $1
+                   ORDER BY ol.created_at DESC LIMIT 50""",
+                uid
+            )
+            return _json_resp({"log": [dict(r) for r in rows]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/team/audit", team_audit)
+    app.router.add_get("/api/miniapp/my_activity", user_activity_log)
 
     # SSE
     app.router.add_get("/api/miniapp/events", events)
