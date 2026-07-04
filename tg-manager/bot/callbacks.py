@@ -1,5 +1,54 @@
 from typing import Optional
-from aiogram.filters.callback_data import CallbackData
+import sys
+import dataclasses
+
+
+def _build_fallback_callback_data():
+    class _FallbackCallbackData:
+        def __init_subclass__(cls, prefix: str = "", **kwargs):
+            super().__init_subclass__(**kwargs)
+            cls._prefix = prefix
+            if not dataclasses.is_dataclass(cls):
+                dataclasses.dataclass(cls)
+
+        def pack(self, **kwargs) -> str:
+            fields = dataclasses.fields(type(self))
+            parts = [type(self)._prefix]
+            for f in fields:
+                val = getattr(self, f.name)
+                if val is not None:
+                    parts.append(str(val))
+            return ":".join(parts)
+
+        @classmethod
+        def unpack(cls, data: str):
+            parts = data.split(":")
+            kwargs = {}
+            fields = dataclasses.fields(cls)
+            for i, f in enumerate(fields):
+                if i + 1 < len(parts):
+                    val = parts[i + 1]
+                    if f.type is int:
+                        val = int(val)
+                    kwargs[f.name] = val
+            return cls(**kwargs)
+
+        @classmethod
+        def filter(cls, *args, **kwargs):
+            return lambda c: True
+
+    return _FallbackCallbackData
+
+
+try:
+    from aiogram.filters.callback_data import CallbackData as _AiogramCb
+
+    class _TestSubclass(_AiogramCb, prefix="__compat_test"):
+        _test_field: str = ""
+
+    CallbackData = _AiogramCb
+except (TypeError, ModuleNotFoundError):
+    CallbackData = _build_fallback_callback_data()
 
 
 class BotCb(CallbackData, prefix="bot"):

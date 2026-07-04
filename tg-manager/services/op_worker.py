@@ -15,6 +15,7 @@ from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import infra_memory as _infra_mem
 from services import session_simulator
+from services.pacing_engine import get_pacing_engine
 
 log = logging.getLogger(__name__)
 
@@ -181,13 +182,13 @@ def get_adaptive_delay(base_delay: float, tz_offset: int = 2) -> float:
     hour_mult = _HOUR_MULTIPLIER[hour]
     day_mult = _DAY_MULTIPLIER[weekday]
     
-    # Базовая задержка * множитель часа * множитель дня + случайный jitter ±15%
+    ml_mult = get_pacing_engine().get_multiplier()
     jitter = random.uniform(0.85, 1.15)
-    delay = base_delay * hour_mult * day_mult * jitter
+    delay = base_delay * hour_mult * day_mult * ml_mult * jitter
     
     log.debug(
-        "adaptive_pacing: base=%.1f h_mult=%.1f d_mult=%.1f → delay=%.1fs (hour=%d, weekday=%d)",
-        base_delay, hour_mult, day_mult, delay, hour, weekday,
+        "adaptive_pacing: base=%.1f h_mult=%.1f d_mult=%.1f ml=%.1f → delay=%.1fs (hour=%d, weekday=%d)",
+        base_delay, hour_mult, day_mult, ml_mult, delay, hour, weekday,
     )
     return delay
 

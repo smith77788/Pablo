@@ -7938,6 +7938,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}/overlaps", ecosystem_overlaps)
     app.router.add_get("/api/miniapp/operations/export", operation_export)
 
+    # Team & Audit
+    async def team_members(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                "SELECT user_id, username, first_name, current_plan, created_at, last_active_at "
+                "FROM platform_users ORDER BY last_active_at DESC LIMIT 50")
+            return _json_resp({"members": [dict(r) for r in rows]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def audit_trail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                "SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at, "
+                "oq.owner_id, oq.op_type, oq.label "
+                "FROM operation_log ol JOIN operation_queue oq ON oq.id = ol.op_id "
+                "WHERE ol.created_at > NOW() - INTERVAL '7 days' ORDER BY ol.created_at DESC LIMIT 200")
+            return _json_resp({"entries": [dict(r) for r in rows]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/team/members", team_members)
+    app.router.add_get("/api/miniapp/audit", audit_trail)
+
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 

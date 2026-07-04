@@ -414,9 +414,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
-    <div class="hdr-meta">
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
+      <button onclick="forceRefresh()" style="background:var(--bg2);border:1px solid var(--sep);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:var(--text);flex-shrink:0" title="Обновить">🔄</button>
     </div>
   </div>
   <div class="sb" id="homeScroll" style="position:relative">
@@ -3271,6 +3272,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ TEAM ══════════════════════ -->
+<div class="screen" id="s-team">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👥 Команда</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Участники платформы</div>
+    <div class="lst" id="teamList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ AUDIT ══════════════════════ -->
+<div class="screen" id="s-audit">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📋 Аудит</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Последние действия</div>
+    <div class="lst" id="auditList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 </div><!-- /content -->
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
@@ -3765,6 +3790,29 @@ let CUR_ACCS = [];     // cached accounts
 let CUR_CHANNELS = []; // cached channels
 let REF_CODE = null;
 
+// ── Offline cache ──────────────────────────────────────
+const CACHE_TTL = 300000;
+function getCached(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (Date.now() - d.ts > CACHE_TTL) { localStorage.removeItem(key); return null; }
+    return d.data;
+  } catch(_) { return null; }
+}
+function setCache(key, data) {
+  try { localStorage.setItem(key, JSON.stringify({ts: Date.now(), data})); } catch(_) {}
+}
+function clearAllCache() {
+  ['infragram_cache_home','infragram_cache_bots','infragram_cache_accounts','infragram_cache_channels'].forEach(k=>localStorage.removeItem(k));
+}
+function forceRefresh() {
+  clearAllCache();
+  loadHome(); loadBots(); loadAccounts();
+  toast('🔄 Данные обновлены');
+}
+
 // ── Boot ───────────────────────────────────────────────
 (async function boot() {
   const u = tg.initDataUnsafe?.user;
@@ -4094,6 +4142,10 @@ function buildDrawer() {
    ['broadcasts','📨','Рассылки'],['more','🧩','Все функции']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
+  // Team & Audit
+  html += '<div class="nav-cat">Команда</div>';
+  html += `<div class="nav-item" onclick="closeDrawer(); openTeam()"><span class="ni-ico">👥</span>Команда</div>`;
+  html += `<div class="nav-item" onclick="closeDrawer(); openAudit()"><span class="ni-ico">📋</span>Аудит</div>`;
   // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки).
   //    Меню всегда полное и синхронно с каталогом функций, без дублирования списка.
   const more = document.getElementById('s-more');
@@ -4190,14 +4242,17 @@ function loadTab(tab) {
 
 // ── Home ───────────────────────────────────────────────
 async function loadHome() {
-  modernizeIcons(document.getElementById('s-home'));  // SVG-иконки в быстрых действиях
+  modernizeIcons(document.getElementById('s-home'));
+  const cached = getCached('infragram_cache_home');
+  if (cached) { renderCards(cached); renderAct(cached.recent_activity||[]); updateMoreStats(cached); }
   try {
     const d = await api('/api/miniapp/dashboard');
+    setCache('infragram_cache_home', d);
     renderCards(d);
     renderAct(d.recent_activity||[]);
     updateMoreStats(d);
   } catch(e) {
-    document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
+    if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
 }
 
@@ -4359,16 +4414,18 @@ const BOT_GRADS = [
 ];
 
 async function loadBots() {
+  const cached = getCached('infragram_cache_bots');
+  if (cached) { BOTS = cached.bots||[]; const botTotal = (cached.total!=null?cached.total:BOTS.length); const cntEl = document.getElementById('bots-cnt'); if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : ''; renderBots(); }
   try {
     const d = await api('/api/miniapp/bots');
+    setCache('infragram_cache_bots', d);
     BOTS = d.bots||[];
     const botTotal = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
     if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : '';
     renderBots();
   } catch(e) {
-    const wrap = document.getElementById('botList');
-    if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); }
+    if (!cached) { const wrap = document.getElementById('botList'); if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); } }
   }
 }
 
@@ -4853,25 +4910,39 @@ async function massCheckAccounts() {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function loadAccounts() {
-  // Accounts and channels load independently — one failure doesn't break the other
+  const cachedAcc = getCached('infragram_cache_accounts');
+  const cachedCh = getCached('infragram_cache_channels');
+  if (cachedAcc) {
+    CUR_ACCS = cachedAcc.accounts||[];
+    const cnt = (cachedAcc.stats && cachedAcc.stats.total!=null) ? cachedAcc.stats.total : CUR_ACCS.length;
+    document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
+    txt('m-acc-cnt', cnt+' аккаунтов');
+    updateAccKpi(CUR_ACCS, cachedAcc.stats);
+    renderAccounts(CUR_ACCS);
+  }
+  if (cachedCh) {
+    CUR_CHANNELS = cachedCh.channels||[];
+    txt('m-ch-cnt', (cachedCh.total!=null?cachedCh.total:CUR_CHANNELS.length)+' каналов');
+    renderChPreview(CUR_CHANNELS, cachedCh.total);
+  }
   api('/api/miniapp/accounts').then(ad => {
+    setCache('infragram_cache_accounts', ad);
     CUR_ACCS = ad.accounts||[];
-    // Истинное число из серверной агрегации (список ограничен LIMIT 100)
     const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
     updateAccKpi(CUR_ACCS, ad.stats);
     renderAccounts(CUR_ACCS);
   }).catch(e => {
-    document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
+    if (!cachedAcc) document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
   api('/api/miniapp/channels').then(cd => {
+    setCache('infragram_cache_channels', cd);
     CUR_CHANNELS = cd.channels||[];
-    // Истинное число каналов из cd.total (список ограничен 50) — иначе подпись врала
     txt('m-ch-cnt', (cd.total!=null?cd.total:CUR_CHANNELS.length)+' каналов');
     renderChPreview(CUR_CHANNELS, cd.total);
   }).catch(() => {
-    txt('chPreview', '');
+    if (!cachedCh) txt('chPreview', '');
   });
 }
 
@@ -5541,6 +5612,70 @@ async function sendBcast() {
 // ── Operations ─────────────────────────────────────────
 let OPS_FILTER = null;
 function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
+
+// ── Team & Audit ──────────────────────────────────────
+async function openTeam() {
+  txt('teamList','<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-team');
+  try {
+    const d = await api('/api/miniapp/team/members');
+    const rows = d.members || [];
+    if (!rows.length) { txt('teamList','<div class="empty"><div class="empty-ico">👥</div><div class="empty-txt">Пока нет участников</div></div>'); return; }
+    let h = '';
+    rows.forEach(r => {
+      const initials = (r.first_name || r.username || '?')[0].toUpperCase();
+      const colors = ['ava-blue','ava-green','ava-orange','ava-purple','ava-teal','ava-red'];
+      const cls = colors[Math.abs(r.user_id||0) % colors.length];
+      const planBadge = r.current_plan && r.current_plan !== 'free'
+        ? `<span class="badge b-gr">${r.current_plan}</span>` : '';
+      const lastSeen = r.last_active_at ? _fmtAgo(new Date(r.last_active_at)) : '';
+      h += `<div class="li">
+        <div class="ava ${cls}">${initials}</div>
+        <div class="li-body">
+          <div class="li-name">${esc(r.first_name || r.username || 'ID '+r.user_id)}</div>
+          <div class="li-sub">${r.username ? '@'+esc(r.username) : 'ID: '+r.user_id}${lastSeen ? ' · '+lastSeen : ''}</div>
+        </div>
+        <div class="li-right">${planBadge}</div>
+      </div>`;
+    });
+    txt('teamList','<div class="lst" style="margin:0 16px">'+h+'</div>');
+  } catch(e) { txt('teamList','<div class="err-msg"><div class="err-msg-ico">⚠️</div><div class="err-msg-txt">Ошибка загрузки</div></div>'); }
+}
+
+async function openAudit() {
+  txt('auditList','<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-audit');
+  try {
+    const d = await api('/api/miniapp/audit');
+    const rows = d.entries || [];
+    if (!rows.length) { txt('auditList','<div class="empty"><div class="empty-ico">📋</div><div class="empty-txt">Нет записей за 7 дней</div></div>'); return; }
+    let h = '';
+    rows.forEach(r => {
+      const statusColors = {success:'b-gr',error:'b-rd',done:'b-gr',running:'b-bl',pending:'b-gy',failed:'b-rd'};
+      const sc = statusColors[r.status] || 'b-gy';
+      const time = r.created_at ? _fmtAgo(new Date(r.created_at)) : '';
+      const label = r.label || r.op_type || '';
+      const msg = r.message ? `<div style="font-size:12px;color:var(--hint);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.message)}</div>` : '';
+      h += `<div class="li">
+        <div class="li-body">
+          <div class="li-name">${esc(label)}</div>
+          <div class="li-sub">${r.target ? 'Цель: '+esc(String(r.target)) : ''}${time ? ' · '+time : ''}</div>
+          ${msg}
+        </div>
+        <div class="li-right"><span class="badge ${sc}">${r.status}</span></div>
+      </div>`;
+    });
+    txt('auditList','<div class="lst" style="margin:0 16px">'+h+'</div>');
+  } catch(e) { txt('auditList','<div class="err-msg"><div class="err-msg-ico">⚠️</div><div class="err-msg-txt">Ошибка загрузки</div></div>'); }
+}
+
+function _fmtAgo(d) {
+  const s = Math.floor((Date.now()-d.getTime())/1000);
+  if (s<60) return 'только что';
+  if (s<3600) return Math.floor(s/60)+' мин';
+  if (s<86400) return Math.floor(s/3600)+' ч';
+  return Math.floor(s/86400)+' д';
+}
 
 // ── Создать операцию: категорийный лаунчер ──────────────
 const OP_CREATE_CATS = [
