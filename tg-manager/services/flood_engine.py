@@ -107,7 +107,17 @@ def recommended_delay(account_id: int, action_type: str = "default") -> float:
     multiplier = 1.0 + (state.risk_score * 1.5)
     if state.consecutive_floods >= 2:
         multiplier += min(1.5, state.consecutive_floods * 0.25)
-    return min(base * multiplier, 900.0)
+    # Глобальный ML-темп: если по флоту растут флуды/баны — замедляем реальные
+    # операции, а не только показываем множитель в админке. Для action_type,
+    # совпадающего со словарём op_type (напр. "strike"), учитывается точечно,
+    # иначе — глобальный тренд. Ошибки движка не должны ломать hot-path.
+    try:
+        from services.pacing_engine import get_pacing_engine
+
+        pacing_mult = get_pacing_engine().get_multiplier(action_type)
+    except Exception:
+        pacing_mult = 1.0
+    return min(base * multiplier * pacing_mult, 900.0)
 
 
 def gaussian_delay(

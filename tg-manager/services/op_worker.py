@@ -173,19 +173,19 @@ _HOUR_MULTIPLIER = [
 _DAY_MULTIPLIER = [1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.5]
 
 
-def get_adaptive_delay(base_delay: float, tz_offset: int = 2) -> float:
+def get_adaptive_delay(base_delay: float, tz_offset: int = 2, action_type: str = "") -> float:
     """Рассчитать адаптивную задержку с учётом времени суток и дня недели."""
     now = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=tz_offset)
     hour = now.hour
     weekday = now.weekday()  # 0=пн, 6=вс
-    
+
     hour_mult = _HOUR_MULTIPLIER[hour]
     day_mult = _DAY_MULTIPLIER[weekday]
-    
-    ml_mult = get_pacing_engine().get_multiplier()
+
+    ml_mult = get_pacing_engine().get_multiplier(action_type)
     jitter = random.uniform(0.85, 1.15)
     delay = base_delay * hour_mult * day_mult * ml_mult * jitter
-    
+
     log.debug(
         "adaptive_pacing: base=%.1f h_mult=%.1f d_mult=%.1f ml=%.1f → delay=%.1fs (hour=%d, weekday=%d)",
         base_delay, hour_mult, day_mult, ml_mult, delay, hour, weekday,
@@ -193,9 +193,9 @@ def get_adaptive_delay(base_delay: float, tz_offset: int = 2) -> float:
     return delay
 
 
-def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int = 2) -> float:
+def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int = 2, action_type: str = "") -> float:
     """Адаптивная задержка для батч-операций с учётом размера батча."""
-    base = get_adaptive_delay(base_delay, tz_offset)
+    base = get_adaptive_delay(base_delay, tz_offset, action_type)
     # Большие батчи — увеличиваем задержку пропорционально
     batch_factor = 1.0 + (batch_size / 100) * 0.3  # +30% за каждые 100 аккаунтов
     return base * batch_factor

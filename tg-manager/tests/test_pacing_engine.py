@@ -68,6 +68,67 @@ def test_stats_track_counts():
     assert st["ban"] == 1
 
 
+def test_per_action_multiplier_isolates_types():
+    """get_multiplier(action_type) учится по конкретному типу действия."""
+    eng = _fresh_engine()
+    # "post" — стабильно успешный
+    for _ in range(15):
+        eng.record_result(success=True, action_type="post")
+    # "strike" — ловит флуды
+    for _ in range(15):
+        eng.record_result(success=False, is_flood=True, action_type="strike")
+    # по типу strike — замедление, по типу post — ускорение
+    assert eng.get_multiplier("strike") >= 1.8
+    assert eng.get_multiplier("post") < 1.0
+
+
+def test_per_action_falls_back_to_global_when_sparse():
+    """Мало наблюдений по типу → используем глобальный сигнал, не выдумываем."""
+    eng = _fresh_engine()
+    for _ in range(20):
+        eng.record_result(success=False, is_flood=True, action_type="join")
+    # по редкому типу "leave" (0 наблюдений) откатываемся к глобальному (флуды)
+    assert eng.get_multiplier("leave") >= 2.5
+    # глобальный вызов без типа не сломан
+    assert eng.get_multiplier() >= 2.5
+
+
+def test_recommended_delay_reacts_to_fleet_flood():
+    """Глобальный ML-темп реально замедляет recommended_delay, а не только админку."""
+    import services.pacing_engine as pe
+    from services import flood_engine
+
+    saved = pe._engine
+    pe._engine = pe.PacingEngine()
+    try:
+        acc_id = 987654321  # свежий аккаунт без риска
+        baseline = flood_engine.recommended_delay(acc_id, "strike")
+        # флот массово ловит флуды по strike
+        for _ in range(20):
+            pe.get_pacing_engine().record_result(
+                success=False, is_flood=True, action_type="strike"
+            )
+        slowed = flood_engine.recommended_delay(acc_id, "strike")
+        assert slowed > baseline * 1.5, (
+            f"ML-темп не влияет на реальную задержку: {baseline} → {slowed}"
+        )
+        assert slowed <= 900.0  # cap соблюдён
+    finally:
+        pe._engine = saved
+        flood_engine._flood_state.pop(987654321, None)
+
+
+def test_recommended_delay_wired_to_pacing_engine():
+    """flood_engine должен реально читать движок — иначе он инертен в hot-path."""
+    import inspect
+    from services import flood_engine
+
+    src = inspect.getsource(flood_engine.recommended_delay)
+    assert "get_pacing_engine" in src, (
+        "recommended_delay не учитывает ML-темп — движок не влияет на операции"
+    )
+
+
 def test_engine_is_wired_into_op_worker():
     """op_worker должен и читать, и КОРМИТЬ движок (иначе он инертен)."""
     import inspect

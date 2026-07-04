@@ -28,13 +28,13 @@ class PacingEngine:
         if is_flood:
             self._flood_count += 1
 
-    def get_multiplier(self, action_type: str = "") -> float:
-        if len(self._history) < 10:
-            return 1.0
-        recent = list(self._history)[-50:]
-        flood_rate = sum(1 for r in recent if r["flood"]) / len(recent)
-        ban_rate = sum(1 for r in recent if r["ban"]) / len(recent)
-        success_rate = sum(1 for r in recent if r["ok"]) / len(recent)
+    @staticmethod
+    def _multiplier_from(records: list) -> float:
+        """Рассчитать множитель задержки по выборке результатов."""
+        n = len(records)
+        flood_rate = sum(1 for r in records if r["flood"]) / n
+        ban_rate = sum(1 for r in records if r["ban"]) / n
+        success_rate = sum(1 for r in records if r["ok"]) / n
         if flood_rate > 0.3:
             return 2.5
         elif flood_rate > 0.15:
@@ -44,6 +44,22 @@ class PacingEngine:
         elif success_rate > 0.9:
             return 0.8
         return 1.0
+
+    def get_multiplier(self, action_type: str = "") -> float:
+        """Множитель задержки.
+
+        Если задан action_type и по нему накоплено ≥10 наблюдений — считаем
+        множитель по этому типу действия (движок учится, какие именно операции
+        сейчас ловят флуды/баны). Иначе — глобальный множитель по всей истории.
+        """
+        recent = list(self._history)[-50:]
+        if action_type:
+            typed = [r for r in recent if r["type"] == action_type]
+            if len(typed) >= 10:
+                return self._multiplier_from(typed)
+        if len(self._history) < 10:
+            return 1.0
+        return self._multiplier_from(recent)
 
     def should_pause(self) -> bool:
         if len(self._history) < 20:
