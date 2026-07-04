@@ -15,8 +15,6 @@ from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import infra_memory as _infra_mem
 from services import session_simulator
-from services.pacing_engine import get_pacing_engine
-from services.behavioral_engine import get_behavioral_engine
 
 log = logging.getLogger(__name__)
 
@@ -154,51 +152,6 @@ def _circuit_breaker_status(owner_id: int) -> dict:
         return {"status": "closed", "failures": 0}
     remaining = int(state["cooldown_until"] - now) if state.get("cooldown_until") else 0
     return {"status": "open", "failures": state.get("failures", 0), "cooldown_remaining_s": remaining}
-
-
-# ── Adaptive Pacing (адаптивные задержки) ─────────────────────────────────────
-# Система учитывает время суток, день недели и паттерны целевого канала
-# для оптимальных задержек между действиями.
-
-import datetime as _dt
-
-# Множители задержек по часам суток (0-23). Ночью — усиленные паузы, днём — нормальные.
-_HOUR_MULTIPLIER = [
-    2.0, 2.0, 2.0, 2.0, 2.0, 1.8,
-    1.5, 1.2, 1.0, 1.0, 1.0, 1.0,
-    1.0, 1.0, 1.0, 1.0, 1.0, 1.1,
-    1.2, 1.3, 1.5, 1.8, 2.0, 2.0,
-]
-
-_DAY_MULTIPLIER = [1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.5]
-
-
-def get_adaptive_delay(base_delay: float, tz_offset: int = 2, action_type: str = "") -> float:
-    """Рассчитать адаптивную задержку с учётом времени суток и дня недели."""
-    now = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=tz_offset)
-    hour = now.hour
-    weekday = now.weekday()  # 0=пн, 6=вс
-
-    hour_mult = _HOUR_MULTIPLIER[hour]
-    day_mult = _DAY_MULTIPLIER[weekday]
-
-    ml_mult = get_pacing_engine().get_multiplier(action_type)
-    jitter = random.uniform(0.85, 1.15)
-    delay = base_delay * hour_mult * day_mult * ml_mult * jitter
-
-    log.debug(
-        "adaptive_pacing: base=%.1f h_mult=%.1f d_mult=%.1f ml=%.1f → delay=%.1fs (hour=%d, weekday=%d)",
-        base_delay, hour_mult, day_mult, ml_mult, delay, hour, weekday,
-    )
-    return delay
-
-
-def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int = 2, action_type: str = "") -> float:
-    """Адаптивная задержка для батч-операций с учётом размера батча."""
-    base = get_adaptive_delay(base_delay, tz_offset, action_type)
-    # Большие батчи — увеличиваем задержку пропорционально
-    batch_factor = 1.0 + (batch_size / 100) * 0.3  # +30% за каждые 100 аккаунтов
-    return base * batch_factor
 
 
 async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
@@ -461,7 +414,7 @@ async def _deactivate_dead_session(
     """
     msg = str(exc)
     name = type(exc).__name__
-    if not (name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg or "USER_DEACTIVATED" in msg):
+    if not (name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg):
         return
     account_ids = params.get("account_ids") or []
     if not account_ids:
@@ -487,42 +440,6 @@ async def _deactivate_dead_session(
             log.warning(
                 "op_worker: failed to deactivate account_id=%s: %s", acc_id, db_err
             )
-
-
-async def _mark_channel_private(
-    pool: asyncpg.Pool, channel_identifier: str, operation_id: int
-) -> None:
-    """Пометить канал как приватный в БД при ошибке CHANNEL_PRIVATE.
-    
-    Это предотвращает повторные попытки доступа к приватному каналу
-    в будущих операциях.
-    """
-    if not channel_identifier:
-        return
-    try:
-        # Попытка обновить канал в tg_channels если он существует
-        result = await pool.execute(
-            """UPDATE tg_channels 
-               SET is_private = TRUE, updated_at = NOW()
-               WHERE username = $1 OR title ILIKE $1""",
-            channel_identifier,
-        )
-        if result == "UPDATE 0":
-            # Канала нет в БД — просто логируем
-            log.info(
-                "op_worker: CHANNEL_PRIVATE for '%s' (op=%d) — channel not in DB, skipping",
-                channel_identifier, operation_id,
-            )
-        else:
-            log.info(
-                "op_worker: marked channel '%s' as PRIVATE (op=%d)",
-                channel_identifier, operation_id,
-            )
-    except Exception as e:
-        log.debug(
-            "op_worker: failed to mark channel_private for '%s': %s",
-            channel_identifier, e,
-        )
 
 
 async def _maybe_requeue(
@@ -877,12 +794,8 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
         log.info("op_worker startup: no stale running operations found")
 
 
-async def _watchdog_stale(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
-    """Периодически сбрасывает 'running' операции, которые зависли.
-
-    Проверяет:
-    - операция в статусе 'running' дольше _STALE_RUNNING_TIMEOUT_MIN минут
-    - операция действительно зависла: done_items не обновлялись >10 минут
+async def _watchdog_stale(pool: asyncpg.Pool) -> None:
+    """Периодически сбрасывает 'running' операции, которые висят дольше N минут.
 
     Исключает операции, которые реально выполняются в памяти (_active_op_ids),
     чтобы не перезапустить strike/bulk-op пока первый прогон ещё идёт.
@@ -893,52 +806,18 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
 
         active_ids_list = list(active_now) if active_now else None
 
-        stale_rows = await _safe_fetch(
-            pool,
-            """SELECT id, op_type, owner_id, started_at, done_items,
-                      EXTRACT(EPOCH FROM (now() - started_at))/60 AS age_min
-               FROM operation_queue
-               WHERE status = 'running'
-                 AND started_at < now() - make_interval(mins => $1)
-                 AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
+        result = await pool.execute(
+            """UPDATE operation_queue
+                SET status = 'pending', started_at = NULL
+                WHERE status = 'running'
+                  AND started_at < now() - make_interval(mins => $1)
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
             _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
         )
-
-        for row in stale_rows:
-            op_id = row["id"]
-            op_type = row["op_type"]
-            owner_id = row["owner_id"]
-            done_items = row["done_items"] or 0
-            age_min = row["age_min"] or 0
-
-            log.warning(
-                "op_worker watchdog: resetting stale op #%d (%s, owner=%d, age=%.0fm, done=%d)",
-                op_id, op_type, owner_id, age_min, done_items,
-            )
-
-            await _safe_execute(
-                pool,
-                """UPDATE operation_queue
-                   SET status = 'pending', started_at = NULL
-                   WHERE id = $1""",
-                op_id,
-                log_ctx=f"[watchdog_reset op={op_id}]",
-            )
-
-            if bot and owner_id:
-                try:
-                    await bot.send_message(
-                        owner_id,
-                        f"⚠️ <b>Операция #{op_id}</b> (<code>{op_type}</code>) "
-                        f"автоматически сброшена: зависла на {int(age_min)} минут "
-                        f"(выполнено {done_items} элементов). "
-                        f"Операция будет перезапущена.",
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    log_exc_swallow(log, f"watchdog: notify owner={owner_id} for op={op_id} failed")
-
+        count = int((result or "UPDATE 0").split()[-1])
+        if count:
+            log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
     except Exception as e:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
 
@@ -1023,7 +902,7 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         _watchdog_tick += 1
         # Run stale-running watchdog every 6 poll cycles (~1 minute)
         if _watchdog_tick % 6 == 0:
-            await _watchdog_stale(pool, bot)
+            await _watchdog_stale(pool)
         # Alert admins about stuck operations every ~5 minutes (30 cycles)
         if _watchdog_tick % 30 == 0:
             await _watchdog_alerts(pool, bot)
@@ -1410,13 +1289,6 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             await _circuit_breaker_record(owner_id, _final_status == "done")
             # Adaptive pacing: record result for learning
             session_simulator.record_success(op_type, 0, elapsed) if _final_status == "done" else session_simulator.record_failure(op_type, 0, elapsed)
-            # ML pacing engine: feed success/failure so get_multiplier() learns
-            try:
-                get_pacing_engine().record_result(
-                    success=_final_status == "done", action_type=op_type
-                )
-            except Exception:
-                pass
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
@@ -1570,17 +1442,6 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
                 # Circuit breaker: record failure
                 await _circuit_breaker_record(owner_id, False)
-                # ML pacing engine: feed failure with flood/ban granularity
-                try:
-                    _kind = _classify_op_error(e)
-                    get_pacing_engine().record_result(
-                        success=False,
-                        is_flood=_kind in ("flood", "peer_flood"),
-                        is_ban=_kind == "fatal",
-                        action_type=op_type,
-                    )
-                except Exception:
-                    pass
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
                 _acc_ids_for_audit = params.get("account_ids") or []
@@ -2173,7 +2034,6 @@ async def _exec_mass_publish(
                     await record_success(acc["id"], "publish")
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_success failed")
-                get_behavioral_engine().record_event(acc["id"], "publish", True)
                 # Persist resolved access_hash so future publishes use fast path
                 _resolved_hash = result.get("resolved_access_hash", 0)
                 if _resolved_hash and not dialog.get("access_hash"):
@@ -2328,7 +2188,6 @@ async def _exec_mass_publish(
                         )
                     except Exception:
                         log_exc_swallow(log, "mass_publish: record_flood failed")
-                    get_behavioral_engine().record_event(acc["id"], "publish", False, is_flood=True, duration_ms=int(flood_wait * 1000))
                     await asyncio.sleep(flood_wait + random.uniform(2, 8))
                     continue  # retry
                 # Non-retryable failure or second attempt failed
@@ -2361,7 +2220,6 @@ async def _exec_mass_publish(
                     await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_flood failed")
-                get_behavioral_engine().record_event(acc["id"], "publish", False, is_flood=True, duration_ms=int(flood_wait * 1000))
             await _safe_execute(
                     pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -2564,7 +2422,6 @@ async def _exec_bulk_join_inner(
                     _infra_mem.record_account_op(
                         acc["id"], "join", success=False, error="PeerFlood"
                     )
-                    get_behavioral_engine().record_event(acc["id"], "join", False, is_peer_flood=True, duration_ms=int(_peer_flood_wait * 1000))
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'error',$4)",
@@ -2623,7 +2480,6 @@ async def _exec_bulk_join_inner(
                         log,
                         f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}",
                     )
-                get_behavioral_engine().record_event(acc["id"], "join", True, duration_ms=dur_ms)
                 _infra_mem.record_account_op(
                     acc["id"], "join", success=True, duration_s=dur_ms / 1000
                 )
@@ -2656,7 +2512,6 @@ async def _exec_bulk_join_inner(
                             log,
                             f"Сбой записи flood в flood_engine для аккаунта {acc['id']}",
                         )
-                    get_behavioral_engine().record_event(acc["id"], "join", False, is_flood=True, duration_ms=int(flood_wait * 1000))
                 else:
                     log.warning(
                         "op_worker bulk_join: link=%s acc=%s error: %s",
@@ -2664,7 +2519,6 @@ async def _exec_bulk_join_inner(
                         acc_dict.get("phone"),
                         err_str,
                     )
-                    get_behavioral_engine().record_event(acc["id"], "join", False)
                 await _safe_execute(
                         pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -2875,7 +2729,6 @@ async def _exec_bulk_leave(
                         log,
                         f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}",
                     )
-                get_behavioral_engine().record_event(acc["id"], "leave", True, duration_ms=dur_ms)
                 _infra_mem.record_account_op(
                     acc["id"], "leave", success=True, duration_s=dur_ms / 1000
                 )
@@ -2899,7 +2752,6 @@ async def _exec_bulk_leave(
                             log,
                             f"Сбой записи flood в flood_engine для аккаунта {acc['id']}",
                         )
-                    get_behavioral_engine().record_event(acc["id"], "leave", False, is_flood=True, duration_ms=int(flood_wait * 1000))
                 else:
                     log.warning(
                         "op_worker bulk_leave: channel=%s acc=%s error: %s",
