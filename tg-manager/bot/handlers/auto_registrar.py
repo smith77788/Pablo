@@ -734,7 +734,10 @@ async def _do_batch_register(
     """Регистрирует cnt аккаунтов последовательно. 2FA-номера пропускаются.
     status_msg может быть None (headless-вызов из воркера). progress_cb(i, ok, failed)
     — необязательный колбэк прогресса. Возвращает {'ok': [...], 'failed': [...]}."""
-    from services.account_manager import start_login, confirm_code, get_client_info_and_session, cleanup_pending
+    from services.account_manager import (
+        start_login, confirm_code, get_client_info_and_session, cleanup_pending,
+        country_code_from_phone, pick_registration_proxy,
+    )
 
     ok_accs: list[str] = []
     failed: list[str] = []
