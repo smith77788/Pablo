@@ -1076,6 +1076,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Topology</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openTopoviz()">
+        <div class="mgmt-tile-ico">🗺</div>
+        <div class="mgmt-tile-lbl">Топология экосистемы</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openInfra()">
         <div class="mgmt-tile-ico">⚡</div>
         <div class="mgmt-tile-lbl">Инфра</div>
@@ -3296,6 +3301,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ TOPOLOGY VISUALIZATION ══════════════════════ -->
+<div class="screen" id="s-topoviz">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🗺 Топология экосистемы</div>
+  </div>
+  <div class="sb" style="padding:12px">
+    <div id="topoCanvas" style="background:var(--bg2);border-radius:16px;border:1px solid rgba(255,255,255,.06);min-height:400px;position:relative;overflow:hidden"></div>
+    <div id="topoLegend" style="margin-top:12px"></div>
+    <div id="topoInfo" style="margin-top:12px"></div>
+  </div>
+</div>
+
 </div><!-- /content -->
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
@@ -3768,6 +3786,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <button class="btn btn-p" id="refCopyBtn" onclick="copyRef()" style="width:100%;display:none">📋 Скопировать ссылку</button>
   </div>
 </div>
+
 
 </div><!-- /app -->
 
@@ -11411,6 +11430,61 @@ async function submitAdminBroadcast() {
     toast('✅ Отправлено: ' + (r.sent||0) + ' юзерам');
     back();
   } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
+}
+
+function openTopoviz() { push('s-topoviz'); loadTopo(); }
+
+async function loadTopo() {
+  txt('topoCanvas', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const links = await api('/api/miniapp/topology/links');
+    const nodes = await api('/api/miniapp/topology');
+    renderTopology(nodes.nodes || [], links.links || []);
+  } catch(e) { txt('topoCanvas', errHtml(e.message)); }
+}
+
+function renderTopology(nodes, links) {
+  const canvas = document.getElementById('topoCanvas');
+  if (!nodes.length) { txt('topoCanvas', empty('🗺','Нет данных для топологии')); return; }
+  const w = canvas.offsetWidth;
+  const h = Math.max(400, w * 0.75);
+  canvas.style.height = h + 'px';
+  const cx = w / 2;
+  const cy = h / 2;
+  const r = Math.min(w, h) * 0.35;
+  const nodeMap = {};
+  nodes.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+    nodeMap[n.id] = {
+      x: cx + r * Math.cos(angle),
+      y: cy + r * Math.sin(angle),
+      name: n.username || n.title || '#' + n.id,
+      type: n.type || 'channel',
+      active: n.is_active !== false,
+    };
+  });
+  let svg = '<svg width="' + w + '" height="' + h + '" style="position:absolute;top:0;left:0">';
+  links.forEach(l => {
+    const a = nodeMap[l.source || l.from];
+    const b = nodeMap[l.target || l.to];
+    if (a && b) {
+      const strength = l.strength || l.common_subscribers || 1;
+      const opacity = Math.min(1, strength / 50 + 0.2);
+      svg += '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="#3b82f6" stroke-width="' + Math.min(4, strength/10+1) + '" opacity="' + opacity + '"/>';
+    }
+  });
+  Object.values(nodeMap).forEach(n => {
+    const color = n.type === 'bot' ? '#a855f7' : n.active ? '#22c55e' : '#ef4444';
+    const size = n.type === 'bot' ? 16 : 20;
+    svg += '<circle cx="' + n.x + '" cy="' + n.y + '" r="' + size + '" fill="' + color + '" stroke="rgba(255,255,255,.2)" stroke-width="2"/>';
+    svg += '<text x="' + n.x + '" y="' + (n.y + size + 14) + '" text-anchor="middle" fill="#fafafa" font-size="11" font-weight="500">' + esc(n.name.substring(0, 15)) + '</text>';
+  });
+  svg += '</svg>';
+  canvas.innerHTML = svg;
+  const legend = document.getElementById('topoLegend');
+  legend.innerHTML = '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--hint)">' +
+    '<span>🟢 Активный канал</span><span>🟣 Бот</span><span>🔴 Неактивный</span><span>── Связь</span>' +
+    '</div>';
 }
 </script>
 </body>
