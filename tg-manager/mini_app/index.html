@@ -83,7 +83,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .lst{background:var(--bg2);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;margin:0 16px;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .li{padding:12px 14px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--sep)}
 .li:last-child{border-bottom:none}
-.li.tap{cursor:pointer;min-height:44px}
+.li.tap{cursor:pointer}
 .li.tap:active{background:rgba(255,255,255,.04)}
 .ava{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
 .ava-blue{background:rgba(59,130,246,.18);color:var(--blue)}
@@ -101,7 +101,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Rows (settings) ────────────────────────────────────────── */
 .row{padding:12px 14px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--sep)}
 .row:last-child{border-bottom:none}
-.row.tap{cursor:pointer;min-height:44px}
+.row.tap{cursor:pointer}
 .row.tap:active{background:rgba(255,255,255,.04)}
 .row-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
 .row-body{flex:1;min-width:0}
@@ -117,7 +117,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:10px;padding:12px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 16px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:opacity .12s,transform .1s;white-space:nowrap;flex:1;min-width:120px;min-height:44px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 16px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:opacity .12s,transform .1s;white-space:nowrap;flex:1;min-width:120px}
 .btn:active{opacity:.7;transform:scale(.97)}
 .btn:disabled{opacity:.4;pointer-events:none}
 .btn-p{background:var(--btn);color:var(--btn-text)}
@@ -147,12 +147,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Progress ───────────────────────────────────────────────── */
 .prog{height:3px;background:var(--sep);border-radius:2px;margin-top:6px;overflow:hidden}
 .prog-fill{height:100%;border-radius:2px;background:var(--btn);transition:width .6s}
-.op-progress-item{margin-bottom:8px}
-.op-progress-item:last-child{margin-bottom:0}
-.op-progress-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.op-progress-label{font-size:13px;font-weight:600;color:var(--text)}
-.op-progress-pct{font-size:12px;color:var(--hint);font-weight:500}
-.op-progress-bar{font-size:11px;color:var(--hint);margin-top:3px}
 
 /* ─── Empty / Error ──────────────────────────────────────────── */
 .empty{text-align:center;padding:40px 20px;color:var(--hint)}
@@ -414,14 +408,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
-    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
+    <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
-      <button onclick="forceRefresh()" style="background:var(--bg2);border:1px solid var(--sep);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:var(--text);flex-shrink:0" title="Обновить">🔄</button>
     </div>
   </div>
-  <div class="sb" id="homeScroll" style="position:relative">
-    <div id="pullRefresh" style="text-align:center;padding:0;height:0;overflow:hidden;transition:height .2s;color:var(--hint);font-size:13px;font-weight:500">🔄 Потяните вниз</div>
+  <div class="sb">
     <!-- KPI scroll row -->
     <div class="kpi-scroll" id="kpiScroll">
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
@@ -435,12 +427,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
     </div>
     <!-- Quick actions -->
-    <div class="sec">⚡ Быстрые действия</div>
-    <div class="qa-grid" style="grid-template-columns:repeat(4,1fr)">
-      <div class="qa-tile" onclick="openBcastPick()"><div class="qa-tile-ico">📢</div><div class="qa-tile-lbl">Новая рассылка</div></div>
-      <div class="qa-tile" onclick="openChannels()"><div class="qa-tile-ico">➕</div><div class="qa-tile-lbl">Добавить канал</div></div>
-      <div class="qa-tile" onclick="openBotAddModal()"><div class="qa-tile-ico">🤖</div><div class="qa-tile-lbl">Добавить бота</div></div>
-      <div class="qa-tile" onclick="openAnalytics()"><div class="qa-tile-ico">📊</div><div class="qa-tile-lbl">Статистика</div></div>
+    <div class="sec">Быстрые действия</div>
+    <div class="qa-grid">
+      <div class="qa-tile" onclick="goTab('bots')"><div class="qa-tile-ico">🤖</div><div class="qa-tile-lbl">Боты</div><div class="qa-tile-val" id="qa-bots">—</div></div>
+      <div class="qa-tile" onclick="goTab('accounts')"><div class="qa-tile-ico">📱</div><div class="qa-tile-lbl">Аккаунты</div><div class="qa-tile-val" id="qa-accs">—</div></div>
+      <div class="qa-tile" onclick="openChannels()"><div class="qa-tile-ico">📡</div><div class="qa-tile-lbl">Каналы</div><div class="qa-tile-val" id="qa-chs">—</div></div>
+      <div class="qa-tile" onclick="goTab('broadcasts')"><div class="qa-tile-ico">📨</div><div class="qa-tile-lbl">Рассылки</div><div class="qa-tile-val" id="qa-bc">—</div></div>
+      <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div><div class="qa-tile-val" id="qa-ops">—</div></div>
+      <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div><div class="qa-tile-val" style="color:var(--blue)">→</div></div>
     </div>
     <!-- Activity chart -->
     <div class="sec-row" style="margin-top:8px">
@@ -1074,11 +1068,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="mgmt-tile" onclick="openTopology()">
         <div class="mgmt-tile-ico">🗺</div>
         <div class="mgmt-tile-lbl">Topology</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openTopoviz()">
-        <div class="mgmt-tile-ico">🗺</div>
-        <div class="mgmt-tile-lbl">Топология экосистемы</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openInfra()">
@@ -1945,7 +1934,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div>
-    <div class="hdr-meta" style="display:flex;gap:6px;align-items:center"><button class="mini-btn" onclick="exportOpsCSV()">CSV</button><button class="mini-btn" onclick="exportOpsJSON()">JSON</button><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="seg" id="ops-seg">
@@ -1995,31 +1984,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="lst" id="topBots"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Позиции в поиске</div>
     <div class="lst" id="kwList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">🔥 Тепловая карта активности</div>
-    <div class="lst" style="padding:12px 14px;margin:0 16px">
-      <div id="heatMap" style="display:flex;gap:3px;flex-wrap:wrap"></div>
-      <div style="display:flex;justify-content:space-between;margin-top:8px">
-        <span style="font-size:10px;color:var(--hint)">Мало</span>
-        <div style="display:flex;gap:2px">
-          <div style="width:16px;height:10px;border-radius:2px;background:rgba(34,197,94,.2)"></div>
-          <div style="width:16px;height:10px;border-radius:2px;background:rgba(34,197,94,.5)"></div>
-          <div style="width:16px;height:10px;border-radius:2px;background:rgba(245,158,11,.6)"></div>
-          <div style="width:16px;height:10px;border-radius:2px;background:rgba(239,68,68,.7)"></div>
-          <div style="width:16px;height:10px;border-radius:2px;background:rgba(239,68,68,.95)"></div>
-        </div>
-        <span style="font-size:10px;color:var(--hint)">Много</span>
-      </div>
-    </div>
-    <div class="sec" style="margin-top:8px">📊 Сравнение каналов</div>
-    <div class="lst" id="chCompare"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">📈 Операции по дням</div>
-    <div class="lst" style="padding:14px 14px 10px;margin:0 16px">
-      <div id="opsChart" style="display:flex;align-items:flex-end;gap:6px;height:80px"></div>
-      <div id="opsTotal" style="text-align:center;font-size:12px;color:var(--hint);margin-top:8px"></div>
-    </div>
-    <div style="padding:12px 16px">
-      <button class="btn btn-s" style="width:100%" onclick="exportAnalyticsCSV()">📥 Экспорт CSV</button>
-    </div>
   </div>
 </div>
 
@@ -3277,43 +3241,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
-<!-- ══════════════════════ TEAM ══════════════════════ -->
-<div class="screen" id="s-team">
-  <div class="hdr">
-    <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">👥 Команда</div>
-  </div>
-  <div class="sub-sb">
-    <div class="sec">Участники платформы</div>
-    <div class="lst" id="teamList"><div class="spin-wrap"><div class="spin"></div></div></div>
-  </div>
-</div>
-
-<!-- ══════════════════════ AUDIT ══════════════════════ -->
-<div class="screen" id="s-audit">
-  <div class="hdr">
-    <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">📋 Аудит</div>
-  </div>
-  <div class="sub-sb">
-    <div class="sec">Последние действия</div>
-    <div class="lst" id="auditList"><div class="spin-wrap"><div class="spin"></div></div></div>
-  </div>
-</div>
-
-<!-- ══════════════════════ TOPOLOGY VISUALIZATION ══════════════════════ -->
-<div class="screen" id="s-topoviz">
-  <div class="hdr">
-    <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">🗺 Топология экосистемы</div>
-  </div>
-  <div class="sb" style="padding:12px">
-    <div id="topoCanvas" style="background:var(--bg2);border-radius:16px;border:1px solid rgba(255,255,255,.06);min-height:400px;position:relative;overflow:hidden"></div>
-    <div id="topoLegend" style="margin-top:12px"></div>
-    <div id="topoInfo" style="margin-top:12px"></div>
-  </div>
-</div>
-
 </div><!-- /content -->
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
@@ -3787,7 +3714,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
-
 </div><!-- /app -->
 
 <script>
@@ -3808,29 +3734,6 @@ let CUR_BOT = null;    // bot for sub-screens
 let CUR_ACCS = [];     // cached accounts
 let CUR_CHANNELS = []; // cached channels
 let REF_CODE = null;
-
-// ── Offline cache ──────────────────────────────────────
-const CACHE_TTL = 300000;
-function getCached(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (Date.now() - d.ts > CACHE_TTL) { localStorage.removeItem(key); return null; }
-    return d.data;
-  } catch(_) { return null; }
-}
-function setCache(key, data) {
-  try { localStorage.setItem(key, JSON.stringify({ts: Date.now(), data})); } catch(_) {}
-}
-function clearAllCache() {
-  ['infragram_cache_home','infragram_cache_bots','infragram_cache_accounts','infragram_cache_channels'].forEach(k=>localStorage.removeItem(k));
-}
-function forceRefresh() {
-  clearAllCache();
-  loadHome(); loadBots(); loadAccounts();
-  toast('🔄 Данные обновлены');
-}
 
 // ── Boot ───────────────────────────────────────────────
 (async function boot() {
@@ -3932,17 +3835,6 @@ function openSSE() {
   SSE.addEventListener('op_progress', e => {
     try { renderOpProgress((JSON.parse(e.data).items)||[]); } catch(_) {}
   });
-  SSE.addEventListener('op_complete', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const label = d.label || d.op_type || 'Операция';
-      toast('✅ ' + label + ' завершена');
-      try {
-        const h = tg && tg.HapticFeedback;
-        if (h) h.notificationOccurred('success');
-      } catch(_) {}
-    } catch(_) {}
-  });
   SSE.onopen = () => {
     _sseRetry = 0;
     const hLive = document.getElementById('hLive');
@@ -3969,25 +3861,13 @@ function renderOpProgress(items) {
   }
   el.style.display = 'block';
   el.innerHTML = items.map(op => {
-    const pct = op.pct || 0;
-    const bar = '█'.repeat(Math.floor(pct / 10)) + '░'.repeat(10 - Math.floor(pct / 10));
-    let etaStr = '';
-    if (pct > 0 && pct < 100 && op.started_at) {
-      const elapsed = (Date.now() - new Date(op.started_at).getTime()) / 1000;
-      const remaining = (elapsed / pct) * (100 - pct);
-      if (remaining > 0) {
-        const mins = Math.floor(remaining / 60);
-        const secs = Math.floor(remaining % 60);
-        etaStr = mins > 0 ? '~' + mins + 'м ' + secs + 'с' : '~' + secs + 'с';
-      }
-    }
+    const bar = '█'.repeat(Math.floor(op.pct/10)) + '░'.repeat(10 - Math.floor(op.pct/10));
     return `<div class="op-progress-item">
       <div class="op-progress-header">
         <span class="op-progress-label">${op.label || op.op_type}</span>
-        <span class="op-progress-pct">${pct}%${etaStr ? ' · ETA ' + etaStr : ''}</span>
+        <span class="op-progress-pct">${op.pct}%</span>
       </div>
-      <div class="prog"><div class="prog-fill" style="width:${pct}%"></div></div>
-      <div class="op-progress-bar">${op.done || 0}/${op.total || 0}</div>
+      <div class="op-progress-bar">[${bar}] ${op.done}/${op.total}</div>
     </div>`;
   }).join('');
 }
@@ -4161,10 +4041,6 @@ function buildDrawer() {
    ['broadcasts','📨','Рассылки'],['more','🧩','Все функции']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
-  // Team & Audit
-  html += '<div class="nav-cat">Команда</div>';
-  html += `<div class="nav-item" onclick="closeDrawer(); openTeam()"><span class="ni-ico">👥</span>Команда</div>`;
-  html += `<div class="nav-item" onclick="closeDrawer(); openAudit()"><span class="ni-ico">📋</span>Аудит</div>`;
   // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки).
   //    Меню всегда полное и синхронно с каталогом функций, без дублирования списка.
   const more = document.getElementById('s-more');
@@ -4261,46 +4137,16 @@ function loadTab(tab) {
 
 // ── Home ───────────────────────────────────────────────
 async function loadHome() {
-  modernizeIcons(document.getElementById('s-home'));
-  const cached = getCached('infragram_cache_home');
-  if (cached) { renderCards(cached); renderAct(cached.recent_activity||[]); updateMoreStats(cached); }
+  modernizeIcons(document.getElementById('s-home'));  // SVG-иконки в быстрых действиях
   try {
     const d = await api('/api/miniapp/dashboard');
-    setCache('infragram_cache_home', d);
     renderCards(d);
     renderAct(d.recent_activity||[]);
     updateMoreStats(d);
   } catch(e) {
-    if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
+    document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
 }
-
-(function initPullToRefresh(){
-  const sc=document.getElementById('homeScroll');
-  if(!sc)return;
-  let sy=0, pulling=false;
-  sc.addEventListener('touchstart',e=>{
-    if(sc.scrollTop<=0){sy=e.touches[0].clientY;pulling=true;}
-  },{passive:true});
-  sc.addEventListener('touchmove',e=>{
-    if(!pulling)return;
-    const dy=e.touches[0].clientY-sy;
-    if(dy>0&&sc.scrollTop<=0){
-      const pr=document.getElementById('pullRefresh');
-      const h=Math.min(dy*.4,50);
-      pr.style.height=h+'px';
-      pr.textContent=h>35?'🔄 Отпустите для обновления':'🔄 Потяните вниз';
-    }
-  },{passive:true});
-  sc.addEventListener('touchend',()=>{
-    if(!pulling)return;
-    pulling=false;
-    const pr=document.getElementById('pullRefresh');
-    const h=parseFloat(pr.style.height)||0;
-    pr.style.height='0px';
-    if(h>35){loadHome();tg.HapticFeedback?.impactOccurred('medium');}
-  },{passive:true});
-})();
 
 function renderCards(d) {
   // KPI scroll row
@@ -4433,18 +4279,16 @@ const BOT_GRADS = [
 ];
 
 async function loadBots() {
-  const cached = getCached('infragram_cache_bots');
-  if (cached) { BOTS = cached.bots||[]; const botTotal = (cached.total!=null?cached.total:BOTS.length); const cntEl = document.getElementById('bots-cnt'); if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : ''; renderBots(); }
   try {
     const d = await api('/api/miniapp/bots');
-    setCache('infragram_cache_bots', d);
     BOTS = d.bots||[];
     const botTotal = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
     if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : '';
     renderBots();
   } catch(e) {
-    if (!cached) { const wrap = document.getElementById('botList'); if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); } }
+    const wrap = document.getElementById('botList');
+    if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); }
   }
 }
 
@@ -4929,39 +4773,25 @@ async function massCheckAccounts() {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function loadAccounts() {
-  const cachedAcc = getCached('infragram_cache_accounts');
-  const cachedCh = getCached('infragram_cache_channels');
-  if (cachedAcc) {
-    CUR_ACCS = cachedAcc.accounts||[];
-    const cnt = (cachedAcc.stats && cachedAcc.stats.total!=null) ? cachedAcc.stats.total : CUR_ACCS.length;
-    document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
-    txt('m-acc-cnt', cnt+' аккаунтов');
-    updateAccKpi(CUR_ACCS, cachedAcc.stats);
-    renderAccounts(CUR_ACCS);
-  }
-  if (cachedCh) {
-    CUR_CHANNELS = cachedCh.channels||[];
-    txt('m-ch-cnt', (cachedCh.total!=null?cachedCh.total:CUR_CHANNELS.length)+' каналов');
-    renderChPreview(CUR_CHANNELS, cachedCh.total);
-  }
+  // Accounts and channels load independently — one failure doesn't break the other
   api('/api/miniapp/accounts').then(ad => {
-    setCache('infragram_cache_accounts', ad);
     CUR_ACCS = ad.accounts||[];
+    // Истинное число из серверной агрегации (список ограничен LIMIT 100)
     const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
     updateAccKpi(CUR_ACCS, ad.stats);
     renderAccounts(CUR_ACCS);
   }).catch(e => {
-    if (!cachedAcc) document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
+    document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
   api('/api/miniapp/channels').then(cd => {
-    setCache('infragram_cache_channels', cd);
     CUR_CHANNELS = cd.channels||[];
+    // Истинное число каналов из cd.total (список ограничен 50) — иначе подпись врала
     txt('m-ch-cnt', (cd.total!=null?cd.total:CUR_CHANNELS.length)+' каналов');
     renderChPreview(CUR_CHANNELS, cd.total);
   }).catch(() => {
-    if (!cachedCh) txt('chPreview', '');
+    txt('chPreview', '');
   });
 }
 
@@ -5632,70 +5462,6 @@ async function sendBcast() {
 let OPS_FILTER = null;
 function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
 
-// ── Team & Audit ──────────────────────────────────────
-async function openTeam() {
-  txt('teamList','<div class="spin-wrap"><div class="spin"></div></div>');
-  push('s-team');
-  try {
-    const d = await api('/api/miniapp/team/members');
-    const rows = d.members || [];
-    if (!rows.length) { txt('teamList','<div class="empty"><div class="empty-ico">👥</div><div class="empty-txt">Пока нет участников</div></div>'); return; }
-    let h = '';
-    rows.forEach(r => {
-      const initials = (r.first_name || r.username || '?')[0].toUpperCase();
-      const colors = ['ava-blue','ava-green','ava-orange','ava-purple','ava-teal','ava-red'];
-      const cls = colors[Math.abs(r.user_id||0) % colors.length];
-      const planBadge = r.current_plan && r.current_plan !== 'free'
-        ? `<span class="badge b-gr">${r.current_plan}</span>` : '';
-      const lastSeen = r.last_active_at ? _fmtAgo(new Date(r.last_active_at)) : '';
-      h += `<div class="li">
-        <div class="ava ${cls}">${initials}</div>
-        <div class="li-body">
-          <div class="li-name">${esc(r.first_name || r.username || 'ID '+r.user_id)}</div>
-          <div class="li-sub">${r.username ? '@'+esc(r.username) : 'ID: '+r.user_id}${lastSeen ? ' · '+lastSeen : ''}</div>
-        </div>
-        <div class="li-right">${planBadge}</div>
-      </div>`;
-    });
-    txt('teamList','<div class="lst" style="margin:0 16px">'+h+'</div>');
-  } catch(e) { txt('teamList','<div class="err-msg"><div class="err-msg-ico">⚠️</div><div class="err-msg-txt">Ошибка загрузки</div></div>'); }
-}
-
-async function openAudit() {
-  txt('auditList','<div class="spin-wrap"><div class="spin"></div></div>');
-  push('s-audit');
-  try {
-    const d = await api('/api/miniapp/audit');
-    const rows = d.entries || [];
-    if (!rows.length) { txt('auditList','<div class="empty"><div class="empty-ico">📋</div><div class="empty-txt">Нет записей за 7 дней</div></div>'); return; }
-    let h = '';
-    rows.forEach(r => {
-      const statusColors = {success:'b-gr',error:'b-rd',done:'b-gr',running:'b-bl',pending:'b-gy',failed:'b-rd'};
-      const sc = statusColors[r.status] || 'b-gy';
-      const time = r.created_at ? _fmtAgo(new Date(r.created_at)) : '';
-      const label = r.label || r.op_type || '';
-      const msg = r.message ? `<div style="font-size:12px;color:var(--hint);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.message)}</div>` : '';
-      h += `<div class="li">
-        <div class="li-body">
-          <div class="li-name">${esc(label)}</div>
-          <div class="li-sub">${r.target ? 'Цель: '+esc(String(r.target)) : ''}${time ? ' · '+time : ''}</div>
-          ${msg}
-        </div>
-        <div class="li-right"><span class="badge ${sc}">${r.status}</span></div>
-      </div>`;
-    });
-    txt('auditList','<div class="lst" style="margin:0 16px">'+h+'</div>');
-  } catch(e) { txt('auditList','<div class="err-msg"><div class="err-msg-ico">⚠️</div><div class="err-msg-txt">Ошибка загрузки</div></div>'); }
-}
-
-function _fmtAgo(d) {
-  const s = Math.floor((Date.now()-d.getTime())/1000);
-  if (s<60) return 'только что';
-  if (s<3600) return Math.floor(s/60)+' мин';
-  if (s<86400) return Math.floor(s/3600)+' ч';
-  return Math.floor(s/86400)+' д';
-}
-
 // ── Создать операцию: категорийный лаунчер ──────────────
 const OP_CREATE_CATS = [
   {title:'📢 Контент и публикация', items:[
@@ -5749,29 +5515,13 @@ function closeOpCreateAnd(fn) {
   else toast('Модуль недоступен');
 }
 
-function explainError(msg) {
-  if (!msg) return 'Неизвестная ошибка';
-  const m = msg.toLowerCase();
-  if (m.includes('floodwait') || m.includes('flood_wait')) return '⏳ Ожидание из-за ограничений Telegram';
-  if (m.includes('peer_flood') || m.includes('peerflood')) return '🚫 Слишком много запросов — подождите 48ч';
-  if (m.includes('channel_private')) return '🔒 Канал приватный';
-  if (m.includes('auth_key') || m.includes('session')) return '🔑 Сессия устарела — нужен ре-импорт';
-  if (m.includes('proxy')) return '🌐 Прокси недоступен';
-  return '❌ ' + msg.substring(0, 80);
-}
-
 async function loadOps() {
   const url = OPS_FILTER ? '/api/miniapp/operations?status='+OPS_FILTER : '/api/miniapp/operations';
   try {
     const d = await api(url);
     const ops = d.operations||[];
     if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?'По фильтру «'+OPS_FILTER+'»':''))); return; }
-    const failedOps = ops.filter(o=>o.status==='failed');
-    let retryAllBtn = '';
-    if (failedOps.length > 1) {
-      retryAllBtn = `<div style="padding:8px 16px"><button class="btn btn-o" onclick="retryAllFailed()" style="width:100%">↺ Повторить все упавшие (${failedOps.length})</button></div>`;
-    }
-    txt('opsList', retryAllBtn + ops.map(o=>{
+    txt('opsList', ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
       const canCancel = o.status==='pending'||o.status==='running';
@@ -5789,7 +5539,7 @@ async function loadOps() {
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
-        ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(explainError(o.error_msg))}</div>`:''}
+        ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(o.error_msg.substring(0,80))}</div>`:''}
       </div>`;
     }).join(''));
   } catch(e) { txt('opsList', errHtml(e.message,'loadOps()')); }
@@ -5809,62 +5559,11 @@ async function retryOp(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
-async function retryAllFailed() {
-  try {
-    const d = await api('/api/miniapp/operations?status=failed');
-    const ops = d.operations || [];
-    const failed = ops.filter(o => o.status === 'failed');
-    if (!failed.length) { toast('Нет упавших операций'); return; }
-    let ok = 0;
-    for (const o of failed) {
-      try { await api('/api/miniapp/operation/'+o.id+'/retry', {method:'POST'}); ok++; } catch(e) {}
-    }
-    toast('↺ Повторено: '+ok+' из '+failed.length); loadOps();
-  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
-}
-
 function filterOps(status, btn) {
   OPS_FILTER=status;
   document.querySelectorAll('#ops-seg .seg-opt').forEach(x=>x.classList.remove('on'));
   btn.classList.add('on');
   loadOps();
-}
-
-function exportOpsCSV() {
-  const url = '/api/miniapp/operations' + (OPS_FILTER ? '?status=' + OPS_FILTER : '') + '&token=' + encodeURIComponent(TK);
-  fetch(url).then(r=>r.json()).then(d=>{
-    const ops = d.operations || [];
-    if (!ops.length) { toast('Нет данных для экспорта'); return; }
-    const header = 'ID,Тип,Метка,Статус,Выполнено,Всего,Процент,Создано,Ошибка';
-    const rows = ops.map(o => {
-      const pct = o.total_items > 0 ? Math.round((o.done_items || 0) / o.total_items * 100) : 0;
-      return [o.id, o.op_type || '', o.label || '', o.status, o.done_items || 0, o.total_items || 0, pct + '%', o.created_at || '', (o.error_msg || '').replace(/"/g, '""')].map(v => '"' + v + '"').join(',');
-    });
-    const csv = header + '\n' + rows.join('\n');
-    const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'operations_' + new Date().toISOString().slice(0, 10) + '.csv';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast('✅ CSV скачан');
-  }).catch(() => toast('⚠️ Ошибка экспорта'));
-}
-
-function exportOpsJSON() {
-  const url = '/api/miniapp/operations' + (OPS_FILTER ? '?status=' + OPS_FILTER : '') + '&token=' + encodeURIComponent(TK);
-  fetch(url).then(r=>r.json()).then(d=>{
-    const ops = d.operations || [];
-    if (!ops.length) { toast('Нет данных для экспорта'); return; }
-    const json = JSON.stringify(ops, null, 2);
-    const blob = new Blob([json], {type: 'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'operations_' + new Date().toISOString().slice(0, 10) + '.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast('✅ JSON скачан');
-  }).catch(() => toast('⚠️ Ошибка экспорта'));
 }
 
 // ── Analytics ──────────────────────────────────────────
@@ -5874,20 +5573,14 @@ async function loadAnalytics() {
   txt('topBots','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('kwList','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('growthChart','');
-  txt('chCompare','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('heatMap','');
-  txt('opsChart','');
   try {
-    const [d, chData, opsData] = await Promise.all([
-      api('/api/miniapp/analytics'),
-      api('/api/miniapp/channels?limit=5'),
-      api('/api/miniapp/operations')
-    ]);
+    const d = await api('/api/miniapp/analytics');
     // Growth chart
     const growth = d.growth||[];
     if (growth.length) {
       const max = Math.max(...growth.map(g=>g.new_users||0), 1);
       const total = growth.reduce((s,g)=>s+(g.new_users||0),0);
+      const labels = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
       document.getElementById('growthChart').innerHTML = growth.map((g,i)=>{
         const h = Math.max(4, Math.round((g.new_users||0)/max*50));
         const day = new Date(g.day);
@@ -5921,102 +5614,9 @@ async function loadAnalytics() {
       </div>`;
     }).join('') : empty('🔍','Нет ключевых слов','Добавьте через меню бота'));
     txt('kw-val', kws.length ? kws.length+' ключей отслеживается' : '—');
-
-    // Heatmap by hour
-    const ops = (opsData&&opsData.operations)||[];
-    const hourBuckets = new Array(24).fill(0);
-    ops.forEach(op=>{
-      if(op.created_at){
-        const h = new Date(op.created_at).getHours();
-        hourBuckets[h]++;
-      }
-    });
-    const maxH = Math.max(...hourBuckets, 1);
-    const heatEl = document.getElementById('heatMap');
-    if(heatEl){
-      heatEl.innerHTML = hourBuckets.map((v,i)=>{
-        const ratio = v/maxH;
-        let bg = 'rgba(34,197,94,.08)';
-        if(ratio>.75) bg='rgba(239,68,68,.85)';
-        else if(ratio>.5) bg='rgba(239,68,68,.5)';
-        else if(ratio>.3) bg='rgba(245,158,11,.55)';
-        else if(ratio>.12) bg='rgba(34,197,94,.45)';
-        else if(v>0) bg='rgba(34,197,94,.18)';
-        return `<div style="flex:1;min-width:12px;height:28px;border-radius:3px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:8px;color:rgba(255,255,255,.5);transition:background .4s" title="${i}:00 — ${v} ops">${i%3===0?i:''}</div>`;
-      }).join('');
-    }
-
-    // Channel comparison top 5
-    const channels = (chData&&chData.channels)||[];
-    const topCh = channels.slice(0,5);
-    const maxCh = Math.max(...topCh.map(c=>c.member_count||0), 1);
-    txt('chCompare', topCh.length ? `<div style="padding:4px 0">${topCh.map(c=>{
-      const pct = Math.max(4, Math.round((c.member_count||0)/maxCh*100));
-      const lbl = c.title||c.username||'Канал';
-      return `<div style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-          <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%">${esc(lbl)}</span>
-          <span style="color:var(--hint);flex-shrink:0;margin-left:8px">${num(c.member_count||0)}</span>
-        </div>
-        <div style="height:8px;border-radius:4px;background:var(--sep);overflow:hidden">
-          <div style="height:100%;width:${pct}%;border-radius:4px;background:linear-gradient(90deg,var(--blue),var(--purple));transition:width .6s"></div>
-        </div>
-      </div>`;
-    }).join('')}</div>` : empty('📡','Нет каналов'));
-
-    // Operations per day (last 7 days)
-    const dayMap = {};
-    const dayLabels = [];
-    for(let i=6;i>=0;i--){
-      const dt=new Date();dt.setDate(dt.getDate()-i);
-      const key=dt.toISOString().slice(0,10);
-      dayMap[key]=0;
-      dayLabels.push(key);
-    }
-    ops.forEach(op=>{
-      if(op.created_at){
-        const key=op.created_at.slice(0,10);
-        if(key in dayMap) dayMap[key]++;
-      }
-    });
-    const dayVals = dayLabels.map(k=>dayMap[k]);
-    const maxOps = Math.max(...dayVals,1);
-    const totalOps = dayVals.reduce((a,b)=>a+b,0);
-    const opsEl = document.getElementById('opsChart');
-    if(opsEl){
-      opsEl.innerHTML = dayVals.map((v,i)=>{
-        const h = Math.max(3, Math.round(v/maxOps*70));
-        const dt = new Date(dayLabels[i]);
-        const lbl = dt.toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
-        return `<div class="bar-wrap"><div class="bar" style="height:${h}px;background:${v>0?'var(--blue)':'var(--sep)'}" title="${v} операций ${lbl}"></div><div class="bar-lbl">${lbl}</div></div>`;
-      }).join('');
-    }
-    const opsTot = document.getElementById('opsTotal');
-    if(opsTot) opsTot.textContent = `${totalOps} операций за 7 дней`;
   } catch(e) {
-    txt('topBots', errHtml(e.message,'loadAnalytics()'));
+    txt('topBots', errHtml(e.message,'loadPromoData()'));
   }
-}
-
-function exportAnalyticsCSV() {
-  api('/api/miniapp/analytics').then(d=>{
-    const rows = [['Рост подписчиков','',''],['Дата','Новых подписчиков','']];
-    (d.growth||[]).forEach(g=>{ rows.push([g.day, g.new_users||0, '']); });
-    rows.push(['','','']);
-    rows.push(['Топ ботов','',''],['Бот','Активных подписчиков','username']]);
-    (d.top_bots||[]).forEach(b=>{ rows.push([b.first_name||'Бот #'+b.bot_id, b.active_subs||0, b.username||'']); });
-    rows.push(['','','']);
-    rows.push(['Ключевые слова','',''],['Ключевое слово','Позиция','Бот']]);
-    (d.keywords||[]).forEach(k=>{ rows.push([k.keyword, k.last_position!=null?'#'+k.last_position:'—', k.bot_username||'']); });
-    const csv = rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
-    const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href=url; a.download='analytics_'+new Date().toISOString().slice(0,10)+'.csv';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('📥 CSV скачан');
-  }).catch(()=>toast('⚠️ Ошибка экспорта'));
 }
 
 // ── Bot toggle ─────────────────────────────────────────
@@ -11460,61 +11060,6 @@ async function submitAdminBroadcast() {
     toast('✅ Отправлено: ' + (r.sent||0) + ' юзерам');
     back();
   } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
-}
-
-function openTopoviz() { push('s-topoviz'); loadTopo(); }
-
-async function loadTopo() {
-  txt('topoCanvas', '<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const links = await api('/api/miniapp/topology/links');
-    const nodes = await api('/api/miniapp/topology');
-    renderTopology(nodes.nodes || [], links.links || []);
-  } catch(e) { txt('topoCanvas', errHtml(e.message)); }
-}
-
-function renderTopology(nodes, links) {
-  const canvas = document.getElementById('topoCanvas');
-  if (!nodes.length) { txt('topoCanvas', empty('🗺','Нет данных для топологии')); return; }
-  const w = canvas.offsetWidth;
-  const h = Math.max(400, w * 0.75);
-  canvas.style.height = h + 'px';
-  const cx = w / 2;
-  const cy = h / 2;
-  const r = Math.min(w, h) * 0.35;
-  const nodeMap = {};
-  nodes.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
-    nodeMap[n.id] = {
-      x: cx + r * Math.cos(angle),
-      y: cy + r * Math.sin(angle),
-      name: n.username || n.title || '#' + n.id,
-      type: n.type || 'channel',
-      active: n.is_active !== false,
-    };
-  });
-  let svg = '<svg width="' + w + '" height="' + h + '" style="position:absolute;top:0;left:0">';
-  links.forEach(l => {
-    const a = nodeMap[l.source || l.from];
-    const b = nodeMap[l.target || l.to];
-    if (a && b) {
-      const strength = l.strength || l.common_subscribers || 1;
-      const opacity = Math.min(1, strength / 50 + 0.2);
-      svg += '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="#3b82f6" stroke-width="' + Math.min(4, strength/10+1) + '" opacity="' + opacity + '"/>';
-    }
-  });
-  Object.values(nodeMap).forEach(n => {
-    const color = n.type === 'bot' ? '#a855f7' : n.active ? '#22c55e' : '#ef4444';
-    const size = n.type === 'bot' ? 16 : 20;
-    svg += '<circle cx="' + n.x + '" cy="' + n.y + '" r="' + size + '" fill="' + color + '" stroke="rgba(255,255,255,.2)" stroke-width="2"/>';
-    svg += '<text x="' + n.x + '" y="' + (n.y + size + 14) + '" text-anchor="middle" fill="#fafafa" font-size="11" font-weight="500">' + esc(n.name.substring(0, 15)) + '</text>';
-  });
-  svg += '</svg>';
-  canvas.innerHTML = svg;
-  const legend = document.getElementById('topoLegend');
-  legend.innerHTML = '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--hint)">' +
-    '<span>🟢 Активный канал</span><span>🟣 Бот</span><span>🔴 Неактивный</span><span>── Связь</span>' +
-    '</div>';
 }
 </script>
 </body>
