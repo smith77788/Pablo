@@ -3499,8 +3499,37 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
         )
         return
 
+    # Резолвим канал ДО записи: получаем актуальное название и проверяем, что
+    # бот — участник. Если бот не в канале, проверка подписки провалится
+    # (fail-closed) и гейт заблокирует ВСЕХ пользователей — предупреждаем.
+    resolved_title = ""
+    bot_in_channel = False
+    resolve_warning = ""
     try:
-        await db.add_subscription_gate_channel(pool, username, title="")
+        _bot = message.bot
+        _chat = await _bot.get_chat(username)
+        resolved_title = _chat.title or ""
+        try:
+            _me = await _bot.get_me()
+            _mem = await _bot.get_chat_member(username, _me.id)
+            bot_in_channel = _mem.status in ("member", "administrator", "creator")
+        except Exception:
+            bot_in_channel = False
+        if not bot_in_channel:
+            resolve_warning = (
+                "\n\n⚠️ <b>Бот не найден среди участников канала.</b>\n"
+                "Добавьте бота в канал (лучше администратором), иначе гейт "
+                "не сможет проверять подписку и заблокирует всех пользователей."
+            )
+    except Exception:
+        resolve_warning = (
+            "\n\n⚠️ <b>Не удалось открыть канал.</b>\n"
+            f"Проверьте, что <code>{_html.escape(username)}</code> существует и "
+            "бот добавлен в него. Иначе проверка подписки будет падать."
+        )
+
+    try:
+        await db.add_subscription_gate_channel(pool, username, title=resolved_title)
     except Exception as exc:
         await state.clear()
         await message.answer(f"❌ Ошибка БД: {_html.escape(str(exc)[:100])}", parse_mode="HTML")
@@ -3511,11 +3540,10 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     set_gate_channels(channels)
     await state.clear()
     gate_on = get_gate_enabled()
-    kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ К настройкам гейта", callback_data="adm:gate")
-    kb.adjust(1)
+    _name = _html.escape(resolved_title) + " " if resolved_title else ""
     await message.answer(
-        f"✅ Канал <code>{_html.escape(username)}</code> добавлен.\n\n"
+        f"✅ Канал {_name}<code>{_html.escape(username)}</code> добавлен."
+        f"{resolve_warning}\n\n"
         + _gate_text(gate_on, channels),
         parse_mode="HTML",
         reply_markup=_gate_kb(channels, gate_on),
