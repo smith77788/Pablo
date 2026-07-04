@@ -2658,6 +2658,31 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         for row in top_ops:
             lines.append(f"• {row['op_type']}: <b>{row['cnt']}</b>")
 
+    # ML Pacing Engine health — адаптивный темп на основе истории флудов/банов
+    try:
+        from services.pacing_engine import get_pacing_engine
+
+        _eng = get_pacing_engine()
+        _st = _eng.get_stats()
+        if _st.get("total", 0) > 0:
+            _mult = _eng.get_multiplier()
+            _pause = "⏸ ДА" if _eng.should_pause() else "▶️ нет"
+            lines.append("\n🧠 <b>ML-темп (адаптивный движок):</b>")
+            lines.append(
+                f"• Множитель задержки: <b>×{_mult:.2f}</b> · автопауза: {_pause}"
+            )
+            lines.append(
+                f"• Успех: <b>{_st.get('success_rate', 0)}%</b> "
+                f"(флуды {_st.get('flood', 0)} · баны {_st.get('ban', 0)} · "
+                f"выборка {_st.get('total', 0)})"
+            )
+        else:
+            lines.append(
+                "\n🧠 <b>ML-темп:</b> набирает статистику (нужно ≥10 операций)"
+            )
+    except Exception:
+        pass
+
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb()
     )

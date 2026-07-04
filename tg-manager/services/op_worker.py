@@ -1410,6 +1410,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             await _circuit_breaker_record(owner_id, _final_status == "done")
             # Adaptive pacing: record result for learning
             session_simulator.record_success(op_type, 0, elapsed) if _final_status == "done" else session_simulator.record_failure(op_type, 0, elapsed)
+            # ML pacing engine: feed success/failure so get_multiplier() learns
+            try:
+                get_pacing_engine().record_result(
+                    success=_final_status == "done", action_type=op_type
+                )
+            except Exception:
+                pass
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
@@ -1563,6 +1570,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
                 # Circuit breaker: record failure
                 await _circuit_breaker_record(owner_id, False)
+                # ML pacing engine: feed failure with flood/ban granularity
+                try:
+                    _kind = _classify_op_error(e)
+                    get_pacing_engine().record_result(
+                        success=False,
+                        is_flood=_kind in ("flood", "peer_flood"),
+                        is_ban=_kind == "fatal",
+                        action_type=op_type,
+                    )
+                except Exception:
+                    pass
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
                 _acc_ids_for_audit = params.get("account_ids") or []
