@@ -5470,3 +5470,29 @@ async def transfer_bot_via_botfather(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в transfer_bot_via_botfather")
+
+
+async def validate_session_import(session_str: str, proxy_url: str | None = None) -> dict:
+    try:
+        client = _make_client(session_str)
+        await asyncio.wait_for(client.connect(), timeout=15)
+        me = await client.get_me()
+        await client.disconnect()
+        return {"valid": True, "phone": me.phone or "", "user_id": me.id}
+    except Exception as e:
+        return {"valid": False, "error": str(e)[:200]}
+
+
+def detect_session_format(data: str) -> str:
+    data = data.strip()
+    if data.startswith('{'):
+        try:
+            import json
+            parsed = json.loads(data)
+            if 'dc_id' in parsed and 'api_id' in parsed:
+                return 'pyrogram_json'
+        except Exception:
+            pass
+    if len(data) > 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in data):
+        return 'string_session'
+    return 'unknown'
