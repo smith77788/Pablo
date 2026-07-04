@@ -8099,6 +8099,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("admin_user_unban uid=%d target=%d", uid, target_id)
             return _err(str(e), 500)
 
+    async def admin_audit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            rows = await pool.fetch(
+                """SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at,
+                          oq.owner_id, oq.op_type, oq.label
+                   FROM operation_log ol
+                   JOIN operation_queue oq ON oq.id = ol.op_id
+                   WHERE ol.created_at > NOW() - INTERVAL '24 hours'
+                   ORDER BY ol.created_at DESC LIMIT 100""")
+            return _json_resp({"audit": [
+                {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                for r in rows
+            ]})
+        except Exception as e:
+            log.exception("admin_audit uid=%d", uid)
+            return _err(str(e), 500)
+
+    async def admin_ops_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid or not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            rows = await pool.fetch(
+                """SELECT op_type, COUNT(*) as total,
+                          SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done,
+                          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
+                          AVG(EXTRACT(EPOCH FROM (finished_at - started_at))) as avg_duration_s
+                   FROM operation_queue
+                   WHERE created_at > NOW() - INTERVAL '7 days'
+                   GROUP BY op_type
+                   ORDER BY total DESC""")
+            return _json_resp({"stats": [
+                {k: (round(float(v), 2) if k == "avg_duration_s" else int(v) if v is not None else 0) for k, v in dict(r).items()}
+                for r in rows
+            ]})
+        except Exception as e:
+            log.exception("admin_ops_stats uid=%d", uid)
+            return _err(str(e), 500)
+
     app.router.add_get("/api/miniapp/admin/users", admin_users)
     app.router.add_get("/api/miniapp/admin/stats", admin_stats)
     app.router.add_get("/api/miniapp/admin/user/{user_id}", admin_user_detail)
@@ -8107,6 +8149,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/admin/user/{user_id}/revoke", admin_user_revoke)
     app.router.add_post("/api/miniapp/admin/user/{user_id}/ban", admin_user_ban)
     app.router.add_post("/api/miniapp/admin/user/{user_id}/unban", admin_user_unban)
+    app.router.add_get("/api/miniapp/admin/audit", admin_audit)
+    app.router.add_get("/api/miniapp/admin/ops/stats", admin_ops_stats)
 
     async def miniapp_config(request: web.Request) -> web.Response:
         """Public config endpoint — no auth required. Returns bot info for frontend."""
