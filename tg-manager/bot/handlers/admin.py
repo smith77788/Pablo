@@ -2926,6 +2926,21 @@ async def notify_new_platform_user(
         )
         return
     if not admin_ids:
+        # Fallback: если ADMIN_IDS пуст и нет сессионных админов — пытаемся
+        # найти любого пользователя с ролью owner в БД.
+        try:
+            fallback = await pool.fetchval(
+                "SELECT user_id FROM platform_users WHERE current_plan IS NOT NULL ORDER BY created_at ASC LIMIT 1"
+            )
+            if fallback:
+                admin_ids = {int(fallback)}
+                log.info(
+                    "new_platform_user: ADMIN_IDS пуст — fallback на первого пользователя user_id=%s",
+                    fallback,
+                )
+        except Exception:
+            pass
+    if not admin_ids:
         log.warning(
             "new_platform_user: нет получателей (ADMIN_IDS пуст и нет сессионных админов) — "
             "уведомление о user_id=%s не отправлено. Задайте ADMIN_IDS в окружении.",
