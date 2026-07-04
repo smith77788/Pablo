@@ -282,22 +282,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            stats = await _stats(pool, uid)
-        except Exception:
-            stats = {"bots": 0, "channels": 0, "subscribers": 0,
-                     "campaigns_active": 0, "funnels_active": 0,
-                     "accounts": 0, "ops_running": 0}
-        try:
-            # План — из того же источника, что и у бота (subscriptions/get_plan),
-            # иначе дашборд показывал «free» при оплаченном тарифе.
+
+        # Все запросы дашборда независимы — выполняем их параллельно одним
+        # gather вместо ~8 последовательных round-trip'ов к БД.
+        async def _plan():
             try:
                 from bot.utils.subscription import get_plan as _gp
-                stats["plan"] = await _gp(pool, uid)
+                return await _gp(pool, uid)
             except Exception:
-                stats["plan"] = None
-            plan_row = await pool.fetchrow(
-                "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid)
+                return None
+        _q = {
+            "stats": _stats(pool, uid),
+            "plan": _plan(),
+            "plan_row": pool.fetchrow(
+                "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid),
+            "exp_row": pool.fetchrow(
+                "SELECT expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
+                "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid),
+            "activity": pool.fetch(
+                """SELECT COALESCE(label, op_type) AS action, status, created_at,
+                          done_items, total_items, error_msg
+                   FROM operation_queue WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 10""", uid),
+            "acc_health": pool.fetchval(
+                "SELECT ROUND(AVG(COALESCE(trust_score, 100))) FROM tg_accounts WHERE owner_id=$1 AND is_active=true", uid),
+            "queue_backlog": pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'", uid),
+            "ops_failed": pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='failed' AND created_at > NOW() - INTERVAL '24 hours'", uid),
+        }
+        _keys = list(_q.keys())
+        _res = await asyncio.gather(*_q.values(), return_exceptions=True)
+        r = {k: (None if isinstance(v, Exception) else v) for k, v in zip(_keys, _res)}
+
+        stats = r["stats"] or {"bots": 0, "channels": 0, "subscribers": 0,
+                               "campaigns_active": 0, "funnels_active": 0,
+                               "accounts": 0, "ops_running": 0}
+        # План
+        plan_row = r["plan_row"]
+        try:
+            stats["plan"] = r["plan"]
             if not stats.get("plan"):
                 stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
             try:
@@ -305,62 +329,33 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 stats["plan"] = _cp(stats["plan"])
             except Exception:
                 pass
-            # Срок — из активной подписки, иначе из platform_users.
-            _exp_row = await pool.fetchrow(
-                "SELECT expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
-                "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid)
-            if _exp_row:
-                stats["plan_expires_at"] = str(_exp_row["expires_at"])
+            if r["exp_row"]:
+                stats["plan_expires_at"] = str(r["exp_row"]["expires_at"])
             else:
                 stats["plan_expires_at"] = str(plan_row["plan_expires_at"]) if plan_row and plan_row["plan_expires_at"] else None
         except Exception:
             stats["plan"] = "free"
             stats["plan_expires_at"] = None
+        # Лента активности
+        def _op_action(s):
+            return ("completed" if s == "done" else
+                    "running" if s == "running" else
+                    "error" if s == "failed" else s)
         try:
-            activity = await pool.fetch(
-                """SELECT COALESCE(label, op_type) AS action,
-                          status, created_at,
-                          done_items, total_items, error_msg
-                   FROM operation_queue WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT 10""",
-                uid)
-            def _op_action(row):
-                s = row["status"]
-                return ("completed" if s == "done" else
-                        "running" if s == "running" else
-                        "error" if s == "failed" else s)
             stats["recent_activity"] = [
                 {
-                    "action": r["action"],
-                    "status": _op_action(r),
-                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                    "detail": (f'{r["done_items"]}/{r["total_items"]}' if (r["total_items"] or 0) > 0 else None),
+                    "action": a["action"],
+                    "status": _op_action(a["status"]),
+                    "created_at": a["created_at"].isoformat() if a["created_at"] else None,
+                    "detail": (f'{a["done_items"]}/{a["total_items"]}' if (a["total_items"] or 0) > 0 else None),
                 }
-                for r in activity
+                for a in (r["activity"] or [])
             ]
         except Exception:
             stats["recent_activity"] = []
-        try:
-            acc_health = await pool.fetchval(
-                "SELECT ROUND(AVG(COALESCE(trust_score, 100))) FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
-                uid)
-            stats["acc_health"] = int(acc_health) if acc_health is not None else 100
-        except Exception:
-            stats["acc_health"] = 100
-        try:
-            queue_backlog = await pool.fetchval(
-                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'",
-                uid)
-            stats["queue_backlog"] = int(queue_backlog or 0)
-        except Exception:
-            stats["queue_backlog"] = 0
-        try:
-            ops_failed = await pool.fetchval(
-                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='failed' AND created_at > NOW() - INTERVAL '24 hours'",
-                uid)
-            stats["ops_failed"] = int(ops_failed or 0)
-        except Exception:
-            stats["ops_failed"] = 0
+        stats["acc_health"] = int(r["acc_health"]) if r["acc_health"] is not None else 100
+        stats["queue_backlog"] = int(r["queue_backlog"] or 0)
+        stats["ops_failed"] = int(r["ops_failed"] or 0)
         return _json_resp(stats)
 
     # ── Bots ─────────────────────────────────────────────────────────────────
