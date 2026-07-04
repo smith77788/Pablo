@@ -71,7 +71,7 @@ def test_disallowed_tokens_allows_normal_punctuation():
 
 
 def test_quality_warnings_clean_template():
-    assert s.quality_warnings("{Привет|Хай} {мир|друг}") == []
+    assert s.quality_warnings("{Привет|Здравствуйте|Хай} {мир|друг|земля}") == []
 
 
 def test_quality_warnings_flags_long_run():
@@ -83,13 +83,16 @@ def test_quality_warnings_flags_long_run():
 
 
 def test_is_valid_template():
-    assert s.is_valid_template("{A|B}") is True
-    assert s.is_valid_template("{A|B") is False
+    assert s.is_valid_template("{Привет|Здравствуйте|Хай}") is True
+    assert s.is_valid_template("{A|B}") is False  # <3 вариантов
+    assert s.is_valid_template("{А|Б|В}") is True
+    assert s.is_valid_template("{Привет|Здравствуйте}") is False  # <3
+    assert s.is_valid_template("{Привет") is False
 
 
 def test_keep_valid_templates_filters_broken():
-    kept = s.keep_valid_templates(["{A|B}", "{oops", "{C|D}"])
-    assert kept == ["{A|B}", "{C|D}"]
+    kept = s.keep_valid_templates(["{Привет|Здравствуйте|Хай}", "{oops", "{A|B|C}"])
+    assert kept == ["{Привет|Здравствуйте|Хай}", "{A|B|C}"]
 
 
 def test_expand_template_is_deterministic_under_seed():
@@ -118,10 +121,10 @@ async def _fake_complete_factory(response: str):
 @pytest.mark.asyncio
 async def test_generate_spins_returns_valid_templates():
     complete = await _fake_complete_factory(
-        json.dumps(["{Привет|Хай}, {как дела|как ты}?", "{Здравствуйте|Приветствую}!"])
+        json.dumps(["{Привет|Здравствуйте|Хай}, {как дела|как ты|как поживаешь}?", "{Здравствуйте|Приветствую|Добрый день}!"])
     )
     result = await s.generate_spins("Привет, как дела?", complete=complete, count=2)
-    assert result == ["{Привет|Хай}, {как дела|как ты}?", "{Здравствуйте|Приветствую}!"]
+    assert result == ["{Привет|Здравствуйте|Хай}, {как дела|как ты|как поживаешь}?", "{Здравствуйте|Приветствую|Добрый день}!"]
     system, user = complete.calls[0]
     assert "2" in system
     assert user == "Привет, как дела?"
@@ -129,9 +132,9 @@ async def test_generate_spins_returns_valid_templates():
 
 @pytest.mark.asyncio
 async def test_generate_spins_drops_invalid_and_keeps_valid():
-    complete = await _fake_complete_factory(json.dumps(["{A|B}", "{broken", "{C|D}"]))
+    complete = await _fake_complete_factory(json.dumps(["{Привет|Здравствуйте|Хай}", "{broken", "{мир|друг|земля}"]))
     result = await s.generate_spins("текст", complete=complete, count=3)
-    assert result == ["{A|B}", "{C|D}"]
+    assert result == ["{Привет|Здравствуйте|Хай}", "{мир|друг|земля}"]
 
 
 def test_introduces_foreign_letters_detects_leak():
@@ -162,7 +165,7 @@ async def test_generate_spins_drops_foreign_leak_templates():
 async def test_generate_spins_caps_to_requested_count():
     # модель вернула 9 валидных — наружу должно уйти ровно count
     complete = await _fake_complete_factory(
-        json.dumps([f"{{A{i}|B{i}}}" for i in range(9)])
+        json.dumps([f"{{A{i}|B{i}|C{i}}}" for i in range(9)])
     )
     result = await s.generate_spins("текст", complete=complete, count=5)
     assert len(result) == 5
@@ -170,7 +173,7 @@ async def test_generate_spins_caps_to_requested_count():
 
 @pytest.mark.asyncio
 async def test_generate_spins_empty_script_raises():
-    complete = await _fake_complete_factory(json.dumps(["{A|B}"]))
+    complete = await _fake_complete_factory(json.dumps(["{Привет|Здравствуйте|Хай}"]))
     with pytest.raises(s.SpintaxServiceError):
         await s.generate_spins("   ", complete=complete, count=1)
 
