@@ -2608,6 +2608,99 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_add uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def bot_factory_create(request: web.Request) -> web.Response:
+        """Создание ботов со всеми настройками из Mini App."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        token = str(data.get("token", "")).strip()
+        name_template = str(data.get("name", "")).strip()
+        uname_template = str(data.get("username", "")).strip().lstrip("@").rstrip("_")
+        description = str(data.get("description", "")).strip()
+        short_desc = str(data.get("short_description", "")).strip()
+        account_id = data.get("account_id")
+        count = min(max(int(data.get("count", 1)), 1), 10)
+        ecosystem_id = data.get("ecosystem_id")
+        if not token:
+            return _err("token обязателен", 400)
+        if not name_template:
+            return _err("имя бота обязательно", 400)
+        import re as _re
+        if not _re.match(r'^\d+:[A-Za-z0-9_-]{30,}$', token):
+            return _err("Неверный формат токена", 400)
+        try:
+            import aiohttp as _aio
+            async with _aio.ClientSession() as _http:
+                async with _http.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=_aio.ClientTimeout(total=10),
+                ) as _resp:
+                    me = await _resp.json()
+            if not me.get("ok"):
+                return _err(f"Telegram API: {me.get('description', 'неверный токен')}", 400)
+            bot_info = me["result"]
+            bot_id = bot_info["id"]
+            from database import db as _db
+            already_owned = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            if not already_owned:
+                from bot.utils.subscription import get_bot_limit, get_effective_bot_count
+                _lim = await get_bot_limit(pool, uid)
+                if await get_effective_bot_count(pool, uid) >= _lim:
+                    return _err(f"Достигнут лимит ботов ({_lim})", 403)
+            result = await _db.add_bot(pool, token, bot_id, bot_info.get("username", ""), bot_info.get("first_name", ""), uid)
+            if result == "taken":
+                return _err("Этот бот уже добавлен другим пользователем", 409)
+            if result is False:
+                return _json_resp({"ok": True, "already_exists": True, "bot_id": bot_id})
+            # Применяем настройки к боту через Telegram API
+            applied = []
+            if name_template:
+                try:
+                    async with _aio.ClientSession() as _http:
+                        await _http.get(f"https://api.telegram.org/bot{token}/setMyName?name={_aio.helpers.quote(name_template)}", timeout=_aio.ClientTimeout(total=10))
+                    applied.append("name")
+                except Exception:
+                    pass
+            if description:
+                try:
+                    async with _aio.ClientSession() as _http:
+                        await _http.get(f"https://api.telegram.org/bot{token}/setMyDescription?description={_aio.helpers.quote(description)}", timeout=_aio.ClientTimeout(total=10))
+                    applied.append("description")
+                except Exception:
+                    pass
+            if short_desc:
+                try:
+                    async with _aio.ClientSession() as _http:
+                        await _http.get(f"https://api.telegram.org/bot{token}/setMyShortDescription?short_description={_aio.helpers.quote(short_desc)}", timeout=_aio.ClientTimeout(total=10))
+                    applied.append("short_description")
+                except Exception:
+                    pass
+            # Привязка к экосистеме
+            if ecosystem_id:
+                try:
+                    await pool.execute(
+                        "INSERT INTO ecosystem_bots (ecosystem_id, bot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                        int(ecosystem_id), bot_id,
+                    )
+                    applied.append("ecosystem")
+                except Exception:
+                    pass
+            return _json_resp({
+                "ok": True, "bot_id": bot_id,
+                "username": bot_info.get("username", ""),
+                "first_name": bot_info.get("first_name", ""),
+                "applied_settings": applied,
+                "count": count,
+            })
+        except Exception as exc:
+            log.exception("bot_factory_create uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def bot_remove(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -7679,6 +7772,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bots
     app.router.add_get("/api/miniapp/bots", bots)
     app.router.add_post("/api/miniapp/bot/add", bot_add)
+    app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)
     app.router.add_get("/api/miniapp/bot/{bot_id}/auto_replies", bot_auto_replies)
