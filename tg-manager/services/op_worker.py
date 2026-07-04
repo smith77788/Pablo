@@ -15,6 +15,7 @@ from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import infra_memory as _infra_mem
 from services import session_simulator
+from services.pacing_engine import get_pacing_engine
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +153,51 @@ def _circuit_breaker_status(owner_id: int) -> dict:
         return {"status": "closed", "failures": 0}
     remaining = int(state["cooldown_until"] - now) if state.get("cooldown_until") else 0
     return {"status": "open", "failures": state.get("failures", 0), "cooldown_remaining_s": remaining}
+
+
+# ── Адаптивный темп по времени суток + ML ─────────────────────────────────────
+# Система учитывает время суток, день недели и историю флудов/банов (ML-движок)
+# для оптимальных задержек между действиями.
+
+import datetime as _dt
+
+# Множители задержек по часам суток (0-23). Ночью — усиленные паузы, днём — нормальные.
+_HOUR_MULTIPLIER = [
+    2.0, 2.0, 2.0, 2.0, 2.0, 1.8,
+    1.5, 1.2, 1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.1,
+    1.2, 1.3, 1.5, 1.8, 2.0, 2.0,
+]
+
+_DAY_MULTIPLIER = [1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.5]
+
+
+def get_adaptive_delay(base_delay: float, tz_offset: int = 2, action_type: str = "") -> float:
+    """Рассчитать адаптивную задержку с учётом времени суток и дня недели."""
+    now = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=tz_offset)
+    hour = now.hour
+    weekday = now.weekday()  # 0=пн, 6=вс
+
+    hour_mult = _HOUR_MULTIPLIER[hour]
+    day_mult = _DAY_MULTIPLIER[weekday]
+
+    ml_mult = get_pacing_engine().get_multiplier(action_type)
+    jitter = random.uniform(0.85, 1.15)
+    delay = base_delay * hour_mult * day_mult * ml_mult * jitter
+
+    log.debug(
+        "adaptive_pacing: base=%.1f h_mult=%.1f d_mult=%.1f ml=%.1f → delay=%.1fs (hour=%d, weekday=%d)",
+        base_delay, hour_mult, day_mult, ml_mult, delay, hour, weekday,
+    )
+    return delay
+
+
+def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int = 2, action_type: str = "") -> float:
+    """Адаптивная задержка для батч-операций с учётом размера батча."""
+    base = get_adaptive_delay(base_delay, tz_offset, action_type)
+    # Большие батчи — увеличиваем задержку пропорционально
+    batch_factor = 1.0 + (batch_size / 100) * 0.3  # +30% за каждые 100 аккаунтов
+    return base * batch_factor
 
 
 async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
@@ -1289,6 +1335,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             await _circuit_breaker_record(owner_id, _final_status == "done")
             # Adaptive pacing: record result for learning
             session_simulator.record_success(op_type, 0, elapsed) if _final_status == "done" else session_simulator.record_failure(op_type, 0, elapsed)
+            # ML pacing engine: feed success/failure so get_multiplier() learns
+            try:
+                get_pacing_engine().record_result(
+                    success=_final_status == "done", action_type=op_type
+                )
+            except Exception:
+                pass
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
@@ -1442,6 +1495,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
                 # Circuit breaker: record failure
                 await _circuit_breaker_record(owner_id, False)
+                # ML pacing engine: feed failure with flood/ban granularity
+                try:
+                    _kind = _classify_op_error(e)
+                    get_pacing_engine().record_result(
+                        success=False,
+                        is_flood=_kind in ("flood", "peer_flood"),
+                        is_ban=_kind == "fatal",
+                        action_type=op_type,
+                    )
+                except Exception:
+                    pass
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
                 _acc_ids_for_audit = params.get("account_ids") or []
