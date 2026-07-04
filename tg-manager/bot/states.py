@@ -640,3 +640,4 @@ class NodesBroadcastFSM(StatesGroup):
 class SpinFlow(StatesGroup):
     waiting_script = State()   # ждём обычный текст сценария для авто-спина
     waiting_expand = State()   # ждём готовый spintax-шаблон для раскрытия
+    showing = State()          # показан результат; храним шаблоны для быстрой перегенерации
