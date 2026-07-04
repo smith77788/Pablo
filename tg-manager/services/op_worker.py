@@ -1256,11 +1256,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # params: {target: str, reason: str}
                 result = await _exec_report_peer(pool, bot, op_id, owner_id, params)
             elif op_type == "auto_register":
-                # Auto-registration is handled by the bot flow, not op_worker
-                result = {
-                    "status": "done",
-                    "summary": "✅ Авто-регистрация запущена через систему",
-                }
+                result = await _exec_auto_register(pool, bot, op_id, owner_id, params)
             elif op_type == "leave_all_chats":
                 result = await _exec_leave_all_chats(pool, bot, op_id, owner_id, params)
             elif op_type == "delete_contacts":
@@ -8078,6 +8074,53 @@ async def _exec_report_peer(
         "failed": fail_count,
         "total": len(accounts),
         "summary": f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно" + (f" ❌ {fail_count}" if fail_count else ""),
+    }
+
+
+async def _exec_auto_register(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Батч-регистрация Telegram-аккаунтов через SMS-сервис (5sim/sms-activate).
+    params: {count:int, country:str}. Ключи SMS-сервиса берутся из platform_settings."""
+    from bot.handlers.auto_registrar import _get_sms_client, _do_batch_register
+
+    try:
+        cnt = max(1, min(50, int(params.get("count") or 1)))
+    except (TypeError, ValueError):
+        cnt = 1
+    country = str(params.get("country") or "RU")
+
+    sms_client, service = await _get_sms_client(pool)
+    if not sms_client:
+        return {"status": "failed",
+                "summary": f"⚠️ Не задан API-ключ SMS-сервиса ({service}). "
+                           "Админ платформы задаёт ключ в настройках бота."}
+
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", cnt, op_id)
+
+    async def _progress(i, ok, failed):
+        try:
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=$1 WHERE id=$2", ok + failed, op_id)
+        except Exception:
+            pass
+        return not await _is_cancelled(pool, op_id)
+
+    try:
+        res = await _do_batch_register(pool, owner_id, country, cnt, sms_client, None,
+                                       progress_cb=_progress)
+    except Exception as exc:
+        log.exception("auto_register op=%d owner=%d", op_id, owner_id)
+        return {"status": "failed", "summary": f"⚠️ Ошибка авторегистрации: {str(exc)[:120]}"}
+
+    ok_n = len(res.get("ok", []))
+    fail_n = len(res.get("failed", []))
+    await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", ok_n + fail_n, op_id)
+    return {
+        "status": "done" if ok_n else "failed",
+        "ok": ok_n,
+        "failed": fail_n,
+        "summary": f"📱 Авторег {country}: ✅ {ok_n}/{cnt}" + (f" ⚠️ {fail_n}" if fail_n else ""),
     }
 
 
