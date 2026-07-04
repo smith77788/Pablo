@@ -411,7 +411,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM operation_queue WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 10""", uid),
             "acc_health": pool.fetchval(
-                "SELECT ROUND(AVG(COALESCE(trust_score, 100))) FROM tg_accounts WHERE owner_id=$1 AND is_active=true", uid),
+                """SELECT ROUND(AVG(
+                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
+                         ELSE COALESCE(trust_score, 1.0)
+                    END
+                ) * 100) FROM tg_accounts WHERE owner_id=$1 AND is_active=true""", uid),
             "queue_backlog": pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'", uid),
             "ops_failed": pool.fetchval(
