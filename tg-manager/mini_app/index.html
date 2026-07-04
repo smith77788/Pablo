@@ -408,6 +408,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
+    <div style="flex-shrink:0;font-size:17px;cursor:pointer;opacity:.7" onclick="loadDashboard()">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
@@ -1941,7 +1942,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button></div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="exportOpsCSV()">📥</span>
+      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button>
+    </div>
   </div>
   <div class="sub-sb">
     <div class="seg" id="ops-seg">
@@ -7165,6 +7169,25 @@ function exportCSV(path) {
   try { tg.openLink(url, {try_instant_view:false}); }
   catch(_) { window.open(url, '_blank'); }
   toast('Файл открывается для скачивания…');
+}
+
+function exportOpsCSV() {
+  const rows = [['ID','Тип','Статус','Создана','Канал','Прогресс']];
+  document.querySelectorAll('#opsList .li').forEach(el => {
+    const name = el.querySelector('.li-name')?.textContent?.trim() || '';
+    const sub = el.querySelector('.li-sub')?.textContent?.trim() || '';
+    const badge = el.querySelector('.badge')?.textContent?.trim() || '';
+    rows.push(['', name, badge, '', sub, '']);
+  });
+  if (rows.length < 2) { toast('Нет операций для экспорта'); return; }
+  const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'operations_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('CSV файл скачан');
 }
 
 function nuSwitch(which) {
