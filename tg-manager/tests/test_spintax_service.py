@@ -131,6 +131,16 @@ async def test_generate_spins_drops_invalid_and_keeps_valid():
 
 
 @pytest.mark.asyncio
+async def test_generate_spins_caps_to_requested_count():
+    # модель вернула 9 валидных — наружу должно уйти ровно count
+    complete = await _fake_complete_factory(
+        json.dumps([f"{{A{i}|B{i}}}" for i in range(9)])
+    )
+    result = await s.generate_spins("текст", complete=complete, count=5)
+    assert len(result) == 5
+
+
+@pytest.mark.asyncio
 async def test_generate_spins_empty_script_raises():
     complete = await _fake_complete_factory(json.dumps(["{A|B}"]))
     with pytest.raises(s.SpintaxServiceError):

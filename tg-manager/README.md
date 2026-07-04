@@ -33,6 +33,11 @@ Telegram-native infrastructure and mass-action operating system. Maximum Telegra
   no more than two unspun words in a row
 - Every template is validated by the vendored engine
   (`services/spintax_engine/`); ready templates expand into random variants
+- `🔁 Ещё генерация` re-rolls the stored templates instantly, without another
+  LLM call
+- Uses strong models by default (DeepSeek V3 / Llama-3.3-70B on OpenRouter) to
+  avoid junk from tiny models; override with `SPIN_MODELS` (comma-separated
+  OpenRouter models)
 
 ### Billing & Subscriptions
 - Crypto payments (TON, TRON)

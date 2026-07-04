@@ -14,12 +14,17 @@
   4. Кнопка «🔁 Ещё генерация» мгновенно перераскрывает уже готовые шаблоны в
      новые случайные варианты — БЕЗ повторного обращения к LLM (быстро и без
      лишних вызовов). Шаблоны хранятся в FSM (Postgres) до новой генерации.
+
+Для качества модуль использует сильные модели (см. ``_SPIN_PREFERRED_MODELS``),
+а не слабые 3B/7B из общего failover — их можно переопределить переменной
+окружения ``SPIN_MODELS`` (список моделей OpenRouter через запятую).
 """
 
 from __future__ import annotations
 
 import html
 import logging
+import os
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -41,6 +46,31 @@ router = Router()
 _SPIN_COUNT = spintax_service.DEFAULT_SPIN_COUNT
 _MAX_SCRIPT_LEN = 2000
 _DATA_TEMPLATES = "spin_templates"  # ключ в FSM-данных для хранения шаблонов
+_SPIN_TEMPERATURE = 0.7  # ниже, чем у чата: меньше «уплывания» смысла и языка
+
+# Сильные модели специально для /spin (слабые 3B/7B дают брак: чужой язык,
+# выдуманные слова, потеря смысла). Порядок = приоритет; можно переопределить
+# переменной окружения SPIN_MODELS (через запятую, для OpenRouter).
+_SPIN_PREFERRED_MODELS: dict[str, str] = {
+    "openrouter": (
+        "deepseek/deepseek-chat-v3-0324:free,"
+        "meta-llama/llama-3.3-70b-instruct:free,"
+        "google/gemini-2.0-flash-exp:free"
+    ),
+    "groq": "llama-3.3-70b-versatile",
+    "gemini": "gemini-2.0-flash",
+}
+
+
+def _models_for(provider) -> list[str]:
+    """Список моделей для /spin: сильные впереди, дефолтные провайдера — запас."""
+    if provider.name == "openrouter":
+        raw = os.getenv("SPIN_MODELS", "").strip() or _SPIN_PREFERRED_MODELS["openrouter"]
+    else:
+        raw = _SPIN_PREFERRED_MODELS.get(provider.name, "")
+    preferred = [m.strip() for m in raw.split(",") if m.strip()]
+    # запасные модели провайдера, которых ещё нет в списке
+    return preferred + [m for m in provider.models if m not in preferred]
 
 _INTRO = (
     "🎲 <b>Spintax-модуль</b>\n\n"
@@ -91,18 +121,18 @@ async def _ai_complete(system: str, user: str) -> str:
     ]
     last_error: Exception | None = None
     for provider in providers:
-        for model in provider.models:
+        for model in _models_for(provider):
             client = AsyncOpenAI(
                 api_key=provider.api_key,
                 base_url=provider.base_url,
-                timeout=30.0,
+                timeout=45.0,
             )
             try:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    max_tokens=2000,
-                    temperature=1.0,
+                    max_tokens=2500,
+                    temperature=_SPIN_TEMPERATURE,
                 )
                 text = response.choices[0].message.content or ""
                 if text.strip():
