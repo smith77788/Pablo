@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import html
 import logging
-import os
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -36,8 +35,7 @@ from bot.callbacks import BmCb, SpinCb
 from bot.states import SpinFlow
 from bot.utils.op_helpers import safe_answer
 
-from services import spintax_service
-from services.ai_providers import configured_providers
+from services import spintax_ai, spintax_service
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -46,31 +44,6 @@ router = Router()
 _SPIN_COUNT = spintax_service.DEFAULT_SPIN_COUNT
 _MAX_SCRIPT_LEN = 2000
 _DATA_TEMPLATES = "spin_templates"  # ключ в FSM-данных для хранения шаблонов
-_SPIN_TEMPERATURE = 0.7  # ниже, чем у чата: меньше «уплывания» смысла и языка
-
-# Сильные модели специально для /spin (слабые 3B/7B дают брак: чужой язык,
-# выдуманные слова, потеря смысла). Порядок = приоритет; можно переопределить
-# переменной окружения SPIN_MODELS (через запятую, для OpenRouter).
-_SPIN_PREFERRED_MODELS: dict[str, str] = {
-    "openrouter": (
-        "deepseek/deepseek-chat-v3-0324:free,"
-        "meta-llama/llama-3.3-70b-instruct:free,"
-        "google/gemini-2.0-flash-exp:free"
-    ),
-    "groq": "llama-3.3-70b-versatile",
-    "gemini": "gemini-2.0-flash",
-}
-
-
-def _models_for(provider) -> list[str]:
-    """Список моделей для /spin: сильные впереди, дефолтные провайдера — запас."""
-    if provider.name == "openrouter":
-        raw = os.getenv("SPIN_MODELS", "").strip() or _SPIN_PREFERRED_MODELS["openrouter"]
-    else:
-        raw = _SPIN_PREFERRED_MODELS.get(provider.name, "")
-    preferred = [m.strip() for m in raw.split(",") if m.strip()]
-    # запасные модели провайдера, которых ещё нет в списке
-    return preferred + [m for m in provider.models if m not in preferred]
 
 
 def _plural_variant(n: int) -> str:
@@ -113,47 +86,8 @@ def _result_kb() -> InlineKeyboardBuilder:
     return kb
 
 
-async def _ai_complete(system: str, user: str) -> str:
-    """Единичный запрос к LLM с перебором провайдеров (OpenAI-совместимый API)."""
-    providers = configured_providers()
-    if not providers:
-        raise spintax_service.SpintaxServiceError(
-            "AI не настроен: добавьте OPENROUTER_API_KEY, GROQ_API_KEY или GEMINI_API_KEY"
-        )
-    try:
-        from openai import AsyncOpenAI
-    except ImportError as exc:  # pragma: no cover - зависит от окружения
-        raise spintax_service.SpintaxServiceError("библиотека openai не установлена") from exc
-
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-    last_error: Exception | None = None
-    for provider in providers:
-        for model in _models_for(provider):
-            client = AsyncOpenAI(
-                api_key=provider.api_key,
-                base_url=provider.base_url,
-                timeout=45.0,
-            )
-            try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=2500,
-                    temperature=_SPIN_TEMPERATURE,
-                )
-                text = response.choices[0].message.content or ""
-                if text.strip():
-                    return text
-            except Exception as exc:  # noqa: BLE001 - failover по провайдерам
-                last_error = exc
-                log_exc_swallow(log, f"spin: провайдер {provider.name}/{model} не ответил")
-                continue
-    raise spintax_service.SpintaxServiceError(
-        f"ни один AI-провайдер не ответил: {last_error}" if last_error else "AI недоступен"
-    )
+# Вызов LLM вынесен в services.spintax_ai (общий с Mini App).
+_ai_complete = spintax_ai.complete
 
 
 # ── Точки входа ──────────────────────────────────────────────────────────────

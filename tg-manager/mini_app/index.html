@@ -712,6 +712,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
   <div class="sb">
+    <div style="padding:6px 0 2px"><button class="btn btn-s" onclick="openSpintax()" style="width:100%">🎲 Spintax — рандомизация текста</button></div>
     <div class="sec-row"><div class="sec">Рассылки по ботам</div></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div><span class="sec-btn" onclick="openCmpModal()">+ Создать</span></div>
@@ -763,6 +764,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="mgmt-tile" onclick="openQuickPost()">
         <div class="mgmt-tile-ico">✍️</div>
         <div class="mgmt-tile-lbl">Быстрый пост</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSpintax()">
+        <div class="mgmt-tile-ico">🎲</div>
+        <div class="mgmt-tile-lbl">Spintax</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
@@ -2447,6 +2453,25 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="quickPostSelected" style="padding:8px 0;color:#a78bfa;font-size:13px"></div>
     <div class="field-err" id="quickPostErr"></div>
     <button class="btn btn-p" id="quickPostBtn" onclick="submitQuickPost()" style="width:100%;margin-top:8px" disabled>📤 Опубликовать (выберите каналы)</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: SPINTAX ══════════════════════ -->
+<div class="screen" id="s-spintax">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🎲 Spintax</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Текст сценария</div>
+    <div style="padding:8px 0">
+      <div class="field"><textarea id="spinText" rows="5" placeholder="Пришлите обычный текст сообщения — соберу из него spintax-варианты…" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    </div>
+    <div style="font-size:12px;color:var(--hint);padding:0 2px 4px">Синонимы в <code>{вариант1|вариант2}</code>, каждый вариант проверяется движком. Сверху — пример, снизу — сам шаблон для копирования в софт.</div>
+    <div class="field-err" id="spinErr"></div>
+    <button class="btn btn-p" id="spinBtn" onclick="submitSpin()" style="width:100%;margin-top:8px">🎲 Сгенерировать</button>
+    <div class="lst" id="spinResult" style="margin-top:10px"></div>
+    <button class="btn btn-s" id="spinRerollBtn" onclick="rerollSpin()" style="width:100%;margin-top:8px;display:none">🔁 Ещё генерация</button>
   </div>
 </div>
 
@@ -7290,6 +7315,60 @@ async function submitGrowth() {
 
 // ── Quick Post ───────────────────────────────────────────
 let QUICK_POST_SELECTED = new Set();
+// ── Spintax ────────────────────────────────────────────
+let SPIN_TEMPLATES = [];
+function openSpintax() {
+  push('s-spintax');
+  SPIN_TEMPLATES = [];
+  const t = document.getElementById('spinText'); if (t) t.value='';
+  txt('spinResult',''); txt('spinErr','');
+  document.getElementById('spinRerollBtn').style.display='none';
+}
+function _spinRender(variants) {
+  SPIN_TEMPLATES = variants.map(v=>v.template);
+  txt('spinResult', variants.map((v,i)=>{
+    const warn = (v.warnings&&v.warnings.length)
+      ? `<div style="font-size:11px;color:#f59e0b;margin-top:4px">⚠️ ${esc(v.warnings.join('; '))}</div>` : '';
+    return `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="font-weight:600">${i+1}. ${esc(v.sample||'')}</div>
+      <div onclick="copySpinTpl(${i})"
+           style="font-family:monospace;font-size:12px;background:rgba(255,255,255,.06);border-radius:8px;padding:8px;white-space:pre-wrap;word-break:break-word;cursor:pointer">${esc(v.template)}</div>
+      ${warn}
+    </div>`;
+  }).join(''));
+  document.getElementById('spinRerollBtn').style.display = variants.length?'block':'none';
+}
+function copySpinTpl(i) {
+  const tpl = SPIN_TEMPLATES[i];
+  if (tpl==null) return;
+  navigator.clipboard?.writeText(tpl).then(()=>toast('📋 Шаблон скопирован')).catch(()=>toast('Не удалось скопировать'));
+}
+async function submitSpin() {
+  const script = (document.getElementById('spinText').value||'').trim();
+  txt('spinErr','');
+  if (!script) { txt('spinErr','Пришлите текст сценария'); return; }
+  const btn = document.getElementById('spinBtn');
+  btn.disabled=true; const old=btn.textContent; btn.textContent='🎲 Генерирую…';
+  txt('spinResult','<div class="spin-wrap"><div class="spin"></div></div>');
+  document.getElementById('spinRerollBtn').style.display='none';
+  try {
+    const d = await api('/api/miniapp/spintax/generate',{method:'POST',body:JSON.stringify({script})});
+    _spinRender(d.variants||[]);
+  } catch(e) {
+    txt('spinResult',''); txt('spinErr', e.message);
+  } finally { btn.disabled=false; btn.textContent=old; }
+}
+async function rerollSpin() {
+  if (!SPIN_TEMPLATES.length) return;
+  const btn = document.getElementById('spinRerollBtn');
+  btn.disabled=true; const old=btn.textContent; btn.textContent='🔁 …';
+  try {
+    const d = await api('/api/miniapp/spintax/expand',{method:'POST',body:JSON.stringify({templates:SPIN_TEMPLATES})});
+    _spinRender(d.variants||[]);
+  } catch(e) { toast(e.message); }
+  finally { btn.disabled=false; btn.textContent=old; }
+}
+
 async function openQuickPost() {
   push('s-quickpost');
   QUICK_POST_SELECTED = new Set();

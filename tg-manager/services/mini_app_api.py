@@ -106,6 +106,26 @@ def _err(msg: str, status: int = 400) -> web.Response:
     return _json_resp({"error": msg}, status)
 
 
+def _spintax_pack(templates: list[str]) -> list[dict[str, Any]]:
+    """Список шаблонов → элементы для фронта: шаблон, пример, предупреждения."""
+    from services import spintax_service
+
+    items: list[dict[str, Any]] = []
+    for tpl in templates:
+        try:
+            sample = spintax_service.expand_template(tpl)
+        except Exception:
+            sample = ""
+        items.append(
+            {
+                "template": tpl,
+                "sample": sample,
+                "warnings": spintax_service.quality_warnings(tpl),
+            }
+        )
+    return items
+
+
 def _get_uid(request: web.Request) -> int | None:
     auth = request.headers.get("Authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else request.query.get("token")
@@ -6996,6 +7016,62 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("narrative_campaign_create uid=%d", uid)
             return _err(str(exc), 500)
 
+    # ── Spintax ──────────────────────────────────────────────────────────────
+
+    async def spintax_generate(request: web.Request) -> web.Response:
+        """Обычный текст → spintax-шаблоны (через LLM) + пример раскрытия."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        script = str(data.get("script", "")).strip()
+        if not script:
+            return _err("Пришлите текст сценария", 400)
+        if len(script) > 4000:
+            return _err("Слишком длинный текст (лимит 4000 символов)", 400)
+
+        from services import spintax_ai, spintax_service
+
+        try:
+            templates = await spintax_service.generate_spins(
+                script,
+                complete=spintax_ai.complete,
+                count=spintax_service.DEFAULT_SPIN_COUNT,
+            )
+        except spintax_service.SpintaxServiceError as exc:
+            return _err(str(exc), 400)
+        except Exception:
+            log.exception("spintax_generate uid=%d", uid)
+            return _err("Внутренняя ошибка генерации", 500)
+        return _json_resp({"variants": _spintax_pack(templates)})
+
+    async def spintax_expand(request: web.Request) -> web.Response:
+        """Быстрая перегенерация: раскрыть готовые шаблоны заново, без LLM."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        templates = data.get("templates") or []
+        single = str(data.get("template", "")).strip()
+        if single:
+            templates = [single]
+        templates = [str(t).strip() for t in templates if str(t).strip()]
+        if not templates:
+            return _err("Нет шаблонов для раскрытия", 400)
+
+        from services import spintax_service
+
+        for tpl in templates:
+            if not spintax_service.is_valid_template(tpl):
+                return _err("Некорректный spintax-шаблон", 400)
+        return _json_resp({"variants": _spintax_pack(templates)})
+
     # ── Self Promo ───────────────────────────────────────────────────────────
 
     async def self_promo_list(request: web.Request) -> web.Response:
@@ -7822,6 +7898,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)
     app.router.add_post("/api/miniapp/narrative", narrative_campaign_create)
     app.router.add_get("/api/miniapp/narrative/{campaign_id}", narrative_campaign_detail)
+    # Spintax
+    app.router.add_post("/api/miniapp/spintax/generate", spintax_generate)
+    app.router.add_post("/api/miniapp/spintax/expand", spintax_expand)
     # Self Promo
     app.router.add_get("/api/miniapp/self_promo", self_promo_list)
     app.router.add_post("/api/miniapp/self_promo/template", self_promo_create)

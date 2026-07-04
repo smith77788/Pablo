@@ -89,6 +89,7 @@ from bot.callbacks import (
     SubCb,
     AutoReplyCb,
     DmCb,
+    SpinCb,
     StrikeCb,
     TopoCb,
     VisCb,
@@ -235,8 +236,9 @@ def _comms_kb():
     kb.button(text="💬 Ответы оператора", callback_data=BmCb(action="pick_bot_for", sub="relay"))
     kb.button(text="🤖 Авто-ответы бота", callback_data=BmCb(action="pick_bot_for", sub="ar"))
     kb.button(text="🔗 Воронки (цепочки)", callback_data=BmCb(action="pick_bot_for", sub="fn"))
+    kb.button(text="🎲 Spintax (рандомизация)", callback_data=SpinCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

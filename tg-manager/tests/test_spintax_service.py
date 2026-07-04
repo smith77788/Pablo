@@ -60,10 +60,14 @@ def test_disallowed_tokens_clean():
 
 
 def test_disallowed_tokens_flags_engine_syntax():
-    tokens = s.find_disallowed_tokens("{Apple::10|Orange} [uuid] {!A|B}")
+    tokens = s.find_disallowed_tokens("{Apple::10|Orange} [uuid]")
     assert "::" in tokens
     assert "[" in tokens
-    assert "!" in tokens
+
+
+def test_disallowed_tokens_allows_normal_punctuation():
+    # ! ? # $ ~ — обычная пунктуация, не ошибка спинтакса
+    assert s.find_disallowed_tokens("{Привет|Здравствуйте}! Как дела? #тема $ ~") == []
 
 
 def test_quality_warnings_clean_template():
@@ -128,6 +132,30 @@ async def test_generate_spins_drops_invalid_and_keeps_valid():
     complete = await _fake_complete_factory(json.dumps(["{A|B}", "{broken", "{C|D}"]))
     result = await s.generate_spins("текст", complete=complete, count=3)
     assert result == ["{A|B}", "{C|D}"]
+
+
+def test_introduces_foreign_letters_detects_leak():
+    # текст на русском, в шаблоне появилась латиница «práv»
+    assert s.introduces_foreign_letters("{буквально|práv|совсем}", "буквально недавно") is True
+
+
+def test_introduces_foreign_letters_allows_when_source_has_latin():
+    # если латиница была в оригинале (бренд) — не считаем ошибкой
+    assert s.introduces_foreign_letters("{Trading|Трейдинг}", "Trading курс") is False
+
+
+def test_introduces_foreign_letters_clean_russian():
+    assert s.introduces_foreign_letters("{Привет|Здравствуйте}", "Привет мир") is False
+
+
+@pytest.mark.asyncio
+async def test_generate_spins_drops_foreign_leak_templates():
+    # первый шаблон с латиницей должен быть отброшен
+    complete = await _fake_complete_factory(
+        json.dumps(["{совсем|práv|буквально}", "{совсем|буквально|только что}"])
+    )
+    result = await s.generate_spins("совсем недавно", complete=complete, count=2)
+    assert result == ["{совсем|буквально|только что}"]
 
 
 @pytest.mark.asyncio
