@@ -5749,13 +5749,29 @@ function closeOpCreateAnd(fn) {
   else toast('Модуль недоступен');
 }
 
+function explainError(msg) {
+  if (!msg) return 'Неизвестная ошибка';
+  const m = msg.toLowerCase();
+  if (m.includes('floodwait') || m.includes('flood_wait')) return '⏳ Ожидание из-за ограничений Telegram';
+  if (m.includes('peer_flood') || m.includes('peerflood')) return '🚫 Слишком много запросов — подождите 48ч';
+  if (m.includes('channel_private')) return '🔒 Канал приватный';
+  if (m.includes('auth_key') || m.includes('session')) return '🔑 Сессия устарела — нужен ре-импорт';
+  if (m.includes('proxy')) return '🌐 Прокси недоступен';
+  return '❌ ' + msg.substring(0, 80);
+}
+
 async function loadOps() {
   const url = OPS_FILTER ? '/api/miniapp/operations?status='+OPS_FILTER : '/api/miniapp/operations';
   try {
     const d = await api(url);
     const ops = d.operations||[];
     if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?'По фильтру «'+OPS_FILTER+'»':''))); return; }
-    txt('opsList', ops.map(o=>{
+    const failedOps = ops.filter(o=>o.status==='failed');
+    let retryAllBtn = '';
+    if (failedOps.length > 1) {
+      retryAllBtn = `<div style="padding:8px 16px"><button class="btn btn-o" onclick="retryAllFailed()" style="width:100%">↺ Повторить все упавшие (${failedOps.length})</button></div>`;
+    }
+    txt('opsList', retryAllBtn + ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
       const canCancel = o.status==='pending'||o.status==='running';
@@ -5773,7 +5789,7 @@ async function loadOps() {
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
-        ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(o.error_msg.substring(0,80))}</div>`:''}
+        ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(explainError(o.error_msg))}</div>`:''}
       </div>`;
     }).join(''));
   } catch(e) { txt('opsList', errHtml(e.message,'loadOps()')); }
@@ -5790,6 +5806,20 @@ async function retryOp(id) {
   try {
     const d = await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'});
     toast('✅ Операция поставлена в очередь повторно'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function retryAllFailed() {
+  try {
+    const d = await api('/api/miniapp/operations?status=failed');
+    const ops = d.operations || [];
+    const failed = ops.filter(o => o.status === 'failed');
+    if (!failed.length) { toast('Нет упавших операций'); return; }
+    let ok = 0;
+    for (const o of failed) {
+      try { await api('/api/miniapp/operation/'+o.id+'/retry', {method:'POST'}); ok++; } catch(e) {}
+    }
+    toast('↺ Повторено: '+ok+' из '+failed.length); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 

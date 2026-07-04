@@ -3437,3 +3437,53 @@ def get_best_preset_for_target(target_type: str) -> str:
         candidates.sort(reverse=True)
         return candidates[0][1]
     return "channel_report"
+
+
+# ── A/B Testing ───────────────────────────────────────────────────────────────
+
+_ab_tests: dict[str, dict] = {}
+
+
+def start_ab_test(test_name: str, variant_a: str, variant_b: str) -> dict:
+    _ab_tests[test_name] = {
+        "variant_a": variant_a,
+        "variant_b": variant_b,
+        "a_runs": 0,
+        "a_success": 0,
+        "b_runs": 0,
+        "b_success": 0,
+        "started_at": time.time(),
+    }
+    return {"test": test_name, "variants": [variant_a, variant_b]}
+
+
+def record_ab_result(test_name: str, variant: str, success: bool) -> None:
+    test = _ab_tests.get(test_name)
+    if not test:
+        return
+    if variant == test["variant_a"]:
+        test["a_runs"] += 1
+        if success:
+            test["a_success"] += 1
+    elif variant == test["variant_b"]:
+        test["b_runs"] += 1
+        if success:
+            test["b_success"] += 1
+
+
+def get_ab_test_results(test_name: str) -> dict:
+    test = _ab_tests.get(test_name)
+    if not test:
+        return {"error": "test not found"}
+    a_rate = test["a_success"] / max(test["a_runs"], 1) * 100
+    b_rate = test["b_success"] / max(test["b_runs"], 1) * 100
+    return {
+        "test": test_name,
+        "variant_a": {"preset": test["variant_a"], "runs": test["a_runs"], "success_rate": round(a_rate, 1)},
+        "variant_b": {"preset": test["variant_b"], "runs": test["b_runs"], "success_rate": round(b_rate, 1)},
+        "winner": test["variant_a"] if a_rate > b_rate else test["variant_b"] if b_rate > a_rate else "tie",
+    }
+
+
+def get_active_ab_tests() -> list[dict]:
+    return [{"test": name, **get_ab_test_results(name)} for name in _ab_tests]

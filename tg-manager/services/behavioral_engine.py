@@ -105,6 +105,46 @@ class BehavioralEngine:
             "ban_prediction": self._ban_predictions.get(account_id, 0.0),
         }
 
+    def predict_ban_timeframe(self, account_id: int) -> dict:
+        risk = self._ban_predictions.get(account_id, 0.0)
+        acc_events = [e for e in self._events if e["acc"] == account_id]
+        if not acc_events:
+            return {"timeframe": "unknown", "risk": 0.0, "confidence": 0}
+        recent = acc_events[-20:]
+        if len(recent) < 10:
+            return {"timeframe": "low_risk", "risk": risk, "confidence": 30}
+        recent_floods = sum(1 for e in recent[-10:] if e["flood"])
+        old_floods = sum(1 for e in recent[:10] if e["flood"])
+        if recent_floods > old_floods * 2:
+            timeframe = "hours"
+            confidence = min(80, int(risk * 100))
+        elif risk > 0.6:
+            timeframe = "days"
+            confidence = min(70, int(risk * 100))
+        elif risk > 0.3:
+            timeframe = "weeks"
+            confidence = min(50, int(risk * 100))
+        else:
+            timeframe = "months"
+            confidence = min(30, int((1 - risk) * 100))
+        return {"timeframe": timeframe, "risk": risk, "confidence": confidence}
+
+    def auto_tune_delays(self, account_id: int) -> float:
+        risk = self._ban_predictions.get(account_id, 0.0)
+        if risk > 0.7:
+            return 2.5
+        elif risk > 0.4:
+            return 1.8
+        elif risk > 0.2:
+            return 1.3
+        acc_events = [e for e in self._events if e["acc"] == account_id][-50:]
+        if len(acc_events) < 20:
+            return 1.0
+        success_rate = sum(1 for e in acc_events if e["ok"]) / len(acc_events)
+        if success_rate > 0.95:
+            return 0.85
+        return 1.0
+
     def get_recommendations(self, owner_id: int, pool: asyncpg.Pool) -> list[dict]:
         recs = []
         acc_ids = set(e["acc"] for e in self._events)
