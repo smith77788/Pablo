@@ -619,4 +619,22 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import signal
+
+    # Контейнеры (Railway, Docker, k8s) при рестарте/деплое шлют SIGTERM. По
+    # умолчанию Python завершает процесс без раскрутки стека — блок finally в
+    # main() (закрытие пула БД, снятие webhook, корректное завершение op_worker)
+    # НЕ выполняется. Превращаем SIGTERM в KeyboardInterrupt, чтобы asyncio.run
+    # отменил главную задачу и отработал graceful-shutdown, как при Ctrl+C.
+    def _graceful_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _graceful_sigterm)
+    except (ValueError, OSError):
+        pass  # не главный поток / платформа без SIGTERM — не критично
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("Получен сигнал остановки — завершаемся штатно")
