@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
+import os
 import re
 from typing import Awaitable, Callable
 
@@ -23,6 +25,14 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SPIN_COUNT = 2
 MAX_LITERAL_RUN = 2
+
+# Насколько «скелет» шаблона (первые варианты групп) должен совпадать с исходным
+# текстом, чтобы считать, что модель СПИНТАКСИЛА текст, а не переписала его.
+# Переопределяется переменной окружения SPIN_MIN_PRESERVE (0..1).
+try:
+    MIN_PRESERVE_RATIO = float(os.getenv("SPIN_MIN_PRESERVE", "0.6"))
+except ValueError:
+    MIN_PRESERVE_RATIO = 0.6
 
 # Асинхронный вызов LLM: принимает system+user промпты, возвращает текст ответа.
 Completer = Callable[[str, str], Awaitable[str]]
@@ -57,8 +67,12 @@ spintax-версий ИМЕННО ЭТОГО текста.
 НЕПРАВИЛЬНО: двойные скобки — это ошибка. Никогда не ставь две скобки подряд.
 
 - ПЕРВЫЙ вариант в каждой группе — это ИСХОДНОЕ слово/выражение из текста.
-- Проверка: убери все скобки и оставь только первый вариант каждой группы —
-  должен получиться ИСХОДНЫЙ текст слово в слово.
+- Проверка (обязательна!): убери все скобки и оставь только первый вариант каждой
+  группы — должен получиться ИСХОДНЫЙ текст СЛОВО В СЛОВО. Мысленно сделай это.
+- НЕ переставляй слова местами и не меняй порядок частей предложения. «его
+  читаешь» остаётся «его читаешь», а не «читаешь его».
+- НЕ меняй тон на официальный: «Целесообразно», «имеются ли», «по прошествии
+  времени» — брак, если этого не было в оригинале.
 - Если синонима нет или он звучит криво — оставь слово без скобок.
 
 ФОРМАТ:
@@ -76,9 +90,15 @@ closesym = одна закрывающая фигурная скобка
 Если хотя бы одна комбинация нарушает грамматику или согласование — переделай группу.
 
 ГЛАВНЫЕ ЗАПРЕТЫ (нарушение = брак):
-- ТОЛЬКО на языке оригинала. Никаких иностранных слов.
-- НЕ повторяй один и тот же вариант внутри группы.
-- НЕ смешивай в одной группе части речи с разным управлением.
+- ТОЛЬКО на языке оригинала. Никаких иностранных слов (mês, feed, práv).
+- НЕ выдумывай и не слепляй слова: «сновавно», «достовольно» — брак.
+- НЕ повторяй один и тот же вариант внутри группы: {{недавно|недавно}} — брак.
+- НЕ смешивай в одной группе части речи с разным управлением (предлог и без
+  предлога): «следишь апвоут» — брак, нужно «следишь за апвоутом».
+- Согласуй местоимение с окончанием: с «вы» → «вы зарегистрированы», «вы сидите»
+  (не «вы зарегистрирован», не «вы сидишь»). Рандомизируешь «ты|вы» — глагол тоже
+  идёт группой с обеими формами.
+- НЕ вставляй кривые связки «на то, что», «на факт, что» вместо простого «что».
 - НЕ меняй смысл. Каждое предложение значит ровно то же, что в оригинале.
 
 Как делать сильный спин:
@@ -273,6 +293,95 @@ def introduces_foreign_letters(template: str, script: str) -> bool:
     return bool(_LATIN_RE.search(template))
 
 
+def _first_alt(inner: str) -> str:
+    """Первая альтернатива до верхнеуровневого ``|`` внутри содержимого группы."""
+    depth = 0
+    i = 0
+    n = len(inner)
+    while i < n:
+        ch = inner[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == "|" and depth == 0:
+            return inner[:i]
+        i += 1
+    return inner
+
+
+def first_option_render(template: str) -> str:
+    """«Скелет» шаблона: раскрытие, где в каждой группе взят ПЕРВЫЙ вариант.
+
+    Если модель честно спинтаксила текст (первый вариант = исходное слово), то
+    скелет совпадает с исходным сообщением.
+    """
+
+    def render(s: str) -> str:
+        out: list[str] = []
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if ch == "\\" and i + 1 < n:
+                out.append(s[i + 1])
+                i += 2
+                continue
+            if ch == "{":
+                depth = 1
+                j = i + 1
+                while j < n and depth > 0:
+                    c = s[j]
+                    if c == "\\":
+                        j += 2
+                        continue
+                    if c == "{":
+                        depth += 1
+                    elif c == "}":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    j += 1
+                inner = s[i + 1 : j]
+                out.append(render(_first_alt(inner)))
+                i = j + 1
+                continue
+            if ch == "}":
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    return render(template)
+
+
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def text_similarity(a: str, b: str) -> float:
+    """Похожесть двух текстов по последовательности слов (0..1)."""
+    ta = _WORD_RE.findall(a.lower())
+    tb = _WORD_RE.findall(b.lower())
+    if not ta and not tb:
+        return 1.0
+    if not ta or not tb:
+        return 0.0
+    return difflib.SequenceMatcher(None, ta, tb).ratio()
+
+
+def preserves_original(template: str, script: str, threshold: float = MIN_PRESERVE_RATIO) -> bool:
+    """True, если скелет шаблона достаточно близок к исходному тексту.
+
+    Отсекает случаи, когда модель переписала сообщение заново вместо того, чтобы
+    спинтаксить именно присланный текст.
+    """
+    return text_similarity(first_option_render(template), script) >= threshold
+
+
 def expand_template(template: str, *, seed: int | None = None) -> str:
     """Раскрывает шаблон в один случайный вариант."""
     return _engine.generate(template, Context(), seed=seed)
@@ -328,6 +437,20 @@ async def generate_spins(
     clean = [t for t in valid if not introduces_foreign_letters(t, script)]
     if clean:
         valid = clean
+
+    # Главный фильтр: оставляем только те шаблоны, что реально спинтаксят ИСХОДНЫЙ
+    # текст (скелет ≈ оригинал), а не переписывают его заново. Если ни один не
+    # прошёл — берём наиболее близкие к оригиналу, чтобы не падать в ошибку.
+    preserved = [t for t in valid if preserves_original(t, script)]
+    if preserved:
+        valid = preserved
+    else:
+        log.warning("spin: модель переписала текст — беру наиболее близкие шаблоны")
+        valid = sorted(
+            valid,
+            key=lambda t: text_similarity(first_option_render(t), script),
+            reverse=True,
+        )
 
     if len(valid) < count:
         log.warning("получено %d валидных шаблонов из %d", len(valid), count)

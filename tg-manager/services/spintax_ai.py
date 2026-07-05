@@ -17,7 +17,7 @@ from services.spintax_service import SpintaxServiceError
 
 log = logging.getLogger(__name__)
 
-_SPIN_TEMPERATURE = 0.7  # ниже, чем у чата: меньше «уплывания» смысла и языка
+_SPIN_TEMPERATURE = 0.35  # низкая: модель точнее следует тексту, меньше «творчества»
 
 # Сильные модели специально для /spin. Порядок = приоритет; для OpenRouter
 # переопределяется переменной окружения SPIN_MODELS (список через запятую).

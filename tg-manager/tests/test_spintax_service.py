@@ -79,6 +79,36 @@ def test_quality_warnings_flags_long_run():
     assert any("нерандомизированных" in w for w in warnings)
 
 
+# ── first_option_render / preservation ───────────────────────────────────────
+
+
+def test_first_option_render_takes_first_of_each_group():
+    assert s.first_option_render("{Привет|Хай} {мир|друг}") == "Привет мир"
+
+
+def test_first_option_render_nested():
+    assert s.first_option_render("{сразу|в тот же {момент|час}}") == "сразу"
+    assert s.first_option_render("{в тот же {момент|час}|сразу}") == "в тот же момент"
+
+
+def test_first_option_render_reconstructs_original():
+    orig = "Привет! Недавно подписался на ваш канал."
+    tpl = "{Привет|Здравствуйте}! {Недавно|Не так давно} {подписался|подписалась} на {ваш канал|ваш паблик}."
+    assert s.first_option_render(tpl) == orig
+
+
+def test_preserves_original_true_for_faithful_spin():
+    orig = "Привет! Случайно увидела, что ты сидишь тут."
+    tpl = "{Привет|Хай}! {Случайно|Внезапно} {увидела|заметила}, что {ты|вы} {сидишь|тут} тут."
+    assert s.preserves_original(tpl, orig) is True
+
+
+def test_preserves_original_false_for_rewrite():
+    orig = "Привет! Случайно увидела, что ты сидишь тут."
+    rewrite = "{Здравствуйте|Приветствую}! {Наткнулась|Обнаружила} на то, что {вы|люди} зарегистрированы здесь непременно всенепременно навсегда."
+    assert s.preserves_original(rewrite, orig) is False
+
+
 # ── engine-backed helpers ────────────────────────────────────────────────────
 
 
@@ -120,14 +150,26 @@ async def _fake_complete_factory(response: str):
 
 @pytest.mark.asyncio
 async def test_generate_spins_returns_valid_templates():
-    complete = await _fake_complete_factory(
-        json.dumps(["{Привет|Здравствуйте|Хай}, {как дела|как ты|как поживаешь}?", "{Здравствуйте|Приветствую|Добрый день}!"])
-    )
+    # оба шаблона — честный спин исходного текста (скелет = оригинал), ≥3 варианта
+    t1 = "{Привет|Здравствуйте|Хай}, {как дела|как ты|как поживаешь}?"
+    t2 = "{Привет|Здравствуй|Хей}, {как дела|как жизнь|как сам}?"
+    complete = await _fake_complete_factory(json.dumps([t1, t2]))
     result = await s.generate_spins("Привет, как дела?", complete=complete, count=2)
-    assert result == ["{Привет|Здравствуйте|Хай}, {как дела|как ты|как поживаешь}?", "{Здравствуйте|Приветствую|Добрый день}!"]
+    assert result == [t1, t2]
     system, user = complete.calls[0]
     assert "2" in system
     assert user == "Привет, как дела?"
+
+
+@pytest.mark.asyncio
+async def test_generate_spins_drops_rewritten_template():
+    # первый — честный спин, второй — переписан заново → отбрасывается фильтром
+    orig = "Привет, недавно подписался на канал."
+    faithful = "{Привет|Здравствуй|Хай}, {недавно|не так давно|на днях} {подписался|подписалась|подписалась только что} на {канал|паблик|сообщество}."
+    rewrite = "{Здравствуйте|Приветствую|Доброго дня}! {Обнаружил|Выявил|Нашёл} интересный ресурс совершенно случайно недавно вечером."
+    complete = await _fake_complete_factory(json.dumps([faithful, rewrite]))
+    result = await s.generate_spins(orig, complete=complete, count=2)
+    assert result == [faithful]
 
 
 @pytest.mark.asyncio
