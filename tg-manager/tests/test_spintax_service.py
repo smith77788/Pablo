@@ -217,6 +217,21 @@ def test_introduces_foreign_letters_clean_russian():
     assert s.introduces_foreign_letters("{Привет|Здравствуйте}", "Привет мир") is False
 
 
+def test_introduces_foreign_letters_detects_hieroglyphs():
+    # иероглифы (CJK) и другие письменности тоже отсекаются
+    assert s.introduces_foreign_letters("{привет|你好}", "привет мир") is True
+    assert s.introduces_foreign_letters("{привет|مرحبا}", "привет мир") is True
+
+
+def test_introduces_foreign_letters_allows_emoji():
+    assert s.introduces_foreign_letters("{Привет|Здравствуй} 😊", "Привет 😊") is False
+
+
+def test_clean_synonyms_drops_hieroglyphs():
+    out = s._clean_synonyms("привет", ["здравствуй", "你好", "хай"], "привет мир")
+    assert out == ["здравствуй", "хай"]
+
+
 # ── generate_spins (новый конвейер: синонимы → сборка) ───────────────────────
 
 

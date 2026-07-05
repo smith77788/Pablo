@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from typing import Awaitable, Callable
 
 from services.spintax_engine import Context, SpintaxEngine
@@ -419,19 +420,50 @@ def keep_valid_templates(templates: list[str]) -> list[str]:
     return [t for t in templates if is_valid_template(t)]
 
 
-# Латиница (включая диакритику Latin-1: á, ê, ñ …). Кириллица сюда НЕ попадает.
-_LATIN_RE = re.compile(r"[A-Za-zÀ-ÿ]")
+# Метки письменностей (по имени символа в Unicode) — для отсева чужого алфавита.
+_SCRIPT_TAGS = (
+    "CYRILLIC", "LATIN", "GREEK", "ARABIC", "HEBREW", "CJK", "HIRAGANA",
+    "KATAKANA", "HANGUL", "DEVANAGARI", "THAI", "ARMENIAN", "GEORGIAN",
+)
+
+
+def _char_script(ch: str) -> str | None:
+    """Письменность буквы (CYRILLIC/LATIN/CJK/…), либо None для не-букв."""
+    if not ch.isalpha():
+        return None
+    try:
+        name = unicodedata.name(ch)
+    except ValueError:
+        return None
+    for tag in _SCRIPT_TAGS:
+        if tag in name:
+            return tag
+    return "OTHER"
+
+
+def _scripts_in(text: str) -> set[str]:
+    """Множество письменностей, встречающихся в тексте."""
+    found: set[str] = set()
+    for ch in text or "":
+        sc = _char_script(ch)
+        if sc:
+            found.add(sc)
+    return found
 
 
 def introduces_foreign_letters(template: str, script: str) -> bool:
-    """True, если в шаблоне появилась латиница, которой не было в исходном тексте.
+    """True, если в шаблоне появились буквы ЧУЖОЙ письменности.
 
-    Ловит типичные утечки слабых моделей: «práv», «mês», «feed». Если в исходном
-    тексте латиница уже была (бренды, ссылки) — не фильтруем.
+    Ловит утечки слабых моделей на любом алфавите: латиницу («práv», «feed»),
+    иероглифы (CJK), арабицу, хангыль и т.д. Разрешены только те письменности,
+    что уже есть в исходном тексте (напр. кириллица + латиница для брендов).
     """
-    if _LATIN_RE.search(script or ""):
-        return False
-    return bool(_LATIN_RE.search(template))
+    allowed = _scripts_in(script)
+    for ch in template or "":
+        sc = _char_script(ch)
+        if sc and sc not in allowed:
+            return True
+    return False
 
 
 def _first_alt(inner: str) -> str:
