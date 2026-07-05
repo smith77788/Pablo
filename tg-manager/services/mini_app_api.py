@@ -575,15 +575,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("response_text required")
         if trigger_type == "keyword" and not keyword:
             return _err("keyword required for keyword trigger")
+        # Инлайн-кнопки (необязательно): [{text,url}]
+        buttons = []
+        for b in (body.get("buttons") or [])[:10]:
+            try:
+                bt = str(b.get("text") or "").strip()[:64]
+                bu = str(b.get("url") or "").strip()
+            except Exception:
+                continue
+            if bt and bu.lower().startswith(("http://", "https://")):
+                buttons.append({"text": bt, "url": bu})
+        buttons_json = _json.dumps(buttons) if buttons else None
         try:
             try:
                 row = await pool.fetchrow(
-                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode) VALUES($1,$2,$3,$4,$5) RETURNING id",
-                    bot_id, trigger_type, keyword or None, response_text, match_mode)
+                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode, buttons) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING id",
+                    bot_id, trigger_type, keyword or None, response_text, match_mode, buttons_json)
             except asyncpg.UndefinedColumnError:
-                row = await pool.fetchrow(
-                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
-                    bot_id, trigger_type, keyword or None, response_text)
+                try:
+                    row = await pool.fetchrow(
+                        "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode) VALUES($1,$2,$3,$4,$5) RETURNING id",
+                        bot_id, trigger_type, keyword or None, response_text, match_mode)
+                except asyncpg.UndefinedColumnError:
+                    row = await pool.fetchrow(
+                        "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
+                        bot_id, trigger_type, keyword or None, response_text)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.exception("create_auto_reply bot=%d uid=%d", bot_id, uid)
@@ -2329,6 +2345,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "proxy_id": proxy_id})
         except Exception as exc:
             log.exception("account_set_proxy uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def account_set_note(request: web.Request) -> web.Response:
+        """Заметка к аккаунту (account_notes)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        note = (body.get("note") or "").strip()[:500]
+        try:
+            res = await pool.execute(
+                "UPDATE tg_accounts SET account_notes=$1 WHERE id=$2 AND owner_id=$3",
+                note or None, acc_id, uid)
+            if str(res).endswith(" 0"):
+                return _err("Аккаунт не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("account_set_note uid=%d acc=%d", uid, acc_id)
             return _err(str(exc), 500)
 
     async def account_check_one(request: web.Request) -> web.Response:
@@ -8145,6 +8183,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
+    app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)

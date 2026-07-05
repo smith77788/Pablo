@@ -60,6 +60,23 @@ def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str
     )
 
 
+def _rule_buttons(rule: dict) -> list | None:
+    """Инлайн-кнопки авто-ответа из JSONB-колонки buttons: [{text,url}] или None."""
+    raw = rule.get("buttons")
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        try:
+            import json as _json
+            raw = _json.loads(raw)
+        except Exception:
+            return None
+    if isinstance(raw, list) and raw:
+        out = [b for b in raw if isinstance(b, dict) and b.get("text") and b.get("url")]
+        return out or None
+    return None
+
+
 def _match_rule(rule: dict, text: str) -> bool:
     if not text:
         return False
@@ -353,7 +370,7 @@ async def _process_bot(
                         rendered = _render_text(start_rules[0]["response_text"], from_user, bot_row)
                         if _is_free:
                             rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
-                        await bot_api.send_message(http, token, chat_id, rendered)
+                        await bot_api.send_message(http, token, chat_id, rendered, buttons=_rule_buttons(start_rules[0]))
                     else:
                         fname = from_user.get("first_name") or "друг"
                         bot_name = bot_row.get("username") or bot_row.get("first_name") or "бот"
@@ -388,7 +405,7 @@ async def _process_bot(
                     if _is_free:
                         rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                     ok, retry = await bot_api.send_message(
-                        http, token, chat_id, rendered
+                        http, token, chat_id, rendered, buttons=_rule_buttons(rule)
                     )
                     if ok:
                         # Log the fired rule to auto_reply_log for analytics

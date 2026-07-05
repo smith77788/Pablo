@@ -1714,6 +1714,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Modal: Account Note -->
+<div class="mbg" id="mo-acc-note" onclick="if(event.target===this)closeModal('mo-acc-note')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-acc-note')">✕</div>
+    <div class="modal-title">📝 Заметка к аккаунту</div>
+    <div class="field">
+      <textarea id="antText" rows="4" maxlength="500" placeholder="Пометка для себя: назначение, кластер, статус…" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
+    </div>
+    <div class="field-err" id="antErr"></div>
+    <button class="btn btn-p" id="antBtn" onclick="submitAccNote()" style="width:100%">Сохранить</button>
+  </div>
+</div>
+
 <!-- Modal: Channel Edit -->
 <div class="mbg" id="mo-chan-edit" onclick="if(event.target===this)closeModal('mo-chan-edit')">
   <div class="modal">
@@ -3469,6 +3482,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <label>Текст ответа</label>
       <textarea id="arText" rows="4" maxlength="4096" placeholder="Сообщение которое отправит бот..."></textarea>
     </div>
+    <div class="field">
+      <label>Кнопки под ответом (необязательно)</label>
+      <textarea id="arButtons" rows="2" placeholder="Текст кнопки | https://ссылка (по одной на строку)"></textarea>
+    </div>
     <div class="field-err" id="arErr"></div>
     <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
   </div>
@@ -4812,6 +4829,7 @@ function openArModal() {
   document.getElementById('arType').value='keyword';
   document.getElementById('arKw').value='';
   { const _m=document.getElementById('arMatch'); if(_m) _m.value='contains'; }
+  { const _b=document.getElementById('arButtons'); if(_b) _b.value=''; }
   document.getElementById('arText').value='';
   document.getElementById('arErr').style.display='none';
   toggleArKw();
@@ -4835,8 +4853,11 @@ async function saveAutoReply() {
   btn.disabled=true; btn.textContent='Сохранение...';
   try {
     const match_mode = document.getElementById('arMatch')?.value || 'contains';
+    const buttons = parseInlineButtons(document.getElementById('arButtons')?.value||'');
+    const _body = {trigger_type:type, keyword:kw||null, response_text:text, match_mode};
+    if (buttons.length) _body.buttons = buttons;
     await api('/api/miniapp/bot/'+AR_SAVE_BOT+'/auto_reply', {
-      method:'POST', body:JSON.stringify({trigger_type:type, keyword:kw||null, response_text:text, match_mode})
+      method:'POST', body:JSON.stringify(_body)
     });
     closeArModal(); toast('✅ Авто-ответ создан'); loadArList();
   } catch(e) {
@@ -4923,6 +4944,25 @@ async function submitAccProxy() {
     toast(proxy_id?'✅ Прокси назначен':'✅ Прокси снят');
     closeModal('mo-acc-proxy');
     openAccount(APX_ACC_ID);
+  } catch(e){ err.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Сохранить'; }
+}
+// ── Заметка аккаунта ────────────────────────────────────
+let ANT_ACC_ID = null;
+function openAccNote(id) {
+  ANT_ACC_ID = id;
+  const ta=document.getElementById('antText'); if(ta) ta.value = (window._accDetail && window._accDetail.account_notes) || '';
+  const e=document.getElementById('antErr'); if(e) e.textContent='';
+  showModal('mo-acc-note');
+}
+async function submitAccNote() {
+  const err=document.getElementById('antErr'); err.textContent='';
+  const note=document.getElementById('antText').value.trim();
+  const btn=document.getElementById('antBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
+  try {
+    await api('/api/miniapp/account/'+ANT_ACC_ID+'/note',{method:'POST',body:JSON.stringify({note})});
+    toast('✅ Заметка сохранена'); closeModal('mo-acc-note');
+    if(window._accDetail) window._accDetail.account_notes=note;
   } catch(e){ err.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
 }
@@ -5229,6 +5269,7 @@ async function openAccount(accId) {
   push('s-accdetail');
   try {
     const d = await api('/api/miniapp/account/'+accId);
+    window._accDetail = d.account || {};
     txt('acd-body', buildAccDetail(d));
   } catch(e) {
     txt('acd-body', errHtml(e.message));
@@ -5333,6 +5374,7 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
       <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
+      <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
     </div>
 
     <div class="sec">Профиль</div>
