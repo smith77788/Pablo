@@ -1414,6 +1414,60 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "count": len(commands)})
         return _err("Telegram API error", 500)
 
+    async def bot_profile(request: web.Request) -> web.Response:
+        """Изменить профиль бота: имя, описание, краткое описание (Bot API)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        name = (body.get("name") or "").strip()[:64]
+        description = (body.get("description") or "").strip()[:512]
+        short_description = (body.get("short_description") or "").strip()[:120]
+        if not (name or description or short_description):
+            return _err("Укажите хотя бы одно поле", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not row:
+            return _err("Бот не найден", 404)
+        try:
+            from services.token_vault import decrypt_token as _dt
+            token = _dt(row["token"])
+        except Exception:
+            token = row["token"]
+        import aiohttp as _aio
+        results: dict = {}
+        calls = []
+        if name:
+            calls.append(("setMyName", {"name": name}, "name"))
+        if description:
+            calls.append(("setMyDescription", {"description": description}, "description"))
+        if short_description:
+            calls.append(("setMyShortDescription", {"short_description": short_description}, "short_description"))
+        try:
+            async with _aio.ClientSession() as sess:
+                for method, params, key in calls:
+                    try:
+                        async with sess.post(
+                            f"https://api.telegram.org/bot{token}/{method}",
+                            json=params, timeout=_aio.ClientTimeout(total=10),
+                        ) as resp:
+                            jd = await resp.json()
+                        results[key] = bool(jd.get("ok"))
+                        if not jd.get("ok"):
+                            results[key + "_error"] = jd.get("description", "error")
+                    except Exception as e:
+                        results[key] = False
+                        results[key + "_error"] = str(e)[:80]
+        except Exception as exc:
+            log.exception("bot_profile uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+        ok_any = any(v is True for k, v in results.items() if not k.endswith("_error"))
+        return _json_resp({"ok": ok_any, "results": results})
+
     # ── Bot Stats (detailed) ───────────────────────────────────────────────────
 
     async def bot_stats(request: web.Request) -> web.Response:
@@ -7941,6 +7995,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/profile", bot_profile)
     # Account Shield
     app.router.add_get("/api/miniapp/shield", shield_summary)
     # Ad Intelligence

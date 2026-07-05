@@ -1550,6 +1550,29 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Modal: Bot Profile (имя/описание бота) -->
+<div class="mbg" id="mo-bot-profile" onclick="if(event.target===this)closeModal('mo-bot-profile')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-profile')">✕</div>
+    <div class="modal-title">⚙️ Профиль бота</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Меняется через Bot API. Заполните только нужные поля.</div>
+    <div class="field">
+      <label>Имя бота (до 64)</label>
+      <input type="text" id="bpName" maxlength="64" placeholder="Отображаемое имя" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="field">
+      <label>Описание (экран «О боте», до 512)</label>
+      <textarea id="bpDesc" maxlength="512" rows="3" placeholder="Показывается до старта бота" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
+    </div>
+    <div class="field">
+      <label>Краткое описание (профиль, до 120)</label>
+      <textarea id="bpShort" maxlength="120" rows="2" placeholder="Показывается в профиле и при шаринге" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
+    </div>
+    <div class="field-err" id="bpErr"></div>
+    <button class="btn btn-p" id="bpBtn" onclick="submitBotProfile()" style="width:100%">Сохранить</button>
+  </div>
+</div>
+
 <!-- Modal: Add Node -->
 <div class="mbg" id="mo-node" onclick="if(event.target===this)closeModal('mo-node')">
   <div class="modal">
@@ -4659,6 +4682,11 @@ function buildBotDetail(d) {
       <div class="kpi-col"><div class="kpi-val" style="color:var(--orange)">${num(d.active_funnels)}</div><div class="kpi-lbl">Воронок</div></div>
       <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
     </div>
+    <div style="display:flex;gap:8px;padding:4px 0 4px">
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:10px 6px" onclick="toggleBotActive(${bid},this)">${b.is_active?'⏸ Выключить':'▶️ Включить'}</button>
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:10px 6px;color:var(--red)" onclick="removeBotConfirm(${bid},'${bn}')">🗑 Убрать</button>
+    </div>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>
       <div class="mgmt-grid">
@@ -5804,10 +5832,36 @@ async function toggleBotActive(botId, el) {
     // Update BOTS cache
     const b = BOTS.find(x=>x.bot_id==botId);
     if (b) b.is_active = d.is_active;
+    // Если открыт экран деталей бота — обновим его (кнопка/бейдж статуса).
+    if (document.getElementById('s-botdetail')?.classList.contains('show')) openBot(botId);
   } catch(e) {
     el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn);
     toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
   }
+}
+
+// ── Настройки профиля бота (имя/описание) ──────────────
+let BP_BOT_ID = null;
+function openBotProfile(botId) {
+  BP_BOT_ID = botId;
+  ['bpName','bpDesc','bpShort'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const e=document.getElementById('bpErr'); if(e) e.textContent='';
+  showModal('mo-bot-profile');
+}
+async function submitBotProfile() {
+  const errEl=document.getElementById('bpErr'); errEl.textContent='';
+  const name=document.getElementById('bpName').value.trim();
+  const description=document.getElementById('bpDesc').value.trim();
+  const short_description=document.getElementById('bpShort').value.trim();
+  if(!name && !description && !short_description){ errEl.textContent='Заполните хотя бы одно поле'; return; }
+  const btn=document.getElementById('bpBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
+  try {
+    const payload={}; if(name)payload.name=name; if(description)payload.description=description; if(short_description)payload.short_description=short_description;
+    const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/profile',{method:'POST',body:JSON.stringify(payload)});
+    if(r.ok){ toast('✅ Профиль бота обновлён'); closeModal('mo-bot-profile'); }
+    else { errEl.textContent='Telegram отклонил изменение (проверьте текст/лимиты)'; }
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Сохранить'; }
 }
 
 // ── Funnel Detail ──────────────────────────────────────
