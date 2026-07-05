@@ -60,6 +60,7 @@ async def run(
     user_ids: list[int] | None = None,
     buttons: list[dict] | None = None,
     start_delay: float = 0.0,
+    silent: bool = False,
 ) -> None:
     # Stagger start across multiple concurrent broadcasts (e.g. network broadcast)
     # so they don't all hammer Telegram at the same instant.
@@ -189,11 +190,11 @@ async def run(
 
             if photo_file_id:
                 success, retry_after = await bot_api.send_photo(
-                    session, token, uid, photo_file_id, user_text, buttons=buttons
+                    session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent
                 )
             else:
                 success, retry_after = await bot_api.send_message(
-                    session, token, uid, user_text, buttons=buttons
+                    session, token, uid, user_text, buttons=buttons, disable_notification=silent
                 )
             if success:
                 sent += 1
@@ -231,11 +232,11 @@ async def run(
                     await asyncio.sleep(retry_after)
                     if photo_file_id:
                         ok, _ = await bot_api.send_photo(
-                            session, token, uid, photo_file_id, user_text, buttons=buttons
+                            session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent
                         )
                     else:
                         ok, _ = await bot_api.send_message(
-                            session, token, uid, user_text, buttons=buttons
+                            session, token, uid, user_text, buttons=buttons, disable_notification=silent
                         )
                     if ok:
                         sent += 1
@@ -328,6 +329,7 @@ def start(
     user_ids: list[int] | None = None,
     buttons: list[dict] | None = None,
     start_delay: float = 0.0,
+    silent: bool = False,
 ) -> None:
     task = asyncio.create_task(
         run(
@@ -341,6 +343,7 @@ def start(
             user_ids,
             buttons,
             start_delay,
+            silent,
         ),
         name=f"broadcast-{broadcast_id}",
     )
@@ -379,6 +382,7 @@ async def resume_interrupted(
                 r.get("target_user_ids"),  # список (сегмент) или None (полная аудитория)
                 r.get("buttons"),  # восстановить инлайн-кнопки после рестарта
                 start_delay=i * 2.0,  # разносим старты, чтобы не бить по Telegram разом
+                silent=bool(r.get("silent")),
             )
         except Exception as exc:
             logger.warning("resume_interrupted: рассылка %s не перезапущена: %s", r.get("id"), exc)

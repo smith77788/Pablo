@@ -680,6 +680,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
             return _err("Invalid bot_id")
+        silent = bool(body.get("silent"))
         # Инлайн-кнопки (необязательно): [{text, url}] — валидируем и ограничиваем.
         buttons = []
         for b in (body.get("buttons") or [])[:10]:
@@ -700,13 +701,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             try:
                 row = await pool.fetchrow(
-                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons) "
-                    "VALUES($1,$2,$3,'pending',$4,$5::jsonb) RETURNING id",
-                    bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None)
+                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons, silent) "
+                    "VALUES($1,$2,$3,'pending',$4,$5::jsonb,$6) RETURNING id",
+                    bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None, silent)
             except Exception:
-                row = await pool.fetchrow(
-                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
-                    bot_id_int, text, total, uid)
+                try:
+                    row = await pool.fetchrow(
+                        "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons) "
+                        "VALUES($1,$2,$3,'pending',$4,$5::jsonb) RETURNING id",
+                        bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None)
+                except Exception:
+                    row = await pool.fetchrow(
+                        "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
+                        bot_id_int, text, total, uid)
             broadcast_id = row["id"]
             # Create op_queue entry so user can track progress
             bot_label = bot_row.get("username") or bot_id_int
@@ -714,6 +721,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _op_params = {"bot_id": bot_id_int, "broadcast_id": broadcast_id, "text": text}
             if buttons:
                 _op_params["buttons"] = buttons
+            if silent:
+                _op_params["silent"] = True
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",

@@ -407,9 +407,12 @@ async def send_photo(
     photo: str,
     caption: str = "",
     buttons: list[dict] | None = None,
+    disable_notification: bool = False,
 ) -> tuple[bool, int | None]:
     """Send a photo by file_id. Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "photo": photo}
+    if disable_notification:
+        params["disable_notification"] = True
     if caption:
         params["caption"] = caption
         params["parse_mode"] = "HTML"

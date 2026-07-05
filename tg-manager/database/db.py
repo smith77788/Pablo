@@ -475,27 +475,35 @@ async def create_broadcast(
     photo_file_id: str | None = None,
     target_user_ids: list[int] | None = None,
     buttons: list[dict] | None = None,
+    silent: bool = False,
 ) -> int:
     # target_user_ids сохраняем только для сегментных рассылок (подмножество
     # аудитории); NULL = полная аудитория бота. Используется resume после
     # рестарта, чтобы сегментная рассылка не ушла всей аудитории.
-    # buttons сохраняем, чтобы инлайн-кнопки пережили рестарт (resume).
+    # buttons/silent сохраняем, чтобы кнопки и тихий режим пережили рестарт.
     import json as _json
     target_json = _json.dumps(target_user_ids) if target_user_ids else None
     buttons_json = _json.dumps(buttons) if buttons else None
     try:
         return await pool.fetchval(
-            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons)
-               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb) RETURNING id""",
-            bot_id, message_text, total, created_by, photo_file_id, target_json, buttons_json,
+            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons, silent)
+               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb, $8) RETURNING id""",
+            bot_id, message_text, total, created_by, photo_file_id, target_json, buttons_json, bool(silent),
         )
     except asyncpg.UndefinedColumnError:
-        # Совместимость со старой схемой без колонки buttons
-        return await pool.fetchval(
-            """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids)
-               VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb) RETURNING id""",
-            bot_id, message_text, total, created_by, photo_file_id, target_json,
-        )
+        try:
+            return await pool.fetchval(
+                """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids, buttons)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb) RETURNING id""",
+                bot_id, message_text, total, created_by, photo_file_id, target_json, buttons_json,
+            )
+        except asyncpg.UndefinedColumnError:
+            # Совместимость со старой схемой без колонок buttons/silent
+            return await pool.fetchval(
+                """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id, target_user_ids)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb) RETURNING id""",
+                bot_id, message_text, total, created_by, photo_file_id, target_json,
+            )
 
 
 async def update_broadcast(
@@ -534,7 +542,7 @@ async def get_interrupted_broadcasts(pool: asyncpg.Pool) -> list[dict]:
     try:
         rows = await pool.fetch(
             """SELECT b.id, b.bot_id, b.message_text, b.photo_file_id, b.target_user_ids,
-                      b.buttons, m.token
+                      b.buttons, b.silent, m.token
                FROM broadcasts b
                JOIN managed_bots m ON m.bot_id = b.bot_id
                WHERE b.status IN ('running', 'pending') AND m.is_active = TRUE

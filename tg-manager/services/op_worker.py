@@ -8261,6 +8261,7 @@ async def _exec_run_broadcast(
     broadcast_id = params.get("broadcast_id")
     text = (params.get("text") or "").strip()
     buttons = params.get("buttons") or None
+    silent = bool(params.get("silent"))
 
     if not bot_id or not text:
         return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
@@ -8293,9 +8294,9 @@ async def _exec_run_broadcast(
     # Create/reuse broadcast record
     if not broadcast_id:
         from database import db as _db
-        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id, buttons=buttons)
+        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id, buttons=buttons, silent=silent)
 
-    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, buttons)
+    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, buttons, silent=silent)
     await _safe_execute(
             pool,"UPDATE operation_queue SET done_items=$1 WHERE id=$2", total, op_id)
 
