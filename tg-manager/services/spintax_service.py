@@ -120,6 +120,139 @@ closesym = одна закрывающая фигурная скобка
 скобки — только ОДИНАРНЫЕ фигурные скобки для каждой группы."""
 
 
+def build_synonym_prompt(count: int) -> str:
+    """Промпт для сбора синонимов (шаблон собирается кодом, не моделью).
+
+    Модель НЕ пишет спинтакс и НЕ трогает текст — она только подбирает синонимы к
+    словам/оборотам. Это исключает вставку новых слов, перестановку и переписывание.
+    """
+    return f"""Тебе дают ГОТОВЫЙ текст сообщения. Не переписывай его и ничего в нём
+не меняй. Твоя единственная задача — подобрать синонимы к отдельным словам и
+оборотам, которые РЕАЛЬНО есть в этом тексте.
+
+Верни СТРОГО JSON такого вида:
+{{"variants": [ [ {{"orig": "<точная подстрока из текста>", "syn": ["синоним1", "синоним2", "синоним3"]}}, ... ], ... ]}}
+
+Правила:
+- В "variants" ровно {count} набора (наборы отличаются подбором синонимов).
+- "orig" — это ТОЧНАЯ подстрока из исходного текста (слово или короткий оборот),
+  скопированная буква в букву. НЕ придумывай слов, которых нет в тексте.
+- "syn" — 2-5 синонимов, которые можно подставить ВМЕСТО orig, и фраза останется
+  грамотной и с тем же смыслом. Следи за падежом, родом, числом и управлением
+  (предлогами). Если orig с большой буквы — синонимы тоже с большой.
+- Пиши синонимы ТОЛЬКО на языке текста, без иностранных слов и выдумок.
+- Бери как можно больше слов и оборотов, но НЕ перекрывай их между собой.
+- Если к слову нет 2+ хороших синонимов — просто не включай его.
+- Разные наборы (variants) должны отличаться выбором синонимов.
+
+Никакого текста кроме JSON."""
+
+
+def _clean_synonyms(orig: str, syns: list, script: str) -> list[str]:
+    """Чистит список синонимов: без дублей, латиницы, служебных скобок; регистр."""
+    out: list[str] = []
+    seen = {orig.strip().lower()}
+    orig_cap = orig[:1].isupper()
+    for raw in syns:
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        if any(ch in s for ch in "{}|[]"):
+            continue
+        if introduces_foreign_letters(s, script):
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        # Согласуем регистр первой буквы с исходным словом.
+        if orig_cap and s[:1].islower():
+            s = s[:1].upper() + s[1:]
+        elif not orig_cap and s[:1].isupper():
+            s = s[:1].lower() + s[1:]
+        out.append(s)
+        if len(out) >= 6:
+            break
+    return out
+
+
+def assemble_template(script: str, replacements: list) -> str:
+    """Собирает spintax-шаблон из ИСХОДНОГО текста и синонимов (без переписывания).
+
+    Оборачивает найденные в тексте подстроки в ``{orig|син1|син2}``, остальной
+    текст остаётся дословно. Гарантирует: текст сохранён 1-в-1, порядок не изменён,
+    лишних слов нет, первый вариант каждой группы = исходное слово.
+    """
+    # Оставляем только замены с достаточным числом синонимов для группы ≥3.
+    cleaned: list[tuple[str, list[str]]] = []
+    for rep in replacements:
+        if not isinstance(rep, dict):
+            continue
+        orig = str(rep.get("orig") or "").strip()
+        if not orig:
+            continue
+        syns = _clean_synonyms(orig, rep.get("syn") or [], script)
+        if len(syns) < MIN_VARIANTS_PER_GROUP - 1:
+            continue
+        cleaned.append((orig, syns))
+
+    result: list[str] = []
+    cursor = 0
+    n = len(script)
+    guard = 0
+    while cursor < n and guard < 10_000:
+        guard += 1
+        best_idx: int | None = None
+        best: tuple[str, list[str]] | None = None
+        for orig, syns in cleaned:
+            idx = script.find(orig, cursor)
+            if idx >= 0 and (best_idx is None or idx < best_idx):
+                best_idx = idx
+                best = (orig, syns)
+        if best is None or best_idx is None:
+            result.append(script[cursor:])
+            break
+        orig, syns = best
+        result.append(script[cursor:best_idx])
+        result.append("{" + "|".join([orig] + syns) + "}")
+        cursor = best_idx + len(orig)
+    else:
+        result.append(script[cursor:])
+    return "".join(result)
+
+
+def parse_synonym_response(raw: str, count: int) -> list[list[dict]]:
+    """Разбирает ответ модели в список наборов замен ``[{orig, syn}, ...]``."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        cleaned = re.sub(r"^json\s*", "", cleaned, count=1, flags=re.IGNORECASE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise SpintaxServiceError(f"модель вернула не-JSON ответ: {exc}") from exc
+
+    if isinstance(data, dict) and isinstance(data.get("variants"), list):
+        variants = data["variants"]
+    elif isinstance(data, list) and data and isinstance(data[0], list):
+        variants = data
+    elif isinstance(data, list):  # один плоский список замен
+        variants = [data]
+    else:
+        raise SpintaxServiceError("не удалось разобрать синонимы из ответа модели")
+
+    result: list[list[dict]] = []
+    for variant in variants:
+        if not isinstance(variant, list):
+            continue
+        reps = [r for r in variant if isinstance(r, dict) and r.get("orig")]
+        if reps:
+            result.append(reps)
+    if not result:
+        raise SpintaxServiceError("модель не вернула синонимов")
+    return result
+
+
 def parse_spin_response(text: str) -> list[str]:
     """Достаёт список шаблонов из ответа LLM.
 
@@ -415,52 +548,39 @@ async def generate_spins(
     :raises SpintaxServiceError: пустой ввод, пустой/битый ответ модели, либо
         среди ответов не оказалось ни одного корректного шаблона.
     """
-    if not script.strip():
+    script = script.strip()
+    if not script:
         raise SpintaxServiceError("сценарий пуст")
 
-    system = build_system_prompt(count)
-    raw = await complete(system, script.strip())
+    # Новый подход: модель отдаёт ТОЛЬКО синонимы, а шаблон собираем кодом из
+    # исходного текста. Это by construction сохраняет текст 1-в-1 (без вставок,
+    # перестановок и переписывания) — первый вариант каждой группы = ваше слово.
+    system = build_synonym_prompt(count)
+    raw = await complete(system, script)
     if not raw or not raw.strip():
         raise SpintaxServiceError("пустой ответ модели")
 
-    templates = parse_spin_response(raw)
-    # Авто-исправление двойных скобок
-    templates = [fix_double_brackets(t) for t in templates]
-    valid = keep_valid_templates(templates)
-    if not valid:
-        raise SpintaxServiceError("модель вернула некорректный spintax")
+    variant_sets = parse_synonym_response(raw, count)
 
-    # Фильтруем шаблоны с группами <3 вариантов — это главное правило качества.
-    with_min_variants = [t for t in valid if not check_minimum_variants(t)]
-    if with_min_variants:
-        valid = with_min_variants
-        log.info(
-            "отфильтрованы шаблоны с <3 вариантами: осталось %d из %d",
-            len(valid), len(templates),
+    templates: list[str] = []
+    seen: set[str] = set()
+    for replacements in variant_sets:
+        template = assemble_template(script, replacements)
+        # Сборка ничего не добавила (мало синонимов) — пропускаем.
+        if not template or template == script:
+            continue
+        if not is_valid_template(template):
+            continue
+        if template in seen:
+            continue
+        seen.add(template)
+        templates.append(template)
+
+    if not templates:
+        raise SpintaxServiceError(
+            "не удалось подобрать синонимы к тексту — попробуйте ещё раз"
         )
 
-    # Отсеиваем шаблоны с чужой латиницей («práv», «mês») — если текст был
-    # без латиницы. Но если после фильтра ничего не осталось — оставляем как есть,
-    # чтобы не падать в ошибку из-за одной утечки.
-    clean = [t for t in valid if not introduces_foreign_letters(t, script)]
-    if clean:
-        valid = clean
-
-    # Главный фильтр: оставляем только те шаблоны, что реально спинтаксят ИСХОДНЫЙ
-    # текст (скелет ≈ оригинал), а не переписывают его заново. Если ни один не
-    # прошёл — берём наиболее близкие к оригиналу, чтобы не падать в ошибку.
-    preserved = [t for t in valid if preserves_original(t, script)]
-    if preserved:
-        valid = preserved
-    else:
-        log.warning("spin: модель переписала текст — беру наиболее близкие шаблоны")
-        valid = sorted(
-            valid,
-            key=lambda t: text_similarity(first_option_render(t), script),
-            reverse=True,
-        )
-
-    if len(valid) < count:
-        log.warning("получено %d валидных шаблонов из %d", len(valid), count)
-    # Не больше запрошенного — модель иногда отдаёт лишние варианты.
-    return valid[:count]
+    if len(templates) < count:
+        log.info("собрано %d шаблонов из %d наборов", len(templates), len(variant_sets))
+    return templates[:count]

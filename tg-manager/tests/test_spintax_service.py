@@ -148,44 +148,68 @@ async def _fake_complete_factory(response: str):
     return _complete
 
 
-@pytest.mark.asyncio
-async def test_generate_spins_returns_valid_templates():
-    # оба шаблона — честный спин исходного текста (скелет = оригинал), ≥3 варианта
-    t1 = "{Привет|Здравствуйте|Хай}, {как дела|как ты|как поживаешь}?"
-    t2 = "{Привет|Здравствуй|Хей}, {как дела|как жизнь|как сам}?"
-    complete = await _fake_complete_factory(json.dumps([t1, t2]))
-    result = await s.generate_spins("Привет, как дела?", complete=complete, count=2)
-    assert result == [t1, t2]
-    system, user = complete.calls[0]
-    assert "2" in system
-    assert user == "Привет, как дела?"
+def _syn_json(*variant_sets: list) -> str:
+    """Готовит JSON-ответ модели нового формата (наборы синонимов)."""
+    return json.dumps({"variants": list(variant_sets)})
 
 
-@pytest.mark.asyncio
-async def test_generate_spins_drops_rewritten_template():
-    # первый — честный спин, второй — переписан заново → отбрасывается фильтром
-    orig = "Привет, недавно подписался на канал."
-    faithful = "{Привет|Здравствуй|Хай}, {недавно|не так давно|на днях} {подписался|подписалась|подписалась только что} на {канал|паблик|сообщество}."
-    rewrite = "{Здравствуйте|Приветствую|Доброго дня}! {Обнаружил|Выявил|Нашёл} интересный ресурс совершенно случайно недавно вечером."
-    complete = await _fake_complete_factory(json.dumps([faithful, rewrite]))
-    result = await s.generate_spins(orig, complete=complete, count=2)
-    assert result == [faithful]
+# ── assemble_template / _clean_synonyms / parse_synonym_response ──────────────
 
 
-@pytest.mark.asyncio
-async def test_generate_spins_drops_invalid_and_keeps_valid():
-    complete = await _fake_complete_factory(json.dumps(["{Привет|Здравствуйте|Хай}", "{broken", "{мир|друг|земля}"]))
-    result = await s.generate_spins("текст", complete=complete, count=3)
-    assert result == ["{Привет|Здравствуйте|Хай}", "{мир|друг|земля}"]
+def test_assemble_template_preserves_original_and_wraps():
+    script = "Привет, недавно подписался на канал."
+    reps = [
+        {"orig": "Привет", "syn": ["Здравствуй", "Хай"]},
+        {"orig": "недавно", "syn": ["не так давно", "на днях"]},
+        {"orig": "канал", "syn": ["паблик", "сообщество"]},
+    ]
+    tpl = s.assemble_template(script, reps)
+    # текст сохранён 1-в-1: скелет == оригинал
+    assert s.first_option_render(tpl) == script
+    assert "{Привет|Здравствуй|Хай}" in tpl
+    assert "{канал|паблик|сообщество}" in tpl
+
+
+def test_assemble_template_skips_group_with_few_synonyms():
+    script = "Привет мир."
+    # у «мир» только 1 синоним → группа <3 → остаётся без скобок
+    reps = [
+        {"orig": "Привет", "syn": ["Здравствуй", "Хай"]},
+        {"orig": "мир", "syn": ["земля"]},
+    ]
+    tpl = s.assemble_template(script, reps)
+    assert "{Привет|Здравствуй|Хай}" in tpl
+    assert "мир." in tpl and "{мир" not in tpl
+
+
+def test_assemble_template_ignores_orig_not_in_text():
+    script = "Привет мир."
+    reps = [{"orig": "выдумка", "syn": ["ложь", "неправда"]}]
+    # ничего не нашли для замены → шаблон == исходный текст
+    assert s.assemble_template(script, reps) == script
+
+
+def test_clean_synonyms_dedupe_foreign_and_case():
+    # дубли и латиница отсеиваются, регистр подгоняется под orig
+    out = s._clean_synonyms("Привет", ["привет", "Здравствуй", "hello", "хай", "хай"], "Привет мир")
+    assert "hello" not in out
+    assert "привет" not in [o.lower() for o in out if o == "привет"]  # не дубль orig
+    assert "Здравствуй" in out
+    assert "Хай" in out  # регистр подогнан под «Привет»
+
+
+def test_parse_synonym_response_variants_and_flat():
+    data = _syn_json([{"orig": "мир", "syn": ["земля"]}])
+    assert s.parse_synonym_response(data, 1) == [[{"orig": "мир", "syn": ["земля"]}]]
+    flat = json.dumps([{"orig": "мир", "syn": ["земля"]}])
+    assert s.parse_synonym_response(flat, 1) == [[{"orig": "мир", "syn": ["земля"]}]]
 
 
 def test_introduces_foreign_letters_detects_leak():
-    # текст на русском, в шаблоне появилась латиница «práv»
     assert s.introduces_foreign_letters("{буквально|práv|совсем}", "буквально недавно") is True
 
 
 def test_introduces_foreign_letters_allows_when_source_has_latin():
-    # если латиница была в оригинале (бренд) — не считаем ошибкой
     assert s.introduces_foreign_letters("{Trading|Трейдинг}", "Trading курс") is False
 
 
@@ -193,36 +217,71 @@ def test_introduces_foreign_letters_clean_russian():
     assert s.introduces_foreign_letters("{Привет|Здравствуйте}", "Привет мир") is False
 
 
+# ── generate_spins (новый конвейер: синонимы → сборка) ───────────────────────
+
+
 @pytest.mark.asyncio
-async def test_generate_spins_drops_foreign_leak_templates():
-    # первый шаблон с латиницей должен быть отброшен
+async def test_generate_spins_assembles_faithful_template():
+    script = "Привет, как дела?"
     complete = await _fake_complete_factory(
-        json.dumps(["{совсем|práv|буквально}", "{совсем|буквально|только что}"])
+        _syn_json([
+            {"orig": "Привет", "syn": ["Здравствуй", "Хай"]},
+            {"orig": "как дела", "syn": ["как ты", "как жизнь"]},
+        ])
     )
-    result = await s.generate_spins("совсем недавно", complete=complete, count=2)
-    assert result == ["{совсем|буквально|только что}"]
+    result = await s.generate_spins(script, complete=complete, count=1)
+    assert len(result) == 1
+    # текст сохранён точь-в-точь
+    assert s.first_option_render(result[0]) == script
+    assert s.is_valid_template(result[0])
+    system, user = complete.calls[0]
+    assert user == script
+
+
+@pytest.mark.asyncio
+async def test_generate_spins_drops_foreign_synonyms():
+    script = "совсем недавно"
+    complete = await _fake_complete_factory(
+        _syn_json([{"orig": "совсем", "syn": ["práv", "буквально", "только что"]}])
+    )
+    result = await s.generate_spins(script, complete=complete, count=1)
+    # латиница «práv» отфильтрована, но группа всё равно собралась (≥2 чистых)
+    assert "práv" not in result[0]
+    assert s.first_option_render(result[0]) == script
 
 
 @pytest.mark.asyncio
 async def test_generate_spins_caps_to_requested_count():
-    # модель вернула 9 валидных — наружу должно уйти ровно count
-    complete = await _fake_complete_factory(
-        json.dumps([f"{{A{i}|B{i}|C{i}}}" for i in range(9)])
-    )
-    result = await s.generate_spins("текст", complete=complete, count=5)
-    assert len(result) == 5
+    script = "Привет мир"
+    sets = [
+        [{"orig": "Привет", "syn": ["Здравствуй", "Хай"]}],
+        [{"orig": "мир", "syn": ["земля", "планета"]}],
+        [{"orig": "Привет", "syn": ["Хай", "Здорово"]}],
+    ]
+    complete = await _fake_complete_factory(_syn_json(*sets))
+    result = await s.generate_spins(script, complete=complete, count=2)
+    assert len(result) == 2
 
 
 @pytest.mark.asyncio
 async def test_generate_spins_empty_script_raises():
-    complete = await _fake_complete_factory(json.dumps(["{Привет|Здравствуйте|Хай}"]))
+    complete = await _fake_complete_factory(_syn_json([{"orig": "мир", "syn": ["земля"]}]))
     with pytest.raises(s.SpintaxServiceError):
         await s.generate_spins("   ", complete=complete, count=1)
 
 
 @pytest.mark.asyncio
-async def test_generate_spins_all_invalid_raises():
-    complete = await _fake_complete_factory(json.dumps(["{broken", "also {broken"]))
+async def test_generate_spins_no_synonyms_raises():
+    # модель не дала пригодных синонимов → нечего собирать
+    script = "Привет мир"
+    complete = await _fake_complete_factory(_syn_json([{"orig": "мир", "syn": ["земля"]}]))
+    with pytest.raises(s.SpintaxServiceError):
+        await s.generate_spins(script, complete=complete, count=1)
+
+
+@pytest.mark.asyncio
+async def test_generate_spins_bad_json_raises():
+    complete = await _fake_complete_factory("это не json")
     with pytest.raises(s.SpintaxServiceError):
         await s.generate_spins("текст", complete=complete, count=2)
 
