@@ -8262,6 +8262,11 @@ async def _exec_run_broadcast(
     text = (params.get("text") or "").strip()
     buttons = params.get("buttons") or None
     silent = bool(params.get("silent"))
+    segment = str(params.get("segment") or "all")
+    _seg_sql = {
+        "active_7d": " AND last_seen >= now() - interval '7 days'",
+        "active_30d": " AND last_seen >= now() - interval '30 days'",
+    }.get(segment, "")
 
     if not bot_id or not text:
         return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
@@ -8279,7 +8284,7 @@ async def _exec_run_broadcast(
 
     try:
         user_ids = [r["user_id"] for r in await pool.fetch(
-            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", int(bot_id)
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE" + _seg_sql, int(bot_id)
         )]
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
@@ -8295,6 +8300,15 @@ async def _exec_run_broadcast(
     if not broadcast_id:
         from database import db as _db
         broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id, buttons=buttons, silent=silent)
+    elif _seg_sql:
+        # Сегментная рассылка: сохраняем целевой список, иначе resume после
+        # рестарта отправит всей аудитории бота.
+        try:
+            await _safe_execute(pool,
+                "UPDATE broadcasts SET target_user_ids=$1::jsonb WHERE id=$2",
+                json.dumps(user_ids), broadcast_id)
+        except Exception:
+            log.warning("run_broadcast: не удалось сохранить target_user_ids для сегмента op=%s", op_id)
 
     broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, buttons, silent=silent)
     await _safe_execute(

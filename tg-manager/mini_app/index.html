@@ -3360,6 +3360,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
     </div>
     <div class="field">
+      <label>Кому отправить</label>
+      <select id="bcastSegment" onchange="updateBcastRecip()">
+        <option value="all">Всем подписчикам</option>
+        <option value="active_7d">Активным за 7 дней</option>
+        <option value="active_30d">Активным за 30 дней</option>
+      </select>
+    </div>
+    <div class="field">
       <label>Кнопки под сообщением (необязательно)</label>
       <textarea id="bcastButtons" rows="2" placeholder="Текст кнопки | https://ссылка&#10;Вторая кнопка | https://..."></textarea>
       <div class="field-note">По одной кнопке на строку: <code>Текст | URL</code></div>
@@ -5486,6 +5494,7 @@ function openBcastPick() {
   document.getElementById('bcastText').value='';
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
+  { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -5501,6 +5510,7 @@ function openBcastForBot(botId, botName, recipCount) {
   document.getElementById('bcastText').value='';
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
+  { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -5560,9 +5570,11 @@ async function sendBcast() {
     errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
   }
   const silent = !!document.getElementById('bcastSilent')?.checked;
+  const segment = document.getElementById('bcastSegment')?.value || 'all';
+  const segLabel = {all:'Всем', active_7d:'Активным 7д', active_30d:'Активным 30д'}[segment] || 'Всем';
   // Предпросмотр перед отправкой — защита от случайной рассылки
   const recip = document.getElementById('bcastRecip')?.textContent || '';
-  const preview = `Отправить рассылку?\n\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const preview = `Отправить рассылку?\n\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'')
     + (silent?'\n🔕 Без звука':'');
   if (!await askConfirm(preview)) return;
@@ -5572,6 +5584,7 @@ async function sendBcast() {
     const payload = {bot_id:botId, text};
     if (buttons.length) payload.buttons = buttons;
     if (silent) payload.silent = true;
+    if (segment !== 'all') payload.segment = segment;
     const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');

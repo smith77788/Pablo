@@ -681,6 +681,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (TypeError, ValueError):
             return _err("Invalid bot_id")
         silent = bool(body.get("silent"))
+        # Сегмент аудитории: all | active_7d | active_30d
+        segment = (body.get("segment") or "all").strip()
+        _seg_sql = {
+            "active_7d": " AND last_seen >= now() - interval '7 days'",
+            "active_30d": " AND last_seen >= now() - interval '30 days'",
+        }.get(segment, "")
         # Инлайн-кнопки (необязательно): [{text, url}] — валидируем и ограничиваем.
         buttons = []
         for b in (body.get("buttons") or [])[:10]:
@@ -697,7 +703,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not bot_row:
             return _err("Bot not found", 404)
         total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql, bot_id_int)
         try:
             try:
                 row = await pool.fetchrow(
@@ -723,6 +729,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _op_params["buttons"] = buttons
             if silent:
                 _op_params["silent"] = True
+            if _seg_sql:
+                _op_params["segment"] = segment
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
