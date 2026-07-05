@@ -3785,6 +3785,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения..."></textarea>
       <div class="field-note"><span id="cmpLen">0</span>/4096</div>
     </div>
+    <div class="field">
+      <label>Темп отправки</label>
+      <select id="cmpPace">
+        <option value="slow">🐢 Медленно — безопаснее от банов</option>
+        <option value="normal" selected>⚖️ Обычный</option>
+        <option value="fast">⚡ Быстро — выше риск</option>
+      </select>
+      <div class="field-note">Влияет на паузы между сообщениями с аккаунтов</div>
+    </div>
     <div class="field-err" id="cmpErr"></div>
     <button class="btn btn-p" id="cmpBtn" onclick="saveCmp()" style="width:100%">📨 Создать черновик</button>
   </div>
@@ -6644,6 +6653,7 @@ async function saveCmp() {
   const text = document.getElementById('cmpText').value.trim();
   const target_type = document.getElementById('cmpTargetType').value;
   const target_id = target_type==='bot_users' ? document.getElementById('cmpBot').value : null;
+  const pace = document.getElementById('cmpPace')?.value || 'normal';
   const errEl = document.getElementById('cmpErr');
   errEl.style.display='none';
   if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
@@ -6653,7 +6663,7 @@ async function saveCmp() {
   try {
     const d = await api('/api/miniapp/dm_campaigns', {
       method:'POST',
-      body: JSON.stringify({name, text:text, target_type, target_id})
+      body: JSON.stringify({name, text:text, target_type, target_id, pace})
     });
     closeCmpModal();
     tg.HapticFeedback?.notificationOccurred('success');

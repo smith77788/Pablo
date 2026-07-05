@@ -3659,12 +3659,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
         except Exception:
             total_targets = 0
+        # Темп рассылки (params.pace): slow безопаснее, fast быстрее (риск бана).
+        pace = (body.get("pace") or "normal").strip()
+        if pace not in ("slow", "normal", "fast"):
+            pace = "normal"
+        params_json = _json.dumps({"pace": pace})
         try:
-            row = await pool.fetchrow(
-                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, total_targets)
-                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
-                uid, name, text, target_type, int(target_id) if target_id else None, total_targets,
-            )
+            try:
+                row = await pool.fetchrow(
+                    """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, total_targets, params)
+                       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id""",
+                    uid, name, text, target_type, int(target_id) if target_id else None, total_targets, params_json,
+                )
+            except asyncpg.UndefinedColumnError:
+                row = await pool.fetchrow(
+                    """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, total_targets)
+                       VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                    uid, name, text, target_type, int(target_id) if target_id else None, total_targets,
+                )
             return _json_resp({"id": row["id"], "total_targets": total_targets})
         except Exception as exc:
             log.exception("dm_campaign_create uid=%d", uid)

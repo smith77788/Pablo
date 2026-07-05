@@ -360,6 +360,19 @@ async def run_campaign(
     _delay_min, _delay_max = _DELAYS_BY_TARGET_TYPE.get(
         campaign.get("target_type", ""), _DEFAULT_DELAY_RANGE
     )
+    # Пользовательский темп (params.pace): slow безопаснее, fast быстрее (риск).
+    try:
+        import json as _json
+        _cp = campaign.get("params") or {}
+        if isinstance(_cp, str):
+            _cp = _json.loads(_cp)
+        _pace = (_cp or {}).get("pace")
+        _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
+        if _pace_mult:
+            _delay_min *= _pace_mult
+            _delay_max *= _pace_mult
+    except Exception:
+        pass
 
     acc_cycle = list(accounts)
     acc_idx = 0
