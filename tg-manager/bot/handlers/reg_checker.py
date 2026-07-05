@@ -215,6 +215,7 @@ async def cb_reg_menu(callback: CallbackQuery, state: FSMContext) -> None:
             _HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb()
         )
     except Exception:
+        log_exc_swallow(log, "edit_text fallback: menu help text")
         await callback.message.answer(
             _HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb()
         )
@@ -234,6 +235,7 @@ async def cb_reg_start(callback: CallbackQuery, state: FSMContext) -> None:
             prompt, parse_mode="HTML", reply_markup=_waiting_kb()
         )
     except Exception:
+        log_exc_swallow(log, "edit_text fallback: waiting prompt")
         await callback.message.answer(
             prompt, parse_mode="HTML", reply_markup=_waiting_kb()
         )
@@ -255,6 +257,7 @@ async def cb_analyze_start(callback: CallbackQuery, state: FSMContext) -> None:
             prompt, parse_mode="HTML", reply_markup=_waiting_kb()
         )
     except Exception:
+        log_exc_swallow(log, "edit_text fallback: analyze waiting prompt")
         await callback.message.answer(
             prompt, parse_mode="HTML", reply_markup=_waiting_kb()
         )
@@ -269,7 +272,7 @@ async def cb_reg_cancel(callback: CallbackQuery, state: FSMContext) -> None:
             _HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb()
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "edit_text help text")
 
 
 # ── Settings: pool selection ──────────────────────────────────────────────────
@@ -289,6 +292,7 @@ async def cb_reg_settings(
     try:
         pools = await db.get_distinct_pools(pool) or []
     except Exception:
+        log_exc_swallow(log, "get_distinct_pools")
         pools = []
 
     try:
@@ -302,6 +306,7 @@ async def cb_reg_settings(
         pool_counts = {r["pool"]: r["cnt"] for r in all_accounts if r["pool"]}
         total_active = sum(r["cnt"] for r in all_accounts)
     except Exception:
+        log_exc_swallow(log, "fetch pool counts")
         pool_counts = {}
         total_active = 0
 
@@ -339,6 +344,7 @@ async def cb_reg_settings(
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
+        log_exc_swallow(log, "edit_text fallback: settings")
         await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -363,7 +369,7 @@ async def cb_reg_set_pool(
             reply_markup=_main_kb(),
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "edit_text pool selected")
 
 
 # ── History ───────────────────────────────────────────────────────────────────
@@ -425,7 +431,7 @@ async def cb_reg_history(
                 reply_markup=kb.as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "edit_text empty history")
         return
 
     type_icon = {
@@ -465,7 +471,7 @@ async def cb_reg_history(
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
-        pass
+        log_exc_swallow(log, "edit_text history list")
 
 
 # ── Exact date via Telethon (manual fallback) ─────────────────────────────────
@@ -491,7 +497,7 @@ async def cb_reg_exact(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "edit_text loading exact date")
 
     canonical = rc.canonical_peer_id(entity_id)
     try:
@@ -514,6 +520,7 @@ async def cb_reg_exact(
             entity_id, entity_type,
         )
     except Exception:
+        log_exc_swallow(log, "fetchrow cache exact")
         row = None
 
     name = row["entity_name"] if row else None
@@ -557,12 +564,13 @@ async def cb_reg_exact(
             try:
                 await callback.message.edit_text(plain, reply_markup=kb)
             except Exception:
+                log_exc_swallow(log, "edit_text fallback: plain text")
                 await callback.message.answer(plain, reply_markup=kb)
         elif "message is not modified" not in str(_e).lower():
             try:
                 await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
             except Exception:
-                pass
+                log_exc_swallow(log, "answer fallback: exact result")
 
 
 # ── FSM: incoming message in waiting_entity state ─────────────────────────────
@@ -738,7 +746,7 @@ async def _handle_text_entity(
     try:
         await loading.delete()
     except Exception:
-        pass
+        log_exc_swallow(log, "loading.delete()")
 
     if full_info:
         await _show_result_from_full_info(message, pool, state, full_info)
@@ -764,7 +772,7 @@ async def _handle_text_entity(
         else:
             bot_entity_type = "user"
     except Exception:
-        pass
+        log_exc_swallow(log, "Bot API get_chat")
 
     if bot_entity_id is not None and bot_entity_type is not None:
         # Got ID from Bot API — pass username so _show_result can use Bot API for metadata
@@ -853,6 +861,7 @@ async def _handle_batch(
                     lines.append(rc.format_batch_line(idx, item, est, b_name))
                     await rc.cache_result(pool, message.from_user.id, est, b_name, username_str)
                 except Exception:
+                    log_exc_swallow(log, "Bot API fallback")
                     lines.append(rc.format_batch_line(idx, item, None))
 
     lines.append("")
@@ -869,7 +878,7 @@ async def _handle_batch(
     try:
         await loading.delete()
     except Exception:
-        pass
+        log_exc_swallow(log, "loading.delete() batch")
 
     await message.answer(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
@@ -890,7 +899,7 @@ async def _bot_api_channel_info(bot, entity_id: int, peer) -> dict | None:
         try:
             member_count = await bot.get_chat_member_count(chat.id)
         except Exception:
-            pass
+            log_exc_swallow(log, "get_chat_member_count")
         ct = getattr(chat, "type", "") or ""
         etype = {"channel": "channel", "supergroup": "supergroup", "group": "group"}.get(ct, "channel")
         return {
@@ -906,6 +915,7 @@ async def _bot_api_channel_info(bot, entity_id: int, peer) -> dict | None:
             "_via_bot_api": True,
         }
     except Exception:
+        log_exc_swallow(log, "_bot_api_channel_info")
         return None
 
 
@@ -992,7 +1002,7 @@ async def _enrich_metadata(
                         reply_markup=kb,
                     )
             except Exception:
-                pass
+                log_exc_swallow(log, "edit_text no-data")
             return
 
         enriched_name = full_info.get("name") or name
@@ -1013,7 +1023,7 @@ async def _enrich_metadata(
             try:
                 await sent_msg.edit_text(new_text, parse_mode="HTML", reply_markup=kb)
             except Exception:
-                pass  # сообщение старое или уже удалено — не критично
+                log_exc_swallow(log, "edit_text enriched")  # сообщение старое или уже удалено — не критично
 
         await rc.cache_result(
             pool, owner_id, merged, enriched_name, enriched_username,
@@ -1082,6 +1092,7 @@ async def _get_or_fetch_analysis(
             entity_id, entity_type,
         )
     except Exception:
+        log_exc_swallow(log, "fetchrow cache analysis")
         row = None
 
     # Prefer username; fall back to canonical positive ID (Telethon-safe)
@@ -1190,7 +1201,7 @@ async def cb_analyze(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "edit_text loading analysis")
 
     data = await _get_or_fetch_analysis(
         pool, callback.from_user.id, entity_id, entity_type
@@ -1204,7 +1215,7 @@ async def cb_analyze(
                 reply_markup=_analyze_kb(entity_id, entity_type, page),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "edit_text error message")
         return
 
     await _show_analysis_page(callback.message, data, entity_id, entity_type, page, pool, callback.from_user.id)
@@ -1263,6 +1274,7 @@ async def cb_analyze_export(
             parse_mode="HTML",
         )
     except Exception:
+        log_exc_swallow(log, "answer_document fallback")
         for i in range(0, min(len(report), 12000), 4000):
             await callback.message.answer(
                 f"<code>{html.escape(report[i:i+4000])}</code>",
@@ -1291,6 +1303,7 @@ async def _show_analysis_page(
         try:
             await message.edit_text(txt, parse_mode=pm, reply_markup=kb, disable_web_page_preview=True)
         except Exception:
+            log_exc_swallow(log, "edit_text fallback: analysis page")
             await message.answer(txt, parse_mode=pm, reply_markup=kb, disable_web_page_preview=True)
 
     try:

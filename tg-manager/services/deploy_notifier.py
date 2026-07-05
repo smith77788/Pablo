@@ -39,7 +39,7 @@ def _repo_root_sync() -> str:
             _REPO_ROOT = result.stdout.strip()
             return _REPO_ROOT
     except Exception:
-        pass
+        log_exc_swallow(log, "get repo root")
     _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return _REPO_ROOT
 
@@ -55,7 +55,7 @@ def _get_git_log_sync(prev_sha: str | None = None, max_commits: int = 15) -> str
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
-        pass
+        log_exc_swallow(log, "get git log")
     return ""
 
 
@@ -69,7 +69,7 @@ def _get_git_diff_summary_sync(prev_sha: str | None = None) -> str:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
-        pass
+        log_exc_swallow(log, "get git diff summary")
     return ""
 
 
@@ -82,7 +82,7 @@ def _get_current_sha_sync() -> str:
         if result.returncode == 0:
             return result.stdout.strip()
     except Exception:
-        pass
+        log_exc_swallow(log, "get current sha")
     return ""
 
 
@@ -103,7 +103,7 @@ async def _get_platform_stats(pool: asyncpg.Pool) -> dict:
         if not isinstance(bot_val, BaseException):
             stats["bots"] = bot_val or 0
     except Exception:
-        pass
+        log_exc_swallow(log, "get platform stats")
     return stats
 
 
@@ -199,7 +199,7 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
             if warmup_plans:
                 lines.append(f"  🌡 Планов прогрева: <b>{warmup_plans}</b>")
     except Exception:
-        pass
+        log_exc_swallow(log, "fetch resume ops and warmup plans")
 
     lines += ["", f"🤖 <i>Infragram OS — Build {BUILD_VERSION}</i>"]
     text = "\n".join(lines)
@@ -218,7 +218,7 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
                 if not settings.get("deploy", True):
                     continue
             except Exception:
-                pass
+                log_exc_swallow(log, "fetch notification settings")
             try:
                 await bot.send_message(admin_id, text, parse_mode="HTML")
                 notified += 1

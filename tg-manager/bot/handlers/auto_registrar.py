@@ -26,6 +26,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AutoRegCb, BmCb
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -121,7 +122,7 @@ async def _save_account(
     try:
         await db.record_phone_link(pool, phone, owner_id)
     except Exception:
-        pass
+        log_exc_swallow(log, "_save_account: record_phone_link failed")
     return acc_id
 
 
@@ -161,6 +162,7 @@ async def cb_autoreg_menu(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Po
             bal = await asyncio.wait_for(client.get_balance(), timeout=8)
             balance_str = f" · баланс <b>${bal:.2f}</b>"
         except Exception:
+            log_exc_swallow(log, "cb_autoreg_menu: balance fetch failed")
             balance_str = " · <i>баланс недоступен</i>"
 
     key_icon = "✅" if key else "❌"
@@ -181,6 +183,7 @@ async def cb_autoreg_menu(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Po
     try:
         await cb.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
     except Exception:
+        log_exc_swallow(log, "cb_autoreg_menu: edit_text failed")
         await cb.message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
     await cb.answer()
 
@@ -207,6 +210,7 @@ async def cb_autoreg_settings(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         await cb.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
     except Exception:
+        log_exc_swallow(log, "cb_autoreg_settings: edit_text failed")
         await cb.message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
 
@@ -234,6 +238,7 @@ async def cb_autoreg_set_key(cb: CallbackQuery, state: FSMContext, pool: asyncpg
             reply_markup=kb.as_markup(), parse_mode="HTML",
         )
     except Exception:
+        log_exc_swallow(log, "cb_autoreg_set_key: edit_text failed")
         await cb.message.answer(
             f"🔑 Введите API-ключ для <b>{_SERVICES.get(service, service)}</b>:",
             reply_markup=kb.as_markup(), parse_mode="HTML",
@@ -307,6 +312,7 @@ async def cb_autoreg_pick_country(cb: CallbackQuery, callback_data: AutoRegCb, p
             reply_markup=kb.as_markup(), parse_mode="HTML",
         )
     except Exception:
+        log_exc_swallow(log, "cb_autoreg_pick_country: edit_text failed")
         await cb.message.answer(
             "<b>🌍 Выберите страну</b>",
             reply_markup=kb.as_markup(), parse_mode="HTML",
@@ -331,6 +337,7 @@ async def cb_autoreg_batch_ask(cb: CallbackQuery, state: FSMContext) -> None:
             reply_markup=kb.as_markup(), parse_mode="HTML",
         )
     except Exception:
+        log_exc_swallow(log, "cb_autoreg_batch_ask: edit_text failed")
         await cb.message.answer(
             "<b>📦 Батч-регистрация</b>\n\nСколько аккаунтов?",
             reply_markup=kb.as_markup(), parse_mode="HTML",
@@ -392,6 +399,7 @@ async def cb_autoreg_batch_country(cb: CallbackQuery, callback_data: AutoRegCb, 
             reply_markup=kb.as_markup(), parse_mode="HTML",
         )
     except Exception:
+        log_exc_swallow(log, "cb_autoreg_batch_country: edit_text failed")
         await cb.message.answer(
             f"<b>🌍 Страна</b> ({cnt} аккаунтов):",
             reply_markup=kb.as_markup(), parse_mode="HTML",
@@ -533,7 +541,7 @@ async def _wait_and_confirm(
                 .adjust(1).as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "_wait_and_confirm: SMS not received msg edit failed")
         return
 
     # Подтверждение кода
@@ -548,7 +556,7 @@ async def _wait_and_confirm(
                 parse_mode="HTML", reply_markup=_menu_kb(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "_wait_and_confirm: wrong code msg edit failed")
         return
 
     if result == "need_2fa":
@@ -573,7 +581,7 @@ async def _wait_and_confirm(
                 .as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "_wait_and_confirm: 2FA prompt edit failed")
         return
 
     # Получаем и сохраняем сессию
@@ -587,7 +595,7 @@ async def _wait_and_confirm(
                 parse_mode="HTML", reply_markup=_menu_kb(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "_wait_and_confirm: session error msg edit failed")
         return
     finally:
         await cleanup_pending(phone)
@@ -605,7 +613,7 @@ async def _wait_and_confirm(
             .adjust(1).as_markup(),
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "_wait_and_confirm: success msg edit failed")
 
 
 # ── FSM: ввод 2FA пароля ──────────────────────────────────────────────────────
@@ -693,13 +701,13 @@ async def cb_autoreg_cancel_2fa(cb: CallbackQuery, state: FSMContext) -> None:
             try:
                 await sms_client.cancel_order(order_id)
             except Exception:
-                pass
+                log_exc_swallow(log, "cb_autoreg_cancel_2fa: cancel_order failed")
         if phone:
             from services.account_manager import cleanup_pending
             try:
                 await cleanup_pending(phone)
             except Exception:
-                pass
+                log_exc_swallow(log, "cb_autoreg_cancel_2fa: cleanup_pending failed")
     await state.clear()
     await cb.answer("Отменено")
     try:
@@ -708,7 +716,7 @@ async def cb_autoreg_cancel_2fa(cb: CallbackQuery, state: FSMContext) -> None:
             reply_markup=_menu_kb(),
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "cb_autoreg_cancel_2fa: edit_text failed")
 
 
 # ── Батч-регистрация ──────────────────────────────────────────────────────────
@@ -742,12 +750,12 @@ async def _do_batch_register(
             try:
                 await status_msg.edit_text(progress, parse_mode="HTML")
             except Exception:
-                pass
+                log_exc_swallow(log, "_do_batch_register: progress edit failed")
         if progress_cb is not None:
             try:
                 await progress_cb(i, len(ok_accs), len(failed))
             except Exception:
-                pass
+                log_exc_swallow(log, "_do_batch_register: progress_cb failed")
 
         phone = ""
         order_id = ""
@@ -792,13 +800,13 @@ async def _do_batch_register(
                 try:
                     await sms_client.cancel_order(order_id)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "_do_batch_register: cancel_order failed")
             if phone:
                 try:
                     from services.account_manager import cleanup_pending as _cp
                     await _cp(phone)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "_do_batch_register: cleanup_pending failed")
             failed.append(f"{phone or '?'} — {str(exc)[:60]}")
 
         if i < cnt:
@@ -824,5 +832,5 @@ async def _do_batch_register(
                 .adjust(1).as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "_do_batch_register: report edit failed")
     return {"ok": ok_accs, "failed": failed}

@@ -515,6 +515,7 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "cmd_ops: fetch operation queue stats")
         stats = None
 
     running = int(stats["running"] or 0) if stats else 0
@@ -558,6 +559,7 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "cmd_report: fetch recent operations")
         ops = []
 
     _icons = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
@@ -580,6 +582,7 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
                     if summary:
                         lines.append(f"   📊 {_html.escape(summary[:100])}")
                 except Exception:
+                    log_exc_swallow(log, "cmd_report: parse operation result JSON")
                     pass
             # Show error if failed
             if op["status"] == "failed" and op["error_msg"]:
@@ -649,6 +652,7 @@ async def cb_bulk_menu(callback: CallbackQuery, state: FSMContext) -> None:
             reply_markup=_bulk_menu_kb().as_markup(),
         )
     except Exception:
+        log_exc_swallow(log, "edit_text fallback: bulk menu")
         await callback.message.answer(
             "⚡ <b>Массовые операции</b>\n\nВыберите операцию:",
             parse_mode="HTML",
@@ -908,6 +912,7 @@ async def cb_bulk_create_start(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_bulk_create_start: fetch accounts")
         accounts = []
     selected = {a["id"] for a in accounts}
     await state.update_data(bulk_op="create", bulk_selected=list(selected))
@@ -1080,6 +1085,7 @@ async def _render_bulk_confirm(
                 text, parse_mode="HTML", reply_markup=final_kb.as_markup()
             )
         except Exception:
+            log_exc_swallow(log, "edit_text fallback: bulk create confirmation (message)")
             await msg_or_cb.message.answer(
                 text, parse_mode="HTML", reply_markup=final_kb.as_markup()
             )
@@ -1089,6 +1095,7 @@ async def _render_bulk_confirm(
                 text, parse_mode="HTML", reply_markup=final_kb.as_markup()
             )
         except Exception:
+            log_exc_swallow(log, "edit_text fallback: bulk create confirmation (callback)")
             await msg_or_cb.answer(
                 text, parse_mode="HTML", reply_markup=final_kb.as_markup()
             )
@@ -1214,6 +1221,7 @@ async def cb_do_bulk_create(
             acc_ids,
         )
     except Exception:
+        log_exc_swallow(log, "cb_bulk_create_confirm: fetch account health")
         health_rows = []
     risk_warnings: list[str] = []
     blocked_accs: list[str] = []
@@ -1557,6 +1565,7 @@ async def cb_join_pick_account(
                 "SELECT id, session_str FROM tg_accounts WHERE id=$1", active[0]["id"]
             )
         except Exception:
+            log_exc_swallow(log, "cb_join_start: fetch single account session")
             acc = None
         if not acc:
             await callback.answer("Аккаунт не найден", show_alert=True)
@@ -1889,6 +1898,7 @@ async def cb_manage_show_dialogs(
             acc_id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_manage_show_dialogs: fetch managed channels")
         db_chans = []
 
     kb = InlineKeyboardBuilder()
@@ -2179,6 +2189,7 @@ async def cb_manage_admins(
             acc_id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_members_promote_show: fetch accounts for admin promotion")
         accounts = []
 
     kb = InlineKeyboardBuilder()
@@ -2241,6 +2252,7 @@ async def cb_do_promote(
             owner_id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_members_promote_do: fetch target account")
         target = None
     if not target or not target["tg_user_id"]:
         await callback.answer(
@@ -2295,6 +2307,7 @@ async def cb_promote_all(
             owner_id, acc_id,
         ) or 0
     except Exception:
+        log_exc_swallow(log, "cb_members_promote_all: count other accounts")
         n_others = 0
     if not n_others:
         await callback.answer("Нет других аккаунтов для назначения.", show_alert=True)
@@ -2585,6 +2598,7 @@ async def cb_members_invite(
                 callback.from_user.id,
             )
         except Exception:
+            log_exc_swallow(log, "cb_members_invite: fetch channel row")
             channel_row = None
     channel_display = (channel_row["title"] if channel_row else None) or str(
         callback_data.channel_id
@@ -2653,6 +2667,7 @@ async def _show_invite_acc_selector(
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
+            log_exc_swallow(log, "edit_text fallback: invite account selector")
             pass
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -3004,6 +3019,7 @@ async def _run_invite_bg(
                 parse_mode="HTML",
             )
         except Exception:
+            log_exc_swallow(log, "invite_bg: update progress message")
             pass
 
     async def _run_one(acc: asyncpg.Record, unames: list[str]) -> None:
@@ -3060,6 +3076,7 @@ async def _run_invite_bg(
                     parse_mode="HTML",
                 )
             except Exception:
+                log_exc_swallow(log, "invite_bg: update invite progress")
                 pass
 
         try:
@@ -3133,6 +3150,7 @@ async def _run_invite_bg(
                 reply_markup=kb.as_markup(),
             )
         except Exception:
+            log_exc_swallow(log, "invite_bg: update final invite result")
             pass
 
     task = asyncio.create_task(_bg())
@@ -3741,6 +3759,7 @@ async def cb_bulk_report_start(
             "SELECT 1 FROM strike_access WHERE user_id=$1", callback.from_user.id
         )
     except Exception:
+        log_exc_swallow(log, "cb_strike_menu: check strike access")
         has_strike = None
     if not has_strike:
         from bot.callbacks import StrikeCb
@@ -4196,7 +4215,7 @@ async def cb_br_confirm(
                     _before - len(viable),
                 )
     except Exception:
-        pass
+        log_exc_swallow(log, "br_confirm: filter warmup accounts")
 
     if not viable:
         await callback.message.edit_text(
@@ -4298,6 +4317,7 @@ async def _show_bulk_select(
             owner_id,
         )
     except Exception:
+        log_exc_swallow(log, "_show_bulk_select: fetch accounts")
         accounts = []
     active = [a for a in accounts if a["is_active"]]
 
@@ -4314,6 +4334,7 @@ async def _show_bulk_select(
                     text, parse_mode="HTML", reply_markup=kb.as_markup()
                 )
             except Exception:
+                log_exc_swallow(log, "edit_text fallback: _show_bulk_select no accounts")
                 await msg_or_cb.message.answer(
                     text, parse_mode="HTML", reply_markup=kb.as_markup()
                 )
@@ -4341,60 +4362,12 @@ async def _show_bulk_select(
                 text, parse_mode="HTML", reply_markup=kb.as_markup()
             )
         except Exception:
+            log_exc_swallow(log, "edit_text fallback: _show_bulk_select account list")
             await msg_or_cb.message.answer(
                 text, parse_mode="HTML", reply_markup=kb.as_markup()
             )
     else:
         await msg_or_cb.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
-
-
-# Entry point for each bulk operation — shows account picker with all accounts pre-selected
-@router.callback_query(
-    ChanCb.filter(
-        F.action.in_(
-            {
-                "bulk_dm",
-                "bulk_join",
-                "bulk_leave",
-                "bulk_post",
-                "bulk_prof_name",
-                "bulk_prof_bio",
-                "bulk_prof_uname",
-                "bulk_chan_uname",
-                "bulk_chan_about",
-            }
-        )
-    )
-)
-async def cb_bulk_start_op(
-    callback: CallbackQuery,
-    callback_data: ChanCb,
-    pool: asyncpg.Pool,
-    state: FSMContext,
-) -> None:
-    await safe_answer(callback)
-    op_map = {
-        "bulk_dm": "dm",
-        "bulk_join": "join",
-        "bulk_leave": "leave",
-        "bulk_post": "post",
-        "bulk_prof_name": "prof_name",
-        "bulk_prof_bio": "prof_bio",
-        "bulk_prof_uname": "prof_uname",
-        "bulk_chan_uname": "chan_uname",
-        "bulk_chan_about": "chan_about",
-    }
-    op = op_map[callback_data.action]
-    try:
-        accounts = await pool.fetch(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-            callback.from_user.id,
-        )
-    except Exception:
-        accounts = []
-    selected = {a["id"] for a in accounts}  # start with all selected
-    await state.update_data(bulk_op=op, bulk_selected=list(selected))
-    await _show_bulk_select(callback, pool, op, selected)
 
 
 # Toggle a single account
@@ -4434,6 +4407,7 @@ async def cb_bulk_select_all(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_bulk_select_all: fetch accounts")
         accounts = []
     selected = {a["id"] for a in accounts}
     await state.update_data(bulk_selected=list(selected), bulk_op=op)
@@ -4514,6 +4488,7 @@ async def cb_bulk_confirm_selection(
                 list(selected_ids),
             ) or 0
         except Exception:
+            log_exc_swallow(log, "bulk_select_proxy: count bound proxies for join")
             proxy_count = 0
         kb = InlineKeyboardBuilder()
         kb.button(text="🔐 Через прокси аккаунтов", callback_data="chan:bjproxy:bound")
@@ -4550,6 +4525,7 @@ async def cb_bulk_confirm_selection(
                 list(selected_ids),
             ) or 0
         except Exception:
+            log_exc_swallow(log, "bulk_select_proxy: count bound proxies for leave")
             proxy_count = 0
         kb = InlineKeyboardBuilder()
         kb.button(text="🔐 Через прокси аккаунтов", callback_data="chan:blproxy:bound")
@@ -4672,6 +4648,7 @@ async def fsm_bulk_channel_id(
             else []
         )
     except Exception:
+        log_exc_swallow(log, "fsm_bulk_channel_id: fetch selected accounts")
         accounts = []
 
     if not accounts:
@@ -4739,6 +4716,7 @@ async def fsm_bulk_post_text(
                 selected_ids,
             )
         except Exception:
+            log_exc_swallow(log, "fsm_bulk_text: fetch accounts for bulk post")
             accounts = []
         if not accounts:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
@@ -4754,6 +4732,7 @@ async def fsm_bulk_post_text(
                     cid,
                 )
             except Exception:
+                log_exc_swallow(log, "fsm_bulk_text: fetch access hash for bulk post")
                 ah_row = None
             bulk_access_hash = (ah_row["access_hash"] if ah_row else 0) or 0
 
@@ -4799,6 +4778,7 @@ async def fsm_bulk_post_text(
                 ch_id,
             )
         except Exception:
+            log_exc_swallow(log, "fsm_bulk_text: fetch access hash for single channel post")
             single_ah_row = None
         single_access_hash = (single_ah_row["access_hash"] if single_ah_row else 0) or 0
         result = await account_manager.post_to_channel(
@@ -4903,6 +4883,7 @@ async def fsm_join_invite_combined(
                 selected_ids,
             )
         except Exception:
+            log_exc_swallow(log, "fsm_bulk_invite: fetch account count for bulk join")
             count = None
         if not count:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
@@ -5003,6 +4984,7 @@ async def fsm_update_profile(
                 selected_ids,
             )
         except Exception:
+            log_exc_swallow(log, "fsm_bulk_value: fetch accounts for bulk update profiles")
             accounts = []
         if not accounts:
             await message.answer("⚠️ Аккаунты не найдены.")
@@ -5186,6 +5168,7 @@ async def fsm_bulk_dm_text(
             selected_ids,
         )
     except Exception:
+        log_exc_swallow(log, "fsm_bulk_dm_confirm: fetch accounts for bulk DM")
         accounts = []
     if not accounts:
         await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
@@ -5274,6 +5257,7 @@ async def fsm_bulk_chan_value(
             or 0
         )
     except Exception:
+        log_exc_swallow(log, "fsm_bulk_chan_value: fetch channel count")
         chan_count = 0
 
     if chan_count == 0:
@@ -5301,6 +5285,7 @@ async def fsm_bulk_chan_value(
             or 0
         )
     except Exception:
+        log_exc_swallow(log, "fsm_bulk_chan_value: fetch account count for preview")
         acc_count = len(selected_ids)
     eta_s = chan_count * 6  # ~6s per channel average
     eta_str = f"{eta_s // 60} мин" if eta_s >= 60 else f"{eta_s}с"
@@ -5372,6 +5357,7 @@ async def cb_bulk_chan_exec(
             selected_ids,
         )
     except Exception:
+        log_exc_swallow(log, "cb_bulk_chan_exec: fetch channels for bulk scan")
         channels = []
 
     if not channels:
@@ -5445,6 +5431,7 @@ async def cb_my_chans(
                 "SELECT * FROM tg_accounts WHERE id=$1", active[0]["id"]
             )
         except Exception:
+            log_exc_swallow(log, "cb_my_chans: fetch single account")
             acc = None
         if not acc:
             await callback.answer("Аккаунт не найден", show_alert=True)
@@ -5494,6 +5481,7 @@ async def cb_my_chans_acc(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_my_chans_acc: fetch account")
         acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -5639,13 +5627,16 @@ async def _show_my_chans_page(
                                 )
                                 await _aio.sleep(1.5)
                             except Exception:
+                                log_exc_swallow(log, "promote_botmother_bg: add admin to channel")
                                 pass
                     except Exception:
+                        log_exc_swallow(log, "promote_botmother_bg: background task failed")
                         pass
                     finally:
                         try:
                             await _client.disconnect()
                         except Exception:
+                            log_exc_swallow(log, "promote_botmother_bg: disconnect client")
                             pass
                 import asyncio as _asyncio
                 _asyncio.create_task(
@@ -5768,6 +5759,7 @@ async def cb_my_chans_leave(
                 pool, callback_data.acc_id, callback.from_user.id
             )
         except Exception:
+            log_exc_swallow(log, "cb_my_chans_leave: fetch account for leave")
             acc = None
         session = acc["session_str"] if acc else None
     if not session:
@@ -5841,6 +5833,7 @@ async def fsm_my_chans_post_text(
             message.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fsm_post_to_channel: fetch account session")
         session_row = None
     if not session_row:
         await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
@@ -5854,6 +5847,7 @@ async def fsm_my_chans_post_text(
             ch_id,
         )
     except Exception:
+        log_exc_swallow(log, "fsm_post_to_channel: fetch access hash")
         access_hash_row = None
     access_hash = (access_hash_row["access_hash"] if access_hash_row else 0) or 0
     msg = await message.answer("⏳ Публикую...")
@@ -6059,6 +6053,7 @@ async def cb_cinv_pick_channel(
             ch_id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_cinv_pick_channel: fetch channel info")
         row = None
     display = (
         f"@{row['username']}"
@@ -6180,12 +6175,14 @@ async def cb_cinv_proceed(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_cinv_confirm: fetch accounts for contact invite")
         acc_rows = []
 
     async def _fetch_one(acc) -> list:
         try:
             return await _am.get_contacts(acc["session_str"], _acc=dict(acc))
         except Exception:
+            log_exc_swallow(log, "_cinv_contacts: fetch contacts per account")
             return []
 
     all_contact_lists = await asyncio.gather(*[_fetch_one(a) for a in acc_rows])
@@ -6241,6 +6238,7 @@ async def cb_cinv_run(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "cb_cinv_run: fetch accounts for contact invite")
         acc_rows = []
     selected_order = {acc_id: idx for idx, acc_id in enumerate(selected_accs)}
     acc_rows = sorted(
@@ -6414,6 +6412,7 @@ async def _cinv_bg_inner(
             else:
                 await _pm.edit_text(text, parse_mode="HTML")
         except Exception:
+            log_exc_swallow(log, "_cinv_bg_inner: update progress message")
             pass
 
     # 0. Auto-add co-accounts to channel, then promote to admin

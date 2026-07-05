@@ -1336,8 +1336,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 get_pacing_engine().record_result(
                     success=_final_status == "done", action_type=op_type
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("pacing_engine record_result failed for op %d: %s", op_id, e)
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
@@ -1389,8 +1389,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 asyncio.create_task(
                     _ce.record(pool, owner_id, None, op_type, _comp_outcome, op_id)
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, f"physics/compliance telemetry failed for op {op_id}: {e}")
 
             summary = _op_summary
             from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -1439,8 +1439,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     record_account_op(
                         int(_acc_id), op_type, success=_mem_ok, duration_s=duration_seconds
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, f"infra_memory record_account_op (success) failed for op {op_id}: {e}")
 
             # Memory Feedback Loop: mark linked intent as completed
             try:
@@ -1477,8 +1477,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     record_account_op(
                         int(_acc_id), op_type, success=False, error=str(e)[:100]
                     )
-            except Exception:
-                pass
+            except Exception as e2:
+                log_exc_swallow(log, f"infra_memory record_account_op (error) failed for op {op_id}: {e2}")
             # Попытаться поставить на повтор перед тем как помечать как failed
             requeued = await _maybe_requeue(pool, op_id, e, params, op_type)
             if not requeued:
@@ -1500,8 +1500,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         is_ban=_kind == "fatal",
                         action_type=op_type,
                     )
-                except Exception:
-                    pass
+                except Exception as e3:
+                    log.warning("pacing_engine record_result (error) failed for op %d: %s", op_id, e3)
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
                 _acc_ids_for_audit = params.get("account_ids") or []
@@ -1742,8 +1742,8 @@ async def _exec_dm_campaign(
             await pool.execute(
                 "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("dm_campaign pause on cancel failed for campaign %d: %s", campaign_id, e)
         raise
 
     # Read final counts from dm_campaigns for the completion summary
@@ -1795,8 +1795,8 @@ async def _exec_mass_publish(
                     outcome="blocked", op_id=op_id,
                     params={"category": _v.category, "rule": _v.rule},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("compliance_engine record (content_block) failed for op %d: %s", op_id, e)
             return {"status": "failed", "summary": "🚫 Публикация заблокирована: запрещённый контент"}
     except Exception as _cs_err:
         log.debug("_exec_mass_publish content_safety check failed: %s", _cs_err)
@@ -1844,8 +1844,8 @@ async def _exec_mass_publish(
         from services import brand_injection as _bi
         if await _bi.is_user_free_tier(pool, owner_id):
             mp_text = _bi.add_promo(mp_text, html=True)
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, f"mass_publish brand_injection failed for op {op_id}: {e}")
 
     if not mp_text:
         return {"status": "failed", "summary": "⚠️ Текст сообщения не указан"}
@@ -1990,8 +1990,8 @@ async def _exec_mass_publish(
                                 "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
                                 _dlg_map[_cid], owner_id, _cid,
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.warning("mass_publish pre-scan: persist access_hash failed for ch=%s: %s", _cid, e)
             except asyncio.CancelledError:
                 raise
             except Exception as _pe:
@@ -2104,8 +2104,8 @@ async def _exec_mass_publish(
                             _resolved_hash, owner_id, int(dialog["id"]),
                         )
                         dialog["access_hash"] = _resolved_hash
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, f"mass_publish: persist resolved access_hash failed for ch={dialog['id']}: {e}")
                 break  # success — stop retry loop
             except Exception as e:
                 err_str = str(e)[:200]
@@ -2210,12 +2210,12 @@ async def _exec_mass_publish(
                                             """UPDATE tg_accounts
                                                SET is_active=FALSE, acc_status='session_expired',
                                                    status_reason=$2
-                                               WHERE id=$1 AND is_active=TRUE""",
+                                            WHERE id=$1 AND is_active=TRUE""",
                                             fallback_acc["id"],
                                             f"Dead session (mass_publish fallback): {err_str[:160]}",
                                         )
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        log_exc_swallow(log, f"mass_publish: fallback dead session deactivate failed: {e}")
                                 else:
                                     try:
                                         await _record_network_isolation(
@@ -2308,8 +2308,8 @@ async def _exec_mass_publish(
                 "UPDATE growth_goals SET current_value = current_value + $2, updated_at=NOW() WHERE id=$1",
                 int(goal_id_param), ok_count,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("mass_publish: update growth_goals failed for goal %s: %s", goal_id_param, e)
 
     parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
     return {
@@ -2560,8 +2560,8 @@ async def _exec_bulk_join_inner(
                             acc["id"], f"Dead session (bulk_join): {err_str[:180]}",
                         )
                         log.warning("op_worker bulk_join: deactivated dead session acc_id=%s", acc["id"])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("bulk_join: dead session deactivate failed for acc %s: %s", acc["id"], e)
                 elif flood_wait:
                     try:
                         from services.flood_engine import record_flood
@@ -3315,8 +3315,8 @@ async def _exec_global_presence_channel(
                 eco_id = ecos[0]["id"]
                 obj_type = "group" if is_group else "channel"
                 await _eb.add_member(pool, eco_id, owner_id, obj_type, channel_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"gp_channel ecosystem add_member failed for ch={channel_id}: {e}")
 
         created_count += 1
 
@@ -3333,8 +3333,8 @@ async def _exec_global_presence_channel(
 
                 await _eb.add_member(pool, _gp_eco_id, owner_id, "channel", channel_id)
                 await _eb.add_member(pool, _gp_eco_id, owner_id, "account", acc["id"])
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"gp_channel ecosystem add_member to plan {plan_id} failed: {e}")
 
         await _safe_execute(
                 pool,
@@ -3654,8 +3654,8 @@ async def _exec_global_presence_bot(
                 await _eb.add_member(
                     pool, _gp_bot_eco_id, owner_id, "account", acc["id"]
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"gp_bot ecosystem add_member to plan {plan_id} failed: {e}")
 
         await _safe_execute(
                 pool,
@@ -4222,8 +4222,8 @@ async def _exec_bot_factory_multi(
                             if data.get("ok"):
                                 bot_id = data["result"]["id"]
                                 actual_uname = data["result"].get("username", actual_uname)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, f"bot_factory_multi getMe failed: {e}")
                 try:
                     from services.token_vault import encrypt_token as _enc_tok_mf
                     await pool.execute(
@@ -4410,8 +4410,8 @@ async def _exec_bot_factory(
                                    ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
                                 owner_id, _enc_retry_tok, _retry_bot_id, actual_uname, display_name,
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log_exc_swallow(log, f"bot_factory retry managed_bots upsert failed: {e}")
                         created_count += 1
                         await _safe_execute(
                                 pool,
@@ -4613,8 +4613,8 @@ async def _exec_strike(
                     pct_items,
                     op_id,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("strike progress update failed for op %d: %s", op_id, e)
 
     try:
         results = await staggered_strike(plan, progress_cb=_strike_progress, pool=pool, op_id=op_id)
@@ -5048,8 +5048,8 @@ async def _exec_seed_presence_pack(
                     "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
                     missing_count + idx, op_id,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("seed_presence_pack progress update failed for op %d: %s", op_id, e)
 
             await asyncio.sleep(2)
 
@@ -5566,8 +5566,8 @@ async def _exec_bulk_post_to_channel(
                         " status_reason=$2 WHERE id=$1 AND is_active=TRUE",
                         acc["id"], f"Dead session (bulk_post): {err_str[:160]}",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, f"bulk_post: dead session deactivate failed for acc {acc['id']}: {e}")
             err_list.append(f"❌ {label}: {_html.escape(err_str[:60])}")
 
         await _safe_execute(
@@ -5584,8 +5584,8 @@ async def _exec_bulk_post_to_channel(
                     message_id=message_id,
                     parse_mode="HTML",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, f"bulk_post progress message edit failed: {e}")
 
         if attempt >= 4:
             attempt = 0
@@ -5618,8 +5618,8 @@ async def _exec_bulk_post_to_channel(
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"bulk_post final message edit failed: {e}")
 
     return {
         "status": "done",
@@ -5726,8 +5726,8 @@ async def _exec_bulk_update_profile(
                     message_id=message_id,
                     parse_mode="HTML",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, f"bulk_update_profile progress message edit failed: {e}")
 
         if attempt >= 4:
             attempt = 0
@@ -5755,8 +5755,8 @@ async def _exec_bulk_update_profile(
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"bulk_update_profile final message edit failed: {e}")
 
     return {
         "status": "done",
@@ -5784,8 +5784,8 @@ async def _exec_bulk_chan_exec(
             from services import brand_injection as _bi
             if await _bi.is_user_free_tier(pool, owner_id):
                 value = _bi.add_promo_to_description(value)
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"bulk_chan_exec brand_injection failed: {e}")
 
     if not channel_acc_pairs or op not in ("chan_uname", "chan_about"):
         return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}
@@ -5873,8 +5873,8 @@ async def _exec_bulk_chan_exec(
                                 "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
                                 assigned, owner_id, ch_id,
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log_exc_swallow(log, f"bulk_chan_exec: persist username failed for ch={ch_id}: {e}")
                     else:
                         err_list.append(f"❌ {chan_title}: {_html.escape(last_err[:60])}")
 
@@ -5995,8 +5995,8 @@ async def _exec_bulk_post_chans(
                             "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
                             _rhash, owner_id, int(ch_id),
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, f"bulk_post_chans: persist access_hash failed for ch={ch_id}: {e}")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -6176,8 +6176,8 @@ async def _exec_check_accounts_health(
             try:
                 await pool.execute("UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"])
                 deactivated += 1
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("check_accounts_health: deactivate acc %s failed: %s", acc["id"], e)
         elif status == "active":
             # Подтверждённо рабочий аккаунт (get_me прошёл, ограничений нет):
             # вернуть в строй, если был ошибочно деактивирован разовой auth-ошибкой
@@ -6194,8 +6194,8 @@ async def _exec_check_accounts_health(
                     reactivated += 1
                 else:
                     await _db.update_acc_status(pool, acc["id"], status, result.get("reason", ""))
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("check_accounts_health: reactivate/update acc %s failed: %s", acc["id"], e)
         elif should_persist_account_status(
             status,
             auth_error=bool(result.get("auth_error", False)),
@@ -6203,8 +6203,8 @@ async def _exec_check_accounts_health(
         ):
             try:
                 await _db.update_acc_status(pool, acc["id"], status, result.get("reason", ""))
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("check_accounts_health: update_acc_status for acc %s failed: %s", acc["id"], e)
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -6338,8 +6338,8 @@ async def _exec_scan_owned_resources(
                         await pool.execute(
                             "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("scan_owned_resources: deactivate dead acc %s failed: %s", acc_id, e)
                     acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
                 elif "flood" in err_low:
                     acc_lines.append(f"⏳ {label}: FloodWait")
@@ -6358,8 +6358,8 @@ async def _exec_scan_owned_resources(
                     await pool.execute(
                         "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("scan_owned_resources: deactivate dead acc %s failed: %s", acc_id, e)
                 acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
             else:
                 acc_lines.append(f"❌ {label}: {str(exc)[:60]}")
@@ -7852,8 +7852,8 @@ async def _exec_self_promo_blast(
                         "UPDATE bot_users SET is_active=FALSE WHERE user_id=$1 AND bot_id=$2",
                         user_id, bot_id,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, f"self_promo_blast: deactivate bot_user failed for user={user_id} bot={bot_id}: {e}")
             fail_count += 1
 
         await _safe_execute(
@@ -7865,8 +7865,8 @@ async def _exec_self_promo_blast(
     for _b in token_cache.values():
         try:
             await _b.session.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"self_promo_blast: close bot session failed: {e}")
 
     await _safe_execute(
             pool,
@@ -8102,8 +8102,8 @@ async def _exec_auto_register(
         try:
             await pool.execute(
                 "UPDATE operation_queue SET done_items=$1 WHERE id=$2", ok + failed, op_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("auto_register progress update failed for op %d: %s", op_id, e)
         return not await _is_cancelled(pool, op_id)
 
     try:
@@ -8175,8 +8175,8 @@ async def _exec_leave_all_chats(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"leave_all_chats: client disconnect failed for acc {account_id}: {e}")
 
     return {
         "status": "done",
@@ -8231,16 +8231,16 @@ async def _exec_delete_contacts(
                     try:
                         await client(DeleteContactsRequest(id=[u]))
                         deleted += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, f"delete_contacts: single contact delete failed for user {getattr(u, 'id', '?')}: {e}")
                     await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                     await asyncio.sleep(0.5)
         await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", deleted, op_id)
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, f"delete_contacts: client disconnect failed for acc {account_id}: {e}")
 
     return {
         "status": "done",

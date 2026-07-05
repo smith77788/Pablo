@@ -406,7 +406,7 @@ async def create_warmup_plan(
         health = _ah.get_health(account_id)
         health.warmup_state = _ah.WarmupState.WARMING
     except Exception:
-        pass
+        log_exc_swallow(log, "warmup: set warmup_state=warming failed")
 
     log.info("warmup: created plan %d for acc=%d (acc_status → warming)", plan_id, account_id)
     return plan_id
@@ -870,7 +870,7 @@ async def _perform_own_channel_read(client, channel_ref: str) -> bool:
                 )
                 await asyncio.sleep(random.uniform(1, 3))
             except Exception:
-                pass
+                log_exc_swallow(log, "warmup: send reaction failed")
         return True
     except Exception as e:
         etype = type(e).__name__
@@ -1398,7 +1398,7 @@ async def _run_daily_warmup_impl(
                     from services import account_health as _ah
                     _ah.update_after_success(account_id, action)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "warmup: update health after success failed")
             else:
                 infra_memory.record_account_op(
                     account_id,
@@ -1413,7 +1413,7 @@ async def _run_daily_warmup_impl(
                     _is_flood = error is not None and "flood" in str(error).lower()
                     _ah.update_after_failure(account_id, action, is_flood=_is_flood)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "warmup: update health after failure failed")
 
             if success:
                 actions_ok += 1
@@ -1543,7 +1543,7 @@ async def _run_daily_warmup_impl(
             # Give a final health boost for completing the full warmup plan
             health.health_score = min(100.0, health.health_score + 5.0)
         except Exception:
-            pass
+            log_exc_swallow(log, "warmup: set warmup_state=READY failed")
         log.info(
             "warmup: acc=%d GRADUATED — plan %d completed, acc_status=active, warmup_state=READY",
             account_id,
@@ -1588,7 +1588,7 @@ async def _run_daily_warmup_impl(
             error_msg=_wu_err,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "warmup: write op audit failed")
 
     return {
         "actions_done": actions_ok + actions_fail,
@@ -1851,7 +1851,7 @@ async def _run_warmup_session_impl(
                         from services import account_health as _ah
                         _ah.update_after_success(acc_id, action)
                     except Exception:
-                        pass
+                        log_exc_swallow(log, "warmup_session: update health after success failed")
                 else:
                     total_fail += 1
                     # Update in-memory health score on failed warmup session action
@@ -1860,7 +1860,7 @@ async def _run_warmup_session_impl(
                         _is_flood = error_str is not None and "flood" in str(error_str).lower()
                         _ah.update_after_failure(acc_id, action, is_flood=_is_flood)
                     except Exception:
-                        pass
+                        log_exc_swallow(log, "warmup_session: update health after failure failed")
 
                 try:
                     await pool.execute(
@@ -1892,7 +1892,7 @@ async def _run_warmup_session_impl(
             try:
                 await asyncio.wait_for(client.disconnect(), timeout=5)
             except Exception:
-                pass
+                log_exc_swallow(log, "warmup_session: client disconnect failed")
             # Освобождаем claim аккаунта
             if _claimed:
                 try:
@@ -1948,7 +1948,7 @@ async def _run_warmup_session_impl(
                     health.warmup_state = _ah.WarmupState.READY
                     health.health_score = min(100.0, health.health_score + 3.0)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "warmup_session: set warmup_state=READY failed")
             except Exception as _ge:
                 log.warning(
                     "warmup_session: graduation update failed acc=%d: %s", _acc_id, _ge

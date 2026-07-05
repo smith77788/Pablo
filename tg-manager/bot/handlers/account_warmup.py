@@ -61,6 +61,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSM
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch active session count")
         sessions = []
     active_sessions = sessions[0]["c"] if sessions else 0
 
@@ -122,6 +123,7 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch accounts for warmup plan")
         accounts = []
 
     if not accounts:
@@ -188,6 +190,7 @@ async def cb_warmup_select_plan(
             "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
         )
     except Exception:
+        log_exc_swallow(log, "fetch account for plan selection")
         acc = None
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
@@ -212,6 +215,7 @@ async def cb_warmup_select_all_plan(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "count accounts with sessions")
         count = 0
 
     kb = InlineKeyboardBuilder()
@@ -253,6 +257,7 @@ async def cb_warmup_create_all_plans(
             user_id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch accounts for create_all_plans")
         accounts = []
 
     if not accounts:
@@ -332,6 +337,7 @@ async def cb_warmup_start(
             "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
         )
     except Exception:
+        log_exc_swallow(log, "fetch account for warmup start")
         acc = None
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
@@ -382,6 +388,7 @@ async def cb_warmup_create_plan(
             "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
         )
     except Exception:
+        log_exc_swallow(log, "fetch account for create_plan")
         acc = None
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
@@ -671,6 +678,7 @@ async def cb_warmup_plan_log(
             "SELECT first_name, phone FROM tg_accounts WHERE id=$1", acc_id
         )
     except Exception:
+        log_exc_swallow(log, "fetch account for plan log")
         acc_row = None
     label = ""
     if acc_row:
@@ -683,6 +691,7 @@ async def cb_warmup_plan_log(
             plan_id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch plan info for plan log")
         plan_row = None
 
     # Get last 50 actions from warmup log
@@ -696,6 +705,7 @@ async def cb_warmup_plan_log(
             acc_id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch warmup log rows")
         rows = []
 
     lines = [f"📋 <b>Лог разогрева: {html.escape(label)}</b>\n"]
@@ -791,6 +801,7 @@ async def _show_account_picker(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch accounts for session picker")
         accounts = []
 
     kb = InlineKeyboardBuilder()
@@ -903,6 +914,7 @@ async def _show_infra_picker(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch managed channels for infra picker")
         channels = []
     try:
         bots = await pool.fetch(
@@ -915,6 +927,7 @@ async def _show_infra_picker(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch managed bots for infra picker")
         bots = []
 
     all_resources = list(channels) + list(bots)
@@ -1159,6 +1172,7 @@ async def cb_wu_mode(
             acc_ids,
         )
     except Exception:
+        log_exc_swallow(log, "fetch account labels for session confirmation")
         acc_rows = []
     acc_labels = [html.escape(str(r["label"])) for r in acc_rows]
 
@@ -1266,6 +1280,7 @@ async def cb_wu_session_list(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch warmup sessions")
         sessions = []
 
     if not sessions:
@@ -1347,6 +1362,7 @@ async def cb_wu_sess_detail(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch session detail")
         s = None
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
@@ -1363,6 +1379,7 @@ async def cb_wu_sess_detail(
             sess_id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch session log")
         logs = []
 
     n_acc = len(s["account_ids"] or [])
@@ -1433,6 +1450,7 @@ async def cb_wu_sess_run(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch session for run")
         s = None
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
@@ -1570,6 +1588,7 @@ async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
             or 0
         )
     except Exception:
+        log_exc_swallow(log, "count active resource sessions")
         active_count = 0
 
     try:
@@ -1585,6 +1604,7 @@ async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
             or 0
         )
     except Exception:
+        log_exc_swallow(log, "count infrastructure resources")
         resources = 0
 
     kb = InlineKeyboardBuilder()
@@ -1629,6 +1649,7 @@ async def _show_ract_account_picker(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch accounts for resource activity picker")
         accounts = []
 
     kb = InlineKeyboardBuilder()
@@ -1754,6 +1775,7 @@ async def cb_ract_profile(
             callback.from_user.id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch resources for preview")
         resources = []
     res_preview = "\n".join(
         f"  • <code>{html.escape(str(r['label']))}</code>" for r in resources
@@ -1767,6 +1789,7 @@ async def cb_ract_profile(
             acc_ids,
         )
     except Exception:
+        log_exc_swallow(log, "fetch account rows for preview")
         acc_rows = []
     acc_preview = ", ".join(html.escape(str(r["label"])) for r in acc_rows[:4])
     if len(acc_rows) > 4:
@@ -1868,6 +1891,7 @@ async def cb_ract_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "fetch resource activity sessions")
         sessions = []
 
     if not sessions:
@@ -1944,6 +1968,7 @@ async def cb_ract_detail(
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "fetch resource activity session")
         s = None
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
@@ -1959,6 +1984,7 @@ async def cb_ract_detail(
             sess_id,
         )
     except Exception:
+        log_exc_swallow(log, "fetch resource activity logs")
         logs = []
 
     day = s["current_day"] or 0
@@ -2031,6 +2057,7 @@ async def cb_ract_run(
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "fetch session for resource activity run")
         s = None
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)

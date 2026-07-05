@@ -82,8 +82,8 @@ async def _resolve_bot_username() -> str:
         finally:
             try:
                 await _b.session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_resolve_bot_username session.close: %s", e)
     except Exception as e:
         log.warning("_resolve_bot_username failed: %s", e)
         _bot_username_cache = ""
@@ -150,8 +150,8 @@ def _is_admin(uid: int | None) -> bool:
         from bot.handlers.admin import _session_admins
         if uid in _session_admins:
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("_is_admin import session_admins: %s", e)
     return False
 
 
@@ -425,8 +425,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 from bot.utils.subscription import coerce_plan as _cp
                 stats["plan"] = _cp(stats["plan"])
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("dashboard coerce_plan: %s", e)
             if r["exp_row"]:
                 stats["plan_expires_at"] = str(r["exp_row"]["expires_at"])
             else:
@@ -2664,22 +2664,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     async with _aio.ClientSession() as _http:
                         await _http.get(f"https://api.telegram.org/bot{token}/setMyName?name={_aio.helpers.quote(name_template)}", timeout=_aio.ClientTimeout(total=10))
                     applied.append("name")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("bot_factory_create setMyName: %s", e)
             if description:
                 try:
                     async with _aio.ClientSession() as _http:
                         await _http.get(f"https://api.telegram.org/bot{token}/setMyDescription?description={_aio.helpers.quote(description)}", timeout=_aio.ClientTimeout(total=10))
                     applied.append("description")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("bot_factory_create setMyDescription: %s", e)
             if short_desc:
                 try:
                     async with _aio.ClientSession() as _http:
                         await _http.get(f"https://api.telegram.org/bot{token}/setMyShortDescription?short_description={_aio.helpers.quote(short_desc)}", timeout=_aio.ClientTimeout(total=10))
                     applied.append("short_description")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("bot_factory_create setMyShortDescription: %s", e)
             # Привязка к экосистеме
             if ecosystem_id:
                 try:
@@ -2688,8 +2688,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         int(ecosystem_id), bot_id,
                     )
                     applied.append("ecosystem")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("bot_factory_create ecosystem link: %s", e)
             return _json_resp({
                 "ok": True, "bot_id": bot_id,
                 "username": bot_info.get("username", ""),
@@ -4348,8 +4348,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         short = await _bapi.get_my_short_description(session, row["token"], lc)
                         if name or desc or short:
                             result.append({"lang": lc or "default", "name": name, "description": desc, "short_description": short})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("multigeo_get get locale %s: %s", lc, e)
         except Exception as exc:
             return _err(str(exc), 500)
         return _json_resp({"profiles": result})
@@ -5875,8 +5875,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 expires = str(srow["expires_at"])
                 if not plan or plan == "free":
                     plan = srow["plan"] or plan
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("subscription fetch subscriptions: %s", e)
         # Фолбэк на platform_users только если источник истины недоступен.
         if not plan:
             try:
@@ -5886,8 +5886,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     plan = prow["current_plan"] or "free"
                     if not expires and prow["plan_expires_at"]:
                         expires = str(prow["plan_expires_at"])
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("subscription fetch platform_users: %s", e)
         # Нормализуем к бинарной модели (starter/pro/enterprise → paid),
         # чтобы клиент корректно показал платный тариф.
         try:
@@ -5911,8 +5911,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if row and row["settings_json"]:
                 import json as _json
                 return _json_resp(_json.loads(row["settings_json"]))
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("user_settings_get: %s", e)
         return _json_resp({
             "notif_ops": True,
             "notif_pay": True,
@@ -6392,8 +6392,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "INSERT INTO ecosystem_global_presence (ecosystem_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                         int(ecosystem_id), plan_id,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("global_presence_create ecosystem link: %s", e)
             return _json_resp({"ok": True, "plan_id": plan_id, "asset_type": asset_type, "name_pattern": name_pattern})
         except Exception as exc:
             log.exception("global_presence_create uid=%d", uid)
@@ -8442,8 +8442,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             finally:
                 try:
                     await _b.session.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("admin_broadcast session.close: %s", e)
             return _json_resp({"ok": True, "sent": sent, "failed": failed})
         except Exception as e:
             log.exception("admin_broadcast uid=%d", uid)

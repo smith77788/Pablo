@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
+from services.logger import log_exc_swallow
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -160,7 +161,7 @@ class SubscriptionGateMiddleware(BaseMiddleware):
                         parse_mode="HTML",
                     )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "edit success message after gate check")
             else:
                 _cache_set(user.id, False)
                 names = ", ".join(
@@ -185,11 +186,11 @@ class SubscriptionGateMiddleware(BaseMiddleware):
                 try:
                     await event.answer("Необходима подписка на каналы!", show_alert=True)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "answer subscription required alert")
                 try:
                     await event.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "edit message to show gate")
             return None
 
         # Cache miss — check Telegram API, then cache the result
@@ -208,13 +209,14 @@ class SubscriptionGateMiddleware(BaseMiddleware):
             try:
                 await event.answer("Необходима подписка на каналы!", show_alert=True)
             except Exception:
-                pass
+                log_exc_swallow(log, "answer subscription required alert")
             try:
                 await event.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
             except Exception:
+                log_exc_swallow(log, "edit message to show gate")
                 try:
                     await event.message.answer(text, reply_markup=markup, parse_mode="HTML")
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "fallback send gate message")
 
         return None

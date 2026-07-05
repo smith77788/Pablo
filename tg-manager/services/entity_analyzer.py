@@ -52,6 +52,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 
 import asyncpg
+from services.logger import log_exc_swallow
 try:
     import httpx as _httpx
     _HTTPX_AVAILABLE = True
@@ -143,10 +144,11 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
             await asyncio.wait_for(client.connect(), timeout=12)
             return client
         except Exception:
+            log_exc_swallow(log, "connect to Telegram client")
             try:
                 await client.disconnect()
             except Exception:
-                pass
+                log_exc_swallow(log, "disconnect client after failed connect")
     return None
 
 
@@ -203,7 +205,7 @@ async def _get_avatar_metrics(client, entity) -> dict[str, Any]:
                 oldest = min(photos, key=lambda p: p.id)
                 oldest_photo_id = oldest.id
     except Exception:
-        pass
+        log_exc_swallow(log, "fetch profile photos")
     return {
         "total_historical_count": total,
         "oldest_photo_id": oldest_photo_id,
@@ -223,6 +225,7 @@ async def _get_db_footprint(pool: asyncpg.Pool, entity_id: int) -> int | None:
         )
         return int(val.timestamp()) if val else None
     except Exception:
+        log_exc_swallow(log, "query reg_check_cache")
         return None
 
 
@@ -243,6 +246,7 @@ async def _get_earliest_activity(pool: asyncpg.Pool, entity_id: int) -> datetime
             val = val.replace(tzinfo=timezone.utc)
         return val
     except Exception:
+        log_exc_swallow(log, "query user_activity")
         return None
 
 
@@ -313,6 +317,7 @@ async def _scan_oldest_message_in_dialogs(
             except (ChannelPrivateError, ChatAdminRequiredError):
                 continue
             except Exception:
+                log_exc_swallow(log, "iterate dialogs")
                 continue
             if scanned >= max_dialogs:
                 break
@@ -339,9 +344,9 @@ async def _scan_oldest_message_in_dialogs(
                 if oldest is None or dt < oldest:
                     oldest = dt
             except Exception:
-                pass
+                log_exc_swallow(log, "fetch messages from dialog")
     except Exception:
-        pass
+        log_exc_swallow(log, "scan oldest message in dialogs")
     return oldest, scanned
 
 
@@ -374,6 +379,7 @@ async def _wayback_first_seen(username: str) -> datetime | None:
                 tzinfo=timezone.utc,
             )
     except Exception:
+        log_exc_swallow(log, "query Wayback Machine")
         return None
 
 
@@ -415,6 +421,7 @@ async def _google_snippet_date(username: str) -> datetime | None:
                     pass
             return min(dates) if dates else None
     except Exception:
+        log_exc_swallow(log, "query Yandex for username")
         return None
 
 
@@ -550,7 +557,7 @@ async def analyze_channel(
                 })
             admins_count = max(admins_count, len(adm_result.participants))
         except Exception:
-            pass
+            log_exc_swallow(log, "fetch admin participants")
 
         try:
             bot_result = await asyncio.wait_for(
@@ -559,7 +566,7 @@ async def analyze_channel(
             )
             bot_count = len(bot_result.participants)
         except Exception:
-            pass
+            log_exc_swallow(log, "fetch bot participants")
 
         # ── Recent posts analysis ─────────────────────────────────────────────
         views_list: list[int] = []
@@ -657,7 +664,7 @@ async def analyze_channel(
                 )
                 linked_name = getattr(linked_ent, "title", None) or getattr(linked_ent, "username", None)
             except Exception:
-                pass
+                log_exc_swallow(log, "resolve linked entity")
 
         # ── OSINT enrichment ──────────────────────────────────────────────────
         dc_id = _extract_dc(ch)
@@ -696,7 +703,7 @@ async def analyze_channel(
             if history.messages:
                 exact_date = history.messages[0].date
         except Exception:
-            pass
+            log_exc_swallow(log, "fetch first message via GetHistoryRequest")
         if not exact_date:
             try:
                 msg = await asyncio.wait_for(
@@ -707,7 +714,7 @@ async def analyze_channel(
                 elif msg and isinstance(msg, list) and msg and getattr(msg[0], "date", None):
                     exact_date = msg[0].date
             except Exception:
-                pass
+                log_exc_swallow(log, "fetch first message via get_messages")
         if exact_date:
             created_at = exact_date
 
@@ -810,7 +817,7 @@ async def analyze_channel(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "disconnect analysis client")
 
 
 async def analyze_user(
@@ -1051,7 +1058,7 @@ async def analyze_user(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "disconnect analysis client")
 
 
 async def analyze_telegram_object(
@@ -1140,7 +1147,7 @@ async def analyze_telegram_object(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "disconnect analysis client")
 
     # Route to the appropriate analyzer
     if isinstance(entity, User):

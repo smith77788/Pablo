@@ -124,8 +124,8 @@ def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
         from services import infra_memory
 
         infra_memory.record_proxy_op(proxy_url, action_type, success=False)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("_record_proxy_fail: %s", e)
 
 
 # ── Proxy Intelligence (интеллект прокси) ───────────────────────────────────
@@ -799,7 +799,8 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
 
         try:
             is_auth = await asyncio.wait_for(client.is_user_authorized(), timeout=15.0)
-        except Exception:
+        except Exception as e:
+            log.warning("import_from_session_string: is_user_authorized failed: %s", e)
             is_auth = False
 
         if not is_auth:
@@ -926,7 +927,8 @@ async def import_from_session_file(
         # Build StringSession in Telethon format (version 1)
         try:
             ip_bytes = IPv4Address(server_address).packed
-        except Exception:
+        except Exception as e:
+            log.warning("import_from_session_file: IPv4Address parse failed: %s", e)
             DC_IPS = {
                 1: "149.154.175.53",
                 2: "149.154.167.51",
@@ -944,8 +946,8 @@ async def import_from_session_file(
     finally:
         try:
             os.unlink(tmp.name)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("import_from_session_file: cleanup tmp: %s", e)
 
     return await import_from_session_string(session_string)
 
@@ -981,8 +983,8 @@ async def convert_session_file_to_string(session_bytes: bytes) -> str:
     finally:
         try:
             os.unlink(tmp.name)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("convert_session_file_to_string: cleanup tmp: %s", e)
 
     if not row:
         raise ValueError("Таблица sessions пустая — сессия не авторизована")
@@ -993,7 +995,8 @@ async def convert_session_file_to_string(session_bytes: bytes) -> str:
         )
     try:
         ip_bytes = IPv4Address(server_address).packed
-    except Exception:
+    except Exception as e:
+        log.warning("convert_session_file_to_string: IPv4Address parse failed: %s", e)
         DC_IPS = {
             1: "149.154.175.53",
             2: "149.154.167.51",
@@ -1278,11 +1281,13 @@ async def get_dialogs(
                 break
             except (ChannelPrivateError, ChatAdminRequiredError):
                 continue
-            except Exception:
+            except Exception as e:
+                log.debug("get_dialogs: iter_dialogs skip: %s", e)
                 continue
             try:
                 entity = dialog.entity
-            except Exception:
+            except Exception as e:
+                log.debug("get_dialogs: dialog.entity error: %s", e)
                 continue
             if isinstance(entity, (Channel, Chat)):
                 dialogs.append(
@@ -1370,13 +1375,15 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
                     break
                 except (ChannelPrivateError, ChatAdminRequiredError):
                     continue
-                except Exception:
+                except Exception as e:
+                    log.debug("scan_owned_assets: iter_dialogs skip: %s", e)
                     continue
                 try:
                     entity = dialog.entity
                 except (ChannelPrivateError, ChatAdminRequiredError):
                     continue
-                except Exception:
+                except Exception as e:
+                    log.debug("scan_owned_assets: dialog.entity error: %s", e)
                     continue
                 if isinstance(entity, Channel):
                     is_creator = getattr(entity, "creator", False)
@@ -1559,11 +1566,13 @@ async def get_account_dialogs_stats(
                 break
             except (ChannelPrivateError, ChatAdminRequiredError):
                 continue
-            except Exception:
+            except Exception as e:
+                log.debug("get_account_dialogs_stats: iter_dialogs skip: %s", e)
                 continue
             try:
                 entity = dialog.entity
-            except Exception:
+            except Exception as e:
+                log.debug("get_account_dialogs_stats: dialog.entity error: %s", e)
                 continue
             total += 1
             if isinstance(entity, Channel):
@@ -2094,8 +2103,8 @@ async def create_channel(
             from services.brand_injection import add_botmother_as_channel_admin, post_welcome_and_pin
             await add_botmother_as_channel_admin(client, _ch_id, _ch_hash)
             await post_welcome_and_pin(client, _ch_id, _ch_hash)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("create_channel: brand_injection failed: %s", e)
 
         return {
             "channel_id": _ch_id,
@@ -2443,7 +2452,8 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
     target_id = _normalize_channel_id(channel_ref)
     try:
         return await asyncio.wait_for(client.get_entity(target_id), timeout=10.0)
-    except Exception:
+    except Exception as e:
+        log.debug("_resolve_channel_peer: get_entity failed: %s", e)
         from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
         _iter = client.iter_dialogs(limit=500)
         while True:
@@ -2453,11 +2463,13 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
                 break
             except (ChannelPrivateError, ChatAdminRequiredError):
                 continue
-            except Exception:
+            except Exception as e2:
+                log.debug("_resolve_channel_peer: iter skip: %s", e2)
                 continue
             try:
                 eid = getattr(dlg.entity, "id", None)
-            except Exception:
+            except Exception as e3:
+                log.debug("_resolve_channel_peer: entity.id error: %s", e3)
                 continue
             if eid and abs(int(eid)) == target_id:
                 ah = getattr(dlg.entity, "access_hash", 0)
@@ -2645,8 +2657,8 @@ async def invite_users_to_channel(
                     if progress_cb and done % 10 == 0:
                         try:
                             await progress_cb(done, total, invited, len(failed))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("invite_users_to_channel: progress_cb error: %s", e)
                     if idx < len(batch) - 1:
                         await asyncio.sleep(
                             random.uniform(35, 95) * session_simulator.chaos_factor()
@@ -2699,7 +2711,8 @@ async def invite_users_to_channel(
                             InviteToChannelRequest(channel=channel_peer, users=[user])
                         )
                         invited += 1
-                    except Exception:
+                    except Exception as e:
+                        log.debug("invite_users_to_channel: flood retry failed: %s", e)
                         failed.append(f"{uname}: FloodWait+retry_fail")
                 except Exception as e:
                     failed.append(f"{uname}: {str(e)[:60]}")
@@ -2717,8 +2730,8 @@ async def invite_users_to_channel(
         if progress_cb:
             try:
                 await progress_cb(total, total, invited, len(failed))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("invite_users_to_channel: final progress_cb error: %s", e)
 
         return {"invited": invited, "failed": failed, "batches": batches_done}
 
@@ -2735,8 +2748,8 @@ async def invite_users_to_channel(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("invite_users_to_channel: disconnect error: %s", e)
 
 
 async def join_channel_by_id(
@@ -2807,8 +2820,8 @@ async def join_channel_by_id(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("join_channel_by_id: disconnect error: %s", e)
 
 
 async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
@@ -2824,8 +2837,8 @@ async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("get_own_user_id: disconnect error: %s", e)
 
 
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
@@ -3042,8 +3055,8 @@ async def post_to_channel(
                 peer = await asyncio.wait_for(
                     client.get_entity(_normalize_channel_id(channel_id)), timeout=10.0
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("post_to_channel: get_entity fallback failed: %s", e)
 
             if peer is None:
                 # Strategy 4: full dialog scan (last resort, slow)
@@ -3056,11 +3069,13 @@ async def post_to_channel(
                         break
                     except (ChannelPrivateError, ChatAdminRequiredError):
                         continue
-                    except Exception:
+                    except Exception as e:
+                        log.debug("post_to_channel: iter skip: %s", e)
                         continue
                     try:
                         eid = getattr(_d.entity, "id", None)
-                    except Exception:
+                    except Exception as e:
+                        log.debug("post_to_channel: entity.id error: %s", e)
                         continue
                     if eid == cid:
                         peer = InputPeerChannel(
@@ -3736,8 +3751,8 @@ async def report_peer_deep_v2(  # noqa: C901
             import telethon.tl.types as _tlt
 
             _rm[_rk] = getattr(_tlt, _tn)()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("rpv2: reason_map import %s: %s", _tn, e)
 
     _escalation: dict[str, list[str]] = {
         "childabuse": ["pornography", "violence", "drugs", "spam", "other"],
@@ -4012,8 +4027,8 @@ async def report_peer_deep_v2(  # noqa: C901
                         from telethon.tl.types import InputChannel as _IC_inv
                         _ie_inv = _IC_inv(entity.id, getattr(entity, "access_hash", 0))
                         entity = await _timed(client.get_entity(_ie_inv), 15.0)
-                    except Exception:
-                        pass  # keep entity from join response — already has access_hash
+                    except Exception as e:
+                        log.debug("rpv2: entity refresh from join failed: %s", e)
                 except Exception:
                     # Already a member (or other join error) — use CheckChatInviteRequest
                     # to get entity. ImportChatInviteRequest fails for existing members,
@@ -4260,8 +4275,8 @@ async def report_peer_deep_v2(  # noqa: C901
                         for m in (raw or [])
                         if m and m.id and not getattr(m, "action", None)
                     ]
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("rpv2[5/GetHistory] fallback failed: %s", e)
             if not msgs:
                 try:
                     raw2 = await _timed(
@@ -4270,8 +4285,8 @@ async def report_peer_deep_v2(  # noqa: C901
                     msgs = [
                         m for m in (raw2 or []) if m and not getattr(m, "action", None)
                     ]
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("rpv2[5/GetHistory] second fallback failed: %s", e)
             if not msgs and _prefetch_msgs:
                 msgs = _prefetch_msgs
                 log.info(
@@ -4363,8 +4378,8 @@ async def report_peer_deep_v2(  # noqa: C901
                 try:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     await client.forward_messages("me", _sv)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("rpv2[6/save_to_fav]: %s", e)
 
             log.info(
                 "rpv2[6/browse] viewed=%d reacted=%d saved=%d acc=%s",
@@ -4409,8 +4424,8 @@ async def report_peer_deep_v2(  # noqa: C901
                             R["peer_reported"] = True
                         else:
                             R["multi_reason_sent"] += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("rpv2[7/peer retry] acc=%s: %s", acc_id, e)
                 elif "REPORT_TOO_MUCH" in err.upper() or "too_many" in err.lower():
                     _record_error("peer", err)
                     break
@@ -4519,8 +4534,8 @@ async def report_peer_deep_v2(  # noqa: C901
                             )
                             if ok:
                                 R["msg_reported"] += min(2, len(chunk))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("rpv2[10/retry ci=%d] acc=%s: %s", ci, acc_id, e)
                     elif "REPORT_TOO_MUCH" in err.upper():
                         log.info("rpv2[10] REPORT_TOO_MUCH ci=%d, stopping", ci)
                         break
@@ -4544,8 +4559,8 @@ async def report_peer_deep_v2(  # noqa: C901
                     try:
                         _spam_participant = await _timed(client.get_entity(_fid), 8.0)
                         break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("rpv2[11/spam_participant] acc=%s: %s", acc_id, e)
             if spam_ids and _spam_participant is None:
                 try:
                     _adm_resp = await _timed(
@@ -4565,8 +4580,8 @@ async def report_peer_deep_v2(  # noqa: C901
                         ):
                             _spam_participant = _au
                             break
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("rpv2[11/spam_admin_fallback] acc=%s: %s", acc_id, e)
             if spam_ids and _spam_participant:
                 try:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -4685,8 +4700,8 @@ async def report_peer_deep_v2(  # noqa: C901
                     try:
                         await client.send_message(fbot, "/start")
                         await asyncio.sleep(random.uniform(1.5, 3.0))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("rpv2[15/fwd_start %s]: %s", bot_uname, e)
                     for em in fwd_msgs[:4]:
                         try:
                             await client.forward_messages(fbot, em)
@@ -4715,8 +4730,8 @@ async def report_peer_deep_v2(  # noqa: C901
                 _last_id = max((m.id for m in msgs if m and m.id), default=0)
                 if _last_id:
                     await _timed(client(_RHR(channel=entity, max_id=_last_id)), 10.0)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("rpv2[16/ReadHistory] acc=%s: %s", acc_id, e)
         try:
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
@@ -4729,13 +4744,13 @@ async def report_peer_deep_v2(  # noqa: C901
                     ),
                 )
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("rpv2[16/mute] acc=%s: %s", acc_id, e)
         if R["joined"]:
             try:
                 await client(LeaveChannelRequest(entity))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("rpv2[16/leave] acc=%s: %s", acc_id, e)
         if block_after:
             try:
                 await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -4767,8 +4782,8 @@ async def report_peer_deep_v2(  # noqa: C901
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("rpv2: disconnect error: %s", e)
     return R
 
 
@@ -4985,8 +5000,8 @@ async def check_username_available(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("check_username_available: disconnect error: %s", e)
 
 
 async def update_account_username(
@@ -5091,8 +5106,8 @@ async def create_bot_via_botfather(
                 msgs = await client.get_messages(bf_entity, limit=1)
                 if msgs and msgs[0].sender_id == bf_id:
                     return msgs[0].id
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("create_bot_via_botfather: _get_last_bf_msg_id: %s", e)
             return 0
 
         async def _bf_send(text: str, timeout: float = 45.0) -> str:
@@ -5116,8 +5131,8 @@ async def create_bot_via_botfather(
                     for msg in msgs:
                         if msg.id > baseline_id and msg.sender_id == bf_id:
                             return msg.text or ""
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("create_bot_via_botfather: poll error: %s", e)
                 poll_interval = min(poll_interval + 1.0, 8.0)  # back off slowly
             return ""  # timed out
 
@@ -5147,8 +5162,8 @@ async def create_bot_via_botfather(
             try:
                 await client.send_message(bf_entity, "/cancel")
                 await asyncio.sleep(random.uniform(2.0, 4.0))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("create_bot_via_botfather: _bf_cancel: %s", e)
 
         # Validate username format before starting dialog
         uname = bot_username.lstrip("@").strip()
@@ -5309,8 +5324,8 @@ async def list_bots_via_botfather(
                     if msg.id > baseline_id and msg.sender_id == bf_id:
                         response_msg = msg
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("list_bots_via_botfather: poll error: %s", e)
             if response_msg is not None:
                 break
 
@@ -5375,8 +5390,8 @@ async def transfer_bot_via_botfather(
                 msgs = await client.get_messages(bf_entity, limit=1)
                 if msgs and msgs[0].sender_id == bf_id:
                     return msgs[0].id
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("transfer_bot_via_botfather: _get_last_bf_msg_id: %s", e)
             return 0
 
         async def _bf_wait_for_new(baseline_id: int, timeout: float = 30.0):
@@ -5389,8 +5404,8 @@ async def transfer_bot_via_botfather(
                     for msg in msgs:
                         if msg.id > baseline_id and msg.sender_id == bf_id:
                             return msg
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("transfer_bot_via_botfather: poll error: %s", e)
             return None
 
         async def _bf_send(text: str, timeout: float = 45.0):
@@ -5412,7 +5427,8 @@ async def transfer_bot_via_botfather(
                         await asyncio.sleep(random.uniform(1.5, 3.5))
                         try:
                             await msg.click(r_idx, c_idx)
-                        except Exception:
+                        except Exception as e:
+                            log.debug("transfer_bot_via_botfather: msg.click fallback: %s", e)
                             await btn.click()
                         return await _bf_wait_for_new(baseline_id)
             return None
@@ -5491,8 +5507,8 @@ def detect_session_format(data: str) -> str:
             parsed = json.loads(data)
             if 'dc_id' in parsed and 'api_id' in parsed:
                 return 'pyrogram_json'
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("detect_session_format: json parse: %s", e)
     if len(data) > 100 and all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in data):
         return 'string_session'
     return 'unknown'
