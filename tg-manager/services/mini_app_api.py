@@ -1027,6 +1027,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Channel not found", 404)
         if not ch.get("acc_id"):
             return _err("No linked account for this channel", 400)
+        # Отложенная публикация: schedule_minutes минут от текущего момента.
+        try:
+            schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            schedule_minutes = 0
+        sched = None
+        if schedule_minutes > 0:
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            sched = (_dt.now(_tz.utc) + _td(minutes=schedule_minutes)).isoformat()
         try:
             from services.operation_bus import submit
             # Контракт _exec_bulk_post_to_channel: account_ids[], channel_ref (числовой
@@ -1037,8 +1046,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "channel_ref": int(ch_id),
                 "text_to_post": text,
                 "bulk_access_hash": int(ch.get("access_hash") or 0),
-            }, total_items=1)
-            return _json_resp({"ok": True, "op_id": op_id})
+            }, total_items=1, scheduled_for=sched)
+            return _json_resp({"ok": True, "op_id": op_id, "scheduled_minutes": schedule_minutes})
         except Exception:
             log.exception("post_to_channel ch=%d uid=%d", ch_id, uid)
             return _err("Failed to enqueue post", 500)

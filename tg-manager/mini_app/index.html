@@ -3858,6 +3858,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <textarea id="chPostText" rows="6" maxlength="4096" placeholder="Введите текст публикации..."></textarea>
       <div class="field-note"><span id="chPostLen">0</span>/4096</div>
     </div>
+    <div class="field">
+      <label>Когда опубликовать</label>
+      <select id="chPostSchedule">
+        <option value="0">Сейчас</option>
+        <option value="60">Через 1 час</option>
+        <option value="180">Через 3 часа</option>
+        <option value="360">Через 6 часов</option>
+        <option value="720">Через 12 часов</option>
+        <option value="1440">Через 24 часа</option>
+      </select>
+    </div>
     <div class="field-err" id="chPostErr"></div>
     <button class="btn btn-p" id="chPostBtn" onclick="sendChPost()" style="width:100%">📤 Опубликовать</button>
   </div>
@@ -6796,6 +6807,7 @@ let CH_POST_ID = null;
 function openChPostModal(chId) {
   CH_POST_ID = chId;
   document.getElementById('chPostText').value='';
+  { const _s=document.getElementById('chPostSchedule'); if(_s) _s.value='0'; }
   document.getElementById('chPostLen').textContent='0';
   document.getElementById('chPostErr').style.display='none';
   document.getElementById('chPostBtn').disabled=false;
@@ -6814,15 +6826,18 @@ async function sendChPost() {
   const errEl = document.getElementById('chPostErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст поста'; errEl.style.display='block'; return; }
+  const schedMin = parseInt(document.getElementById('chPostSchedule')?.value||'0')||0;
+  const schedLabel = document.getElementById('chPostSchedule')?.selectedOptions[0]?.textContent || 'Сейчас';
   const btn = document.getElementById('chPostBtn');
   btn.disabled=true; btn.textContent='⏳ Публикация...';
   try {
+    const payload={text}; if(schedMin>0) payload.schedule_minutes=schedMin;
     const d = await api('/api/miniapp/channel/'+CH_POST_ID+'/post', {
-      method:'POST', body: JSON.stringify({text})
+      method:'POST', body: JSON.stringify(payload)
     });
     closeChPost();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Пост поставлен в очередь · op #'+d.op_id);
+    toast(schedMin>0 ? `⏰ Публикация запланирована (${schedLabel.toLowerCase()})` : '✅ Пост поставлен в очередь · op #'+d.op_id);
   } catch(e) {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
     tg.HapticFeedback?.notificationOccurred('error');
