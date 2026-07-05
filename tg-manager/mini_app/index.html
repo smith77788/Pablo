@@ -1699,6 +1699,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Modal: Account Proxy -->
+<div class="mbg" id="mo-acc-proxy" onclick="if(event.target===this)closeModal('mo-acc-proxy')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-acc-proxy')">✕</div>
+    <div class="modal-title">🌐 Прокси аккаунта</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Через какой прокси аккаунт выходит в сеть. Влияет на IP/гео и безопасность.</div>
+    <div class="field">
+      <label>Прокси</label>
+      <select id="apxSel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"></select>
+    </div>
+    <div class="field-err" id="apxErr"></div>
+    <button class="btn btn-p" id="apxBtn" onclick="submitAccProxy()" style="width:100%">Сохранить</button>
+  </div>
+</div>
+
 <!-- Modal: Channel Edit -->
 <div class="mbg" id="mo-chan-edit" onclick="if(event.target===this)closeModal('mo-chan-edit')">
   <div class="modal">
@@ -4852,6 +4867,34 @@ function openAccProfile(id) {
   apToggle();
   showModal('mo-acc-profile');
 }
+// ── Прокси аккаунта ─────────────────────────────────────
+let APX_ACC_ID = null;
+async function openAccProxy(id) {
+  APX_ACC_ID = id;
+  const sel = document.getElementById('apxSel');
+  const err = document.getElementById('apxErr'); if(err) err.textContent='';
+  sel.innerHTML = '<option value="">Загрузка…</option>';
+  showModal('mo-acc-proxy');
+  try {
+    const d = await api('/api/miniapp/proxies');
+    const list = Array.isArray(d) ? d : (d.proxies||[]);
+    let html = '<option value="">🚫 Без прокси (напрямую / CF relay)</option>';
+    html += list.map(p=>`<option value="${p.id}">${esc(p.label||p.proxy_url||('Прокси #'+p.id))}${p.geo_country?(' · '+esc(p.geo_country)):''}</option>`).join('');
+    sel.innerHTML = html;
+  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+}
+async function submitAccProxy() {
+  const err=document.getElementById('apxErr'); err.textContent='';
+  const proxy_id = document.getElementById('apxSel').value || null;
+  const btn=document.getElementById('apxBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
+  try {
+    await api('/api/miniapp/account/'+APX_ACC_ID+'/proxy',{method:'POST',body:JSON.stringify({proxy_id})});
+    toast(proxy_id?'✅ Прокси назначен':'✅ Прокси снят');
+    closeModal('mo-acc-proxy');
+    openAccount(APX_ACC_ID);
+  } catch(e){ err.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Сохранить'; }
+}
 function apToggle() {
   const op=document.getElementById('apOp').value;
   const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none';};
@@ -5258,6 +5301,7 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
+      <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
     </div>
 
     <div class="sec">Профиль</div>

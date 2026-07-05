@@ -2280,6 +2280,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
             return _err(str(exc), 500)
 
+    async def account_set_proxy(request: web.Request) -> web.Response:
+        """Назначить/снять прокси у аккаунта. body: {proxy_id: int|null}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        raw = body.get("proxy_id")
+        proxy_id = None
+        if raw not in (None, "", 0, "0"):
+            try:
+                proxy_id = int(raw)
+            except (TypeError, ValueError):
+                return _err("Invalid proxy_id", 400)
+            owns_proxy = await _safe_count(pool,
+                "SELECT COUNT(*) FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
+            if not owns_proxy:
+                return _err("Прокси не найден", 404)
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+                proxy_id, acc_id, uid)
+            return _json_resp({"ok": True, "proxy_id": proxy_id})
+        except Exception as exc:
+            log.exception("account_set_proxy uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
     async def account_check_one(request: web.Request) -> web.Response:
         """Проверить один аккаунт (с реактивацией если рабочий)."""
         uid = _get_uid(request)
@@ -8081,6 +8115,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
+    app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
