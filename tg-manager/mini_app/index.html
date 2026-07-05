@@ -3376,6 +3376,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <input type="checkbox" id="bcastSilent" style="width:18px;height:18px">
       🔕 Без звука (тихая отправка)
     </label>
+    <div class="field">
+      <label>Когда отправить</label>
+      <select id="bcastSchedule">
+        <option value="0">Сейчас</option>
+        <option value="60">Через 1 час</option>
+        <option value="180">Через 3 часа</option>
+        <option value="360">Через 6 часов</option>
+        <option value="720">Через 12 часов</option>
+        <option value="1440">Через 24 часа</option>
+      </select>
+    </div>
     <div class="field-err" id="bcastErr"></div>
     <button class="btn btn-p" id="bcastBtn" onclick="sendBcast()" style="width:100%">📢 Отправить</button>
   </div>
@@ -5504,6 +5515,7 @@ function openBcastPick() {
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
   { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
+  { const _sc=document.getElementById('bcastSchedule'); if(_sc) _sc.value='0'; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -5520,6 +5532,7 @@ function openBcastForBot(botId, botName, recipCount) {
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
   { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
+  { const _sc=document.getElementById('bcastSchedule'); if(_sc) _sc.value='0'; }
   document.getElementById('bcastLen').textContent='0';
   document.getElementById('bcastErr').style.display='none';
   document.getElementById('bcastBtn').disabled=false;
@@ -5581,9 +5594,11 @@ async function sendBcast() {
   const silent = !!document.getElementById('bcastSilent')?.checked;
   const segment = document.getElementById('bcastSegment')?.value || 'all';
   const segLabel = {all:'Всем', active_7d:'Активным 7д', active_30d:'Активным 30д'}[segment] || 'Всем';
+  const schedMin = parseInt(document.getElementById('bcastSchedule')?.value||'0')||0;
+  const schedLabel = document.getElementById('bcastSchedule')?.selectedOptions[0]?.textContent || 'Сейчас';
   // Предпросмотр перед отправкой — защита от случайной рассылки
   const recip = document.getElementById('bcastRecip')?.textContent || '';
-  const preview = `Отправить рассылку?\n\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const preview = `${schedMin>0?'Запланировать':'Отправить'} рассылку?\n\n🕐 ${schedLabel}\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'')
     + (silent?'\n🔕 Без звука':'');
   if (!await askConfirm(preview)) return;
@@ -5594,10 +5609,12 @@ async function sendBcast() {
     if (buttons.length) payload.buttons = buttons;
     if (silent) payload.silent = true;
     if (segment !== 'all') payload.segment = segment;
+    if (schedMin > 0) payload.schedule_minutes = schedMin;
     const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Рассылка запущена · '+num(d.total_users)+' получателей');
+    toast(schedMin>0 ? `⏰ Рассылка запланирована (${schedLabel.toLowerCase()}) · ${num(d.total_users)} получателей`
+                     : '✅ Рассылка запущена · '+num(d.total_users)+' получателей');
     LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
   } catch(e) {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';

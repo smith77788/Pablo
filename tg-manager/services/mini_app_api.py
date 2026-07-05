@@ -704,40 +704,57 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Bot not found", 404)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql, bot_id_int)
+        # Отложенная отправка: schedule_minutes минут от текущего момента.
         try:
-            try:
-                row = await pool.fetchrow(
-                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons, silent) "
-                    "VALUES($1,$2,$3,'pending',$4,$5::jsonb,$6) RETURNING id",
-                    bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None, silent)
-            except Exception:
-                try:
-                    row = await pool.fetchrow(
-                        "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons) "
-                        "VALUES($1,$2,$3,'pending',$4,$5::jsonb) RETURNING id",
-                        bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None)
-                except Exception:
-                    row = await pool.fetchrow(
-                        "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
-                        bot_id_int, text, total, uid)
-            broadcast_id = row["id"]
-            # Create op_queue entry so user can track progress
+            schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            schedule_minutes = 0
+        try:
             bot_label = bot_row.get("username") or bot_id_int
             label = f"Рассылка боту @{bot_label}: {text[:40]}…" if len(text) > 40 else f"Рассылка: {text[:60]}"
-            _op_params = {"bot_id": bot_id_int, "broadcast_id": broadcast_id, "text": text}
+            _op_params = {"bot_id": bot_id_int, "text": text}
             if buttons:
                 _op_params["buttons"] = buttons
             if silent:
                 _op_params["silent"] = True
             if _seg_sql:
                 _op_params["segment"] = segment
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps(_op_params),
-                total, label,
-            )
-            return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id, "total_users": total})
+
+            broadcast_id = None
+            if schedule_minutes <= 0:
+                # Немедленная отправка: создаём запись рассылки сразу (прогресс/resume).
+                try:
+                    row = await pool.fetchrow(
+                        "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons, silent) "
+                        "VALUES($1,$2,$3,'pending',$4,$5::jsonb,$6) RETURNING id",
+                        bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None, silent)
+                except Exception:
+                    try:
+                        row = await pool.fetchrow(
+                            "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, buttons) "
+                            "VALUES($1,$2,$3,'pending',$4,$5::jsonb) RETURNING id",
+                            bot_id_int, text, total, uid, _json.dumps(buttons) if buttons else None)
+                    except Exception:
+                        row = await pool.fetchrow(
+                            "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
+                            bot_id_int, text, total, uid)
+                broadcast_id = row["id"]
+                _op_params["broadcast_id"] = broadcast_id
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
+                    uid, _json.dumps(_op_params), total, label)
+            else:
+                # Отложенная: НЕ создаём запись рассылки заранее (иначе resume
+                # отправит её сразу при рестарте). Воркер создаст её, когда
+                # наступит scheduled_for. Планировщик воркера уважает scheduled_for.
+                label = f"⏰ {label}"
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
+                    "VALUES($1,'run_broadcast','pending',$2,$3,$4, now() + ($5 || ' minutes')::interval) RETURNING id",
+                    uid, _json.dumps(_op_params), total, label, str(schedule_minutes))
+            return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id,
+                               "total_users": total, "scheduled_minutes": schedule_minutes})
         except Exception:
             log.exception("create_broadcast bot=%d uid=%d", bot_id_int, uid)
             return _err("Failed to create broadcast", 500)
