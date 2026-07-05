@@ -2628,13 +2628,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not channel_ids:
             return _err("Выберите хотя бы один канал", 400)
         try:
+            schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            schedule_minutes = 0
+        try:
             label = f"Quick Post в {len(channel_ids)} каналов"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'quick_post','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"text": text, "channel_ids": channel_ids}), len(channel_ids), label,
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+            _params = _json.dumps({"text": text, "channel_ids": channel_ids})
+            if schedule_minutes > 0:
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
+                    "VALUES($1,'quick_post','pending',$2,$3,$4, now() + ($5 || ' minutes')::interval) RETURNING id",
+                    uid, _params, len(channel_ids), "⏰ " + label, str(schedule_minutes),
+                )
+            else:
+                op_id = await pool.fetchval(
+                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                    "VALUES($1,'quick_post','pending',$2,$3,$4) RETURNING id",
+                    uid, _params, len(channel_ids), label,
+                )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "scheduled_minutes": schedule_minutes})
         except Exception as exc:
             log.exception("quick_post_submit uid=%d", uid)
             return _err(str(exc), 500)

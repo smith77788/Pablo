@@ -2509,6 +2509,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Выберите каналы</div>
     <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="quickPostSelected" style="padding:8px 0;color:#a78bfa;font-size:13px"></div>
+    <div class="field">
+      <label style="font-size:13px;color:var(--hint)">Когда опубликовать</label>
+      <select id="qpSchedule" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="0">Сейчас</option>
+        <option value="60">Через 1 час</option>
+        <option value="180">Через 3 часа</option>
+        <option value="360">Через 6 часов</option>
+        <option value="720">Через 12 часов</option>
+        <option value="1440">Через 24 часа</option>
+      </select>
+    </div>
     <div class="field-err" id="quickPostErr"></div>
     <button class="btn btn-p" id="quickPostBtn" onclick="submitQuickPost()" style="width:100%;margin-top:8px" disabled>📤 Опубликовать (выберите каналы)</button>
   </div>
@@ -7661,11 +7672,13 @@ async function submitQuickPost() {
   const errEl = document.getElementById('quickPostErr');
   if (!text) { errEl.textContent='Введите текст публикации'; return; }
   if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
+    const schedMin = parseInt(document.getElementById('qpSchedule')?.value||'0')||0;
   const btn = document.getElementById('quickPostBtn');
   btn.disabled=true; btn.textContent='Публикую…';
   try {
-    const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify({text,channel_ids:[...QUICK_POST_SELECTED]})});
-    toast(`✍️ Публикация запущена (#${r.op_id})`);
+    const payload={text,channel_ids:[...QUICK_POST_SELECTED]}; if(schedMin>0) payload.schedule_minutes=schedMin;
+    const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify(payload)});
+    toast(schedMin>0 ? '⏰ Публикация запланирована' : `✍️ Публикация запущена (#${r.op_id})`);
     errEl.textContent='';
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
