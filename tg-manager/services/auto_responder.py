@@ -67,7 +67,20 @@ def _match_rule(rule: dict, text: str) -> bool:
     if t == "start":
         return text.strip().lower().startswith("/start")
     if t == "keyword":
-        return rule["keyword"].lower() in text.lower()
+        kw = (rule.get("keyword") or "").lower().strip()
+        if not kw:
+            return False
+        low = text.lower().strip()
+        mode = (rule.get("match_mode") or "contains").lower()
+        if mode == "exact":
+            return low == kw
+        if mode == "starts":
+            return low.startswith(kw)
+        # contains (по умолчанию); поддержка нескольких слов через запятую
+        parts = [p.strip() for p in kw.split(",") if p.strip()]
+        if len(parts) > 1:
+            return any(p in low for p in parts)
+        return kw in low
     if t == "any":
         return True
     return False

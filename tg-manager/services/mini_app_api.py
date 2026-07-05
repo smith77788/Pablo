@@ -566,6 +566,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         trigger_type = body.get("trigger_type", "keyword")
         keyword = (body.get("keyword") or "").strip()
         response_text = (body.get("response_text") or "").strip()
+        match_mode = (body.get("match_mode") or "contains").strip().lower()
+        if match_mode not in ("contains", "exact", "starts"):
+            match_mode = "contains"
         if trigger_type not in ("start", "keyword", "any"):
             return _err("trigger_type must be start/keyword/any")
         if not response_text:
@@ -573,9 +576,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if trigger_type == "keyword" and not keyword:
             return _err("keyword required for keyword trigger")
         try:
-            row = await pool.fetchrow(
-                "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
-                bot_id, trigger_type, keyword or None, response_text)
+            try:
+                row = await pool.fetchrow(
+                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode) VALUES($1,$2,$3,$4,$5) RETURNING id",
+                    bot_id, trigger_type, keyword or None, response_text, match_mode)
+            except asyncpg.UndefinedColumnError:
+                row = await pool.fetchrow(
+                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
+                    bot_id, trigger_type, keyword or None, response_text)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.exception("create_auto_reply bot=%d uid=%d", bot_id, uid)

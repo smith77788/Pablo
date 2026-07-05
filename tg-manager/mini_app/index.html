@@ -3455,8 +3455,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </select>
     </div>
     <div class="field" id="arKwField">
-      <label>Ключевое слово</label>
+      <label>Ключевое слово(а)</label>
       <input type="text" id="arKw" placeholder="Например: цена, помощь, привет">
+      <div class="field-note">Несколько слов — через запятую (сработает на любое)</div>
+      <label style="margin-top:8px;display:block">Режим совпадения</label>
+      <select id="arMatch">
+        <option value="contains">Содержит слово</option>
+        <option value="exact">Точное совпадение сообщения</option>
+        <option value="starts">Сообщение начинается с</option>
+      </select>
     </div>
     <div class="field">
       <label>Текст ответа</label>
@@ -4804,6 +4811,7 @@ function openArModal() {
   AR_SAVE_BOT = CUR_BOT?.id;
   document.getElementById('arType').value='keyword';
   document.getElementById('arKw').value='';
+  { const _m=document.getElementById('arMatch'); if(_m) _m.value='contains'; }
   document.getElementById('arText').value='';
   document.getElementById('arErr').style.display='none';
   toggleArKw();
@@ -4826,8 +4834,9 @@ async function saveAutoReply() {
   const btn = document.getElementById('arBtn');
   btn.disabled=true; btn.textContent='Сохранение...';
   try {
+    const match_mode = document.getElementById('arMatch')?.value || 'contains';
     await api('/api/miniapp/bot/'+AR_SAVE_BOT+'/auto_reply', {
-      method:'POST', body:JSON.stringify({trigger_type:type, keyword:kw||null, response_text:text})
+      method:'POST', body:JSON.stringify({trigger_type:type, keyword:kw||null, response_text:text, match_mode})
     });
     closeArModal(); toast('✅ Авто-ответ создан'); loadArList();
   } catch(e) {
