@@ -3818,6 +3818,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", _bid, uid)
             if not owns_bot:
                 return _err("Бот не найден", 404)
+        if target_type == "cohort" and not target_id:
+            return _err("Для когорты выберите бота", 400)
+        # Когорта по активности (совпадает с dm_engine._get_targets).
+        _COHORT_SQL = {
+            "hot":  "ua.last_seen >= now() - INTERVAL '1 day'",
+            "warm": "ua.last_seen >= now() - INTERVAL '7 days' AND ua.last_seen < now() - INTERVAL '1 day'",
+            "cold": "ua.last_seen >= now() - INTERVAL '30 days' AND ua.last_seen < now() - INTERVAL '7 days'",
+            "lost": "ua.last_seen < now() - INTERVAL '30 days'",
+        }
+        cohort_type = None
+        if target_type == "cohort":
+            cohort_type = (body.get("cohort_type") or "warm").strip()
+            if cohort_type not in _COHORT_SQL:
+                cohort_type = "warm"
         # Calculate total_targets depending on type
         total_targets = 0
         try:
@@ -3829,13 +3843,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
                        JOIN managed_bots mb ON mb.bot_id=bu.bot_id
                        WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
+            elif target_type == "cohort" and target_id:
+                total_targets = await _safe_count(pool,
+                    f"""SELECT COUNT(*) FROM user_activity ua
+                        JOIN managed_bots mb ON mb.bot_id=ua.bot_id AND mb.added_by=$2
+                        WHERE ua.bot_id=$1 AND {_COHORT_SQL[cohort_type]}""",
+                    int(target_id), uid)
         except Exception:
             total_targets = 0
         # Темп рассылки (params.pace): slow безопаснее, fast быстрее (риск бана).
         pace = (body.get("pace") or "normal").strip()
         if pace not in ("slow", "normal", "fast"):
             pace = "normal"
-        params_json = _json.dumps({"pace": pace})
+        _params = {"pace": pace}
+        if cohort_type:
+            _params["cohort_type"] = cohort_type
+        params_json = _json.dumps(_params)
         try:
             try:
                 row = await pool.fetchrow(

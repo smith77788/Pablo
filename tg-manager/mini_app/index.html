@@ -3858,11 +3858,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <select id="cmpTargetType" onchange="updateCmpTargetBot()">
         <option value="all_bots">Все боты — все подписчики</option>
         <option value="bot_users">Конкретный бот</option>
+        <option value="cohort">Когорта по активности (один бот)</option>
       </select>
     </div>
     <div class="field" id="cmpBotField" style="display:none">
       <label>Бот</label>
       <select id="cmpBot"></select>
+    </div>
+    <div class="field" id="cmpCohortField" style="display:none">
+      <label>Когорта по активности</label>
+      <select id="cmpCohort">
+        <option value="hot">🔥 Hot — активны за последние 24 часа</option>
+        <option value="warm" selected>🌤 Warm — активны за 7 дней</option>
+        <option value="cold">❄️ Cold — активны за 30 дней</option>
+        <option value="lost">💤 Lost — неактивны 30+ дней</option>
+      </select>
+      <div class="field-note">Сегментация по last_seen; нужен выбор бота выше</div>
     </div>
     <div class="field">
       <label>Текст сообщения</label>
@@ -6823,8 +6834,11 @@ function closeCmpModal() { document.getElementById('cmpMbg').classList.remove('s
 function updateCmpTargetBot() {
   const type = document.getElementById('cmpTargetType').value;
   const bf = document.getElementById('cmpBotField');
-  bf.style.display = type==='bot_users'?'block':'none';
-  if (type==='bot_users') {
+  const cf = document.getElementById('cmpCohortField');
+  const needBot = (type==='bot_users' || type==='cohort');
+  bf.style.display = needBot ? 'block' : 'none';
+  if (cf) cf.style.display = (type==='cohort') ? 'block' : 'none';
+  if (needBot) {
     document.getElementById('cmpBot').innerHTML = BOTS.map(b=>{
       const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
       return `<option value="${b.bot_id}">${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
@@ -6840,18 +6854,21 @@ async function saveCmp() {
   const name = document.getElementById('cmpName').value.trim();
   const text = document.getElementById('cmpText').value.trim();
   const target_type = document.getElementById('cmpTargetType').value;
-  const target_id = target_type==='bot_users' ? document.getElementById('cmpBot').value : null;
+  const needBot = (target_type==='bot_users' || target_type==='cohort');
+  const target_id = needBot ? document.getElementById('cmpBot').value : null;
+  const cohort_type = target_type==='cohort' ? document.getElementById('cmpCohort').value : null;
   const pace = document.getElementById('cmpPace')?.value || 'normal';
   const errEl = document.getElementById('cmpErr');
   errEl.style.display='none';
   if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  if (needBot && !target_id) { errEl.textContent='Выберите бота'; errEl.style.display='block'; return; }
   const btn = document.getElementById('cmpBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
   try {
     const d = await api('/api/miniapp/dm_campaigns', {
       method:'POST',
-      body: JSON.stringify({name, text:text, target_type, target_id, pace})
+      body: JSON.stringify({name, text:text, target_type, target_id, pace, cohort_type})
     });
     closeCmpModal();
     tg.HapticFeedback?.notificationOccurred('success');
