@@ -147,7 +147,7 @@ async def cb_reroll(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
     await safe_answer(callback, "🔁 Новые варианты")
-    text = _render_result(templates)
+    text = _render_result(templates, random_sample=True)
     try:
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=_result_kb().as_markup()
@@ -223,12 +223,20 @@ async def _run_spin(message: Message, state: FSMContext, script: str) -> None:
     )
 
 
-def _render_result(templates: list[str]) -> str:
-    """Собирает сообщение: случайное раскрытие каждого шаблона + сам шаблон."""
+def _render_result(templates: list[str], *, random_sample: bool = False) -> str:
+    """Собирает сообщение: пример раскрытия + сам шаблон.
+
+    По умолчанию пример — «скелет» (первые варианты групп = ваш исходный текст),
+    он всегда читается чисто. Случайную комбинацию показываем только по кнопке
+    «🔁 Ещё генерация» (``random_sample=True``).
+    """
     blocks: list[str] = []
     for i, template in enumerate(templates, 1):
         try:
-            sample = spintax_service.expand_template(template)
+            if random_sample:
+                sample = spintax_service.expand_template(template)
+            else:
+                sample = spintax_service.first_option_render(template)
         except Exception:
             sample = ""
         block = f"<b>{i}.</b> {html.escape(sample)}" if sample else f"<b>{i}.</b>"
@@ -238,9 +246,12 @@ def _render_result(templates: list[str]) -> str:
             block += "\n⚠️ " + "; ".join(html.escape(w) for w in warnings)
         blocks.append(block)
 
-    header = (
-        f"🎲 <b>Готово: {len(templates)} {_plural_variant(len(templates))}</b>\n"
-        "Сверху — случайный результат, снизу — сам spintax-шаблон "
-        "(можно скопировать в софт).\n\n"
-    )
+    if random_sample:
+        hint = "Сверху — случайная комбинация, снизу — сам spintax-шаблон.\n\n"
+    else:
+        hint = (
+            "Сверху — ваш текст, снизу — spintax-шаблон с синонимами "
+            "(копируйте в софт). «🔁 Ещё генерация» — показать случайную комбинацию.\n\n"
+        )
+    header = f"🎲 <b>Готово: {len(templates)} {_plural_variant(len(templates))}</b>\n" + hint
     return header + "\n\n".join(blocks)

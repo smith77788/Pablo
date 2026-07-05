@@ -106,14 +106,22 @@ def _err(msg: str, status: int = 400) -> web.Response:
     return _json_resp({"error": msg}, status)
 
 
-def _spintax_pack(templates: list[str]) -> list[dict[str, Any]]:
-    """Список шаблонов → элементы для фронта: шаблон, пример, предупреждения."""
+def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dict[str, Any]]:
+    """Список шаблонов → элементы для фронта: шаблон, пример, предупреждения.
+
+    По умолчанию пример — «скелет» (первые варианты групп = исходный текст), он
+    всегда читается чисто. Случайную комбинацию отдаём только при явном запросе
+    раскрутки (``random_sample=True``).
+    """
     from services import spintax_service
 
     items: list[dict[str, Any]] = []
     for tpl in templates:
         try:
-            sample = spintax_service.expand_template(tpl)
+            if random_sample:
+                sample = spintax_service.expand_template(tpl)
+            else:
+                sample = spintax_service.first_option_render(tpl)
         except Exception:
             sample = ""
         items.append(
@@ -7184,7 +7192,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         for tpl in templates:
             if not spintax_service.is_valid_template(tpl):
                 return _err("Некорректный spintax-шаблон", 400)
-        return _json_resp({"variants": _spintax_pack(templates)})
+        # expand = «Ещё генерация» → показываем случайную комбинацию
+        return _json_resp({"variants": _spintax_pack(templates, random_sample=True)})
 
     # ── Self Promo ───────────────────────────────────────────────────────────
 
