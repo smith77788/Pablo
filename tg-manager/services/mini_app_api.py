@@ -1055,15 +1055,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             offset = max(int(request.rel_url.query.get("offset", "0")), 0)
         except (ValueError, TypeError):
             offset = 0
+        # Показываем ВСЕ каналы доступные пользователю:
+        # 1) Личные каналы (owner_id = uid)
+        # 2) Каналы из экосистем пользователя
+        # 3) Каналы из рабочих пространств пользователя
+        # 4) Каналы созданные через подключённые аккаунты
         rows = await _safe_fetch(pool,
-            """SELECT channel_id AS id, channel_id, username, title,
+            """SELECT DISTINCT channel_id AS id, channel_id, username, title,
                       COALESCE(members_count, 0) AS member_count,
                       type, added_at
-               FROM managed_channels WHERE owner_id=$1
+               FROM managed_channels
+               WHERE owner_id=$1
+                  OR id IN (
+                      SELECT DISTINCT ec.channel_id FROM ecosystem_channels ec
+                      JOIN ecosystems e ON e.id=ec.ecosystem_id
+                      WHERE e.owner_id=$1
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                  )
+                  OR id IN (
+                      SELECT DISTINCT mc.id FROM managed_channels mc
+                      JOIN workspaces w ON w.owner_id=mc.owner_id
+                      JOIN workspace_members wm ON wm.workspace_id=w.id
+                      WHERE wm.user_id=$1
+                  )
                ORDER BY members_count DESC NULLS LAST
                LIMIT $2 OFFSET $3""", uid, limit, offset)
         total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+            """SELECT COUNT(DISTINCT id) FROM managed_channels
+               WHERE owner_id=$1
+                  OR id IN (
+                      SELECT DISTINCT ec.channel_id FROM ecosystem_channels ec
+                      JOIN ecosystems e ON e.id=ec.ecosystem_id
+                      WHERE e.owner_id=$1
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                  )
+                  OR id IN (
+                      SELECT DISTINCT mc.id FROM managed_channels mc
+                      JOIN workspaces w ON w.owner_id=mc.owner_id
+                      JOIN workspace_members wm ON wm.workspace_id=w.id
+                      WHERE wm.user_id=$1
+                  )""", uid)
         return _json_resp({"channels": rows, "total": int(total or 0), "offset": offset, "limit": limit})
 
     # ── Campaigns / Funnels ──────────────────────────────────────────────────
