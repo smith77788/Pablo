@@ -1138,50 +1138,77 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        admin = _is_admin(uid)
+        # Админ видит ВСЕ аккаунты, обычный пользователь — только свои
+        if admin:
+            where_clause = "TRUE"
+            params = []
+        else:
+            where_clause = "owner_id=$1"
+            params = [uid]
         rows = await _safe_fetch(pool,
-            """SELECT id, phone, first_name, username, is_active, last_used, added_at,
-                      COALESCE(trust_score, 100) AS trust_score,
-                      COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until, cluster, stage
-               FROM tg_accounts WHERE owner_id=$1
-               ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", uid)
-        # Серверная агрегация KPI по ВСЕМ аккаунтам (список ограничен LIMIT 100 —
-        # иначе при >100 аккаунтах счётчики считались бы по обрезанному списку).
-        st = await _safe_fetchrow(pool,
-            """SELECT COUNT(*) AS total,
-                      COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
-                      COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
-                      COUNT(*) FILTER (
-                          WHERE is_active
-                            AND COALESCE(acc_status,'ok') <> 'banned'
-                            AND (cooldown_until IS NULL OR cooldown_until <= now())
-                      ) AS active
-               FROM tg_accounts WHERE owner_id=$1""", uid)
+            f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
+                       COALESCE(trust_score, 100) AS trust_score,
+                       COALESCE(acc_status, 'ok') AS acc_status,
+                       cooldown_until, cluster, stage
+                FROM tg_accounts WHERE {where_clause}
+                ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", *params)
+        if admin:
+            st = await _safe_fetchrow(pool,
+                """SELECT COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
+                          COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
+                          COUNT(*) FILTER (
+                              WHERE is_active
+                                AND COALESCE(acc_status,'ok') <> 'banned'
+                                AND (cooldown_until IS NULL OR cooldown_until <= now())
+                          ) AS active
+                   FROM tg_accounts""")
+        else:
+            st = await _safe_fetchrow(pool,
+                """SELECT COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
+                          COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
+                          COUNT(*) FILTER (
+                              WHERE is_active
+                                AND COALESCE(acc_status,'ok') <> 'banned'
+                                AND (cooldown_until IS NULL OR cooldown_until <= now())
+                          ) AS active
+                   FROM tg_accounts WHERE owner_id=$1""", uid)
         stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "cooldown", "active")} if st else {}
-        # Разбивка по CRM-статусам (stage) — по ВСЕМ аккаунтам, для чипов-срезов.
         stage_rows = await _safe_fetch(pool,
             "SELECT stage, COUNT(*) AS c FROM tg_accounts "
-            "WHERE owner_id=$1 AND stage IS NOT NULL GROUP BY stage", uid)
+            "WHERE stage IS NOT NULL GROUP BY stage")
         by_stage = {r["stage"]: int(r["c"] or 0) for r in (stage_rows or [])
                     if r.get("stage") in ACCOUNT_STAGES}
         stats["by_stage"] = by_stage
-        return _json_resp({"accounts": rows, "stats": stats})
+        return _json_resp({"accounts": rows, "stats": stats, "admin_view": admin})
 
     async def account_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        admin = _is_admin(uid)
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
             return _err("Invalid acc_id", 400)
-        acc = await _safe_fetchrow(pool,
-            """SELECT id, phone, first_name, username, tg_user_id,
-                      is_active, added_at, last_used,
-                      COALESCE(trust_score, 100) AS trust_score,
-                      COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until, cluster, stage
-               FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
+        if admin:
+            acc = await _safe_fetchrow(pool,
+                """SELECT id, phone, first_name, username, tg_user_id,
+                          is_active, added_at, last_used,
+                          COALESCE(trust_score, 100) AS trust_score,
+                          COALESCE(acc_status, 'ok') AS acc_status,
+                          cooldown_until, cluster, stage
+                   FROM tg_accounts WHERE id=$1""", acc_id)
+        else:
+            acc = await _safe_fetchrow(pool,
+                """SELECT id, phone, first_name, username, tg_user_id,
+                          is_active, added_at, last_used,
+                          COALESCE(trust_score, 100) AS trust_score,
+                          COALESCE(acc_status, 'ok') AS acc_status,
+                          cooldown_until, cluster, stage
+                   FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Account not found", 404)
         caps = await _safe_fetchrow(pool,
