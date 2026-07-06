@@ -580,17 +580,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             limit = min(int(request.rel_url.query.get("limit", "500")), 5000)
         except (ValueError, TypeError):
             limit = 500
+        # Показываем ВСЕ боты доступные пользователю:
+        # 1) Личные боты (added_by = uid)
+        # 2) Боты из экосистем пользователя (ecosystem_members)
+        # 3) Боты из рабочих пространств пользователя (workspace_members)
         rows = await _safe_fetch(pool,
-            """SELECT mb.bot_id, mb.username, mb.first_name, mb.is_active,
+            """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
                       COUNT(DISTINCT bu.user_id) AS total_users
                FROM managed_bots mb
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
                WHERE mb.added_by=$1
+                  OR mb.bot_id IN (
+                      SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                      JOIN ecosystems e ON e.id=eb.ecosystem_id
+                      WHERE e.owner_id=$1
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                  )
+                  OR mb.bot_id IN (
+                      SELECT DISTINCT b.bot_id FROM managed_bots b
+                      JOIN workspaces w ON w.owner_id=b.added_by
+                      JOIN workspace_members wm ON wm.workspace_id=w.id
+                      WHERE wm.user_id=$1
+                  )
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active
                ORDER BY subscriber_count DESC LIMIT $2""", uid, limit)
         total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+            """SELECT COUNT(DISTINCT bot_id) FROM managed_bots
+               WHERE added_by=$1
+                  OR bot_id IN (
+                      SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                      JOIN ecosystems e ON e.id=eb.ecosystem_id
+                      WHERE e.owner_id=$1
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                  )
+                  OR bot_id IN (
+                      SELECT DISTINCT b.bot_id FROM managed_bots b
+                      JOIN workspaces w ON w.owner_id=b.added_by
+                      JOIN workspace_members wm ON wm.workspace_id=w.id
+                      WHERE wm.user_id=$1
+                  )""", uid)
         return _json_resp({"bots": rows, "total": int(total or 0)})
 
     async def bot_detail(request: web.Request) -> web.Response:
@@ -601,11 +630,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("Invalid bot_id", 400)
-        bot = await _safe_fetchrow(pool,
-            "SELECT bot_id, username, first_name, is_active FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            bot_id, uid)
-        if not bot:
-            return _err("Bot not found", 404)
+        # Проверяем доступ: личный бот ИЛИ бот из экосистемы/рабочего пространства
+        owns = await _safe_count(pool,
+            """SELECT COUNT(*) FROM managed_bots mb
+               WHERE mb.bot_id=$1 AND (
+                   mb.added_by=$2
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                       JOIN ecosystems e ON e.id=eb.ecosystem_id
+                       WHERE e.owner_id=$2
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$2)
+                   )
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT b.bot_id FROM managed_bots b
+                       JOIN workspaces w ON w.owner_id=b.added_by
+                       JOIN workspace_members wm ON wm.workspace_id=w.id
+                       WHERE wm.user_id=$2
+                   )
+               )""", bot_id, uid)
+        if not owns:
+            return _err("Bot not found or access denied", 404)
         subs_active = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id)
         subs_total = await _safe_count(pool,
