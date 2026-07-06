@@ -328,7 +328,20 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                SELECT bot_id, COUNT(*) AS ar_cnt
                FROM auto_replies WHERE is_active=TRUE GROUP BY bot_id
            ) ar ON ar.bot_id = m.bot_id
-           WHERE m.added_by=$1 AND m.is_active=TRUE
+           WHERE m.added_by=$1
+              OR m.bot_id IN (
+                  SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                  JOIN ecosystems e ON e.id=eb.ecosystem_id
+                  WHERE e.owner_id=$1
+                     OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+              )
+              OR m.bot_id IN (
+                  SELECT DISTINCT b.bot_id FROM managed_bots b
+                  JOIN workspaces w ON w.owner_id=b.added_by
+                  JOIN workspace_members wm ON wm.workspace_id=w.id
+                  WHERE wm.user_id=$1
+              )
+           AND m.is_active=TRUE
            ORDER BY m.added_at DESC""",
         added_by,
     )
@@ -339,7 +352,21 @@ async def get_bot(
     pool: asyncpg.Pool, bot_id: int, added_by: int
 ) -> dict | None:
     row = await pool.fetchrow(
-        "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        """SELECT * FROM managed_bots
+           WHERE bot_id=$1 AND is_active=TRUE
+              AND (added_by=$2
+                   OR bot_id IN (
+                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                       JOIN ecosystems e ON e.id=eb.ecosystem_id
+                       WHERE e.owner_id=$2
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$2)
+                   )
+                   OR bot_id IN (
+                       SELECT DISTINCT b.bot_id FROM managed_bots b
+                       JOIN workspaces w ON w.owner_id=b.added_by
+                       JOIN workspace_members wm ON wm.workspace_id=w.id
+                       WHERE wm.user_id=$2
+                   ))""",
         bot_id,
         added_by,
     )
