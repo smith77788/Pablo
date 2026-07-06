@@ -899,7 +899,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       is_active, added_at, last_used,
                       COALESCE(trust_score, 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until
+                      cooldown_until, cluster
                FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Account not found", 404)
@@ -2429,6 +2429,47 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("account_set_note uid=%d acc=%d", uid, acc_id)
+            return _err(str(exc), 500)
+
+    async def account_set_meta(request: web.Request) -> web.Response:
+        """Привязка аккаунта к кластеру и/или переименование метки (first_name).
+        body: {cluster?: str|null, label?: str}. Пустой cluster снимает привязку."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Аккаунт не найден", 404)
+        sets: list = []
+        args: list = []
+        idx = 1
+        if "cluster" in body:
+            raw = body.get("cluster")
+            cluster = (str(raw).strip()[:64] or None) if raw is not None else None
+            sets.append(f"cluster=${idx}"); args.append(cluster); idx += 1
+        if "label" in body:
+            label = (body.get("label") or "").strip()[:128]
+            if not label:
+                return _err("Метка не может быть пустой", 400)
+            sets.append(f"first_name=${idx}"); args.append(label); idx += 1
+        if not sets:
+            return _err("Нечего обновлять", 400)
+        args.extend([acc_id, uid])
+        sql = (f"UPDATE tg_accounts SET {', '.join(sets)} "
+               f"WHERE id=${idx} AND owner_id=${idx+1}")
+        try:
+            res = await pool.execute(sql, *args)
+            if str(res).endswith(" 0"):
+                return _err("Аккаунт не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("account_set_meta uid=%d acc=%d", uid, acc_id)
             return _err(str(exc), 500)
 
     async def account_check_one(request: web.Request) -> web.Response:
@@ -8353,6 +8394,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
+    app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
