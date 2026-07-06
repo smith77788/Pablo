@@ -4088,6 +4088,86 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("warmup_delete_plan uid=%d plan=%d", uid, plan_id)
             return _err(str(exc), 500)
 
+    async def warmup_pause_plan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE account_warmup_plans SET status='paused'
+                   WHERE id=$1 AND owner_id=$2 AND status='active'
+                   RETURNING id""",
+                plan_id, uid)
+            if not row:
+                return _err("Активный план не найден", 404)
+            return _json_resp({"ok": True, "status": "paused"})
+        except Exception as exc:
+            log.exception("warmup_pause_plan uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
+
+    async def warmup_resume_plan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE account_warmup_plans SET status='active'
+                   WHERE id=$1 AND owner_id=$2 AND status='paused'
+                   RETURNING id, account_id""",
+                plan_id, uid)
+            if not row:
+                return _err("Приостановленный план не найден", 404)
+            try:
+                await pool.execute(
+                    """UPDATE tg_accounts SET acc_status='warming'
+                       WHERE id=$1 AND is_active=TRUE
+                         AND COALESCE(acc_status,'active')='active'""",
+                    row["account_id"])
+            except Exception:
+                log.warning("warmup_resume_plan: acc_status update failed plan=%d", plan_id)
+            return _json_resp({"ok": True, "status": "active"})
+        except Exception as exc:
+            log.exception("warmup_resume_plan uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
+
+    async def warmup_cancel_plan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE account_warmup_plans
+                   SET status='cancelled', completed_at=NOW()
+                   WHERE id=$1 AND owner_id=$2
+                     AND status IN ('active','paused')
+                   RETURNING id, account_id""",
+                plan_id, uid)
+            if not row:
+                return _err("Активный план не найден", 404)
+            try:
+                await pool.execute(
+                    """UPDATE tg_accounts SET acc_status='active'
+                       WHERE id=$1 AND COALESCE(acc_status,'active')='warming'""",
+                    row["account_id"])
+            except Exception:
+                log.warning("warmup_cancel_plan: acc_status reset failed plan=%d", plan_id)
+            return _json_resp({"ok": True, "status": "cancelled"})
+        except Exception as exc:
+            log.exception("warmup_cancel_plan uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
+
     # ── A/B Experiments ────────────────────────────────────────────────────────
 
     async def experiments_list(request: web.Request) -> web.Response:
@@ -8239,6 +8319,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
+    app.router.add_post("/api/miniapp/warmup/{plan_id}/pause", warmup_pause_plan)
+    app.router.add_post("/api/miniapp/warmup/{plan_id}/resume", warmup_resume_plan)
+    app.router.add_post("/api/miniapp/warmup/{plan_id}/cancel", warmup_cancel_plan)
     # A/B Experiments
     app.router.add_get("/api/miniapp/experiments", experiments_list)
     app.router.add_post("/api/miniapp/experiment", experiment_create)

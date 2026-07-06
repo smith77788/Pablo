@@ -8660,7 +8660,7 @@ async function submitWarmup() {
   finally { btn.disabled=false; btn.textContent='🚀 Запустить прогрев'; }
 }
 const WARMUP_PLAN = {gentle:'🌱 Gentle',standard:'🌿 Standard',aggressive:'🔥 Intensive'};
-const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён',failed:'❌ Ошибка'};
+const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён',failed:'❌ Ошибка',cancelled:'🚫 Отменён'};
 async function openWarmup() {
   push('s-warmup');
   txt('warmupStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -8681,7 +8681,10 @@ async function openWarmup() {
           <div class="row-name">${esc(p.first_name||p.phone)} ${WARMUP_PLAN[p.plan_type]||p.plan_type}</div>
           <div class="row-val">${WARMUP_STATUS[p.status]||p.status} · День ${p.current_day||0}/${p.target_days||0}</div>
         </div>
-        <div class="row-right">
+        <div class="row-right" style="display:flex;gap:5px">
+          ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})">⏸</button>`:''}
+          ${p.status==='paused'?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})">▶</button>`:''}
+          ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})">⏹</button>`:''}
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id})">🗑</button>
         </div>
       </div>
@@ -8697,6 +8700,28 @@ async function deleteWarmupPlan(id) {
     await api(`/api/miniapp/warmup/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
     openWarmup();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+async function pauseWarmupPlan(id) {
+  try {
+    await api(`/api/miniapp/warmup/${id}/pause`, {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('⏸ Прогрев на паузе'); openWarmup();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+async function resumeWarmupPlan(id) {
+  try {
+    await api(`/api/miniapp/warmup/${id}/resume`, {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('▶ Прогрев возобновлён'); openWarmup();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+async function cancelWarmupPlan(id) {
+  if (!await askConfirm('Отменить прогрев? Аккаунт вернётся в active.')) return;
+  try {
+    await api(`/api/miniapp/warmup/${id}/cancel`, {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('⏹ Прогрев отменён'); openWarmup();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
