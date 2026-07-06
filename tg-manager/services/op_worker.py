@@ -1187,6 +1187,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_post_chans(pool, bot, op_id, owner_id, params)
             elif op_type == "channel_import_all":
                 result = await _exec_channel_import_all(pool, bot, op_id, owner_id, params)
+            elif op_type == "channel_add":
+                result = await _exec_channel_add(pool, bot, op_id, owner_id, params)
             elif op_type == "check_accounts_health":
                 result = await _exec_check_accounts_health(pool, bot, op_id, owner_id, params)
             elif op_type == "scan_owned_resources":
@@ -6151,6 +6153,53 @@ async def _exec_channel_import_all(
         "accounts": n,
         "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{err_hint}",
     }
+
+
+async def _exec_channel_add(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Вступить в канал/группу по ссылке/username одним аккаунтом и добавить в managed_channels."""
+    from services import account_manager
+
+    link = (params.get("channel_identifier") or "").strip()
+    if not link:
+        return {"status": "failed", "summary": "Не указана ссылка на канал"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="join", respect_daily_budget=True,
+    )
+    accounts = await _claim_available_accounts(op_id, accounts)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет свободных активных аккаунтов"}
+
+    acc = dict(accounts[0])
+    try:
+        res = await account_manager.join_channel(acc["session_str"], link, _acc=acc)
+        if "error" in res:
+            return {"status": "failed", "summary": f"❌ {res['error']}"}
+        title = res.get("title") or link
+        # Точечный upsert одной строки — НЕ upsert_managed_channels(), т.к. та
+        # функция удаляет ВСЕ существующие каналы аккаунта перед вставкой
+        # (рассчитана на полный ре-импорт, а не на добавление одного канала).
+        await pool.execute(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+               VALUES($1, $2, $3, $4, $5, $6, $7)
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET title=EXCLUDED.title, username=EXCLUDED.username,
+                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
+                   type=EXCLUDED.type""",
+            owner_id, int(acc["id"]), res["channel_id"], title,
+            res.get("username") or "", res.get("access_hash") or 0,
+            res.get("type") or "channel",
+        )
+        return {
+            "status": "done",
+            "channel_id": res["channel_id"],
+            "title": title,
+            "summary": f"✅ Канал «{title}» добавлен в управление",
+        }
+    finally:
+        await release_accounts([int(acc["id"])])
 
 
 async def _exec_check_accounts_health(

@@ -2174,6 +2174,9 @@ async def join_channel(
         return {
             "channel_id": ch.id,
             "title": ch.title,
+            "username": getattr(ch, "username", "") or "",
+            "access_hash": getattr(ch, "access_hash", 0) or 0,
+            "type": "megagroup" if getattr(ch, "megagroup", False) else "channel",
             "members": getattr(ch, "participants_count", 0) or 0,
         }
     except asyncio.TimeoutError:

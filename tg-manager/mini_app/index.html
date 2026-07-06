@@ -4658,7 +4658,7 @@ async function submitQuickChannel() {
   if(!link.startsWith('http') && !link.startsWith('@')){ errEl.textContent='Формат: https://t.me/channel или @username'; return; }
   try {
     const r=await api('/api/miniapp/channel/add',{method:'POST',body:JSON.stringify({channel_identifier:link})});
-    toast(`✅ Канал ${r.title||link} добавлен!`);
+    toast(`⏳ Поставлено в очередь (#${r.op_id}) — вступаем в ${link}…`);
     document.getElementById('quickChLink').value='';
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
 }

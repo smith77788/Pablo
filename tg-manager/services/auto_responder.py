@@ -89,15 +89,13 @@ def _match_rule(rule: dict, text: str) -> bool:
             return False
         low = text.lower().strip()
         mode = (rule.get("match_mode") or "contains").lower()
+        parts = [p.strip() for p in kw.split(",") if p.strip()] or [kw]
         if mode == "exact":
-            return low == kw
+            return any(low == p for p in parts)
         if mode == "starts":
-            return low.startswith(kw)
-        # contains (по умолчанию); поддержка нескольких слов через запятую
-        parts = [p.strip() for p in kw.split(",") if p.strip()]
-        if len(parts) > 1:
-            return any(p in low for p in parts)
-        return kw in low
+            return any(low.startswith(p) for p in parts)
+        # contains (по умолчанию); поддержка нескольких ключей через запятую
+        return any(p in low for p in parts)
     if t == "any":
         return True
     return False

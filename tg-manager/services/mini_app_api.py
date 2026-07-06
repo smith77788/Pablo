@@ -2337,6 +2337,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("channels_mass uid=%d op=%s", uid, op)
             return _err(str(exc), 500)
 
+    async def channel_add(request: web.Request) -> web.Response:
+        """Вступить в существующий канал/группу по ссылке и добавить в управление."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad body", 400)
+        link = (body.get("channel_identifier") or "").strip()
+        if not link:
+            return _err("channel_identifier required")
+        try:
+            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
+            _lim = await get_channel_limit(pool, uid)
+            if await get_effective_channel_count(pool, uid) >= _lim:
+                return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+                "VALUES($1,'channel_add','pending',$2,1,$3) RETURNING id",
+                uid, json.dumps({"channel_identifier": link}),
+                f"Добавить канал: {link}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("channel_add uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def channel_remove(request: web.Request) -> web.Response:
         """Убрать канал из управления (запись managed_channels)."""
         uid = _get_uid(request)
@@ -8440,6 +8468,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
+    app.router.add_post("/api/miniapp/channel/add", channel_add)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
