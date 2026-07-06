@@ -8336,10 +8336,16 @@ async def _exec_run_broadcast(
     if not bot_row:
         return {"status": "failed", "summary": "⚠️ Бот не найден"}
 
+    # Явный список получателей (напр. повторная отправка недоставленным) —
+    # если передан, используем его; иначе тянем аудиторию по сегменту.
+    explicit_ids = params.get("user_ids")
     try:
-        user_ids = [r["user_id"] for r in await pool.fetch(
-            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE" + _seg_sql, int(bot_id)
-        )]
+        if isinstance(explicit_ids, list) and explicit_ids:
+            user_ids = [int(x) for x in explicit_ids]
+        else:
+            user_ids = [r["user_id"] for r in await pool.fetch(
+                "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE" + _seg_sql, int(bot_id)
+            )]
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
 

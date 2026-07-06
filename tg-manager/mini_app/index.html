@@ -5718,9 +5718,22 @@ function renderBcasts(items) {
         </div>
         <div class="bc-num" style="color:var(--green)">${num(b.sent_count||0)}</div>
         <div class="bc-num" style="color:var(--red)">${num(b.failed_count||0)}</div>
-        <div class="bc-cell"><span class="badge ${bc}">${bl}</span></div>
+        <div class="bc-cell" style="display:flex;align-items:center;gap:4px">
+          <span class="badge ${bc}">${bl}</span>
+          ${(['done','failed','partial'].includes(b.status) && (b.failed_count||0)>0)
+            ? `<span onclick="resendBcast(${b.id})" title="Отправить недоставленным" style="cursor:pointer;font-size:15px;color:var(--blue)">↻</span>` : ''}
+        </div>
       </div>`;
     }).join('');
+}
+async function resendBcast(id) {
+  if (!await askConfirm('Отправить рассылку повторно только тем, кто её НЕ получил?')) return;
+  try {
+    const d = await api('/api/miniapp/broadcast/'+id+'/resend', {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('↻ Повтор запущен · '+num(d.total_users)+' получателей');
+    LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 function renderCmps(items) {
