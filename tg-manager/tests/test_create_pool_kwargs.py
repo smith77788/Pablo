@@ -14,6 +14,16 @@ import inspect
 import os
 
 import asyncpg
+import pytest
+
+# В песочнице без скомпилированного C-расширения asyncpg conftest.py подменяет
+# его лёгкой заглушкой (см. tests/conftest.py) — тест против неё бессмысленен
+# (реальных имён параметров create_pool/connect там нет), поэтому пропускаем,
+# а не притворяемся, что проверили совместимость с настоящим asyncpg.
+pytestmark = pytest.mark.skipif(
+    getattr(asyncpg, "__version__", "") == "0.0.0-stub",
+    reason="asyncpg застаблен (нет скомпилированного расширения) — проверка требует реального пакета",
+)
 
 
 def _create_pool_kwargs() -> set[str]:

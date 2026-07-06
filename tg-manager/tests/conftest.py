@@ -24,8 +24,25 @@ def _stub(name: str) -> types.ModuleType:
     return mod
 
 
-class _Any:
-    """Заглушка любого telethon-класса/функции."""
+class _AnyMeta(type):
+    """Метакласс: атрибут, запрошенный на самом классе _Any (не на экземпляре),
+    тоже отдаёт заглушку — иначе `SomeStubbedClass.some_attr` (частый паттерн
+    monkey-patch / F.field / isinstance-констант в aiogram) падает с
+    AttributeError, потому что обычный __getattr__ класса не перехватывает
+    доступ к атрибутам самого класса."""
+
+    def __getattr__(cls, name):
+        # Дандеры (__signature__, __wrapped__, __mro_entries__, ...) обязаны
+        # реально отсутствовать — иначе inspect/functools/pickle получают
+        # мусорный объект вместо AttributeError и падают своей собственной
+        # TypeError глубоко внутри stdlib (см. inspect.signature()).
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return _Any()
+
+
+class _Any(metaclass=_AnyMeta):
+    """Заглушка любого telethon/aiogram-класса или функции."""
 
     def __init__(self, *a, **k):
         pass
@@ -33,7 +50,9 @@ class _Any:
     def __call__(self, *a, **k):
         return self
 
-    def __getattr__(self, _n):
+    def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         return _Any()
 
     def __or__(self, other):
@@ -41,6 +60,23 @@ class _Any:
 
     def __ror__(self, other):
         return _Any()
+
+    def __and__(self, other):
+        return _Any()
+
+    def __rand__(self, other):
+        return _Any()
+
+    def __invert__(self):
+        return _Any()
+
+    def __eq__(self, other):
+        return _Any()
+
+    def __ne__(self, other):
+        return _Any()
+
+    __hash__ = object.__hash__
 
 
 import importlib.abc
@@ -92,6 +128,7 @@ except (ImportError, ModuleNotFoundError):
     _asyncpg.Record = dict
     _asyncpg.Connection = _Any
     _asyncpg.create_pool = _Any
+    _asyncpg.connect = _Any
     sys.modules.setdefault("asyncpg", _asyncpg)
     _asyncpg_proto = types.ModuleType("asyncpg.protocol")
     _asyncpg_proto.__path__ = []
@@ -110,19 +147,31 @@ _STUB_MODULES = {
     "aiohttp": {"ClientSession": _Any, "ClientTimeout": _Any, "TCPConnector": _Any, "ClientError": Exception},
     "aiohttp.web": {"Response": _Any, "Request": _Any, "Application": _Any},
     "aiohttp_socks": {},
-    "aiogram": {"Bot": _Any, "Dispatcher": _Any, "Router": _Any, "F": _Any},
+    "aiogram": {"Bot": _Any, "Dispatcher": _Any, "Router": _Any, "F": _Any(), "BaseMiddleware": _Any},
     "aiogram.client": {"default": _Any},
     "aiogram.client.default": {"DefaultBotProperties": _Any},
     "aiogram.client.session": {},
     "aiogram.client.session.aiohttp": {"AiohttpSession": _Any},
     "aiogram.enums": {"ParseMode": _Any},
     "aiogram.filters": {"Command": _Any, "CommandStart": _Any, "StateFilter": _Any},
-    "aiogram.filters.callback_data": {"CallbackData": type("CallbackData", (), {"__init_subclass__": lambda cls, **kw: None, "pack": lambda self: "", "unpack": classmethod(lambda cls, d: cls()), "filter": classmethod(lambda cls, *a, **kw: lambda c: True)})},
+    "aiogram.filters.callback_data": {"CallbackData": type("CallbackData", (), {
+        "__init_subclass__": lambda cls, **kw: None,
+        "__init__": lambda self, **kw: self.__dict__.update(kw),
+        "pack": lambda self: "",
+        "unpack": classmethod(lambda cls, d: cls()),
+        "filter": classmethod(lambda cls, *a, **kw: lambda c: True),
+    })},
+    "aiogram.filters.state": {"State": _Any, "StatesGroup": _Any},
     "aiogram.fsm.context": {"FSMContext": _Any},
     "aiogram.fsm.state": {"State": _Any, "StatesGroup": _Any},
     "aiogram.fsm.storage.base": {"BaseStorage": _Any, "StorageKey": _Any, "StateType": _Any},
     "aiogram.fsm.storage.memory": {"MemoryStorage": _Any},
-    "aiogram.types": {"Message": _Any, "CallbackQuery": _Any, "InlineKeyboardButton": _Any, "InlineKeyboardMarkup": _Any, "KeyboardButton": _Any, "ReplyKeyboardMarkup": _Any, "BufferedInputFile": _Any, "ErrorEvent": _Any},
+    "aiogram.types": {
+        "Message": _Any, "CallbackQuery": _Any, "InlineKeyboardButton": _Any, "InlineKeyboardMarkup": _Any,
+        "KeyboardButton": _Any, "ReplyKeyboardMarkup": _Any, "BufferedInputFile": _Any, "ErrorEvent": _Any,
+        "WebAppInfo": _Any, "PhotoSize": _Any, "TelegramObject": _Any,
+        "MessageOriginChannel": _Any, "MessageOriginChat": _Any, "MessageOriginHiddenUser": _Any, "MessageOriginUser": _Any,
+    },
     "aiogram.utils.keyboard": {"InlineKeyboardBuilder": _Any, "ReplyKeyboardBuilder": _Any},
 }
 
