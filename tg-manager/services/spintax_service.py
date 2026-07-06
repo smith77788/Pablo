@@ -377,8 +377,8 @@ def max_literal_word_run(template: str) -> int:
     return best
 
 
-MIN_VARIANTS_PER_GROUP = 2
-MAX_VARIANTS_PER_GROUP = 3  # {в1|в2} или {в1|в2|в3} — не больше
+MIN_VARIANTS_PER_GROUP = 3  # {orig|син1|син2} — минимум 3 варианта (orig + 2 синонима)
+MAX_VARIANTS_PER_GROUP = 3  # {в1|в2|в3} — не больше
 
 
 def count_group_variants(template: str) -> list[int]:
