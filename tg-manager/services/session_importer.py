@@ -48,12 +48,13 @@ def extract_session_string(data: str, fmt: str) -> str | None:
 
 async def validate_session(session_string: str, proxy_url: str | None = None) -> dict:
     from services.account_manager import _make_client
+    import asyncio
+    client = None
     try:
-        client = _make_client(session_string)
-        import asyncio
+        device = {"proxy_url": proxy_url} if proxy_url else None
+        client = _make_client(session_string, device)
         await asyncio.wait_for(client.connect(), timeout=15)
         me = await client.get_me()
-        await client.disconnect()
         return {
             "valid": True,
             "phone": me.phone or "",
@@ -63,6 +64,9 @@ async def validate_session(session_string: str, proxy_url: str | None = None) ->
         }
     except Exception as e:
         return {"valid": False, "error": str(e)[:200]}
+    finally:
+        if client is not None and client.is_connected():
+            await client.disconnect()
 
 
 async def import_sessions(
