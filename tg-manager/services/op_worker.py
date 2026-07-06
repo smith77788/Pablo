@@ -1177,6 +1177,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_dm_adhoc(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_post_to_channel":
                 result = await _exec_bulk_post_to_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "pin_last_post":
+                result = await _exec_pin_last_post(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_update_profile":
                 result = await _exec_bulk_update_profile(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_chan_exec":
@@ -5481,6 +5483,58 @@ async def _exec_bulk_dm_adhoc(
         "ok": ok_count,
         "fail": err_count,
         "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей",
+    }
+
+
+async def _exec_pin_last_post(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Закрепить последний пост в канале от имени аккаунта-владельца/админа."""
+    import html as _html
+    from services import account_manager
+
+    channel_ref = params.get("channel_ref")
+    account_id = params.get("account_id")
+    access_hash = int(params.get("access_hash", 0) or 0)
+    if not channel_ref or not account_id:
+        return {"status": "failed", "reason": "Не указан channel_ref или account_id"}
+
+    row = await _safe_fetchrow(
+        pool,
+        "SELECT id, session_str, first_name, phone, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, "
+        "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id "
+        "AND up.is_active=TRUE) AS proxy_url "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, int(account_id),
+    )
+    if not row:
+        return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
+    acc = dict(row)
+
+    await _safe_execute(pool, "UPDATE operation_queue SET total_items=1 WHERE id=$1", op_id)
+
+    try:
+        result = await account_manager.pin_last_channel_post(
+            acc["session_str"], channel_ref, access_hash=access_hash, _acc=acc)
+    except asyncio.CancelledError:
+        raise
+    except Exception as _pin_exc:
+        log.warning("_exec_pin_last_post acc=%s: %s", acc.get("id"), _pin_exc)
+        result = {"error": str(_pin_exc)[:120]}
+
+    await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
+
+    if "pinned_msg_id" in result:
+        return {
+            "status": "done", "ok": 1, "failed": 0,
+            "summary": f"\U0001F4CC Закреплён пост msg_id={result['pinned_msg_id']}",
+        }
+    return {
+        "status": "failed", "ok": 0, "failed": 1,
+        "reason": result.get("error", "ошибка"),
+        "summary": f"❌ {_html.escape(str(result.get('error', 'ошибка'))[:120])}",
     }
 
 

@@ -2997,6 +2997,76 @@ async def promote_to_admin(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+async def pin_last_channel_post(
+    session_string: str,
+    channel_id: int | str,
+    access_hash: int = 0,
+    username: str = "",
+    _acc: dict | None = None,
+    silent: bool = True,
+) -> dict:
+    """Закрепить последний пост в канале от имени аккаунта.
+
+    Возвращает {"pinned_msg_id": int} при успехе либо {"error": str, ...}.
+    Требует, чтобы аккаунт был админом канала с правом pin_messages.
+    """
+    if not session_string:
+        return {"error": "session_str отсутствует — сессия недоступна"}
+    from telethon.tl.types import InputPeerChannel
+    from telethon.tl.functions.messages import UpdatePinnedMessageRequest
+    from telethon.errors import (
+        FloodWaitError,
+        ChatAdminRequiredError,
+        MessageIdInvalidError,
+        AuthKeyUnregisteredError,
+    )
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+        cid = abs(int(channel_id)) if isinstance(channel_id, (int, str)) else 0
+        if access_hash and cid > 0:
+            peer = InputPeerChannel(channel_id=cid, access_hash=access_hash)
+        elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
+            peer = channel_id
+        elif username:
+            peer = await asyncio.wait_for(
+                client.get_entity(f"@{username.lstrip('@')}"), timeout=10.0)
+        else:
+            peer = await asyncio.wait_for(
+                client.get_entity(_normalize_channel_id(channel_id)), timeout=10.0)
+
+        msgs = await asyncio.wait_for(
+            client.get_messages(peer, limit=1), timeout=_OP_TIMEOUT)
+        if not msgs:
+            return {"error": "В канале нет сообщений для закрепления"}
+        last_id = msgs[0].id
+        await asyncio.wait_for(
+            client(UpdatePinnedMessageRequest(peer=peer, id=last_id, silent=silent)),
+            timeout=_OP_TIMEOUT)
+        return {"pinned_msg_id": last_id}
+    except FloodWaitError as e:
+        return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
+    except ChatAdminRequiredError:
+        return {"error": "Требуются права администратора канала (pin_messages)", "banned": True}
+    except MessageIdInvalidError:
+        return {"error": "Сообщение недоступно для закрепления"}
+    except AuthKeyUnregisteredError as e:
+        return {"error": f"AUTH_KEY: сессия недействительна: {e}"}
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "pin")
+        return {"error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
+    except Exception as e:
+        log.warning("pin_last_channel_post error: %s", e)
+        return {"error": str(e)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в pin_last_channel_post")
+
+
 async def post_to_channel(
     session_string: str,
     channel_id: int | str,

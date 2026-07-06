@@ -1076,6 +1076,33 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("post_to_channel ch=%d uid=%d", ch_id, uid)
             return _err("Failed to enqueue post", 500)
 
+    async def pin_channel_last_post(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid ch_id", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
+            "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+        if not ch:
+            return _err("Channel not found", 404)
+        if not ch.get("acc_id"):
+            return _err("No linked account for this channel", 400)
+        try:
+            from services.operation_bus import submit
+            op_id = await submit(pool, uid, "pin_last_post", {
+                "channel_ref": int(ch_id),
+                "account_id": int(ch["acc_id"]),
+                "access_hash": int(ch.get("access_hash") or 0),
+            }, total_items=1)
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception:
+            log.exception("pin_channel_last_post ch=%d uid=%d", ch_id, uid)
+            return _err("Failed to enqueue pin", 500)
+
     async def channel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -1100,10 +1127,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """SELECT op_type, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
                ORDER BY created_at DESC LIMIT 8""", uid)
+        # ── Статистика роста участников (снимок за день + дельты) ─────────────
+        mc = int(ch.get("member_count") or 0)
+        if mc > 0:
+            try:
+                await pool.execute(
+                    """INSERT INTO channel_member_history(owner_id, channel_id, members_count)
+                       VALUES($1,$2,$3)
+                       ON CONFLICT (owner_id, channel_id, captured_on)
+                       DO UPDATE SET members_count=EXCLUDED.members_count, captured_at=NOW()""",
+                    uid, ch_id, mc)
+            except Exception:
+                log.debug("channel_detail: member snapshot failed ch=%d", ch_id)
+        hist = await _safe_fetch(pool,
+            """SELECT members_count, captured_on FROM channel_member_history
+               WHERE owner_id=$1 AND channel_id=$2
+               ORDER BY captured_on DESC LIMIT 30""", uid, ch_id)
+        def _delta(days):
+            from datetime import date as _date, timedelta as _tdd
+            cutoff = _date.today() - _tdd(days=days)
+            for r in hist:
+                if r["captured_on"] <= cutoff:
+                    return mc - int(r["members_count"])
+            return None
+        member_growth = {
+            "current": mc,
+            "points": len(hist),
+            "d1": _delta(1),
+            "d7": _delta(7),
+            "d30": _delta(30),
+            "series": [
+                {"d": r["captured_on"].isoformat(), "c": int(r["members_count"])}
+                for r in reversed(hist)
+            ],
+        }
         return _json_resp({
             "channel": ch,
             "linked_account": acc,
             "recent_ops": recent_ops,
+            "member_growth": member_growth,
         })
 
     # ── Operations ───────────────────────────────────────────────────────────
@@ -8045,6 +8107,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Channels
     app.router.add_get("/api/miniapp/channel/{ch_id}", channel_detail)
     app.router.add_post("/api/miniapp/channel/{ch_id}/post", post_to_channel)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/pin", pin_channel_last_post)
     # Bot subscribers
     app.router.add_get("/api/miniapp/bot/{bot_id}/subscribers", bot_subscribers)
     # DM campaigns

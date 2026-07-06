@@ -5555,6 +5555,7 @@ function buildChDetail(d) {
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1;min-width:88px">📝 Опубликовать</button>
+      <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1;min-width:88px">📌 Закрепить пост</button>
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1;min-width:88px">✏️ Изменить</button>
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1;min-width:88px">👑 Админы</button>
       <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1;min-width:88px">🗑 Убрать</button>
@@ -5577,6 +5578,8 @@ function buildChDetail(d) {
       </div>`:''}
     </div>
 
+    ${chGrowthHtml(d.member_growth)}
+
     ${acc?`
     <div class="sec" style="margin-top:8px">Аккаунт-владелец</div>
     <div class="lst">
@@ -5592,6 +5595,45 @@ function buildChDetail(d) {
 
     ${recentOpsHtml}
     <div style="height:16px"></div>`;
+}
+
+// ── Закрепление последнего поста канала ─────────────────
+async function pinLastPost(chId) {
+  if (!await askConfirm('Закрепить последний пост канала? Аккаунт-владелец должен быть админом с правом закрепления.')) return;
+  try {
+    await api('/api/miniapp/channel/'+chId+'/pin', {method:'POST', body:'{}'});
+    toast('📌 Закрепление поставлено в очередь');
+    tg.HapticFeedback?.impactOccurred('medium');
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+// ── Рендер статистики роста участников канала ───────────
+function chGrowthHtml(g) {
+  if (!g || !g.current) return '';
+  const fmt = v => v==null ? '—' : (v>0?'▲ +'+num(v):(v<0?'▼ '+num(v):'0'));
+  const col = v => v==null?'var(--hint)':(v>0?'var(--green)':(v<0?'var(--red)':'var(--hint)'));
+  const cell = (lbl,v) => `<div style="flex:1;text-align:center">
+      <div style="font-size:11px;color:var(--hint)">${lbl}</div>
+      <div style="font-weight:600;color:${col(v)}">${fmt(v)}</div></div>`;
+  const ser = g.series||[];
+  let spark = '';
+  if (ser.length >= 2) {
+    const vals = ser.map(p=>p.c), mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx-mn)||1;
+    spark = `<div style="display:flex;align-items:flex-end;gap:2px;height:34px;margin-top:8px">`
+      + ser.map(p=>{const h=6+Math.round((p.c-mn)/rng*28);
+          return `<div title="${esc(p.d)}: ${num(p.c)}" style="flex:1;height:${h}px;background:var(--accent,#6366f1);border-radius:2px;opacity:.85"></div>`;
+        }).join('') + `</div>`;
+  }
+  const note = ser.length < 2
+    ? `<div style="font-size:11px;color:var(--hint);text-align:center;margin-top:6px">Идёт накопление данных — динамика появится позже</div>`
+    : '';
+  return `
+    <div class="sec" style="margin-top:8px">Рост участников</div>
+    <div class="lst" style="padding:12px">
+      <div style="display:flex;gap:6px">
+        ${cell('За сутки', g.d1)}${cell('7 дней', g.d7)}${cell('30 дней', g.d30)}
+      </div>
+      ${spark}${note}
+    </div>`;
 }
 
 // ── Broadcasts ─────────────────────────────────────────

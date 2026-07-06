@@ -158,6 +158,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📤",
     },
+    "pin_last_post": {
+        "description": "Закрепить последний пост канала",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📌",
+    },
     "bulk_update_profile": {
         "description": "Массовое обновление профилей",
         "min_plan": "starter",
