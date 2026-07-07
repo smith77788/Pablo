@@ -66,8 +66,11 @@ def test_stage_stats_scoped_and_whitelisted():
 
 def test_ui_stage_filter_composes_with_health():
     ui = _read("mini_app/index.html")
-    # срез по статусу должен КОМБИНИРОВАТЬСЯ с фильтром здоровья внутри _accFiltered
-    assert "if (ACC_STAGE_FILTER) list = list.filter(a=>a.stage===ACC_STAGE_FILTER)" in ui, (
-        "stage-фильтр не встроен в _accFiltered — не скомбинируется с health-фильтром"
-    )
+    # Фильтрация серверная: и health-фильтр, и CRM-статус попадают в один запрос
+    # (_accQuery), поэтому комбинируются на сервере, а не клиентским дофильтром.
+    m = re.search(r"function _accQuery\(offset\)\s*\{(.*?)\}", ui, re.DOTALL)
+    assert m, "_accQuery не найден"
+    body = m.group(1)
+    assert "ACC_FILTER" in body and "p.set('filter'" in body, "health-фильтр не идёт в запрос"
+    assert "ACC_STAGE_FILTER" in body and "p.set('stage'" in body, "CRM-статус не идёт в запрос"
     assert "renderStageChips" in ui

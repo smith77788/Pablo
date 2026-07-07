@@ -691,9 +691,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
+    <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
+    <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="accLoadMore" style="padding:6px 0 0"></div>
     <div class="sec-row" style="margin-top:12px">
       <div class="sec">📡 Каналы и чаты</div>
       <span class="sec-btn" onclick="openChannels()">Открыть →</span>
@@ -5752,15 +5755,18 @@ async function massCheckAccounts() {
 }
 async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
-  api('/api/miniapp/accounts').then(ad => {
+  api(_accQuery(0)).then(ad => {
     CUR_ACCS = ad.accounts||[];
-    // Истинное число из серверной агрегации (список ограничен LIMIT 100)
+    ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    ACC_OFFSET = CUR_ACCS.length;
+    // Истинное число из серверной агрегации (страница ограничена LIMIT)
     const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
     updateAccKpi(CUR_ACCS, ad.stats);
     renderStageChips(ad.stats && ad.stats.by_stage);
-    renderAccounts(_accFiltered());
+    renderAccounts(CUR_ACCS);
+    renderLoadMore(ad.page);
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
@@ -5826,20 +5832,79 @@ function phoneFlag(phone) {
 
 let ACC_FILTER = 'all';
 let ACC_STAGE_FILTER = '';   // '' = все статусы
+let ACC_SEARCH = '';
+let ACC_OFFSET = 0;
+let ACC_HAS_MORE = false;
+let ACC_LOADING = false;
+let _accSearchT = null;
+
+function _accQuery(offset) {
+  const p = new URLSearchParams();
+  if (ACC_FILTER && ACC_FILTER!=='all') p.set('filter', ACC_FILTER);
+  if (ACC_STAGE_FILTER) p.set('stage', ACC_STAGE_FILTER);
+  if (ACC_SEARCH) p.set('q', ACC_SEARCH);
+  p.set('offset', offset); p.set('limit', 100);
+  return '/api/miniapp/accounts?'+p.toString();
+}
+// Перезагрузить срез с сервера (offset=0). Серверная фильтрация — срез считается
+// по ВСЕЙ таблице, не по загруженным 100.
+async function reloadAccounts() {
+  try {
+    const ad = await api(_accQuery(0));
+    CUR_ACCS = ad.accounts||[];
+    ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    ACC_OFFSET = CUR_ACCS.length;
+    updateAccKpi(CUR_ACCS, ad.stats);
+    renderStageChips(ad.stats && ad.stats.by_stage);
+    renderAccounts(CUR_ACCS);
+    renderLoadMore(ad.page);
+    if (ACC_SEL_MODE) updateAccSelBar();
+  } catch(e) {
+    document.getElementById('accList').innerHTML=errHtml(e.message,'reloadAccounts()');
+  }
+}
+async function loadMoreAccounts() {
+  if (ACC_LOADING || !ACC_HAS_MORE) return;
+  ACC_LOADING = true;
+  const box=document.getElementById('accLoadMore');
+  if(box) box.innerHTML='<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  try {
+    const ad = await api(_accQuery(ACC_OFFSET));
+    const more = ad.accounts||[];
+    CUR_ACCS = CUR_ACCS.concat(more);
+    ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    ACC_OFFSET += more.length;
+    renderAccounts(CUR_ACCS);
+    renderLoadMore(ad.page);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+  finally { ACC_LOADING=false; }
+}
+function renderLoadMore(page) {
+  const box=document.getElementById('accLoadMore'); if(!box) return;
+  if (page && page.has_more) {
+    const shown = ACC_OFFSET, tot = page.filtered_total||0;
+    box.innerHTML = `<button class="btn btn-s" onclick="loadMoreAccounts()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${shown} из ${tot}</button>`;
+  } else { box.innerHTML=''; }
+}
+function onAccSearch(v) {
+  ACC_SEARCH = (v||'').trim();
+  clearTimeout(_accSearchT);
+  _accSearchT = setTimeout(reloadAccounts, 350);
+}
 
 function filterAcc(mode, btn) {
   ACC_FILTER = mode;
   document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x=>x.classList.remove('on'));
   btn.classList.add('on');
-  renderAccounts(_accFiltered());
+  reloadAccounts();
 }
-// Срез по CRM-статусу (комбинируется с фильтром здоровья)
+// Срез по CRM-статусу (комбинируется с фильтром здоровья, серверно)
 function filterStage(stage) {
   ACC_STAGE_FILTER = (ACC_STAGE_FILTER===stage) ? '' : stage;  // повторный клик снимает
   document.querySelectorAll('#stageChips .st-chip').forEach(x=>{
     x.classList.toggle('on', x.getAttribute('data-stage')===ACC_STAGE_FILTER);
   });
-  renderAccounts(_accFiltered());
+  reloadAccounts();
 }
 function renderStageChips(byStage) {
   const box = document.getElementById('stageChips');
@@ -5865,7 +5930,12 @@ function updateAccKpi(list, stats) {
 
 function renderAccounts(list) {
   const el = document.getElementById('accList');
-  if (!list.length) { el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram'); return; }
+  if (!list.length) {
+    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
+    else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram');
+    return;
+  }
   el.innerHTML = list.map(a=>{
     const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
     const phone = a.phone || '';
@@ -5912,16 +5982,10 @@ function toggleAccSelMode() {
   updateAccSelBar();
 }
 function _accFiltered() {
-  // текущий активный фильтр KPI (здоровье)
-  const active = document.querySelector('.acc-kpi-card.on');
-  const f = active ? active.getAttribute('data-filter') : 'all';
-  let list = CUR_ACCS;
-  if (f==='active') list = list.filter(a=>a.is_active && a.acc_status!=='banned' && !isOnCooldown(a));
-  else if (f==='cooldown') list = list.filter(a=>isOnCooldown(a));
-  else if (f==='banned') list = list.filter(a=>a.acc_status==='banned');
-  // срез по CRM-статусу (комбинируется с фильтром здоровья)
-  if (ACC_STAGE_FILTER) list = list.filter(a=>a.stage===ACC_STAGE_FILTER);
-  return list;
+  // Фильтрация теперь серверная (reloadAccounts) — CUR_ACCS уже содержит только
+  // аккаунты текущего среза (фильтр здоровья + CRM-статус + поиск), поэтому
+  // клиентского дофильтра нет. Функция сохранена: её зовёт режим выбора.
+  return CUR_ACCS;
 }
 function toggleAccSel(id) {
   if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);

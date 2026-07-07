@@ -1136,26 +1136,74 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Accounts ─────────────────────────────────────────────────────────────
 
-    @_cached_user()
+    def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False) -> tuple[str, list]:
+        """Собрать WHERE + args для списка аккаунтов из фильтра здоровья, CRM-статуса
+        и поиска. Возвращает (sql_where, args). Серверная фильтрация снимает
+        100-лимит клиента: срез считается по ВСЕЙ таблице, не по загруженной странице.
+        admin=True — межтенантный просмотр (все аккаунты платформы, без owner-скоупа)."""
+        if admin:
+            clauses = ["TRUE"]
+            args: list = []
+        else:
+            clauses = ["owner_id=$1"]
+            args = [uid]
+        if flt == "active":
+            clauses.append("is_active AND COALESCE(acc_status,'ok') <> 'banned' "
+                           "AND (cooldown_until IS NULL OR cooldown_until <= now())")
+        elif flt == "cooldown":
+            clauses.append("cooldown_until IS NOT NULL AND cooldown_until > now()")
+        elif flt == "banned":
+            clauses.append("COALESCE(acc_status,'ok') = 'banned'")
+        if stage in ACCOUNT_STAGES:
+            args.append(stage)
+            clauses.append(f"stage = ${len(args)}")
+        if q:
+            args.append(f"%{q}%")
+            n = len(args)
+            clauses.append(f"(phone ILIKE ${n} OR first_name ILIKE ${n} OR username ILIKE ${n})")
+        return " AND ".join(clauses), args
+
     async def accounts(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         admin = _is_admin(uid)
-        # Админ видит ВСЕ аккаунты, обычный пользователь — только свои
-        if admin:
-            where_clause = "TRUE"
-            params = []
-        else:
-            where_clause = "owner_id=$1"
-            params = [uid]
+        # Параметры серверной пагинации/фильтрации
+        qs = request.rel_url.query
+        flt = qs.get("filter", "all")
+        if flt not in ("all", "active", "cooldown", "banned"):
+            flt = "all"
+        stage = (qs.get("stage") or "").strip().lower()
+        if stage and stage not in ACCOUNT_STAGES:
+            stage = ""
+        q = (qs.get("q") or "").strip()[:64]
+        try:
+            offset = max(0, int(qs.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
+            limit = min(200, max(1, int(qs.get("limit", 100))))
+        except (TypeError, ValueError):
+            limit = 100
+
+        # admin=True — межтенантный просмотр всех аккаунтов платформы (без owner-скоупа).
+        where, args = _accounts_where(uid, flt, stage, q, admin=admin)
+        page_args = args + [limit, offset]
         rows = await _safe_fetch(pool,
             f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
-                       COALESCE(trust_score, 100) AS trust_score,
-                       COALESCE(acc_status, 'ok') AS acc_status,
-                       cooldown_until, cluster, stage
-                FROM tg_accounts WHERE {where_clause}
-                ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", *params)
+                      COALESCE(trust_score, 100) AS trust_score,
+                      COALESCE(acc_status, 'ok') AS acc_status,
+                      cooldown_until, cluster, stage
+               FROM tg_accounts WHERE {where}
+               ORDER BY is_active DESC, last_used DESC NULLS LAST
+               LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)
+        # Сколько всего под текущим фильтром — для пагинации «Загрузить ещё».
+        filtered_total = await _safe_count(pool,
+            f"SELECT COUNT(*) FROM tg_accounts WHERE {where}", *args)
+        filtered_total = int(filtered_total or 0)
+
+        # Серверная агрегация KPI (глобальные счётчики, не срез). Админ — по всей
+        # платформе, обычный пользователь — по своим аккаунтам.
         if admin:
             st = await _safe_fetchrow(pool,
                 """SELECT COUNT(*) AS total,
@@ -1192,7 +1240,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         by_stage = {r["stage"]: int(r["c"] or 0) for r in (stage_rows or [])
                     if r.get("stage") in ACCOUNT_STAGES}
         stats["by_stage"] = by_stage
-        return _json_resp({"accounts": rows, "stats": stats, "admin_view": admin})
+        return _json_resp({
+            "accounts": rows,
+            "stats": stats,
+            "admin_view": admin,
+            "page": {
+                "offset": offset, "limit": limit,
+                "filtered_total": filtered_total,
+                "has_more": offset + len(rows) < filtered_total,
+                "filter": flt, "stage": stage, "q": q,
+            },
+        })
 
     async def account_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
