@@ -7501,6 +7501,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ecosystem_detail uid=%d eco=%d", uid, eco_id)
             return _err(str(exc), 500)
 
+    async def ecosystem_auto_discover(request: web.Request) -> web.Response:
+        """Авто-наполнение экосистемы объектами (аккаунты/каналы/боты по region/пулам).
+        Возможность ecosystem_brain.auto_discover_members раньше не была выведена в UI."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eco_id = int(request.match_info["eco_id"])
+        except (KeyError, ValueError):
+            return _err("bad eco_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid)
+        if not owns:
+            return _err("Экосистема не найдена", 404)
+        try:
+            from services import ecosystem_brain
+            added = await ecosystem_brain.auto_discover_members(pool, eco_id, uid)
+            total = sum(int(v) for v in (added or {}).values())
+            return _json_resp({"ok": True, "added": added or {}, "total": total})
+        except Exception as exc:
+            log.exception("ecosystem_auto_discover uid=%d eco=%d", uid, eco_id)
+            return _err(str(exc), 500)
+
     async def ecosystem_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -9050,6 +9073,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Ecosystems
     app.router.add_get("/api/miniapp/ecosystems", ecosystems_list)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}", ecosystem_detail)
+    app.router.add_post("/api/miniapp/ecosystem/{eco_id}/auto_discover", ecosystem_auto_discover)
     app.router.add_post("/api/miniapp/ecosystem", ecosystem_create)
     app.router.add_delete("/api/miniapp/ecosystem/{eco_id}", ecosystem_delete)
     # Channel Factory
