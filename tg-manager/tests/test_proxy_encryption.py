@@ -23,6 +23,8 @@ def test_proxy_fingerprint_deterministic_and_encryption_agnostic():
 
 
 def test_parse_proxy_decrypts_encrypted_url():
+    import pytest
+    pytest.importorskip("socks", reason="PySocks не установлен в этой среде — _parse_proxy вернёт None")
     from services import account_manager
     from services.token_vault import encrypt_token
 
