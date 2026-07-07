@@ -1569,6 +1569,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <label>Краткое описание (профиль, до 120)</label>
       <textarea id="bpShort" maxlength="120" rows="2" placeholder="Показывается в профиле и при шаринге" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
     </div>
+    <div class="field">
+      <label>Аватар бота (публичный https URL картинки)</label>
+      <input type="url" id="bpAvatar" placeholder="https://example.com/avatar.jpg" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn btn-s" style="flex:1;font-size:13px;padding:8px" onclick="setBotAvatar()">🖼 Поставить</button>
+        <button class="btn btn-d" style="flex:1;font-size:13px;padding:8px" onclick="deleteBotAvatar()">🗑 Удалить фото</button>
+      </div>
+    </div>
     <div class="field-err" id="bpErr"></div>
     <button class="btn btn-p" id="bpBtn" onclick="submitBotProfile()" style="width:100%">Сохранить</button>
   </div>
@@ -6203,9 +6211,26 @@ async function toggleBotActive(botId, el) {
 let BP_BOT_ID = null;
 function openBotProfile(botId) {
   BP_BOT_ID = botId;
-  ['bpName','bpDesc','bpShort'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  ['bpName','bpDesc','bpShort','bpAvatar'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   const e=document.getElementById('bpErr'); if(e) e.textContent='';
   showModal('mo-bot-profile');
+}
+async function setBotAvatar() {
+  const url=document.getElementById('bpAvatar').value.trim();
+  const errEl=document.getElementById('bpErr'); errEl.textContent='';
+  if(!url){ errEl.textContent='Вставьте https URL картинки'; return; }
+  toast('🖼 Загружаю аватар…');
+  try {
+    const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/avatar',{method:'POST',body:JSON.stringify({photo_url:url})});
+    if(r.ok) toast('✅ Аватар обновлён'); else errEl.textContent='Не удалось поставить аватар';
+  } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+}
+async function deleteBotAvatar() {
+  if(!await askConfirm('Удалить аватар бота?')) return;
+  try {
+    const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/avatar',{method:'DELETE'});
+    if(r.ok) toast('✅ Аватар удалён');
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function submitBotProfile() {
   const errEl=document.getElementById('bpErr'); errEl.textContent='';

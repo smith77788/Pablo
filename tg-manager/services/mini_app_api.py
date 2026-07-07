@@ -117,6 +117,34 @@ def channel_edit_worker_op(op) -> str | None:
     return _CHANNEL_EDIT_OPS.get(op)
 
 
+def is_safe_public_url(url: str) -> bool:
+    """SSRF-гард для загрузки картинок по URL (аватар бота).
+
+    Требует https, отсекает localhost и приватные диапазоны IP в hostname.
+    Best-effort (без резолва DNS): блокирует очевидные внутренние адреса.
+    Чистая функция — тестируема.
+    """
+    import re as _re
+    from urllib.parse import urlparse
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        p = urlparse(url.strip())
+    except Exception:
+        return False
+    if p.scheme != "https" or not p.hostname:
+        return False
+    host = p.hostname.lower()
+    if host in ("localhost", "0.0.0.0") or host.endswith(".local") or host.endswith(".internal"):
+        return False
+    # Приватные / loopback / link-local диапазоны по literal-IP в hostname.
+    if _re.match(r"^127\.", host) or _re.match(r"^10\.", host) \
+       or _re.match(r"^192\.168\.", host) or _re.match(r"^169\.254\.", host) \
+       or _re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host) or host == "::1":
+        return False
+    return True
+
+
 def parse_proxy_type(proxy_url: str) -> str | None:
     """Определяет тип прокси по схеме URL. None — если схема не поддержана.
 
@@ -1756,6 +1784,64 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
         ok_any = any(v is True for k, v in results.items() if not k.endswith("_error"))
         return _json_resp({"ok": ok_any, "results": results})
+
+    async def bot_avatar(request: web.Request) -> web.Response:
+        """Сменить/удалить аватар бота (bot_api.set_photo/delete_my_photo — были мертвы).
+        POST {photo_url}: скачать по URL (SSRF-гард) и загрузить. DELETE: удалить фото."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not row:
+            return _err("Бот не найден", 404)
+        try:
+            from services.token_vault import decrypt_token as _dt
+            token = _dt(row["token"])
+        except Exception:
+            token = row["token"]
+        from services import bot_api
+        import aiohttp as _aio
+
+        if request.method == "DELETE":
+            try:
+                async with _aio.ClientSession() as sess:
+                    ok = await bot_api.delete_my_photo(sess, token)
+                return _json_resp({"ok": bool(ok)})
+            except Exception:
+                log.exception("bot_avatar delete uid=%d bot=%d", uid, bot_id)
+                return _err("Ошибка удаления аватара", 500)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        photo_url = (body.get("photo_url") or "").strip()
+        if not is_safe_public_url(photo_url):
+            return _err("Нужен публичный https URL картинки", 400)
+        try:
+            async with _aio.ClientSession() as sess:
+                # Скачиваем с потолком размера (5 МБ) и таймаутом.
+                async with sess.get(photo_url, timeout=_aio.ClientTimeout(total=15)) as resp:
+                    if resp.status != 200:
+                        return _err(f"Не удалось скачать картинку (HTTP {resp.status})", 400)
+                    ctype = (resp.headers.get("Content-Type") or "").lower()
+                    if "image" not in ctype:
+                        return _err("URL не является картинкой", 400)
+                    data = await resp.content.read(5 * 1024 * 1024 + 1)
+                    if len(data) > 5 * 1024 * 1024:
+                        return _err("Картинка слишком большая (макс. 5 МБ)", 400)
+                ok = await bot_api.set_photo(sess, token, data)
+            if ok:
+                return _json_resp({"ok": True})
+            return _err("Telegram отклонил картинку (формат/размер)", 502)
+        except Exception:
+            log.exception("bot_avatar set uid=%d bot=%d", uid, bot_id)
+            return _err("Ошибка установки аватара", 500)
 
     # ── Bot Stats (detailed) ───────────────────────────────────────────────────
 
@@ -8791,6 +8877,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
     app.router.add_post("/api/miniapp/bot/{bot_id}/profile", bot_profile)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/avatar", bot_avatar)
+    app.router.add_delete("/api/miniapp/bot/{bot_id}/avatar", bot_avatar)
     # Account Shield
     app.router.add_get("/api/miniapp/shield", shield_summary)
     # Ad Intelligence

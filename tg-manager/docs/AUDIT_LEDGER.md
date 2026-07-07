@@ -25,6 +25,11 @@
 Найдено: движок читает `account_niche_profiles(profile_type, niche, custom_channels)` — profile_type задаёт веса действий, custom_channels/niche задают каналы — но **в эту таблицу никто и никогда не писал** (0 INSERT/UPDATE в кодовой базе). UI давал ровно 1 дропдаун (пресет). То есть весь пласт «характер аккаунта / ниша / свои каналы» был мёртвым кодом, каждый аккаунт грелся как mixed/general на дефолтных пабликах.
 Исправлено: да. Эндпоинт `warmup_create_plan` теперь апсертит account_niche_profiles и принимает profile_type (reader/commenter/reactor/lurker/mixed), niche (6 наборов), custom_channels (свой список, нормализация через `account_warmer.normalize_warmup_channels`), override daily_actions/target_days с жёстким клампом по безопасности (daily ≤20 — >20 на свежем аккаунте топ-триггер бана). UI-модалка расширена этими полями + продвинутый блок. Регресс-тест `tests/test_warmup_channels.py`. Осталось (следующий проход): взаимный прогрев между своими аккаунтами, окна по времени суток в UI (в движке `_time_of_day_multiplier` уже есть, но не настраивается), заполнение профиля (аватар/био) как часть прогрева.
 
+## МОДУЛЬ Боты — глубина+ширина до топ1 (волна 2) — 2026-07-07
+Проверено: bot_api vs UI. Модуль уже широкий (auto_replies/воронки/подписчики/расписания/deeplinks/команды/профиль/роль/релей/multigeo/webhook).
+Найдено: `bot_api.set_photo`/`delete_my_photo` (аватар бота) есть, но UI профиля не использовал — единственная явная мёртвая ширина.
+Исправлено: эндпоинт `bot_avatar` (POST по https-URL → скачать с потолком 5МБ+таймаут+проверка content-type → setMyPhoto; DELETE → deleteMyPhoto). SSRF-гард `is_safe_public_url` (только https, отсекает localhost/приватные IP/*.internal/*.local — тест). UI: поле URL аватара + кнопки поставить/удалить в модалке профиля. Регресс-тест `tests/test_ssrf_guard.py`. Осталось (бэклог): показ текущих значений профиля при редактировании (get_my_description), menu button (в bot_api нет обёртки), массовые операции над ботами.
+
 ## МОДУЛЬ Прокси — глубина+ширина до топ1 (волна 2) — 2026-07-07
 Проверено: user_proxies + proxy_selector vs UI.
 Найдено: крупнейшая мёртвая ширина волны 2. `account_manager.test_proxy` и `proxy_selector.check_proxy_health` есть, схема user_proxies имеет is_alive/last_check — но проверить прокси из UI было нельзя (только add/delete/list). Массового импорта не было (по одному).
