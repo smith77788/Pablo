@@ -4158,8 +4158,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid JSON", 400)
         account_id = body.get("account_id")
         plan_type = body.get("plan_type", "standard")
+        if plan_type not in ("gentle", "standard", "aggressive"):
+            return _err("plan_type должен быть gentle/standard/aggressive", 400)
         if not account_id:
             return _err("account_id обязателен", 400)
+
+        # ── Расширенные настройки поведения прогрева (движок читает их из
+        # account_niche_profiles) — раньше не выводились в UI, аккаунт всегда
+        # грелся как mixed/general. Теперь пользователь задаёт характер. ──
+        from services.account_warmer import (
+            WARMUP_PROFILES, WARMUP_NICHES, normalize_warmup_channels,
+        )
+        profile_type = (body.get("profile_type") or "mixed").strip().lower()
+        if profile_type not in WARMUP_PROFILES:
+            return _err(f"profile_type должен быть одним из: {', '.join(WARMUP_PROFILES)}", 400)
+        niche = (body.get("niche") or "general").strip().lower()
+        if niche not in WARMUP_NICHES:
+            return _err(f"niche должен быть одним из: {', '.join(WARMUP_NICHES)}", 400)
+        custom_channels = normalize_warmup_channels(body.get("custom_channels"))
+
         try:
             acc = await pool.fetchrow(
                 "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
@@ -4176,11 +4193,51 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
             target_days = days_map.get(plan_type, 14)
             daily_actions = actions_map.get(plan_type, 10)
-            label = f"Прогрев аккаунта ({plan_type})"
+            # Опциональные переопределения (продвинутый режим). Клампим по
+            # безопасности: >20 действий/день на свежем аккаунте — топ-триггер
+            # бана, поэтому жёсткий потолок независимо от ввода пользователя.
+            if body.get("daily_actions") is not None:
+                try:
+                    daily_actions = max(3, min(20, int(body["daily_actions"])))
+                except (TypeError, ValueError):
+                    return _err("daily_actions должен быть числом 3..20", 400)
+            if body.get("target_days") is not None:
+                try:
+                    target_days = max(5, min(45, int(body["target_days"])))
+                except (TypeError, ValueError):
+                    return _err("target_days должен быть числом 5..45", 400)
+
+            # Сохраняем поведенческий профиль — движок прогрева читает именно
+            # отсюда (profile_type → веса действий, niche/custom_channels → на
+            # каких каналах греть).
+            await pool.execute(
+                """CREATE TABLE IF NOT EXISTS account_niche_profiles (
+                       account_id      BIGINT PRIMARY KEY,
+                       owner_id        BIGINT NOT NULL,
+                       niche           TEXT NOT NULL DEFAULT 'general',
+                       profile_type    TEXT NOT NULL DEFAULT 'reader',
+                       custom_channels TEXT[] DEFAULT '{}',
+                       flood_wait_count INT NOT NULL DEFAULT 0,
+                       last_flood_at   TIMESTAMPTZ,
+                       updated_at      TIMESTAMPTZ DEFAULT NOW()
+                   )"""
+            )
+            await pool.execute(
+                """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, custom_channels, updated_at)
+                   VALUES($1,$2,$3,$4,$5,now())
+                   ON CONFLICT (account_id) DO UPDATE
+                   SET niche=$3, profile_type=$4, custom_channels=$5, updated_at=now()""",
+                account_id, uid, niche, profile_type, custom_channels,
+            )
+
+            label = f"Прогрев аккаунта ({plan_type}, {profile_type})"
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'account_warmup','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"account_id": account_id, "plan_type": plan_type}), label,
+                uid, _json.dumps({
+                    "account_id": account_id, "plan_type": plan_type,
+                    "profile_type": profile_type, "niche": niche,
+                }), label,
             )
             await pool.execute(
                 """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
@@ -4189,7 +4246,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
                 uid, account_id, plan_type, target_days, daily_actions,
             )
-            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+            return _json_resp({
+                "ok": True, "op_id": op_id, "label": label,
+                "profile_type": profile_type, "niche": niche,
+                "custom_channels": len(custom_channels),
+                "daily_actions": daily_actions, "target_days": target_days,
+            })
         except Exception as exc:
             log.exception("warmup_create_plan uid=%d acc=%s", uid, account_id)
             return _err(str(exc), 500)

@@ -332,6 +332,33 @@ def _compute_warmup_level(actions_done: int) -> str:
     return "light"
 
 
+WARMUP_PROFILES = ("reader", "commenter", "reactor", "lurker", "mixed")
+WARMUP_NICHES = ("general", "tech", "news", "crypto", "sports", "entertainment")
+
+
+def normalize_warmup_channels(raw, limit: int = 50) -> list[str]:
+    """Приводит пользовательский ввод каналов к списку валидных @username.
+
+    Принимает список или строку (каналы через перенос/запятую). Отсекает мусор,
+    поддерживает t.me/<name> и @name, дедуплицирует с сохранением порядка,
+    ограничивает количество (защита от гигантских списков). Общий хелпер для
+    UI-эндпоинта прогрева и любых других мест, где нужен разбор каналов.
+    """
+    import re as _re
+
+    if isinstance(raw, str):
+        raw = _re.split(r"[\n,]+", raw)
+    out: list[str] = []
+    for ch in (raw or []):
+        ch = str(ch).strip().lstrip("@").strip()
+        if not ch:
+            continue
+        m = _re.match(r"^(?:https?://t\.me/|t\.me/)?([A-Za-z0-9_]{3,32})/?$", ch)
+        if m:
+            out.append("@" + m.group(1))
+    return list(dict.fromkeys(out))[:limit]
+
+
 async def get_account_niche_channels(pool: asyncpg.Pool, account_id: int) -> list[str]:
     """Возвращает список каналов для прогрева с учётом нишевого профиля аккаунта."""
     try:

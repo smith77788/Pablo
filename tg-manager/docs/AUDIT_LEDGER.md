@@ -20,6 +20,11 @@
 
 ---
 
+## МОДУЛЬ Прогрев (account_warmer) — углубление до паритета — 2026-07-07
+Проверено: что реально настраивается в прогреве против возможностей бэкенда.
+Найдено: движок читает `account_niche_profiles(profile_type, niche, custom_channels)` — profile_type задаёт веса действий, custom_channels/niche задают каналы — но **в эту таблицу никто и никогда не писал** (0 INSERT/UPDATE в кодовой базе). UI давал ровно 1 дропдаун (пресет). То есть весь пласт «характер аккаунта / ниша / свои каналы» был мёртвым кодом, каждый аккаунт грелся как mixed/general на дефолтных пабликах.
+Исправлено: да. Эндпоинт `warmup_create_plan` теперь апсертит account_niche_profiles и принимает profile_type (reader/commenter/reactor/lurker/mixed), niche (6 наборов), custom_channels (свой список, нормализация через `account_warmer.normalize_warmup_channels`), override daily_actions/target_days с жёстким клампом по безопасности (daily ≤20 — >20 на свежем аккаунте топ-триггер бана). UI-модалка расширена этими полями + продвинутый блок. Регресс-тест `tests/test_warmup_channels.py`. Осталось (следующий проход): взаимный прогрев между своими аккаунтами, окна по времени суток в UI (в движке `_time_of_day_multiplier` уже есть, но не настраивается), заполнение профиля (аватар/био) как часть прогрева.
+
 ## tg-manager/services/spintax_ai.py, spintax_engine/*, spintax_service.py — 2026-07-06
 Проверено: лексер/парсер/генератор spintax, подсчёт вариантов групп, unique-pool через structural_key, seeded RNG, интеграция spintax_service ↔ spintax_engine.
 Найдено: ничего существенного.

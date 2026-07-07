@@ -3754,15 +3754,55 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="modal">
     <div class="modal-x" onclick="closeWarmupModal()">✕</div>
     <div class="modal-title">🌱 Запустить прогрев</div>
-    <div class="field"><label>Аккаунт</label><select id="warmupAccSel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Аккаунт</label><select id="warmupAccSel"><option value="">Загрузка...</option></select></div>
     <div class="field">
       <label>Режим прогрева</label>
-      <select id="warmupPlan" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+      <select id="warmupPlan">
         <option value="gentle">🌱 Gentle (21 день, 5 действий/день)</option>
         <option value="standard" selected>🌿 Standard (14 дней, 10 действий/день)</option>
         <option value="aggressive">🔥 Intensive (10 дней, 12 действий/день)</option>
       </select>
     </div>
+    <div class="field">
+      <label>Характер поведения</label>
+      <select id="warmupProfile">
+        <option value="mixed" selected>🎭 Смешанный — сбалансированное поведение</option>
+        <option value="reader">📖 Читатель — в основном читает каналы</option>
+        <option value="commenter">💬 Комментатор — активно комментирует</option>
+        <option value="reactor">❤️ Реагирующий — много реакций</option>
+        <option value="lurker">👀 Наблюдатель — тихий, минимум активности</option>
+      </select>
+      <div class="field-note">Определяет, какие действия аккаунт делает чаще во время прогрева</div>
+    </div>
+    <div class="field">
+      <label>Ниша (набор каналов по умолчанию)</label>
+      <select id="warmupNiche">
+        <option value="general" selected>🌐 Общая</option>
+        <option value="tech">💻 Технологии</option>
+        <option value="news">📰 Новости</option>
+        <option value="crypto">₿ Крипто</option>
+        <option value="sports">⚽ Спорт</option>
+        <option value="entertainment">🎬 Развлечения</option>
+      </select>
+      <div class="field-note">Используется, если не заданы свои каналы ниже</div>
+    </div>
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:6px 0">⚙️ Дополнительно</summary>
+      <div class="field" style="margin-top:8px">
+        <label>Свои каналы для прогрева</label>
+        <textarea id="warmupChannels" rows="3" placeholder="@channel1&#10;@channel2&#10;t.me/channel3"></textarea>
+        <div class="field-note">По одному на строку. Переопределяют нишу. До 50 каналов</div>
+      </div>
+      <div class="field">
+        <label>Действий в день (переопределить)</label>
+        <input type="number" id="warmupDaily" min="3" max="20" placeholder="из пресета (3–20)">
+        <div class="field-note">Больше 20/день на свежем аккаунте — главный триггер бана</div>
+      </div>
+      <div class="field">
+        <label>Дней прогрева (переопределить)</label>
+        <input type="number" id="warmupDays" min="5" max="45" placeholder="из пресета (5–45)">
+      </div>
+    </details>
     <div class="field-err" id="warmupErr"></div>
     <button class="btn btn-p" id="warmupBtn" onclick="submitWarmup()" style="width:100%">🚀 Запустить прогрев</button>
   </div>
@@ -8689,6 +8729,9 @@ async function deleteDm(id) {
 async function openWarmupModal() {
   document.getElementById('warmupErr').textContent='';
   document.getElementById('warmupBtn').disabled=false;
+  document.getElementById('warmupChannels').value='';
+  document.getElementById('warmupDaily').value='';
+  document.getElementById('warmupDays').value='';
   document.getElementById('warmupMbg').classList.add('show');
   const sel = document.getElementById('warmupAccSel');
   sel.innerHTML='<option value="">Загрузка...</option>';
@@ -8704,13 +8747,23 @@ function closeWarmupModal() { document.getElementById('warmupMbg').classList.rem
 async function submitWarmup() {
   const account_id = parseInt(document.getElementById('warmupAccSel').value);
   const plan_type = document.getElementById('warmupPlan').value;
+  const profile_type = document.getElementById('warmupProfile').value;
+  const niche = document.getElementById('warmupNiche').value;
+  const custom_channels = document.getElementById('warmupChannels').value.trim();
+  const dailyRaw = document.getElementById('warmupDaily').value.trim();
+  const daysRaw = document.getElementById('warmupDays').value.trim();
   const errEl = document.getElementById('warmupErr');
   if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
+  const payload = {account_id, plan_type, profile_type, niche};
+  if (custom_channels) payload.custom_channels = custom_channels;
+  if (dailyRaw) payload.daily_actions = parseInt(dailyRaw);
+  if (daysRaw) payload.target_days = parseInt(daysRaw);
   const btn = document.getElementById('warmupBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const r = await api('/api/miniapp/warmup',{method:'POST',body:JSON.stringify({account_id,plan_type})});
-    toast(`🌱 Прогрев запущен (#${r.op_id})`);
+    const r = await api('/api/miniapp/warmup',{method:'POST',body:JSON.stringify(payload)});
+    const chNote = r.custom_channels ? `, ${r.custom_channels} своих каналов` : '';
+    toast(`🌱 Прогрев запущен (#${r.op_id}): ${r.daily_actions} действ./день${chNote}`);
     closeWarmupModal();
     openWarmup();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
