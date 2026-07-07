@@ -2322,6 +2322,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["current_password"] = (body.get("current_password") or "").strip()
             params["hint"] = (body.get("hint") or "").strip()
             return params, "Смена 2FA"
+        if op == "username":
+            un = (body.get("username") or "").strip().lstrip("@")
+            if not un:
+                return None, "Укажите username"
+            params["username"] = un
+            return params, "Смена username"
+        if op == "close_sessions":
+            return params, "Закрыть сторонние сессии"
+        if op == "privacy":
+            key = (body.get("privacy_key") or "").strip()
+            if key not in ("phone", "invite", "lastseen"):
+                return None, "Неизвестный ключ приватности"
+            params["privacy_key"] = key
+            params["privacy_allow"] = bool(body.get("privacy_allow"))
+            return params, "Настройка приватности"
         return None, "Неизвестная операция"
 
     async def accounts_mass(request: web.Request) -> web.Response:
@@ -2370,7 +2385,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         uid, _json.dumps({"account_id": aid}), f"Выход из всех чатов (акк. {aid})")
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
-            if op in ("name", "avatar", "2fa"):
+            if op in ("name", "avatar", "2fa", "username", "close_sessions", "privacy"):
                 params, label = _build_profile_params(op, body, ids)
                 if params is None:
                     return _err(label, 400)
@@ -2425,6 +2440,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["current_password"] = (body.get("current_password") or "").strip()
             params["hint"] = (body.get("hint") or "").strip()
             label = "Смена 2FA"
+        elif op == "username":
+            un = (body.get("username") or "").strip().lstrip("@")
+            if not un:
+                return _err("Укажите username", 400)
+            params["username"] = un
+            label = "Смена username"
+        elif op == "close_sessions":
+            label = "Закрыть сторонние сессии"
+        elif op == "privacy":
+            pk = (body.get("privacy_key") or "phone").strip()
+            if pk not in ("phone", "invite", "lastseen"):
+                return _err("privacy_key: phone|invite|lastseen", 400)
+            params["privacy_key"] = pk
+            params["privacy_allow"] = bool(body.get("privacy_allow", False))
+            label = f"Приватность: {pk}"
         else:
             return _err("Неизвестная операция", 400)
         try:
@@ -2436,6 +2466,33 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("account_profile uid=%d acc=%d op=%s", uid, acc_id, op)
             return _err(str(exc), 500)
+
+    async def account_login_code(request: web.Request) -> web.Response:
+        """Получить последний код входа Telegram для аккаунта (инлайн, из чата 777000).
+        Аналог «Получить код авторизации» — раньше в mini-app недоступно."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import profile_setter_engine as pse
+            res = await pse.get_login_code(acc["session_str"], dict(acc))
+            if res.get("ok"):
+                return _json_resp({"ok": True, "code": res["code"]})
+            return _err(res.get("error") or "Код не найден", 404)
+        except Exception:
+            log.exception("account_login_code uid=%d acc=%d", uid, acc_id)
+            return _err("Ошибка получения кода", 500)
 
     async def channel_edit(request: web.Request) -> web.Response:
         """Изменить название/описание/username канала (op: title|about|username).
@@ -9326,6 +9383,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
+    app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
     app.router.add_post("/api/miniapp/channel/add", channel_add)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)

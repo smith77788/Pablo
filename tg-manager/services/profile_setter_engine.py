@@ -192,6 +192,99 @@ async def set_2fa_password(
             pass
 
 
+# ── Безопасность: закрыть сторонние сессии ────────────────────────────────────
+
+async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Завершить ВСЕ прочие авторизации аккаунта (кроме текущей).
+    Аналог «Закрыть сторонние сессии» — защита угнанных/прогретых аккаунтов."""
+    from telethon.tl.functions.auth import ResetAuthorizationsRequest
+
+    client = await _connect(session_string, _acc)
+    try:
+        await asyncio.wait_for(client(ResetAuthorizationsRequest()), timeout=_ACTION_TIMEOUT)
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ── Настройки приватности ─────────────────────────────────────────────────────
+
+# key → (PrivacyKey, разрешено/запрещено). value=True = «открыть/показать всем»,
+# value=False = «скрыть/закрыть» (никому).
+_PRIVACY_KEYS = {"phone", "invite", "lastseen"}
+
+
+async def set_privacy(session_string: str, _acc: dict | None, key: str, allow: bool) -> dict[str, Any]:
+    """Настройка приватности: phone (номер), invite (кто может добавлять в группы),
+    lastseen (был в сети). allow=True — всем, False — никому."""
+    from telethon.tl.functions.account import SetPrivacyRequest
+    from telethon.tl.types import (
+        InputPrivacyKeyPhoneNumber, InputPrivacyKeyChatInvite, InputPrivacyKeyStatusTimestamp,
+        InputPrivacyValueAllowAll, InputPrivacyValueDisallowAll,
+    )
+    keymap = {
+        "phone": InputPrivacyKeyPhoneNumber,
+        "invite": InputPrivacyKeyChatInvite,
+        "lastseen": InputPrivacyKeyStatusTimestamp,
+    }
+    if key not in keymap:
+        return {"ok": False, "error": f"unknown privacy key {key}"}
+    client = await _connect(session_string, _acc)
+    try:
+        rule = InputPrivacyValueAllowAll() if allow else InputPrivacyValueDisallowAll()
+        await asyncio.wait_for(
+            client(SetPrivacyRequest(key=keymap[key](), rules=[rule])),
+            timeout=_ACTION_TIMEOUT,
+        )
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ── Получить код авторизации ──────────────────────────────────────────────────
+
+def extract_login_code(text: str) -> str | None:
+    """Выделить 5–6-значный код входа Telegram из текста сервисного сообщения.
+    Сначала ищем рядом со словом code/код (устойчивее к номерам/датам в тексте),
+    затем — любой изолированный 5–6-значный блок. Чистая функция (без Telethon)."""
+    if not text:
+        return None
+    match = re.search(r"(?:code|код)[^\d]{0,20}(\d{5,6})", text, re.IGNORECASE)
+    if not match:
+        match = re.search(r"\b(\d{5,6})\b", text)
+    return match.group(1) if match else None
+
+
+async def get_login_code(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Прочитать последний код входа Telegram из служебного чата (777000).
+    Возвращает {ok, code, error}. Аналог «Получить код авторизации»."""
+    client = await _connect(session_string, _acc)
+    try:
+        msgs = await asyncio.wait_for(client.get_messages(777000, limit=5), timeout=_ACTION_TIMEOUT)
+        for m in (msgs or []):
+            code = extract_login_code(getattr(m, "message", "") or "")
+            if code:
+                return {"ok": True, "code": code, "error": None}
+        return {"ok": False, "code": None, "error": "Код не найден в последних сообщениях"}
+    except Exception as exc:
+        return {"ok": False, "code": None, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 # ── Спинтакс (рандомизация текста) ───────────────────────────────────────────
 
 def expand_spintax(text: str) -> str:

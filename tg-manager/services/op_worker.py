@@ -7249,6 +7249,17 @@ async def _exec_bulk_set_profile(
                     current_password=params.get("current_password", ""),
                     hint=params.get("hint", ""),
                 )
+            elif op == "username":
+                uname = pse.expand_spintax(params.get("username", ""))
+                res = await pse.set_username(acc["session_str"], dict(acc), uname)
+            elif op == "close_sessions":
+                res = await pse.close_other_sessions(acc["session_str"], dict(acc))
+            elif op == "privacy":
+                res = await pse.set_privacy(
+                    acc["session_str"], dict(acc),
+                    key=params.get("privacy_key", "phone"),
+                    allow=bool(params.get("privacy_allow", False)),
+                )
             else:
                 res = {"ok": False, "error": f"unknown op: {op}"}
 
@@ -7273,7 +7284,8 @@ async def _exec_bulk_set_profile(
         if idx < total:
             await asyncio.sleep(2.0)
 
-    op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
+    op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль",
+                 "username": "Username", "close_sessions": "Закрыть сессии", "privacy": "Приватность"}
     summary = (
         f"🎨 Сеттер: {op_labels.get(op, op)}\n"
         f"✅ Успешно: {ok_count}/{total}"

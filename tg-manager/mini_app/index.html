@@ -1703,9 +1703,32 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <select id="apOp" onchange="apToggle()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
         <option value="name">Имя и Bio</option>
         <option value="avatar">Аватар</option>
+        <option value="username">Username</option>
         <option value="2fa">2FA пароль</option>
+        <option value="close_sessions">🔒 Закрыть сторонние сессии</option>
+        <option value="privacy">🛡 Приватность</option>
+        <option value="login_code">📩 Получить код входа</option>
       </select>
     </div>
+    <div id="apF-username">
+      <div class="field"><label>Новый username (без @) *</label><input type="text" id="apUsername" placeholder="username" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    </div>
+    <div id="apF-privacy">
+      <div class="field"><label>Что настраиваем</label>
+        <select id="apPrivKey" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="phone">Номер телефона</option>
+          <option value="invite">Кто может добавлять в группы</option>
+          <option value="lastseen">Был в сети</option>
+        </select>
+      </div>
+      <div class="field"><label>Видимость</label>
+        <select id="apPrivAllow" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="0">🔒 Никому (скрыть/закрыть)</option>
+          <option value="1">🌐 Всем (открыть)</option>
+        </select>
+      </div>
+    </div>
+    <div id="apF-info" style="font-size:12px;color:var(--hint);padding:4px 0 8px"></div>
     <div id="apF-name">
       <div class="field"><label>Имя *</label><input type="text" id="apFirst" placeholder="Имя" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
       <div class="field"><label>Фамилия</label><input type="text" id="apLast" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
@@ -5206,17 +5229,38 @@ async function submitAccMeta() {
   } catch(e){ err.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
 }
+const AP_INFO = {
+  close_sessions: '🔒 Завершит ВСЕ прочие авторизации аккаунта (кроме текущей). Защищает угнанные/прогретые аккаунты.',
+  login_code: '📩 Прочитает последний код входа Telegram из служебного чата. Работает при одиночном аккаунте.',
+};
 function apToggle() {
   const op=document.getElementById('apOp').value;
   const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none';};
   show('apF-name', op==='name'); show('apF-avatar', op==='avatar'); show('apF-2fa', op==='2fa');
+  show('apF-username', op==='username'); show('apF-privacy', op==='privacy');
+  const info=document.getElementById('apF-info'); if(info){ info.textContent = AP_INFO[op]||''; info.style.display = AP_INFO[op]?'':'none'; }
 }
 async function submitAccProfile() {
   const errEl=document.getElementById('apErr'); errEl.textContent='';
   const op=document.getElementById('apOp').value;
+  // «Получить код входа» — инлайн, одиночный аккаунт.
+  if(op==='login_code'){
+    if(AP_MASS){ errEl.textContent='Код входа доступен только для одного аккаунта'; return; }
+    const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Читаю…';
+    try{
+      const r=await api(`/api/miniapp/account/${AP_ACC_ID}/login_code`,{method:'POST'});
+      if(r.code){ try{await navigator.clipboard.writeText(r.code);}catch(_){} toast('📩 Код входа: '+r.code+' (скопирован)'); }
+      else toast('Код не найден');
+    }catch(e){ errEl.textContent=e.message||'Ошибка'; }
+    finally{ btn.disabled=false; btn.textContent='Применить'; }
+    return;
+  }
   const payload={op};
   if(op==='name'){ payload.first_name=document.getElementById('apFirst').value.trim(); payload.last_name=document.getElementById('apLast').value.trim(); payload.about=document.getElementById('apAbout').value.trim(); if(!payload.first_name){errEl.textContent='Укажите имя';return;} }
   else if(op==='avatar'){ payload.avatar_url=document.getElementById('apAvatar').value.trim(); if(!payload.avatar_url){errEl.textContent='Укажите ссылку';return;} }
+  else if(op==='username'){ payload.username=document.getElementById('apUsername').value.trim().replace(/^@/,''); if(!payload.username){errEl.textContent='Укажите username';return;} }
+  else if(op==='privacy'){ payload.privacy_key=document.getElementById('apPrivKey').value; payload.privacy_allow=document.getElementById('apPrivAllow').value==='1'; }
+  else if(op==='close_sessions'){ /* без полей */ }
   else { payload.new_password=document.getElementById('apNewPass').value.trim(); payload.current_password=document.getElementById('apCurPass').value.trim(); payload.hint=document.getElementById('apHint').value.trim(); if(!payload.new_password){errEl.textContent='Укажите новый пароль';return;} }
   const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
