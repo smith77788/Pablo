@@ -49,3 +49,25 @@ def test_meta_validates_stage():
     src = _read("services/mini_app_api.py")
     assert 'if "stage" in body' in src
     assert "not in ACCOUNT_STAGES" in src, "meta не валидирует stage по whitelist"
+
+
+def test_stage_stats_scoped_and_whitelisted():
+    src = _read("services/mini_app_api.py")
+    # разбивка by_stage должна считаться по owner_id и фильтроваться whitelist'ом
+    assert '"by_stage"' in src, "нет разбивки by_stage в stats"
+    assert re.search(
+        r"FROM tg_accounts\s+\"?\s*\n?\s*\"?WHERE owner_id=\$1 AND stage IS NOT NULL GROUP BY stage",
+        src,
+    ) or "WHERE owner_id=$1 AND stage IS NOT NULL GROUP BY stage" in src, (
+        "by_stage считается без скоупа owner_id"
+    )
+    assert 'r.get("stage") in ACCOUNT_STAGES' in src, "by_stage не фильтрует по whitelist"
+
+
+def test_ui_stage_filter_composes_with_health():
+    ui = _read("mini_app/index.html")
+    # срез по статусу должен КОМБИНИРОВАТЬСЯ с фильтром здоровья внутри _accFiltered
+    assert "if (ACC_STAGE_FILTER) list = list.filter(a=>a.stage===ACC_STAGE_FILTER)" in ui, (
+        "stage-фильтр не встроен в _accFiltered — не скомбинируется с health-фильтром"
+    )
+    assert "renderStageChips" in ui

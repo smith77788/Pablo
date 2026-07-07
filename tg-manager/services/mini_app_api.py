@@ -1083,6 +1083,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       ) AS active
                FROM tg_accounts WHERE owner_id=$1""", uid)
         stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "cooldown", "active")} if st else {}
+        # Разбивка по CRM-статусам (stage) — по ВСЕМ аккаунтам, для чипов-срезов.
+        stage_rows = await _safe_fetch(pool,
+            "SELECT stage, COUNT(*) AS c FROM tg_accounts "
+            "WHERE owner_id=$1 AND stage IS NOT NULL GROUP BY stage", uid)
+        by_stage = {r["stage"]: int(r["c"] or 0) for r in (stage_rows or [])
+                    if r.get("stage") in ACCOUNT_STAGES}
+        stats["by_stage"] = by_stage
         return _json_resp({"accounts": rows, "stats": stats})
 
     async def account_detail(request: web.Request) -> web.Response:

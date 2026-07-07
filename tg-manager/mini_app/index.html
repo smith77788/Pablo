@@ -614,6 +614,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
+    <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
+    <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:12px">
       <div class="sec">📡 Каналы и чаты</div>
@@ -5472,7 +5474,8 @@ async function loadAccounts() {
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
     updateAccKpi(CUR_ACCS, ad.stats);
-    renderAccounts(CUR_ACCS);
+    renderStageChips(ad.stats && ad.stats.by_stage);
+    renderAccounts(_accFiltered());
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
@@ -5537,18 +5540,32 @@ function phoneFlag(phone) {
 }
 
 let ACC_FILTER = 'all';
+let ACC_STAGE_FILTER = '';   // '' = все статусы
 
 function filterAcc(mode, btn) {
   ACC_FILTER = mode;
   document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x=>x.classList.remove('on'));
   btn.classList.add('on');
-  let list;
-  if (mode==='all') list = CUR_ACCS;
-  else if (mode==='active') list = CUR_ACCS.filter(a=>a.is_active && !isOnCooldown(a) && a.acc_status!=='banned');
-  else if (mode==='cooldown') list = CUR_ACCS.filter(a=>isOnCooldown(a));
-  else if (mode==='banned') list = CUR_ACCS.filter(a=>a.acc_status==='banned');
-  else list = CUR_ACCS;
-  renderAccounts(list);
+  renderAccounts(_accFiltered());
+}
+// Срез по CRM-статусу (комбинируется с фильтром здоровья)
+function filterStage(stage) {
+  ACC_STAGE_FILTER = (ACC_STAGE_FILTER===stage) ? '' : stage;  // повторный клик снимает
+  document.querySelectorAll('#stageChips .st-chip').forEach(x=>{
+    x.classList.toggle('on', x.getAttribute('data-stage')===ACC_STAGE_FILTER);
+  });
+  renderAccounts(_accFiltered());
+}
+function renderStageChips(byStage) {
+  const box = document.getElementById('stageChips');
+  if(!box) return;
+  const entries = Object.keys(ACC_STAGES).filter(k => (byStage||{})[k]);
+  if(!entries.length){ box.style.display='none'; box.innerHTML=''; ACC_STAGE_FILTER=''; return; }
+  box.style.display='flex';
+  const chip=(stage,label,count,on)=>`<span class="st-chip${on?' on':''}" data-stage="${stage}" onclick="filterStage('${stage}')" style="flex:none;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:20px;border:1.5px solid ${on?'var(--accent,#5b8def)':'rgba(255,255,255,.12)'};background:${on?'rgba(91,141,239,.18)':'rgba(255,255,255,.04)'};color:#fff;white-space:nowrap">${label} ${count}</span>`;
+  let html = chip('', 'Все', Object.values(byStage).reduce((a,b)=>a+b,0), ACC_STAGE_FILTER==='');
+  html += entries.map(k=>chip(k, ACC_STAGES[k].emoji+' '+ACC_STAGES[k].label, byStage[k], ACC_STAGE_FILTER===k)).join('');
+  box.innerHTML = html;
 }
 
 function updateAccKpi(list, stats) {
@@ -5610,13 +5627,16 @@ function toggleAccSelMode() {
   updateAccSelBar();
 }
 function _accFiltered() {
-  // текущий активный фильтр KPI
+  // текущий активный фильтр KPI (здоровье)
   const active = document.querySelector('.acc-kpi-card.on');
   const f = active ? active.getAttribute('data-filter') : 'all';
-  if (f==='active') return CUR_ACCS.filter(a=>a.is_active && a.acc_status!=='banned' && !isOnCooldown(a));
-  if (f==='cooldown') return CUR_ACCS.filter(a=>isOnCooldown(a));
-  if (f==='banned') return CUR_ACCS.filter(a=>a.acc_status==='banned');
-  return CUR_ACCS;
+  let list = CUR_ACCS;
+  if (f==='active') list = list.filter(a=>a.is_active && a.acc_status!=='banned' && !isOnCooldown(a));
+  else if (f==='cooldown') list = list.filter(a=>isOnCooldown(a));
+  else if (f==='banned') list = list.filter(a=>a.acc_status==='banned');
+  // срез по CRM-статусу (комбинируется с фильтром здоровья)
+  if (ACC_STAGE_FILTER) list = list.filter(a=>a.stage===ACC_STAGE_FILTER);
+  return list;
 }
 function toggleAccSel(id) {
   if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
