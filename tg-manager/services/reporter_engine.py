@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 from typing import Any
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -73,8 +74,8 @@ async def report_peer(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "report_peer: disconnect")
 
 
 async def report_message(
@@ -106,8 +107,8 @@ async def report_message(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "report_message: disconnect")
 
 
 def parse_target_ref(text: str) -> str:

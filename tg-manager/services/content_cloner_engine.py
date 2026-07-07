@@ -14,6 +14,7 @@ from telethon.errors import (
 )
 
 from services.account_manager import _make_client
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -171,8 +172,8 @@ async def clone_to_channel(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "clone_to_channel: disconnect")
 
     return result
 
@@ -206,6 +207,6 @@ async def get_last_msg_ids(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "get_last_msg_ids: disconnect")
     return ids

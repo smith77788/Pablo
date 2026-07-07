@@ -235,8 +235,8 @@ async def _process_bot(
                             callback_query_id=cbq_id,
                             text="",
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, "_process_bot: answer_callback")
                 continue
 
             msg = upd.get("message")
@@ -960,8 +960,8 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
         _rule_is_free = False
         try:
             _rule_is_free = await brand_injection.is_free_tier(pool, rule["bot_id"])
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "_inactivity_sweep: check_free_tier")
 
         for user in inactive_users:
             chat_id = user["user_id"]

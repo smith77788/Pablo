@@ -258,8 +258,8 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
                                     f"Баланс пополнен. /growth — управление выплатами.",
                                     parse_mode="HTML",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                log_exc_swallow(log, "_confirm")
             except Exception as _ce:
                 log.warning("commission accrual error: %s", _ce)
             # Notify referrer about the paid conversion
@@ -350,5 +350,5 @@ async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> 
         from bot.utils.subscription import invalidate_plan_cache
 
         invalidate_plan_cache(user_id)
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_activate_subscription: import")

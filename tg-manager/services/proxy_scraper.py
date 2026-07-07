@@ -14,6 +14,7 @@ import time as _time
 from typing import Optional
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -136,8 +137,8 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
             await _db.set_platform_setting(
                 pool, "proxy_scraper_last_run", f"0/0@{now_str}"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "scrape_and_refresh: set_platform_setting")
         async with _pool_lock:
             _valid_pool = []
             _pool_updated_at = _time.monotonic()
@@ -226,8 +227,8 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
         await _db.set_platform_setting(
             pool, "proxy_scraper_last_run", f"{len(valid)}/{len(raw)}@{now_str}"
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "scrape_and_refresh: set_platform_setting")
 
     return {
         "fetched": len(raw),
@@ -309,8 +310,8 @@ async def get_pool_stats(pool: asyncpg.Pool) -> dict:
                 last_check = datetime.datetime.fromisoformat(
                     ts_str.rstrip("Z")
                 ).replace(tzinfo=datetime.timezone.utc)
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "get_pool_stats")
 
     return {
         "valid": valid,

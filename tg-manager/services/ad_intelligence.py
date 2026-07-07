@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -439,8 +440,8 @@ async def scan_channel_ads(
         if client is not None:
             try:
                 await client.disconnect()
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "scan_channel_ads: disconnect")
 
 
 # ── DB-хелперы ───────────────────────────────────────────────────────────

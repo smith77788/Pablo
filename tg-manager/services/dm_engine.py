@@ -420,8 +420,8 @@ async def run_campaign(
         from services import brand_injection as _bi
         if await _bi.is_user_free_tier(pool, owner_id):
             template = _bi.add_promo(template, html=False, context="dm")
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "run_campaign: import")
 
     _delay_min, _delay_max = _DELAYS_BY_TARGET_TYPE.get(
         campaign.get("target_type", ""), _DEFAULT_DELAY_RANGE
@@ -632,8 +632,8 @@ async def run_campaign(
                         sent + failed,
                         op_id,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, "run_campaign: update operation")
             await asyncio.sleep(random.uniform(_delay_min, _delay_max))
             continue
         else:
@@ -664,8 +664,8 @@ async def run_campaign(
                     sent + failed,
                     op_id,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "run_campaign: update operation")
 
         # Milestone progress notifications (25%, 50%, 75%)
         if total > 0:

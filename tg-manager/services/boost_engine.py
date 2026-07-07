@@ -12,6 +12,8 @@ import logging
 import re
 from typing import Any
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 _DEFAULT_CONNECT_TIMEOUT = 15.0
@@ -83,8 +85,8 @@ async def boost_views(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "boost_stories: disconnect")
 
 
 # ── Реакции ───────────────────────────────────────────────────────────────────
@@ -122,8 +124,8 @@ async def boost_reaction(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "boost_reaction: disconnect")
 
 
 # ── Сторис ────────────────────────────────────────────────────────────────────
@@ -160,8 +162,8 @@ async def boost_stories(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "boost_views: disconnect")
 
 
 def extract_flood_wait(exc: Exception, err_str: str) -> int:

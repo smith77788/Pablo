@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 
 log = logging.getLogger(__name__)
@@ -801,8 +802,8 @@ async def run_recovery_loop(pool: asyncpg.Pool, bot) -> None:
                 for row in owner_rows:
                     try:
                         await take_health_snapshot(pool, row["owner_id"])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, "run_recovery_loop: take_health_snapshot")
             except Exception as e:
                 log.debug("recovery_engine snapshot cycle: %s", e)
 

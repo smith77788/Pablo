@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -238,8 +239,8 @@ async def get_pressure_warning(
         if warn_threshold <= score < _PRESSURE_HARD_LIMIT:
             label = pressure.get("level_label", "Повышенное")
             return f"⚠️ Давление инфраструктуры {label} ({score}/100) — операция продолжается"
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "get_pressure_warning")
     return None
 
 

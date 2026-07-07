@@ -442,8 +442,8 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                         success,
                         error_str,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, "run_resource_activity_session: update operation")
 
                 try:
                     from services import infra_memory
@@ -451,8 +451,8 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                     infra_memory.record_account_op(
                         acc_id, "resource_activity", success, duration_s=dur_s
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, "run_resource_activity_session: record_account_op")
 
                 if success:
                     total_ok += 1
@@ -473,13 +473,13 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                     await pool.execute(
                         "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, "run_resource_activity_session")
         finally:
             try:
                 await asyncio.wait_for(client.disconnect(), timeout=5)
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "run_resource_activity_session: disconnect")
 
         await asyncio.sleep(random.uniform(20, 60))
 

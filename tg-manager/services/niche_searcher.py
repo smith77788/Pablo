@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -150,8 +151,8 @@ async def search_niche_groups(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "search_niche_groups: disconnect")
 
     results = sorted(found.values(), key=lambda g: g["members"], reverse=True)
     log.info(

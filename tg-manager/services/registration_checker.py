@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -471,8 +472,8 @@ async def _fetch_channel_creation_date(client, entity) -> datetime | None:
         msgs = getattr(history, "messages", [])
         if msgs and getattr(msgs[0], "date", None):
             return msgs[0].date
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_fetch_channel_creation_date")
 
     # Попытка 2: get_messages(ids=1) — точно первое сообщение по ID
     try:
@@ -483,15 +484,15 @@ async def _fetch_channel_creation_date(client, entity) -> datetime | None:
             return msg.date
         if msg and isinstance(msg, list) and msg and msg[0]:
             return msg[0].date
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_fetch_channel_creation_date")
 
     # Попытка 3: iter_messages(reverse=True) — самое старое доступное
     try:
         async for oldest in client.iter_messages(entity, limit=1, reverse=True):
             return oldest.date
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_fetch_channel_creation_date")
 
     return None
 
@@ -524,8 +525,8 @@ async def _fetch_oldest_photo_date(client, entity) -> tuple[datetime | None, int
                 if isinstance(raw_date, (int, float)):
                     raw_date = datetime.fromtimestamp(raw_date, tz=timezone.utc)
                 return raw_date, total_photos
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_fetch_oldest_photo_date")
     return None, 0
 
 
@@ -582,8 +583,8 @@ async def get_entity_full_info(
                     fu = getattr(full, "full_user", None)
                     if fu:
                         result["about"] = getattr(fu, "about", None)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_exc_swallow(log, "get_entity_full_info: get_full_info")
 
                 oldest_photo, total_photos = await _fetch_oldest_photo_date(client, entity)
                 if oldest_photo:
@@ -620,8 +621,8 @@ async def get_entity_full_info(
                                 result["participants_count"] = getattr(
                                     fc, "participants_count", None
                                 )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, "get_entity_full_info")
 
                 # Метод 1: точная дата через первое сообщение (GetHistoryRequest)
                 exact_date = await _fetch_channel_creation_date(client, entity)

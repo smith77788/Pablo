@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -229,8 +230,8 @@ async def record_flood(
             loop.create_task(
                 _pe.record_telemetry(pool, account_id, None, action_type, "flood_wait", wait_seconds, 0)
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "record_flood: import")
 
     return actual_wait
 

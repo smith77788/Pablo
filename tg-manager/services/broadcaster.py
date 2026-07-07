@@ -11,6 +11,7 @@ from database import db
 from services import bot_api
 from services import brand_injection
 from services import content_safety
+from services.logger import log_exc_swallow
 from config import BROADCAST_DELAY
 
 from bot.utils.template_validator import replace_placeholders
@@ -103,8 +104,8 @@ async def run(
                 op_id=broadcast_id,
                 params={"category": _verdict.category, "rule": _verdict.rule},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "run")
         if _own_session and session is not None:
             await session.close()
         return

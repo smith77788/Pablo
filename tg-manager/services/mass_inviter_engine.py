@@ -19,6 +19,7 @@ import logging
 import random
 import re
 from typing import Any
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -143,8 +144,8 @@ async def invite_batch(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "invite_batch: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood, "errors": errors}
 
@@ -226,8 +227,8 @@ async def invite_by_phones(
                     client(DeleteContactsRequest(id=imported_users)),
                     timeout=_ACTION_TIMEOUT,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "invite_by_phones: import")
 
         # Пользователи из телефонов которых не нашли
         not_found = len(phones) - len(imported_users)
@@ -241,8 +242,8 @@ async def invite_by_phones(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "invite_by_phones: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood, "errors": errors}
 

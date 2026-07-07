@@ -13,6 +13,7 @@ import asyncio
 import logging
 import re
 from typing import Any
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -102,8 +103,8 @@ async def check_phones_batch(
                     client(DeleteContactsRequest(id=list(imported.users))),
                     timeout=_ACTION_TIMEOUT,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "check_phones_batch: import")
 
     except Exception as exc:
         log.warning("check_phones_batch error: %s", exc)
@@ -121,8 +122,8 @@ async def check_phones_batch(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "check_phones_batch: disconnect")
 
     return results
 

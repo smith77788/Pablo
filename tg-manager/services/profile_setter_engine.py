@@ -16,6 +16,7 @@ import asyncio
 import logging
 import re
 from typing import Any
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -60,8 +61,8 @@ async def set_name_bio(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "set_name_bio: disconnect")
 
 
 # ── Аватар из URL ─────────────────────────────────────────────────────────────
@@ -96,8 +97,8 @@ async def set_avatar_from_url(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "set_avatar_from_url: disconnect")
 
 
 # ── Аватар из байтов ──────────────────────────────────────────────────────────
@@ -126,8 +127,8 @@ async def set_avatar_from_bytes(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "set_avatar_from_bytes: disconnect")
 
 
 # ── Username ──────────────────────────────────────────────────────────────────
@@ -151,8 +152,8 @@ async def set_username(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "set_username: disconnect")
 
 
 # ── 2FA пароль ────────────────────────────────────────────────────────────────
@@ -188,8 +189,8 @@ async def set_2fa_password(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "set_2fa_password: disconnect")
 
 
 # ── Безопасность: закрыть сторонние сессии ────────────────────────────────────

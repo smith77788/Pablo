@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -522,8 +523,8 @@ async def run_flush_loop(pool: asyncpg.Pool) -> None:
             # Финальный flush перед остановкой
             try:
                 await flush_to_db(pool)
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "run_flush_loop: flush_to_db")
             raise
         except Exception as e:
             log.warning("infra_memory flush loop error: %s", e)

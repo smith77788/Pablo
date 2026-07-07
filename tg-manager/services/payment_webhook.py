@@ -141,8 +141,8 @@ async def _activate_subscription(
     try:
         from bot.utils.subscription import invalidate_plan_cache
         invalidate_plan_cache(user_id)
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_activate_subscription: import")
 
     try:
         await bot.send_message(

@@ -774,8 +774,8 @@ async def _one_account_strike(
                         record_account_op(
                             acc["id"], "strike", success=False, error="entity_error"
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, "_escalate_to_spambot: send_message")
                     return result
 
                 # Фиксируем успех в Infrastructure Memory только если были реальные действия.
@@ -1866,8 +1866,8 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
                 client.get_messages(clean, limit=5), timeout=15
             )
             msgs = [m for m in (msgs or []) if m and not m.service]
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "_escalate_to_spambot: disconnect")
         for bot_name in escalation_bots:
             try:
                 bot_entity = await asyncio.wait_for(
@@ -1900,8 +1900,8 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
                     try:
                         await asyncio.sleep(1.5)
                         await client.send_message(bot_entity, "/report")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_exc_swallow(log, "_one_account_strike: record_account_op")
                 results[bot_name] = "sent" if fwd_count > 0 else "no_msgs"
                 log.info(
                     "escalate_spambot: %s → %s fwd=%d target=%s",
@@ -1925,8 +1925,8 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "_escalate_to_spambot")
     sent = sum(1 for v in results.values() if v == "sent")
     return {
         "status": "sent" if sent > 0 else "failed",

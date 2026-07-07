@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -126,8 +127,8 @@ async def compute_dna(
             """,
             bot_id,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "compute_dna")
 
     if heatmap_rows:
         hour_counts: Counter[int] = Counter()
@@ -162,8 +163,8 @@ async def compute_dna(
         if stats and stats["total"]:
             total_users = int(stats["total"])
             churn_risk_pct = round(stats["inactive_cnt"] / stats["total"] * 100, 1)
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "compute_dna")
 
     # Fallback: count from bot_users / audience table
     if total_users == 0:
@@ -173,8 +174,8 @@ async def compute_dna(
             )
             if row:
                 total_users = int(row["cnt"])
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "compute_dna: db_fetch")
 
     # ── 3. Best content types from content_performance ────────────────────────
     best_content_types: list[str] = []
@@ -260,8 +261,8 @@ async def compute_dna(
                     if t:
                         topic_counter[t] += 1
         top_topics = [t for t, _ in topic_counter.most_common(5)]
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "compute_dna")
 
     # ── 5. Persist ────────────────────────────────────────────────────────────
     now = datetime.now(timezone.utc)

@@ -23,6 +23,7 @@ from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.types import ReactionEmoji
 
 from services.account_manager import _make_client
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -111,8 +112,8 @@ async def _act_read_dialogs(client, pool, profile_id, account_id) -> None:
             if t:
                 targets.append(t)
             await asyncio.sleep(random.uniform(1, 4))
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "_act_read_dialogs: mark_read")
     await _log_action(pool, profile_id, account_id, "read_dialogs", ",".join(targets[:3]) or None, "ok")
 
 

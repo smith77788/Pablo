@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -154,8 +155,8 @@ async def add_botmother_as_channel_admin(
 
         try:
             await client(InviteToChannelRequest(channel=channel, users=[bot_entity]))
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "add_botmother_as_channel_admin: invite_to_channel")
 
         rights = ChatAdminRights(
             post_messages=True,

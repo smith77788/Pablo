@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timezone
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 CHECK_INTERVAL_MINUTES = 30
 MAX_FOLLOWS_PER_ROUND = 200
@@ -110,8 +111,8 @@ async def _check_round(pool: asyncpg.Pool, bot) -> None:
                 "UPDATE entity_follows SET last_checked_at=NOW() WHERE id=$1",
                 row["id"],
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "_check_round: update")
 
     if event_batch:
         await _db.mark_follow_notifications_sent(pool, event_batch)

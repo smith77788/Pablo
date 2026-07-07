@@ -330,8 +330,8 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
                 f"✅ Email OAuth подключён: <code>{email}</code>",
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "add_routes: send_message")
         return web.Response(text="Email OAuth connected. You can close this page.")
 
     app.router.add_get("/oauth/email/callback", callback)

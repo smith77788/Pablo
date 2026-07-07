@@ -10,6 +10,7 @@ import logging
 import asyncpg
 
 from services.account_manager import effective_account_status
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -232,8 +233,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                     "action": "warmup",
                 }
             )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_analyze")
 
     # 10. Pool concentration — one named pool has >80% of all accounts (uneven distribution)
     try:
@@ -256,8 +257,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                         }
                     )
                     break
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_analyze")
 
     # 11. Recent operation failure spike (last 30 ops, >45% failed/error)
     try:
@@ -285,8 +286,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                     "action": "tasks",
                 }
             )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_analyze")
 
     # 12. Accounts without proxy when user has proxies configured
     try:
@@ -313,8 +314,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                         "action": "proxies",
                     }
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_analyze")
 
     # 13. High-trust idle accounts (trust>0.7 but not used >7 days → underutilized asset)
     try:
@@ -343,8 +344,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                     "action": "accounts",
                 }
             )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "_analyze")
 
     # Sort: critical first, then warning, then info
     order = {"critical": 0, "warning": 1, "info": 2}

@@ -21,6 +21,8 @@ from typing import Optional
 
 import asyncpg
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 
@@ -836,8 +838,8 @@ async def detect_drift(
                     d.suggested_fix,
                     d.auto_fixable,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_exc_swallow(log, "detect_drift")
 
     except Exception as e:
         log.debug("detect_drift eco=%d: %s", ecosystem_id, e)
@@ -915,8 +917,8 @@ async def get_snapshot(
             pressure.score,
             risk.level,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log_exc_swallow(log, "get_snapshot")
 
     return EcosystemSnapshot(
         ecosystem_id=ecosystem_id,
@@ -1198,8 +1200,8 @@ async def capture_dna_from_ecosystem(
             )
             if geo_rows:
                 template_data["geo_presets"] = [r["geo_preset"] for r in geo_rows]
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "auto_remove_dead_channels: delete operation")
 
     elif dna_type == "publishing":
         try:
@@ -1216,8 +1218,8 @@ async def capture_dna_from_ecosystem(
             template_data["templates"] = [
                 {"id": r["id"], "title": r["title"]} for r in tpl_rows
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "clone_ecosystem")
 
     elif dna_type == "visibility":
         try:
@@ -1228,8 +1230,8 @@ async def capture_dna_from_ecosystem(
                 "account_count": health.account_count,
                 "healthy_accounts": health.healthy_accounts,
             }
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "capture_dna_from_ecosystem")
 
     actual_type = (
         dna_type
@@ -1344,8 +1346,8 @@ async def clone_ecosystem(
                 m["object_id"],
                 m.get("role", "member"),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "capture_dna_from_ecosystem")
 
     await record_event(
         pool,
@@ -2104,8 +2106,8 @@ async def auto_remove_dead_channels(pool: asyncpg.Pool, ecosystem_id: int, inact
                 ecosystem_id, d["channel_id"],
             )
             removed += 1
-        except Exception:
-            pass
+        except Exception as e:
+            log_exc_swallow(log, "capture_dna_from_ecosystem")
     return {"removed": removed, "total_dead": len(dead)}
 
 
