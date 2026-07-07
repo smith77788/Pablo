@@ -5889,10 +5889,20 @@ async def smm_list_panels(
 # ── Booster Sessions (v99) ─────────────────────────────────────────────────────
 
 async def bb_get_sessions(pool: asyncpg.Pool, owner_id: int) -> list:
-    return await pool.fetch(
+    rows = await pool.fetch(
         "SELECT id, phone, label, status, proxy, last_used_at, added_at FROM booster_sessions WHERE owner_id=$1 ORDER BY added_at DESC",
         owner_id,
     )
+    # decrypt proxy для отображения (passthrough legacy-plaintext)
+    from services.token_vault import decrypt_token
+
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("proxy"):
+            d["proxy"] = decrypt_token(d["proxy"])
+        out.append(d)
+    return out
 
 
 async def smm_get_panel(pool: asyncpg.Pool, panel_id: int) -> asyncpg.Record | None:
@@ -5920,17 +5930,32 @@ async def smm_update_panel(
 
 
 async def bb_add_session(pool: asyncpg.Pool, owner_id: int, phone: str, session_str: str, proxy: str | None, label: str | None) -> int:
+    # Шифруем секреты at-rest (session_str = доступ к аккаунту; proxy = креды).
+    from services.token_vault import encrypt_token
+
     row = await pool.fetchrow(
         "INSERT INTO booster_sessions(owner_id,phone,session_str,proxy,label) VALUES($1,$2,$3,$4,$5) RETURNING id",
-        owner_id, phone, session_str, proxy, label,
+        owner_id, phone, encrypt_token(session_str),
+        encrypt_token(proxy) if proxy else proxy, label,
     )
     return row["id"]
 
 
 async def bb_get_session(pool: asyncpg.Pool, session_id: int, owner_id: int):
-    return await pool.fetchrow(
+    row = await pool.fetchrow(
         "SELECT * FROM booster_sessions WHERE id=$1 AND owner_id=$2", session_id, owner_id
     )
+    if not row:
+        return row
+    # decrypt секретов для потребителя (passthrough legacy-plaintext)
+    from services.token_vault import decrypt_token
+
+    d = dict(row)
+    if d.get("session_str"):
+        d["session_str"] = decrypt_token(d["session_str"])
+    if d.get("proxy"):
+        d["proxy"] = decrypt_token(d["proxy"])
+    return d
 
 
 async def bb_delete_session(pool: asyncpg.Pool, session_id: int, owner_id: int) -> None:
@@ -5946,7 +5971,11 @@ async def bb_get_session_str(pool: asyncpg.Pool, session_id: int, owner_id: int)
     )
     if not row:
         return None, None
-    return row["session_str"], row["proxy"]
+    # decrypt секретов для потребителя (passthrough legacy-plaintext)
+    from services.token_vault import decrypt_token
+
+    _proxy = row["proxy"]
+    return decrypt_token(row["session_str"]), (decrypt_token(_proxy) if _proxy else _proxy)
 
 
 async def smm_delete_panel(pool: asyncpg.Pool, panel_id: int, owner_id: int) -> None:
