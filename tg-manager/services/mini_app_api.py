@@ -8302,6 +8302,82 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("content_mesh_create uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def content_mesh_targets_list(request: web.Request) -> web.Response:
+        """Список целевых каналов меша. Без целей меш ничего не репостит (runner
+        читает mesh_targets) — в mini-app их раньше нельзя было задать вообще."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            mesh_id = int(request.match_info["mesh_id"])
+        except (KeyError, ValueError):
+            return _err("bad mesh_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid)
+        if not owns:
+            return _err("Меш не найден", 404)
+        rows = await _safe_fetch(pool,
+            "SELECT id, target_channel, enabled, added_at FROM mesh_targets WHERE mesh_id=$1 ORDER BY id", mesh_id)
+        return _json_resp({"targets": [dict(r) for r in rows]})
+
+    async def content_mesh_target_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            mesh_id = int(request.match_info["mesh_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid)
+        if not owns:
+            return _err("Меш не найден", 404)
+        target = (body.get("target_channel") or "").strip()
+        if not target:
+            return _err("Укажите канал-цель (@username или -100…)", 400)
+        if len(target) > 128:
+            return _err("Слишком длинный идентификатор", 400)
+        cnt = await _safe_count(pool, "SELECT COUNT(*) FROM mesh_targets WHERE mesh_id=$1", mesh_id)
+        if cnt >= 200:
+            return _err("Достигнут лимит целей (200)", 400)
+        try:
+            # Идемпотентно: повтор включает существующую цель, а не плодит дубли.
+            existing = await pool.fetchrow(
+                "SELECT id FROM mesh_targets WHERE mesh_id=$1 AND target_channel=$2", mesh_id, target)
+            if existing:
+                await pool.execute("UPDATE mesh_targets SET enabled=TRUE WHERE id=$1", existing["id"])
+                return _json_resp({"ok": True, "id": existing["id"], "reactivated": True})
+            row = await pool.fetchrow(
+                "INSERT INTO mesh_targets(mesh_id, target_channel) VALUES($1,$2) RETURNING id",
+                mesh_id, target)
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("content_mesh_target_add mesh=%d uid=%d", mesh_id, uid)
+            return _err("Не удалось добавить цель", 500)
+
+    async def content_mesh_target_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            target_id = int(request.match_info["target_id"])
+        except (KeyError, ValueError):
+            return _err("bad target_id", 400)
+        # Владение через JOIN на content_meshes.
+        row = await _safe_fetchrow(pool,
+            """SELECT mt.id FROM mesh_targets mt
+               JOIN content_meshes cm ON cm.id=mt.mesh_id
+               WHERE mt.id=$1 AND cm.owner_id=$2""", target_id, uid)
+        if not row:
+            return _err("Цель не найдена", 404)
+        try:
+            await pool.execute("DELETE FROM mesh_targets WHERE id=$1", target_id)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("content_mesh_target_delete target=%d uid=%d", target_id, uid)
+            return _err("Не удалось удалить цель", 500)
+
     # ── Narrative Engine ──────────────────────────────────────────────────────
 
     async def narrative_campaigns_list(request: web.Request) -> web.Response:
@@ -9365,6 +9441,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Content Mesh
     app.router.add_get("/api/miniapp/content_meshes", content_meshes_list)
     app.router.add_post("/api/miniapp/content_mesh", content_mesh_create)
+    app.router.add_get("/api/miniapp/content_mesh/{mesh_id}/targets", content_mesh_targets_list)
+    app.router.add_post("/api/miniapp/content_mesh/{mesh_id}/target", content_mesh_target_add)
+    app.router.add_delete("/api/miniapp/content_mesh/target/{target_id}", content_mesh_target_delete)
     app.router.add_put("/api/miniapp/content_mesh/{mesh_id}/toggle", content_mesh_toggle)
     # Narrative Engine
     app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)

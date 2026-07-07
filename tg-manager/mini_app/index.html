@@ -1915,10 +1915,25 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Задержка репоста (минуты)</label><input id="mc-delay" type="number" min="1" max="1440" value="30" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field"><label>Суффикс к постам (необязательно)</label><input id="mc-append" type="text" placeholder="Подпишись: @channel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     <div class="field-err" id="mc-err"></div>
+    <div style="font-size:11px;color:var(--hint);margin-bottom:8px">После создания добавьте каналы-цели (кнопка «🎯 Цели») — без них меш ничего не репостит.</div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-mesh')" style="flex:1">Отмена</button>
       <button class="btn btn-p" onclick="submitMeshCreate()" style="flex:2">Создать</button>
     </div>
+  </div>
+</div>
+
+<!-- Modal: Mesh Targets -->
+<div class="mbg" id="mo-mesh-targets" onclick="if(event.target===this)closeModal('mo-mesh-targets')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-mesh-targets')">✕</div>
+    <div class="modal-title">🎯 Цели меша: <span id="mt-mesh-name"></span></div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Каналы, в которые репостится источник. Без целей меш не работает.</div>
+    <div class="field" style="display:flex;gap:6px">
+      <input id="mt-input" type="text" placeholder="@channel или -100xxx" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <button class="btn btn-p" style="flex:0 0 auto;padding:10px 14px" onclick="addMeshTarget()">➕</button>
+    </div>
+    <div class="lst" id="mt-list" style="max-height:280px;overflow-y:auto"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -11100,7 +11115,8 @@ async function openContentMesh() {
           <div class="row-val">Источник: ${esc(r.source_channel||'—')} · Задержка: ${r.delay_minutes}м</div>
           <div class="row-val">Целей: ${r.targets_count||0} · В очереди: ${r.pending_posts||0}</div>
         </div>
-        <div class="row-right">
+        <div class="row-right" style="display:flex;gap:6px;flex-direction:column">
+          <button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="openMeshTargets(${r.id},'${esc((r.name||'').replace(/'/g,''))}')">🎯 Цели${r.targets_count?' ('+r.targets_count+')':''}</button>
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleMesh(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
         </div>
       </div>
@@ -11115,6 +11131,45 @@ async function toggleMesh(meshId, btn) {
     toast(r.enabled?'🟢 Меш включён':'🔴 Меш выключен');
     openContentMesh();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
+}
+let MT_MESH_ID = null;
+function openMeshTargets(meshId, meshName) {
+  MT_MESH_ID = meshId;
+  document.getElementById('mt-mesh-name').textContent = meshName||('#'+meshId);
+  document.getElementById('mt-input').value='';
+  showModal('mo-mesh-targets');
+  loadMeshTargets();
+}
+async function loadMeshTargets() {
+  const el = document.getElementById('mt-list');
+  el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api(`/api/miniapp/content_mesh/${MT_MESH_ID}/targets`);
+    const t = d.targets||[];
+    if (!t.length) { el.innerHTML = empty('🎯','Целей нет','Добавьте канал выше — иначе меш не репостит'); return; }
+    el.innerHTML = t.map(x=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">${x.enabled?'📡':'⏸'}</div>
+        <div class="row-body"><div class="row-name">${esc(x.target_channel)}</div></div>
+        <div class="row-right"><span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteMeshTarget(${x.id})">🗑</span></div>
+      </div>`).join('');
+  } catch(e){ el.innerHTML = empty('⚠️','Ошибка',e.message); }
+}
+async function addMeshTarget() {
+  const v = document.getElementById('mt-input').value.trim();
+  if (!v) { toast('Введите канал-цель'); return; }
+  try {
+    await api(`/api/miniapp/content_mesh/${MT_MESH_ID}/target`,{method:'POST',body:JSON.stringify({target_channel:v})});
+    document.getElementById('mt-input').value='';
+    toast('✅ Цель добавлена');
+    loadMeshTargets();
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function deleteMeshTarget(targetId) {
+  try {
+    await api(`/api/miniapp/content_mesh/target/${targetId}`,{method:'DELETE'});
+    loadMeshTargets();
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function openMeshModal() {
