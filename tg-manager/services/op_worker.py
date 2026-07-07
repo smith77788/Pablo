@@ -2025,8 +2025,13 @@ async def _exec_mass_publish(
                 "summary": f"Отменено. Опубликовано: {ok_count}, ошибок: {fail_count}",
             }
         if acc is None:
-            remaining = total - idx + 1
-            fail_count += remaining
+            # Изолирован аккаунт ТОЛЬКО этого канала — пропускаем канал, но НЕ
+            # обрываем операцию: остальные каналы управляются ДРУГИМИ аккаунтами
+            # (mc.acc_id), многие здоровы. Каналы отсортированы по channel_id, т.е.
+            # перемешаны по аккаунтам. Раньше здесь было fail_count+=remaining; break
+            # — один изолированный аккаунт валил ВСЕ оставшиеся каналы, включая
+            # управляемые здоровыми аккаунтами (симптом «3 успеха / 56 ошибок»).
+            fail_count += 1
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
@@ -2041,11 +2046,10 @@ async def _exec_mass_publish(
             )
             await _safe_execute(
                     pool,
-                "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                 op_id,
-                remaining,
             )
-            break
+            continue
         flood_wait = 0
         _published = False
         last_error = ""
