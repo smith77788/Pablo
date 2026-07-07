@@ -3037,6 +3037,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div id="warmupStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
     <div class="sec">Активные планы</div>
     <div class="lst" id="warmupList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -8993,6 +8994,15 @@ async function openWarmupModal() {
   } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
 }
 function closeWarmupModal() { document.getElementById('warmupMbg').classList.remove('show'); }
+async function bulkWarmup() {
+  if (!await askConfirm('Запустить прогрев для ВСЕХ активных аккаунтов без плана?\nРежим: Standard, поведение: смешанное.')) return;
+  toast('🔥 Запускаю массовый прогрев…');
+  try {
+    const r = await api('/api/miniapp/warmup/bulk_start', {method:'POST', body:JSON.stringify({plan_type:'standard', profile_type:'mixed', niche:'general'})});
+    toast(r.started>0 ? `✅ Прогрев запущен для ${r.started} аккаунтов` : (r.note||'Нет подходящих аккаунтов'));
+    openWarmup();
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function submitWarmup() {
   const account_id = parseInt(document.getElementById('warmupAccSel').value);
   const plan_type = document.getElementById('warmupPlan').value;

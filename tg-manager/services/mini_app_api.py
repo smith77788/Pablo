@@ -4569,6 +4569,73 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("warmup_create_plan uid=%d acc=%s", uid, account_id)
             return _err(str(exc), 500)
 
+    async def warmup_bulk_start(request: web.Request) -> web.Response:
+        """Массовый прогрев: создать планы для ВСЕХ подходящих аккаунтов сразу
+        (активные, с сессией, ещё без активного плана). Раньше прогрев запускался
+        строго по одному аккаунту — масс-действие отсутствовало. Фоновый
+        run_warmup_loop подхватит новые active-планы, отдельные op не нужны."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services.account_warmer import WARMUP_PROFILES, WARMUP_NICHES
+        plan_type = (body.get("plan_type") or "standard").strip()
+        if plan_type not in ("gentle", "standard", "aggressive"):
+            plan_type = "standard"
+        profile_type = (body.get("profile_type") or "mixed").strip().lower()
+        if profile_type not in WARMUP_PROFILES:
+            profile_type = "mixed"
+        niche = (body.get("niche") or "general").strip().lower()
+        if niche not in WARMUP_NICHES:
+            niche = "general"
+        days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
+        actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
+        target_days = days_map[plan_type]
+        daily_actions = actions_map[plan_type]
+
+        # Подходящие: активные, с сессией, без уже активного плана прогрева.
+        rows = await _safe_fetch(pool,
+            """SELECT a.id FROM tg_accounts a
+               WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
+                 AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM account_warmup_plans wp
+                     WHERE wp.account_id=a.id AND wp.status='active')
+               LIMIT 500""", uid)
+        acc_ids = [int(r["id"]) for r in (rows or [])]
+        if not acc_ids:
+            return _json_resp({"ok": True, "started": 0, "note": "Нет подходящих аккаунтов (все уже греются или недоступны)"})
+        started = 0
+        try:
+            await pool.execute(
+                """CREATE TABLE IF NOT EXISTS account_niche_profiles (
+                       account_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL,
+                       niche TEXT NOT NULL DEFAULT 'general', profile_type TEXT NOT NULL DEFAULT 'reader',
+                       custom_channels TEXT[] DEFAULT '{}', flood_wait_count INT NOT NULL DEFAULT 0,
+                       last_flood_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())"""
+            )
+            for acc_id in acc_ids:
+                await pool.execute(
+                    """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
+                       VALUES($1,$2,$3,$4,now())
+                       ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()""",
+                    acc_id, uid, niche, profile_type)
+                await pool.execute(
+                    """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
+                       VALUES($1,$2,$3,$4,$5)
+                       ON CONFLICT (account_id) DO UPDATE
+                       SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
+                    uid, acc_id, plan_type, target_days, daily_actions)
+                started += 1
+            return _json_resp({"ok": True, "started": started, "plan_type": plan_type,
+                               "profile_type": profile_type, "niche": niche})
+        except Exception as exc:
+            log.exception("warmup_bulk_start uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def warmup_delete_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -9136,6 +9203,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Account Warmup
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
+    app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/pause", warmup_pause_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/resume", warmup_resume_plan)
