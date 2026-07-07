@@ -382,6 +382,21 @@ async def main() -> None:
     except Exception:
         log.warning("failed to load payment wallets from DB", exc_info=True)
 
+    # Self-heal критичных столбцов ДО обслуживания запросов. Запись session_fp/
+    # proxy_fp ломается, если столбца ещё нет (лаг применения schema_v143/v146 при
+    # деплое) → «нельзя добавить аккаунт/прокси», а без прокси не работает ничего.
+    # create_pool применяет схемы, но это belt-and-suspenders на случай сбоя миграции.
+    for _ddl in (
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS session_fp TEXT",
+        "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS proxy_fp TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_proxies_owner_fp "
+        "ON user_proxies(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL",
+    ):
+        try:
+            await pool.execute(_ddl)
+        except Exception:
+            log.warning("startup self-heal DDL failed: %.90s", _ddl)
+
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)
     await op_worker.reset_stale_in_operation(pool)
