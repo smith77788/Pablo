@@ -2140,21 +2140,34 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="exportOpsCSV()">📥</span>
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="exportOpsCSV()" title="Экспорт CSV">📥</span>
       <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openOpCreate()">+ Создать</button>
     </div>
   </div>
   <div class="sub-sb">
+    <div id="opsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
     <div class="seg" id="ops-seg">
       <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
-      <div class="seg-opt" onclick="filterOps('running',this)">В работе</div>
-      <div class="seg-opt" onclick="filterOps('pending',this)">Ожидают</div>
-      <div class="seg-opt" onclick="filterOps('failed',this)">Ошибки</div>
+      <div class="seg-opt" onclick="filterOps('running',this)">🟢 Работают</div>
+      <div class="seg-opt" onclick="filterOps('pending',this)">⏳ Ожидают</div>
+      <div class="seg-opt" onclick="filterOps('failed',this)">❌ Ошибки</div>
+      <div class="seg-opt" onclick="filterOps('done',this)">✅ Готово</div>
+    </div>
+    <div style="padding:6px 0;display:flex;gap:6px">
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все running">⏸ Пауза</button>
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Возобновить все paused">▶️ Старт</button>
+      <button class="btn btn-r" style="flex:1;font-size:12px;padding:8px 4px" onclick="clearDoneOps()" title="Удалить завершённые">🗑 Очистить</button>
     </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
+</div>
+
+<!-- ══════════════════════ ДЕТАЛИ ОПЕРАЦИИ ══════════════════════ -->
+<div class="screen" id="s-opdetail">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="opdetTitle">Операция</div></div>
+  <div class="sub-sb" id="opdetBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ СОЗДАТЬ ОПЕРАЦИЮ ══════════════════════ -->
@@ -6338,12 +6351,24 @@ async function loadOps() {
   try {
     const d = await api(url);
     const ops = d.operations||[];
+    // KPI cards
+    const running = ops.filter(o=>o.status==='running').length;
+    const pending = ops.filter(o=>o.status==='pending').length;
+    const failed = ops.filter(o=>o.status==='failed').length;
+    const done = ops.filter(o=>o.status==='done').length;
+    txt('opsKpi',`
+      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val">${num(ops.length)}</div><div class="kpi-lbl">Всего</div></div>
+      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(done)}</div><div class="kpi-lbl">Готово</div></div>
+      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--blue)">${num(running)}</div><div class="kpi-lbl">Работают</div></div>
+      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val">${num(pending)}</div><div class="kpi-lbl">Ожидают</div></div>
+      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--red)">${num(failed)}</div><div class="kpi-lbl">Ошибки</div></div>
+    `);
     if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?'По фильтру «'+OPS_FILTER+'»':''))); return; }
     txt('opsList', ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
       const canCancel = o.status==='pending'||o.status==='running';
-      return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
+      return `<div class="li" style="display:block;cursor:pointer;padding:11px 14px" onclick="openOpDetail(${o.id})">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
@@ -6352,8 +6377,8 @@ async function loadOps() {
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
-            ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="cancelOp(${o.id})">Отмена</span>`:''}
-            ${(o.status==='failed'||(o.op_type==='mass_publish'&&(o.err_cnt||0)>0&&o.status!=='running'&&o.status!=='pending'))?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="retryOp(${o.id})">↺ Повтор${o.op_type==='mass_publish'&&(o.err_cnt||0)>0?' ('+o.err_cnt+')':''}</span>`:''}
+            ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="event.stopPropagation();cancelOp(${o.id})">Отмена</span>`:''}
+            ${(o.status==='failed'||(o.op_type==='mass_publish'&&(o.err_cnt||0)>0&&o.status!=='running'&&o.status!=='pending'))?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
@@ -6361,6 +6386,53 @@ async function loadOps() {
       </div>`;
     }).join(''));
   } catch(e) { txt('opsList', errHtml(e.message,'loadOps()')); }
+}
+
+async function openOpDetail(opId) {
+  push('s-opdetail');
+  txt('opdetTitle','Операция #'+opId);
+  txt('opdetBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/operations?status=running&limit=500');
+    const ops = d.operations||[];
+    const o = ops.find(x=>x.id===opId);
+    if (!o) { txt('opdetBody',empty('⚙️','Операция не найдена')); return; }
+    const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
+    const [bc,bl]=stb(o.status);
+    const logs = await api('/api/miniapp/operation/'+opId+'/log').catch(()=>({logs:[]}));
+    let html = `
+      <div class="lst" style="margin:12px 16px 0">
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.op_type)}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${num(o.done_items||0)} / ${num(o.total_items||0)} (${pct}%)</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru'):''}</div></div></div>
+        ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru')}</div></div></div>`:''}
+        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">Ошибка</div><div class="row-val" style="color:var(--red)">${esc(o.error_msg)}</div></div></div>`:''}
+      </div>
+    `;
+    if (o.status==='running') {
+      html += `<div style="padding:12px 16px"><div class="prog" style="margin-bottom:8px"><div class="prog-fill" style="width:${pct}%"></div></div></div>`;
+    }
+    const canControl = o.status==='pending'||o.status==='running';
+    if (canControl) {
+      html += `<div style="padding:0 16px;display:flex;gap:8px">
+        <button class="btn btn-r" onclick="cancelOp(${o.id});back()" style="flex:1">⏸ Приостановить</button>
+      </div>`;
+    }
+    if (o.status==='failed') {
+      html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
+    }
+    if (logs.logs&&logs.logs.length) {
+      html += `<div class="sec" style="margin-top:12px">📋 Лог (${logs.logs.length})</div>
+        <div class="lst" style="margin:0 16px;max-height:300px;overflow-y:auto">
+          ${logs.logs.map(l=>`<div class="row"><div class="row-body">
+            <div class="row-name">${esc(l.target||'')}</div>
+            <div class="row-val">${esc(l.message||'').substring(0,120)} <span class="badge ${l.status==='ok'?'b-gr':'b-rd'}">${l.status||''}</span></div>
+          </div></div>`).join('')}
+        </div>`;
+    }
+    txt('opdetBody', html);
+  } catch(e) { txt('opdetBody', errHtml(e.message)); }
 }
 
 async function cancelOp(id) {
@@ -6374,6 +6446,43 @@ async function retryOp(id) {
   try {
     const d = await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'});
     toast('✅ Операция поставлена в очередь повторно'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function pauseAllOps() {
+  try {
+    const d = await api('/api/miniapp/operations?status=running');
+    const ops = d.operations||[];
+    if (!ops.length) { toast('Нет активных операций'); return; }
+    for (const o of ops) {
+      try { await api('/api/miniapp/operation/'+o.id+'/cancel', {method:'POST'}); } catch(_) {}
+    }
+    toast('⏸ '+ops.length+' операций приостановлено'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function resumeAllOps() {
+  try {
+    const d = await api('/api/miniapp/operations?status=pending');
+    const ops = d.operations||[];
+    if (!ops.length) { toast('Нет ожидающих операций'); return; }
+    let ok = 0;
+    for (const o of ops) {
+      try { await api('/api/miniapp/operation/'+o.id+'/retry', {method:'POST'}); ok++; } catch(_) {}
+    }
+    toast('▶️ Возобновлено: '+ok+' из '+ops.length); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function clearDoneOps() {
+  try {
+    const d = await api('/api/miniapp/operations?status=done');
+    const ops = d.operations||[];
+    if (!ops.length) { toast('Нет завершённых операций'); return; }
+    for (const o of ops) {
+      try { await api('/api/miniapp/operation/'+o.id+'/cancel', {method:'POST'}); } catch(_) {}
+    }
+    toast('🗑 Удалено: '+ops.length+' завершённых'); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
