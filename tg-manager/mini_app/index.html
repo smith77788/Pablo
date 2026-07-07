@@ -2956,7 +2956,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">✉️ DM-кампании</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openDmModal()">+ Новая</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
   </div>
   <div class="sub-sb">
     <div id="dmStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
@@ -3730,25 +3730,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
-<!-- DM Campaign modal -->
-<div class="mbg" id="dmMbg" onclick="if(event.target===this)closeDmModal()">
-  <div class="modal">
-    <div class="modal-x" onclick="closeDmModal()">✕</div>
-    <div class="modal-title">✉️ Новая DM-кампания</div>
-    <div class="field"><label>Название кампании</label><input type="text" id="dmName" placeholder="Рассылка подписчикам"></div>
-    <div class="field"><label>Текст сообщения</label><textarea id="dmText" rows="4" placeholder="Привет! У нас новость..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
-    <div class="field">
-      <label>Аудитория</label>
-      <select id="dmTarget" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
-        <option value="bot_users">Подписчики ботов</option>
-        <option value="crm">CRM-контакты</option>
-      </select>
-    </div>
-    <div class="field-err" id="dmErr"></div>
-    <button class="btn btn-p" id="dmBtn" onclick="submitDmCampaign()" style="width:100%">💾 Создать черновик</button>
-  </div>
-</div>
-
 <!-- Warmup modal -->
 <div class="mbg" id="warmupMbg" onclick="if(event.target===this)closeWarmupModal()">
   <div class="modal">
@@ -3918,6 +3899,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="all_bots">Все боты — все подписчики</option>
         <option value="bot_users">Конкретный бот</option>
         <option value="cohort">Когорта по активности (один бот)</option>
+        <option value="crm">CRM-контакты</option>
+        <option value="parsed_audience">Аудитория из парсера</option>
+        <option value="import_list">Свой список (вставить)</option>
       </select>
     </div>
     <div class="field" id="cmpBotField" style="display:none">
@@ -3934,10 +3918,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </select>
       <div class="field-note">Сегментация по last_seen; нужен выбор бота выше</div>
     </div>
+    <div class="field" id="cmpImportField" style="display:none">
+      <label>Список получателей</label>
+      <textarea id="cmpImport" rows="4" placeholder="123456789&#10;@username&#10;t.me/username"></textarea>
+      <div class="field-note">По одному на строку: числовой ID или @username</div>
+    </div>
     <div class="field">
       <label>Текст сообщения</label>
-      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения..."></textarea>
-      <div class="field-note"><span id="cmpLen">0</span>/4096</div>
+      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Поддержка Spintax: {Привет|Здравствуйте}!"></textarea>
+      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a></div>
+      <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
     <div class="field">
       <label>Темп отправки</label>
@@ -3947,6 +3937,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="fast">⚡ Быстро — выше риск</option>
       </select>
       <div class="field-note">Влияет на паузы между сообщениями с аккаунтов</div>
+    </div>
+    <div class="field">
+      <label>Лимит на аккаунт в день</label>
+      <input type="number" id="cmpPerAcc" min="1" max="200" placeholder="без лимита (1–200)">
+      <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня. Защита от бана</div>
     </div>
     <div class="field-err" id="cmpErr"></div>
     <button class="btn btn-p" id="cmpBtn" onclick="saveCmp()" style="width:100%">📨 Создать черновик</button>
@@ -6956,11 +6951,13 @@ async function loadMoreSubs() {
 
 // ── DM Campaign modal ──────────────────────────────────
 function openCmpModal() {
-  if (!BOTS.length) { toast('Сначала загрузите боты'); goTab('bots'); return; }
   document.getElementById('cmpName').value='';
   document.getElementById('cmpTargetType').value='all_bots';
   document.getElementById('cmpText').value='';
+  document.getElementById('cmpImport').value='';
+  document.getElementById('cmpPerAcc').value='';
   document.getElementById('cmpLen').textContent='0';
+  const sp=document.getElementById('cmpSpinPreview'); sp.style.display='none'; sp.textContent='';
   document.getElementById('cmpErr').style.display='none';
   document.getElementById('cmpBtn').disabled=false;
   document.getElementById('cmpBtn').textContent='📨 Создать черновик';
@@ -6974,15 +6971,30 @@ function updateCmpTargetBot() {
   const type = document.getElementById('cmpTargetType').value;
   const bf = document.getElementById('cmpBotField');
   const cf = document.getElementById('cmpCohortField');
+  const imf = document.getElementById('cmpImportField');
   const needBot = (type==='bot_users' || type==='cohort');
   bf.style.display = needBot ? 'block' : 'none';
   if (cf) cf.style.display = (type==='cohort') ? 'block' : 'none';
+  if (imf) imf.style.display = (type==='import_list') ? 'block' : 'none';
   if (needBot) {
-    document.getElementById('cmpBot').innerHTML = BOTS.map(b=>{
+    document.getElementById('cmpBot').innerHTML = BOTS.length ? BOTS.map(b=>{
       const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
       return `<option value="${b.bot_id}">${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
-    }).join('');
+    }).join('') : '<option value="">Нет ботов — добавьте бота</option>';
   }
+}
+
+// Локальный предпросмотр Spintax: тот же {A|B} что движок разворачивает на отправке.
+function previewCmpSpintax() {
+  const raw = document.getElementById('cmpText').value;
+  const el = document.getElementById('cmpSpinPreview');
+  if (!raw.trim()) { el.style.display='none'; return; }
+  let t = raw, guard = 0;
+  while (t.indexOf('{')>=0 && t.indexOf('}')>=0 && guard++ < 50) {
+    t = t.replace(/\{([^{}]+)\}/g, (m,g)=>{ const p=g.split('|'); return p[Math.floor(Math.random()*p.length)]; });
+  }
+  el.textContent = '🎲 ' + t;
+  el.style.display = 'block';
 }
 
 document.getElementById('cmpText').addEventListener('input', function(){
@@ -6997,17 +7009,25 @@ async function saveCmp() {
   const target_id = needBot ? document.getElementById('cmpBot').value : null;
   const cohort_type = target_type==='cohort' ? document.getElementById('cmpCohort').value : null;
   const pace = document.getElementById('cmpPace')?.value || 'normal';
+  const perAccRaw = document.getElementById('cmpPerAcc').value.trim();
   const errEl = document.getElementById('cmpErr');
   errEl.style.display='none';
   if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
   if (needBot && !target_id) { errEl.textContent='Выберите бота'; errEl.style.display='block'; return; }
+  const payload = {name, text, target_type, target_id, pace, cohort_type};
+  if (target_type==='import_list') {
+    const imp = document.getElementById('cmpImport').value.trim();
+    if (!imp) { errEl.textContent='Вставьте список получателей'; errEl.style.display='block'; return; }
+    payload.import_list = imp;
+  }
+  if (perAccRaw) payload.per_account_daily = parseInt(perAccRaw);
   const btn = document.getElementById('cmpBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
   try {
     const d = await api('/api/miniapp/dm_campaigns', {
       method:'POST',
-      body: JSON.stringify({name, text:text, target_type, target_id, pace, cohort_type})
+      body: JSON.stringify(payload)
     });
     closeCmpModal();
     tg.HapticFeedback?.notificationOccurred('success');
@@ -8647,31 +8667,8 @@ async function openRegCheck() {
 }
 
 // ── DM Campaigns ───────────────────────────────────────
-function openDmModal() {
-  document.getElementById('dmName').value='';
-  document.getElementById('dmText').value='';
-  document.getElementById('dmErr').textContent='';
-  document.getElementById('dmBtn').disabled=false;
-  document.getElementById('dmBtn').textContent='💾 Создать черновик';
-  document.getElementById('dmMbg').classList.add('show');
-}
-function closeDmModal() { document.getElementById('dmMbg').classList.remove('show'); }
-async function submitDmCampaign() {
-  const name = document.getElementById('dmName').value.trim();
-  const text = document.getElementById('dmText').value.trim();
-  const target_type = document.getElementById('dmTarget').value;
-  const errEl = document.getElementById('dmErr');
-  if (!name||!text) { errEl.textContent='Заполните название и текст'; return; }
-  const btn = document.getElementById('dmBtn');
-  btn.disabled=true; btn.textContent='Создаю…';
-  try {
-    await api('/api/miniapp/dm_campaigns',{method:'POST',body:JSON.stringify({name,text,target_type})});
-    toast('✅ Черновик создан');
-    closeDmModal();
-    openDmCampaigns();
-  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
-  finally { btn.disabled=false; btn.textContent='💾 Создать черновик'; }
-}
+// Композер DM-кампаний единый — openCmpModal()/saveCmp() (см. выше).
+// Прежний тонкий openDmModal/submitDmCampaign удалён (дубль-путь).
 const DM_STATUS = {draft:'📝 Черновик',running:'▶️ Выполняется',paused:'⏸ Пауза',done:'✅ Завершена',failed:'❌ Ошибка'};
 async function openDmCampaigns() {
   push('s-dmcampaigns');

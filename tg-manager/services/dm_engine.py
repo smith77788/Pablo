@@ -40,6 +40,63 @@ def expand_spintax(text: str) -> str:
     return text
 
 
+def parse_import_list(raw, limit: int = 5000) -> list[dict]:
+    """Разбирает пользовательский список получателей → [{user_id, username}].
+
+    Принимает список или строку (по строке/запятой на получателя). Каждый элемент —
+    либо числовой Telegram user_id, либо @username / t.me/<name>. Мусор отсекается,
+    дедуп по (user_id||username), потолок против гигантских вставок. Общий хелпер
+    для composer'а import_list и любых мест разбора списков адресатов.
+    """
+    if isinstance(raw, str):
+        raw = re.split(r"[\n,;]+", raw)
+    out: list[dict] = []
+    seen: set = set()
+    for item in (raw or []):
+        if isinstance(item, dict):
+            uid = int(item.get("user_id") or 0)
+            uname = (item.get("username") or "").lstrip("@").strip() or None
+        else:
+            s = str(item).strip()
+            if not s:
+                continue
+            if s.lstrip("-").isdigit():
+                uid, uname = int(s), None
+            else:
+                m = re.match(r"^(?:https?://t\.me/|t\.me/|@)?([A-Za-z0-9_]{3,32})/?$", s)
+                if not m:
+                    continue
+                uid, uname = 0, m.group(1)
+        if uid <= 0 and not uname:
+            continue
+        key = uid if uid > 0 else uname.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"user_id": uid, "username": uname})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def pick_account_under_cap(acc_cycle: list, start_idx: int, sent_by_acc: dict, cap):
+    """Выбирает следующий аккаунт из ротации, пропуская достигших дневного лимита.
+
+    Возвращает (acc_dict | None, new_idx). None — если все аккаунты исчерпали cap.
+    Чистая функция (без БД) — тестируема отдельно от send-цикла. cap=None/0 → без лимита.
+    """
+    if not acc_cycle:
+        return None, start_idx
+    idx = start_idx
+    for _ in range(len(acc_cycle)):
+        cand = dict(acc_cycle[idx % len(acc_cycle)])
+        idx += 1
+        if cap and sent_by_acc.get(int(cand["id"]), 0) >= cap:
+            continue
+        return cand, idx
+    return None, idx
+
+
 # ── Error classification ──────────────────────────────────────────────────────
 
 _SKIP_ERRORS = {
@@ -361,11 +418,14 @@ async def run_campaign(
         campaign.get("target_type", ""), _DEFAULT_DELAY_RANGE
     )
     # Пользовательский темп (params.pace): slow безопаснее, fast быстрее (риск).
-    try:
-        import json as _json
-        _cp = campaign.get("params") or {}
-        if isinstance(_cp, str):
+    _cp = campaign.get("params") or {}
+    if isinstance(_cp, str):
+        try:
+            import json as _json
             _cp = _json.loads(_cp)
+        except Exception:
+            _cp = {}
+    try:
         _pace = (_cp or {}).get("pace")
         _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
         if _pace_mult:
@@ -373,6 +433,32 @@ async def run_campaign(
             _delay_max *= _pace_mult
     except Exception:
         pass
+
+    # Лимит отправок на аккаунт В ДЕНЬ (params.per_account_daily). Считаем честно:
+    # префиллим уже отправленное сегодня по всем кампаниям владельца, дальше
+    # доучитываем в этом прогоне. Аккаунт, достигший лимита, выбывает из ротации —
+    # ключевая защита аккаунтов от массовой рассылки одним аккаунтом.
+    try:
+        _per_acc_cap = int((_cp or {}).get("per_account_daily") or 0) or None
+    except (TypeError, ValueError):
+        _per_acc_cap = None
+    _sent_by_acc: dict[int, int] = {}
+    if _per_acc_cap:
+        try:
+            _rows_today = await pool.fetch(
+                """SELECT l.account_id, COUNT(*) AS c
+                   FROM dm_campaign_log l
+                   JOIN dm_campaigns c ON c.id = l.campaign_id
+                   WHERE c.owner_id=$1 AND l.status='sent'
+                     AND l.sent_at >= date_trunc('day', now())
+                   GROUP BY l.account_id""",
+                owner_id,
+            )
+            for r in _rows_today:
+                if r["account_id"] is not None:
+                    _sent_by_acc[int(r["account_id"])] = int(r["c"])
+        except Exception:
+            log_exc_swallow(log, "dm_engine: per-account daily preload failed")
 
     acc_cycle = list(accounts)
     acc_idx = 0
@@ -410,8 +496,19 @@ async def run_campaign(
                 )
                 return
 
-        acc = dict(acc_cycle[acc_idx % len(acc_cycle)])
-        acc_idx += 1
+        # Выбираем следующий аккаунт, пропуская достигших дневного лимита.
+        acc, acc_idx = pick_account_under_cap(acc_cycle, acc_idx, _sent_by_acc, _per_acc_cap)
+        if acc is None:
+            # Все аккаунты исчерпали дневной лимит — пауза до следующего дня
+            # (кампания возобновляема). Не failed: это штатная защита, не ошибка.
+            log.info(
+                "dm_engine: все аккаунты достигли дневного лимита (%s) — пауза кампании %d",
+                _per_acc_cap, campaign_id,
+            )
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+            )
+            return
 
         text = expand_spintax(template)
         t0_dm = time.monotonic()
@@ -422,6 +519,7 @@ async def run_campaign(
 
         if status == "sent":
             sent += 1
+            _sent_by_acc[int(acc["id"])] = _sent_by_acc.get(int(acc["id"]), 0) + 1
             await pool.execute(
                 "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status) "
                 "VALUES ($1,$2,$3,'sent') ON CONFLICT DO NOTHING",

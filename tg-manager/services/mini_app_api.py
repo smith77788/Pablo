@@ -3993,6 +3993,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         target_id = body.get("target_id")
         if not name or not text:
             return _err("Заполните название и текст", 400)
+        # Полный список типов таргета, поддержанных dm_engine._get_targets.
+        _ALLOWED_TARGETS = {
+            "all_bots", "bot_users", "cohort", "crm", "parsed_audience", "import_list",
+        }
+        if target_type not in _ALLOWED_TARGETS:
+            return _err(f"target_type должен быть одним из: {', '.join(sorted(_ALLOWED_TARGETS))}", 400)
         # IDOR-защита: при таргете на конкретного бота проверяем владение.
         if target_type in ("bot_users", "cohort") and target_id:
             try:
@@ -4017,6 +4023,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             cohort_type = (body.get("cohort_type") or "warm").strip()
             if cohort_type not in _COHORT_SQL:
                 cohort_type = "warm"
+        # import_list: свой список получателей (user_id / @username), разбор общим
+        # хелпером dm_engine — раньше этот тип таргета движок умел, но UI не давал.
+        import_list = []
+        if target_type == "import_list":
+            from services.dm_engine import parse_import_list
+            import_list = parse_import_list(body.get("import_list"))
+            if not import_list:
+                return _err("Список получателей пуст или невалиден", 400)
         # Calculate total_targets depending on type
         total_targets = 0
         try:
@@ -4034,6 +4048,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         JOIN managed_bots mb ON mb.bot_id=ua.bot_id AND mb.added_by=$2
                         WHERE ua.bot_id=$1 AND {_COHORT_SQL[cohort_type]}""",
                     int(target_id), uid)
+            elif target_type == "crm":
+                total_targets = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0", uid)
+            elif target_type == "parsed_audience":
+                if target_id:
+                    total_targets = await _safe_count(pool,
+                        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2 AND tg_user_id > 0",
+                        uid, int(target_id))
+                else:
+                    total_targets = await _safe_count(pool,
+                        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1 AND tg_user_id > 0", uid)
+            elif target_type == "import_list":
+                total_targets = len(import_list)
         except Exception:
             total_targets = 0
         # Темп рассылки (params.pace): slow безопаснее, fast быстрее (риск бана).
@@ -4043,6 +4070,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         _params = {"pace": pace}
         if cohort_type:
             _params["cohort_type"] = cohort_type
+        if import_list:
+            _params["import_list"] = import_list
+        # Дневной лимит отправок на аккаунт (защита от бана). Клампим 1..200.
+        if body.get("per_account_daily") is not None:
+            try:
+                _pad = int(body["per_account_daily"])
+                if _pad > 0:
+                    _params["per_account_daily"] = max(1, min(200, _pad))
+            except (TypeError, ValueError):
+                return _err("per_account_daily должен быть числом", 400)
         params_json = _json.dumps(_params)
         try:
             try:
