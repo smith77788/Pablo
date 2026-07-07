@@ -3705,6 +3705,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not group:
             return _err("Укажите группу/канал", 400)
         source = body.get("source", "parsed")
+        if source not in ("parsed", "crm", "bot_users", "import_list"):
+            return _err("Неизвестный источник аудитории", 400)
         account_ids = body.get("account_ids") or []
         if account_ids:
             req_ids = [int(x) for x in account_ids if str(x).isdigit()]
@@ -3716,9 +3718,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             account_ids = [int(r["id"]) for r in (owned or [])]
             if not account_ids:
                 return _err("Аккаунты не найдены", 404)
+        # Свой список: разбираем вставленный текст на user_refs (@username/id) и
+        # phones общими парсерами движка — раньше UI давал только 3 таблицы-источника.
+        user_refs: list = []
+        phones: list = []
+        if source == "import_list":
+            import re as _re_il
+            from services.mass_inviter_engine import parse_user_refs, parse_phones
+            raw = body.get("import_list") or ""
+            # Взаимоисключающий разбор: токен с '+' → телефон, иначе @username/ID.
+            # Иначе числовой ID попал бы и в refs, и в phones (двойной инвайт).
+            _tokens = [t for t in _re_il.split(r"[,;\s\n]+", str(raw).strip()) if t]
+            phones = parse_phones(" ".join(t for t in _tokens if t.startswith("+")))
+            user_refs = parse_user_refs(" ".join(t for t in _tokens if not t.startswith("+")))
+            if not user_refs and not phones:
+                return _err("Список пуст или невалиден", 400)
+        # Настройки безопасности/темпа.
+        pace = (body.get("pace") or "normal").strip()
+        if pace not in ("slow", "normal", "fast"):
+            pace = "normal"
+        def _clamp(v, lo, hi, d):
+            try:
+                return max(lo, min(hi, int(v)))
+            except (TypeError, ValueError):
+                return d
+        batch_size = _clamp(body.get("batch_size"), 1, 20, 5) if body.get("batch_size") is not None else 5
+        max_invites = _clamp(body.get("max_invites"), 0, 100000, 0) if body.get("max_invites") is not None else 0
+        per_account_limit = _clamp(body.get("per_account_limit"), 0, 10000, 0) if body.get("per_account_limit") is not None else 0
         try:
             label = f"Mass Invite → {group}"
-            params = {"group": group, "source": source}
+            params = {"group": group, "source": source, "pace": pace, "batch_size": batch_size}
+            if user_refs:
+                params["user_refs"] = user_refs
+            if phones:
+                params["phones"] = phones
+            if max_invites:
+                params["max_invites"] = max_invites
+            if per_account_limit:
+                params["per_account_limit"] = per_account_limit
             if account_ids:
                 params["account_ids"] = account_ids
             op_id = await pool.fetchval(

@@ -2843,11 +2843,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
       <div class="field">
         <label>Источник аудитории</label>
-        <select id="massInviteSrc" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <select id="massInviteSrc" onchange="massInviteSrcToggle()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
           <option value="parsed">Parsed Audience (из парсера)</option>
           <option value="crm">CRM-контакты</option>
           <option value="bot_users">Подписчики ботов</option>
+          <option value="import_list">Свой список (вставить)</option>
         </select>
+      </div>
+      <div class="field" id="massInviteImportField" style="display:none">
+        <label>Список для инвайта</label>
+        <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567"></textarea>
+        <div class="field-note">По одному на строку. Телефон — с «+», иначе @username или ID</div>
       </div>
       <div class="field">
         <label>Аккаунты-инвайтеры (не выбрано = все активные)</label>
@@ -2855,6 +2861,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <div style="font-size:12px;color:var(--hint)" id="massInviteAccsLoad">Загрузка аккаунтов…</div>
         </div>
       </div>
+      <div class="field">
+        <label>Темп инвайта</label>
+        <select id="massInvitePace" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="slow">🐢 Медленно — безопаснее от банов</option>
+          <option value="normal" selected>⚖️ Обычный</option>
+          <option value="fast">⚡ Быстро — выше риск</option>
+        </select>
+      </div>
+      <details style="margin-bottom:12px">
+        <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:6px 0">⚙️ Лимиты (защита от бана)</summary>
+        <div class="field" style="margin-top:8px">
+          <label>Размер батча</label>
+          <input type="number" id="massInviteBatch" min="1" max="20" placeholder="5 (людей за один заход)">
+        </div>
+        <div class="field">
+          <label>Максимум за прогон</label>
+          <input type="number" id="massInviteMax" min="0" placeholder="без лимита">
+        </div>
+        <div class="field">
+          <label>Лимит на аккаунт за прогон</label>
+          <input type="number" id="massInvitePerAcc" min="0" placeholder="без лимита">
+          <div class="field-note">Инвайт — самая баноопасная операция. Меньше на аккаунт = дольше живёт</div>
+        </div>
+      </details>
       <div class="field-err" id="massInviteErr"></div>
       <button class="btn btn-p" id="massInviteBtn" onclick="submitMassInvite()" style="width:100%">🚀 Запустить инвайт</button>
     </div>
@@ -8432,6 +8462,8 @@ async function scanGifts() {
 async function openMassInvite() {
   push('s-massinvite');
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  massInviteSrcToggle();
   document.getElementById('massInviteAccsLoad').textContent = 'Загрузка аккаунтов…';
   const [opsD, accsD] = await Promise.allSettled([
     api('/api/miniapp/operations'),
@@ -8468,17 +8500,34 @@ async function openMassInvite() {
     txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||''));
   }
 }
+function massInviteSrcToggle() {
+  const src = document.getElementById('massInviteSrc').value;
+  const f = document.getElementById('massInviteImportField');
+  if (f) f.style.display = (src==='import_list') ? 'block' : 'none';
+}
 async function submitMassInvite() {
   const group = document.getElementById('massInviteGroup').value.trim();
   const source = document.getElementById('massInviteSrc').value;
   const errEl = document.getElementById('massInviteErr');
   if (!group) { errEl.textContent='Укажите группу'; return; }
+  const body = {group, source};
+  if (source==='import_list') {
+    const imp = document.getElementById('massInviteImport').value.trim();
+    if (!imp) { errEl.textContent='Вставьте список для инвайта'; return; }
+    body.import_list = imp;
+  }
   const checked = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')].map(c=>parseInt(c.value));
+  if (checked.length) body.account_ids = checked;
+  body.pace = document.getElementById('massInvitePace').value;
+  const _b = document.getElementById('massInviteBatch').value.trim();
+  const _m = document.getElementById('massInviteMax').value.trim();
+  const _pa = document.getElementById('massInvitePerAcc').value.trim();
+  if (_b) body.batch_size = parseInt(_b);
+  if (_m) body.max_invites = parseInt(_m);
+  if (_pa) body.per_account_limit = parseInt(_pa);
   const btn = document.getElementById('massInviteBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
-    const body = {group, source};
-    if (checked.length) body.account_ids = checked;
     const r = await api('/api/miniapp/mass_invite',{method:'POST',body:JSON.stringify(body)});
     toast(`📨 Инвайт запущен (#${r.op_id})`);
     errEl.textContent='';

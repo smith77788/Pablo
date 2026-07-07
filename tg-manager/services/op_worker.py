@@ -7004,6 +7004,18 @@ async def _exec_mass_invite(
     user_refs: list[str | int] = list(params.get("user_refs") or [])
     phones: list[str] = list(params.get("phones") or [])
     batch_size: int = int(params.get("batch_size") or 5)
+    # Темп: множитель паузы между батчами (инвайт — самая баноопасная операция).
+    _pace_mult = {"slow": 2.5, "normal": 1.0, "fast": 0.5}.get(params.get("pace") or "normal", 1.0)
+    _batch_delay = 3.0 * _pace_mult
+    # Максимум инвайтов за прогон (0 = без лимита) и лимит на аккаунт за прогон.
+    try:
+        _max_invites = max(0, int(params.get("max_invites") or 0))
+    except (TypeError, ValueError):
+        _max_invites = 0
+    try:
+        _per_acc_limit = max(0, int(params.get("per_account_limit") or 0))
+    except (TypeError, ValueError):
+        _per_acc_limit = 0
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
@@ -7111,9 +7123,18 @@ async def _exec_mass_invite(
     for acc_idx, acc in enumerate(accounts):
         if await _is_cancelled(pool, op_id):
             break
+        if _max_invites and step >= _max_invites:
+            log.info("mass_invite op=%d: достигнут лимит за прогон (%d)", op_id, _max_invites)
+            break
 
         u_chunk = acc_user_chunks[acc_idx]
         p_chunk = acc_phone_chunks[acc_idx]
+
+        # Лимит на аккаунт за прогон: обрезаем работу аккаунта (сначала users,
+        # телефонам остаётся остаток бюджета).
+        if _per_acc_limit:
+            u_chunk = u_chunk[:_per_acc_limit]
+            p_chunk = p_chunk[:max(0, _per_acc_limit - len(u_chunk))]
 
         if not u_chunk and not p_chunk:
             continue
@@ -7122,6 +7143,8 @@ async def _exec_mass_invite(
         if u_chunk:
             for i in range(0, len(u_chunk), batch_size):
                 if await _is_cancelled(pool, op_id):
+                    break
+                if _max_invites and step >= _max_invites:
                     break
                 batch = u_chunk[i:i + batch_size]
                 try:
@@ -7136,7 +7159,7 @@ async def _exec_mass_invite(
                     if res["peer_flood"]:
                         log.warning("mass_invite op=%d acc=%s PeerFlood — switching", op_id, acc.get("id"))
                         break
-                    await asyncio.sleep(3.0)
+                    await asyncio.sleep(_batch_delay)
                 except Exception as exc:
                     log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
                     total_fail += len(batch)
@@ -7145,6 +7168,8 @@ async def _exec_mass_invite(
         if p_chunk:
             for i in range(0, len(p_chunk), batch_size):
                 if await _is_cancelled(pool, op_id):
+                    break
+                if _max_invites and step >= _max_invites:
                     break
                 batch = p_chunk[i:i + batch_size]
                 try:
@@ -7158,7 +7183,7 @@ async def _exec_mass_invite(
                     )
                     if res["peer_flood"]:
                         break
-                    await asyncio.sleep(3.0)
+                    await asyncio.sleep(_batch_delay)
                 except Exception as exc:
                     log.warning("mass_invite op=%d acc=%s phones error: %s", op_id, acc.get("id"), exc)
                     total_fail += len(batch)
