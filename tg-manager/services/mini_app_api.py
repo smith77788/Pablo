@@ -7447,29 +7447,92 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         username_pattern = (body.get("username_pattern") or "").strip()
         description = (body.get("description") or "").strip()
         short_desc = (body.get("short_description") or "").strip()
-        countries = body.get("countries") or []
         account_ids = body.get("account_ids") or []
         ecosystem_id = body.get("ecosystem_id")
-        
+
+        # ── Референс-унификация: из образца названия/username + города-образца
+        # автоматически выводим паттерн ('Новости Москва' + 'Москва' → 'Новости
+        # {{CITY_NAME}}'). Если явный паттерн не задан, но задан референс — деривуем.
+        from services.presence_planner import (
+            build_targets, derive_pattern_from_reference, render_pattern,
+        )
+        ref_name = (body.get("reference_name") or "").strip()
+        ref_username = (body.get("reference_username") or "").strip()
+        ref_city = (body.get("reference_city") or "").strip()
+        ref_city_slug = (body.get("reference_city_slug") or "").strip()
+        if not name_pattern and ref_name:
+            name_pattern = derive_pattern_from_reference(ref_name, ref_city, "{{CITY_NAME}}")
+        if not username_pattern and ref_username:
+            username_pattern = derive_pattern_from_reference(
+                ref_username, ref_city_slug or ref_city, "{{CITY_SLUG}}")
+
         if asset_type not in ("channel", "group", "bot", "package", "full_package"):
             return _err("Invalid asset_type: must be channel/group/bot/package/full_package", 400)
         if not name_pattern:
-            return _err("name_pattern required", 400)
-        if not countries:
-            return _err("At least one country required", 400)
-        
-        # Create the plan
+            return _err("Укажите паттерн названия или референс", 400)
+
+        # ── Гео: пресет (страны/города мира) ИЛИ свой список городов ИЛИ страны.
+        from services.geo_data import GEO_PRESETS, parse_custom_geo_list, enrich_geo_list
+        geo_preset = (body.get("geo_preset") or "").strip()
+        custom_cities = (body.get("custom_cities") or "").strip()
+        countries = body.get("countries") or []
+        geo_list: list = []
+        geo_source = ""
+        if geo_preset and geo_preset in GEO_PRESETS:
+            geo_list = list(GEO_PRESETS[geo_preset]["cities"])
+            geo_source = geo_preset
+        elif custom_cities:
+            geo_list = parse_custom_geo_list(custom_cities)
+            geo_source = "custom"
+        elif countries:
+            # Фолбэк на старый ввод: страны как «города» (минимальные geo-словари).
+            geo_list = enrich_geo_list([
+                {"country": str(c).strip(), "city": str(c).strip()} for c in countries if str(c).strip()
+            ])
+            geo_source = "countries"
+        if not geo_list:
+            return _err("Выберите гео-пресет, свои города или страны", 400)
+        # Потолок против гигантских планов.
+        geo_list = geo_list[:200]
+
+        acc_ids_int = [int(x) for x in account_ids if str(x).isdigit()]
+        if acc_ids_int:
+            owned = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                uid, acc_ids_int)
+            acc_ids_int = [int(r["id"]) for r in (owned or [])]
+
+        # Генерируем цели тем же конвейером, что и бот (build_targets → рендер
+        # плейсхолдеров per-city). Раньше mini-app путь цели НЕ создавал вообще —
+        # план ставился в очередь, а исполнитель находил 0 целей.
+        targets = build_targets(
+            geo_list,
+            "channel" if asset_type in ("package", "full_package") else asset_type,
+            name_pattern, username_pattern or None, acc_ids_int,
+        )
+        if not targets:
+            return _err("Не удалось сгенерировать цели из гео", 400)
+        # Превью первых названий/username для ответа.
+        preview = [
+            {"name": t.get("planned_name"), "username": t.get("planned_username")}
+            for t in targets[:5]
+        ]
+
         try:
+            # status='pending' — иначе launch (требует pending/failed) отклонял бы 'draft'.
             plan_id = await pool.fetchval(
                 """INSERT INTO global_presence_plans
                    (owner_id, asset_type, name_pattern, username_pattern,
                     geo_selection, account_selection, status)
-                   VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'draft')
+                   VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'pending')
                    RETURNING id""",
                 uid, asset_type, name_pattern, username_pattern,
-                json.dumps({"countries": countries, "description": description, "short_description": short_desc}),
-                json.dumps({"account_ids": [int(x) for x in account_ids]}),
+                json.dumps({"geo_source": geo_source, "count": len(targets),
+                            "description": description, "short_description": short_desc}),
+                json.dumps({"account_ids": acc_ids_int}),
             )
+            from database.db import create_global_presence_targets
+            await create_global_presence_targets(pool, plan_id, targets)
             # Привязка к экосистеме
             if ecosystem_id:
                 try:
@@ -7479,10 +7542,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     )
                 except Exception as e:
                     log.warning("global_presence_create ecosystem link: %s", e)
-            return _json_resp({"ok": True, "plan_id": plan_id, "asset_type": asset_type, "name_pattern": name_pattern})
+            return _json_resp({
+                "ok": True, "plan_id": plan_id, "asset_type": asset_type,
+                "name_pattern": name_pattern, "username_pattern": username_pattern,
+                "targets": len(targets), "geo_source": geo_source, "preview": preview,
+            })
         except Exception as exc:
             log.exception("global_presence_create uid=%d", uid)
             return _err(str(exc), 500)
+
+    async def geo_presets(request: web.Request) -> web.Response:
+        """Список гео-пресетов (страны/города мира) для Global Presence."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services.geo_data import GEO_PRESETS
+        return _json_resp({"presets": [
+            {"key": k, "label": v.get("label", k), "count": v.get("count", len(v.get("cities", [])))}
+            for k, v in GEO_PRESETS.items()
+        ]})
 
     async def global_presence_launch(request: web.Request) -> web.Response:
         """Launch a Global Presence plan — creates targets and queues operations."""
@@ -9167,6 +9245,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
     app.router.add_post("/api/miniapp/global_presence", global_presence_create)
+    app.router.add_get("/api/miniapp/geo_presets", geo_presets)
     app.router.add_post("/api/miniapp/global_presence/{plan_id}/launch", global_presence_launch)
     # Mass Ops
     app.router.add_get("/api/miniapp/mass_ops", mass_ops_overview)

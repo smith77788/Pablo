@@ -27,6 +27,21 @@ def render_pattern(pattern: str, geo: dict) -> str:
     return pattern
 
 
+def derive_pattern_from_reference(reference: str, sample: str, placeholder: str = "{{CITY_NAME}}") -> str:
+    """Унификация из референса: по образцу ('Новости Москва') и городу-образцу
+    ('Москва') строит паттерн ('Новости {{CITY_NAME}}'), заменяя вхождение города
+    на плейсхолдер. Регистронезависимо. Если город не найден в референсе — возвращает
+    референс как есть (пользователь сам подставит плейсхолдер). Чистая функция."""
+    import re as _re
+    ref = (reference or "").strip()
+    smp = (sample or "").strip()
+    if not ref:
+        return ""
+    if not smp:
+        return ref
+    return _re.sub(_re.escape(smp), placeholder, ref, flags=_re.IGNORECASE)
+
+
 def build_targets(
     geo_list: list[dict],
     asset_type: str,

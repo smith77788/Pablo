@@ -1328,22 +1328,38 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="full_package">🎁 Полный пакет (К+Г+Б)</option>
       </select>
       
-      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Шаблон имени *</label>
-      <input type="text" id="gpNamePattern" placeholder="Новости {{city}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
-      <div style="font-size:11px;color:var(--hint);margin-top:4px">Переменные: {{city}} {{country}} {{lang}}. Поддержка спинтакса: {{Вариант1|Вариант2}}</div>
-      
+      <div style="border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:10px;margin:12px 0;background:rgba(59,130,246,.06)">
+        <div style="font-size:13px;color:var(--blue);margin-bottom:6px">🧬 Унификация из референса</div>
+        <div style="font-size:11px;color:var(--hint);margin-bottom:8px">Впишите пример существующего названия/username и город-образец — паттерны соберутся сами.</div>
+        <input type="text" id="gpRefName" placeholder="Название-образец: Новости Москва" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px;margin-bottom:6px">
+        <input type="text" id="gpRefUsername" placeholder="Username-образец: novosti_moscow" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px;margin-bottom:6px">
+        <input type="text" id="gpRefCity" placeholder="Город в образце: Москва / moscow" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px;margin-bottom:6px">
+        <button class="btn btn-s" style="width:100%;font-size:13px;padding:8px" onclick="gpApplyReference()">✨ Собрать паттерны из референса</button>
+      </div>
+
+      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Шаблон названия *</label>
+      <input type="text" id="gpNamePattern" placeholder="Новости {{CITY_NAME}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Плейсхолдеры: {{CITY_NAME}} (нативное), {{CITY}} (лат.), {{COUNTRY}}, {{COUNTRY_CODE}}, {{INDEX}}</div>
+
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Шаблон username</label>
-      <input type="text" id="gpUsernamePattern" placeholder="novosti_{{city}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
-      <div style="font-size:11px;color:var(--hint);margin-top:4px">Суффикс bot добавится автоматически для ботов</div>
-      
+      <input type="text" id="gpUsernamePattern" placeholder="novosti_{{CITY_SLUG}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <div style="font-size:11px;color:var(--hint);margin-top:4px">Плейсхолдеры: {{CITY_SLUG}}, {{COUNTRY_SLUG}}, {{INDEX}}. Суффикс bot добавится для ботов</div>
+
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Описание (для каналов/групп)</label>
       <textarea id="gpDescription" rows="2" placeholder="{{Новости {{city}}|Информация из {{city}}}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:none"></textarea>
       
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Краткое описание (для ботов)</label>
       <input type="text" id="gpShortDesc" placeholder="{{Помощник из {{city}}|Бот {{city}}}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
       
-      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Страны (через запятую) *</label>
-      <input type="text" id="gpCountries" placeholder="Россия, Украина, Казахстан" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Гео-пресет *</label>
+      <select id="gpGeoPreset" onchange="gpGeoToggle()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+        <option value="">— выберите пресет или свои города —</option>
+        <option value="__custom">✍️ Свой список городов</option>
+      </select>
+      <div id="gpCustomCitiesWrap" style="display:none;margin-top:8px">
+        <textarea id="gpCustomCities" rows="4" placeholder="Москва&#10;Санкт-Петербург&#10;Київ" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:vertical"></textarea>
+        <div style="font-size:11px;color:var(--hint);margin-top:4px">По одному городу на строку. Нативные названия подтянутся автоматически</div>
+      </div>
       
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Аккаунты (выберите для создания)</label>
       <div id="gpAccountsList" style="max-height:120px;overflow-y:auto;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px"></div>
@@ -10439,6 +10455,9 @@ async function openGlobalPresence() {
 
 async function openGpCreateModal() {
   showModal('mo-gp-create');
+  ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
+  loadGpGeoPresets();
   // Load accounts
   try {
     const accs = await api('/api/miniapp/accounts');
@@ -10460,40 +10479,69 @@ async function openGpCreateModal() {
   } catch(_) {}
 }
 
+function gpGeoToggle() {
+  const v = document.getElementById('gpGeoPreset').value;
+  document.getElementById('gpCustomCitiesWrap').style.display = (v==='__custom') ? 'block' : 'none';
+}
+function gpApplyReference() {
+  const refName = document.getElementById('gpRefName').value.trim();
+  const refUser = document.getElementById('gpRefUsername').value.trim();
+  const refCity = document.getElementById('gpRefCity').value.trim();
+  if (!refCity) { toast('Укажите город-образец'); return; }
+  // Та же логика, что серверный derive_pattern_from_reference (регистронезависимая замена).
+  const rx = new RegExp(refCity.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'ig');
+  if (refName) document.getElementById('gpNamePattern').value = refName.replace(rx, '{{CITY_NAME}}');
+  if (refUser) document.getElementById('gpUsernamePattern').value = refUser.replace(rx, '{{CITY_SLUG}}');
+  toast('✨ Паттерны собраны — проверьте ниже');
+}
+async function loadGpGeoPresets() {
+  try {
+    const d = await api('/api/miniapp/geo_presets');
+    const sel = document.getElementById('gpGeoPreset');
+    const custom = '<option value="__custom">✍️ Свой список городов</option>';
+    sel.innerHTML = '<option value="">— выберите пресет или свои города —</option>'
+      + (d.presets||[]).map(p=>`<option value="${esc(p.key)}">${esc(p.label)} (${p.count})</option>`).join('')
+      + custom;
+  } catch(_) {}
+}
 async function submitGpCreate() {
   const assetType = document.getElementById('gpAssetType').value;
   const namePattern = document.getElementById('gpNamePattern').value.trim();
   const usernamePattern = document.getElementById('gpUsernamePattern').value.trim();
   const description = document.getElementById('gpDescription').value.trim();
   const shortDesc = document.getElementById('gpShortDesc').value.trim();
-  const countries = document.getElementById('gpCountries').value.trim().split(',').map(s=>s.trim()).filter(Boolean);
+  const geoPreset = document.getElementById('gpGeoPreset').value;
+  const customCities = document.getElementById('gpCustomCities').value.trim();
   const accountIds = [...document.querySelectorAll('.gp-acc-cb:checked')].map(cb=>+cb.value);
   const ecosystemId = document.getElementById('gpEcosystem').value;
   const errEl = document.getElementById('gpCreateErr');
   errEl.textContent = '';
-  
-  if (!namePattern) { errEl.textContent = 'Введите шаблон имени'; return; }
-  if (!countries.length) { errEl.textContent = 'Введите хотя бы одну страну'; return; }
+
+  if (!namePattern) { errEl.textContent = 'Введите шаблон названия (или соберите из референса)'; return; }
+  if (!geoPreset) { errEl.textContent = 'Выберите гео-пресет или свои города'; return; }
+  if (geoPreset==='__custom' && !customCities) { errEl.textContent = 'Впишите список городов'; return; }
   if (!accountIds.length) { errEl.textContent = 'Выберите хотя бы один аккаунт'; return; }
-  
-  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nШаблон: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nОписание: ${description || '(пусто)'}\nСтраны: ${countries.join(', ')}\nАккаунтов: ${accountIds.length}`;
+
+  const geoLbl = geoPreset==='__custom' ? 'свои города' : document.getElementById('gpGeoPreset').selectedOptions[0].textContent;
+  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nАккаунтов: ${accountIds.length}`;
   if (!await askConfirm(preview)) return;
-  
+
+  const payload = {
+    asset_type: assetType,
+    name_pattern: namePattern,
+    username_pattern: usernamePattern,
+    description: description,
+    short_description: shortDesc,
+    account_ids: accountIds,
+    ecosystem_id: ecosystemId ? +ecosystemId : null,
+  };
+  if (geoPreset==='__custom') payload.custom_cities = customCities;
+  else payload.geo_preset = geoPreset;
+
   try {
-    const r = await api('/api/miniapp/global_presence', {
-      method: 'POST',
-      body: JSON.stringify({
-        asset_type: assetType,
-        name_pattern: namePattern,
-        username_pattern: usernamePattern,
-        description: description,
-        short_description: shortDesc,
-        countries: countries,
-        account_ids: accountIds,
-        ecosystem_id: ecosystemId ? +ecosystemId : null,
-      })
-    });
-    toast(`✅ План #${r.plan_id} создан!`);
+    const r = await api('/api/miniapp/global_presence', { method: 'POST', body: JSON.stringify(payload) });
+    const prev = (r.preview||[]).slice(0,3).map(p=>p.name).filter(Boolean).join(', ');
+    toast(`✅ План #${r.plan_id}: ${r.targets} целей${prev?' ('+prev+'…)':''}`);
     closeModal('mo-gp-create');
     openGlobalPresence();
   } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
