@@ -797,10 +797,20 @@ async def get_auto_replies(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Reco
 async def get_active_auto_replies(
     pool: asyncpg.Pool, bot_id: int
 ) -> list[asyncpg.Record]:
-    return await pool.fetch(
-        "SELECT * FROM auto_replies WHERE bot_id=$1 AND is_active=true ORDER BY id",
-        bot_id,
-    )
+    # priority DESC — правило с большим приоритетом выигрывает (цикл в
+    # auto_responder — «первое совпадение выигрывает»). Фолбэк на ORDER BY id,
+    # если колонка priority ещё не мигрирована (schema_v142).
+    try:
+        return await pool.fetch(
+            "SELECT * FROM auto_replies WHERE bot_id=$1 AND is_active=true "
+            "ORDER BY priority DESC, id",
+            bot_id,
+        )
+    except asyncpg.UndefinedColumnError:
+        return await pool.fetch(
+            "SELECT * FROM auto_replies WHERE bot_id=$1 AND is_active=true ORDER BY id",
+            bot_id,
+        )
 
 
 async def add_auto_reply(

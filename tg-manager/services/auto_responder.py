@@ -101,6 +101,26 @@ def _match_rule(rule: dict, text: str) -> bool:
     return False
 
 
+def _within_active_window(hour: int, from_hour, to_hour) -> bool:
+    """True, если час `hour` (0-23, UTC) попадает в рабочее окно правила.
+
+    NULL с любой стороны → окно не задано → всегда активно. Поддерживает окна
+    через полночь (from > to, напр. 22→6 = 22:00..05:59). Чистая функция.
+    """
+    if from_hour is None or to_hour is None:
+        return True
+    try:
+        f, t2 = int(from_hour) % 24, int(to_hour) % 24
+    except (TypeError, ValueError):
+        return True
+    if f == t2:
+        return True  # вырожденное окно трактуем как «всегда»
+    if f < t2:
+        return f <= hour < t2
+    # окно через полночь
+    return hour >= f or hour < t2
+
+
 async def _init_offset(
     pool: asyncpg.Pool, http: aiohttp.ClientSession, bot_id: int, token: str
 ) -> int:
@@ -396,40 +416,56 @@ async def _process_bot(
                     await bot_api.send_message(http, token, chat_id, ack)
                 continue
 
-            # Auto-replies (first match wins)
+            # Auto-replies (правила отсортированы по priority DESC; первое
+            # совпавшее И попадающее в рабочее окно — выигрывает)
+            _cur_hour = datetime.utcnow().hour
             for rule in rules:
-                if _match_rule(rule, text):
-                    rendered = _render_text(rule["response_text"], from_user, bot_row)
-                    if _is_free:
-                        rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
-                    ok, retry = await bot_api.send_message(
-                        http, token, chat_id, rendered, buttons=_rule_buttons(rule)
-                    )
-                    if ok:
-                        # Log the fired rule to auto_reply_log for analytics
-                        try:
-                            await pool.execute(
-                                """INSERT INTO auto_reply_log
-                                       (bot_id, chat_id, rule_id, rule_type, trigger_type, keyword)
-                                   VALUES ($1, $2, $3, 'auto_reply', $4, $5)""",
-                                bot_id,
-                                chat_id,
-                                rule.get("id"),
-                                rule.get("trigger_type"),
-                                rule.get("keyword"),
-                            )
-                        except Exception as _log_err:
-                            log.debug(
-                                "auto_reply_log insert failed bot=%d: %s", bot_id, _log_err
-                            )
-                    else:
-                        log.warning(
-                            "auto_responder: failed to send auto-reply to chat %d bot %d%s",
-                            chat_id,
+                if not _match_rule(rule, text):
+                    continue
+                # Рабочие часы: вне окна правило молчит (проф. автоответчик).
+                if not _within_active_window(
+                    _cur_hour, rule.get("active_from_hour"), rule.get("active_to_hour")
+                ):
+                    continue
+                # Человекоподобная задержка перед ответом (анти-детект).
+                _delay = rule.get("reply_delay_sec") or 0
+                try:
+                    _delay = max(0, min(300, int(_delay)))
+                except (TypeError, ValueError):
+                    _delay = 0
+                if _delay:
+                    await asyncio.sleep(_delay)
+                rendered = _render_text(rule["response_text"], from_user, bot_row)
+                if _is_free:
+                    rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
+                ok, retry = await bot_api.send_message(
+                    http, token, chat_id, rendered, buttons=_rule_buttons(rule)
+                )
+                if ok:
+                    # Log the fired rule to auto_reply_log for analytics
+                    try:
+                        await pool.execute(
+                            """INSERT INTO auto_reply_log
+                                   (bot_id, chat_id, rule_id, rule_type, trigger_type, keyword)
+                               VALUES ($1, $2, $3, 'auto_reply', $4, $5)""",
                             bot_id,
-                            f" (rate-limited {retry}s)" if retry else "",
+                            chat_id,
+                            rule.get("id"),
+                            rule.get("trigger_type"),
+                            rule.get("keyword"),
                         )
-                    break
+                    except Exception as _log_err:
+                        log.debug(
+                            "auto_reply_log insert failed bot=%d: %s", bot_id, _log_err
+                        )
+                else:
+                    log.warning(
+                        "auto_responder: failed to send auto-reply to chat %d bot %d%s",
+                        chat_id,
+                        bot_id,
+                        f" (rate-limited {retry}s)" if retry else "",
+                    )
+                break
 
             # Passive inbox relay: forward non-/start messages to operator even when
             # relay_enabled=false.  Old bots that have custom auto-replies ("Сообщение

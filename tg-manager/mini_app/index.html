@@ -3505,6 +3505,27 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <label>Кнопки под ответом (необязательно)</label>
       <textarea id="arButtons" rows="2" placeholder="Текст кнопки | https://ссылка (по одной на строку)"></textarea>
     </div>
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:6px 0">⚙️ Дополнительно</summary>
+      <div class="field" style="margin-top:8px">
+        <label>Приоритет</label>
+        <input type="number" id="arPriority" min="-100" max="100" placeholder="0 (выше — срабатывает раньше)">
+        <div class="field-note">Если под сообщение подходит несколько правил — сработает с бо́льшим приоритетом</div>
+      </div>
+      <div class="field">
+        <label>Задержка ответа, сек</label>
+        <input type="number" id="arDelay" min="0" max="300" placeholder="0 (пауза перед ответом)">
+        <div class="field-note">Человекоподобная пауза перед отправкой (0–300)</div>
+      </div>
+      <div class="field">
+        <label>Рабочие часы (UTC)</label>
+        <div style="display:flex;gap:8px">
+          <input type="number" id="arFromHour" min="0" max="23" placeholder="с (0–23)" style="flex:1">
+          <input type="number" id="arToHour" min="0" max="23" placeholder="по (0–23)" style="flex:1">
+        </div>
+        <div class="field-note">Вне окна правило молчит. Пусто = круглосуточно. Через полночь: с 22 по 6</div>
+      </div>
+    </details>
     <div class="field-err" id="arErr"></div>
     <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
   </div>
@@ -4852,11 +4873,18 @@ function renderArList(items) {
   if (!items.length) { el.innerHTML=empty('💬','Нет авто-ответов','Нажмите + Добавить чтобы создать'); return; }
   el.innerHTML = items.map(r=>{
     const trig = r.trigger_type==='keyword'?`🔑 ${esc(r.keyword||'?')}`:r.trigger_type==='start'?'🚀 /start':'📬 Любое';
+    const meta = [];
+    if (r.fired!=null) meta.push(`✅ ${num(r.fired)}×`);
+    if (r.priority) meta.push(`⭐ ${r.priority}`);
+    if (r.reply_delay_sec) meta.push(`⏱ ${r.reply_delay_sec}с`);
+    if (r.active_from_hour!=null && r.active_to_hour!=null) meta.push(`🕐 ${r.active_from_hour}–${r.active_to_hour}h`);
+    const metaHtml = meta.length?`<div class="li-sub" style="color:var(--hint);font-size:12px">${meta.join(' · ')}</div>`:'';
     return `<div class="li">
       <div class="ava ava-blue">💬</div>
       <div class="li-body">
         <div class="li-name">${trig}</div>
         <div class="li-sub">${esc((r.response_text||'').substring(0,50))}${(r.response_text||'').length>50?'…':''}</div>
+        ${metaHtml}
       </div>
       <div class="li-right">
         <div class="toggle ${r.is_active?'on':'off'}" onclick="toggleAr(${r.id},this)"></div>
@@ -4896,6 +4924,7 @@ function openArModal() {
   { const _m=document.getElementById('arMatch'); if(_m) _m.value='contains'; }
   { const _b=document.getElementById('arButtons'); if(_b) _b.value=''; }
   document.getElementById('arText').value='';
+  ['arPriority','arDelay','arFromHour','arToHour'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
   document.getElementById('arErr').style.display='none';
   toggleArKw();
   document.getElementById('arMbg').classList.add('show');
@@ -4921,6 +4950,15 @@ async function saveAutoReply() {
     const buttons = parseInlineButtons(document.getElementById('arButtons')?.value||'');
     const _body = {trigger_type:type, keyword:kw||null, response_text:text, match_mode};
     if (buttons.length) _body.buttons = buttons;
+    const _pri = document.getElementById('arPriority').value.trim();
+    const _del = document.getElementById('arDelay').value.trim();
+    const _fh = document.getElementById('arFromHour').value.trim();
+    const _th = document.getElementById('arToHour').value.trim();
+    if (_pri) _body.priority = parseInt(_pri);
+    if (_del) _body.reply_delay_sec = parseInt(_del);
+    if (_fh!=='' && _th==='') { errEl.textContent='Укажите оба часа рабочего окна'; errEl.style.display='block'; btn.disabled=false; btn.textContent='💾 Сохранить'; return; }
+    if (_th!=='' && _fh==='') { errEl.textContent='Укажите оба часа рабочего окна'; errEl.style.display='block'; btn.disabled=false; btn.textContent='💾 Сохранить'; return; }
+    if (_fh!=='') { _body.active_from_hour = parseInt(_fh); _body.active_to_hour = parseInt(_th); }
     await api('/api/miniapp/bot/'+AR_SAVE_BOT+'/auto_reply', {
       method:'POST', body:JSON.stringify(_body)
     });

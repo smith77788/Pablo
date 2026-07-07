@@ -545,9 +545,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Bot not found", 404)
-        rows = await _safe_fetch(pool,
-            "SELECT id, trigger_type, keyword, response_text, is_active, created_at FROM auto_replies WHERE bot_id=$1 ORDER BY created_at DESC",
-            bot_id)
+        # Счётчик срабатываний из auto_reply_log — аналитика прямо в списке.
+        # LEFT JOIN, чтобы правила без срабатываний тоже вернулись (fired=0).
+        # Фолбэк на простой SELECT, если новых колонок/лога ещё нет.
+        try:
+            rows = await pool.fetch(
+                """SELECT ar.id, ar.trigger_type, ar.keyword, ar.response_text,
+                          ar.is_active, ar.created_at, ar.match_mode,
+                          ar.reply_delay_sec, ar.active_from_hour, ar.active_to_hour, ar.priority,
+                          COALESCE(l.fired, 0) AS fired
+                   FROM auto_replies ar
+                   LEFT JOIN (
+                       SELECT rule_id, COUNT(*) AS fired FROM auto_reply_log
+                       WHERE bot_id=$1 AND rule_type='auto_reply' GROUP BY rule_id
+                   ) l ON l.rule_id = ar.id
+                   WHERE ar.bot_id=$1
+                   ORDER BY ar.priority DESC, ar.created_at DESC""",
+                bot_id)
+            rows = [dict(r) for r in rows]
+        except Exception:
+            rows = await _safe_fetch(pool,
+                "SELECT id, trigger_type, keyword, response_text, is_active, created_at FROM auto_replies WHERE bot_id=$1 ORDER BY created_at DESC",
+                bot_id)
         return _json_resp({"auto_replies": rows})
 
     async def create_auto_reply(request: web.Request) -> web.Response:
@@ -586,20 +605,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if bt and bu.lower().startswith(("http://", "https://")):
                 buttons.append({"text": bt, "url": bu})
         buttons_json = _json.dumps(buttons) if buttons else None
+
+        # Углублённые поля правила (schema_v142). Все клампятся/валидируются.
+        def _clamp_int(val, lo, hi, default=None):
+            if val is None or val == "":
+                return default
+            try:
+                return max(lo, min(hi, int(val)))
+            except (TypeError, ValueError):
+                return default
+        reply_delay_sec = _clamp_int(body.get("reply_delay_sec"), 0, 300, 0)
+        active_from_hour = _clamp_int(body.get("active_from_hour"), 0, 23, None)
+        active_to_hour = _clamp_int(body.get("active_to_hour"), 0, 23, None)
+        priority = _clamp_int(body.get("priority"), -100, 100, 0)
+        # Окно рабочих часов задаётся парой — либо оба часа, либо ни одного.
+        if (active_from_hour is None) != (active_to_hour is None):
+            return _err("Укажите оба часа рабочего окна или ни одного", 400)
+
         try:
             try:
                 row = await pool.fetchrow(
-                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode, buttons) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING id",
-                    bot_id, trigger_type, keyword or None, response_text, match_mode, buttons_json)
+                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode, buttons, "
+                    "reply_delay_sec, active_from_hour, active_to_hour, priority) "
+                    "VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10) RETURNING id",
+                    bot_id, trigger_type, keyword or None, response_text, match_mode, buttons_json,
+                    reply_delay_sec, active_from_hour, active_to_hour, priority)
             except asyncpg.UndefinedColumnError:
                 try:
                     row = await pool.fetchrow(
-                        "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode) VALUES($1,$2,$3,$4,$5) RETURNING id",
-                        bot_id, trigger_type, keyword or None, response_text, match_mode)
+                        "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode, buttons) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING id",
+                        bot_id, trigger_type, keyword or None, response_text, match_mode, buttons_json)
                 except asyncpg.UndefinedColumnError:
-                    row = await pool.fetchrow(
-                        "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
-                        bot_id, trigger_type, keyword or None, response_text)
+                    try:
+                        row = await pool.fetchrow(
+                            "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode) VALUES($1,$2,$3,$4,$5) RETURNING id",
+                            bot_id, trigger_type, keyword or None, response_text, match_mode)
+                    except asyncpg.UndefinedColumnError:
+                        row = await pool.fetchrow(
+                            "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
+                            bot_id, trigger_type, keyword or None, response_text)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.exception("create_auto_reply bot=%d uid=%d", bot_id, uid)
