@@ -1491,6 +1491,57 @@ async def send_message_via_account(
             log_exc_swallow(log, "Сбой в send_message_via_account")
 
 
+async def send_media_via_account(
+    session_string: str, chat_id, media_url: str, caption: str = "",
+    _acc: dict | None = None,
+) -> bool:
+    """Отправляет медиа (фото/видео/док) по URL с подписью через личный аккаунт.
+
+    Telethon сам скачивает файл по URL. URL должен быть заранее провалидирован
+    вызывающей стороной (SSRF-гард на уровне API). Обработка ошибок как в
+    send_message_via_account (флуд/dead-session пробрасываются).
+    """
+    from telethon.errors import (
+        FloodWaitError,
+        AuthKeyUnregisteredError,
+        SessionRevokedError,
+        UserDeactivatedBanError,
+        UserDeactivatedError,
+    )
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await asyncio.wait_for(
+            client.send_file(chat_id, file=media_url, caption=caption or None),
+            timeout=max(_OP_TIMEOUT, 60),
+        )
+        return True
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "send_media")
+        log.warning("send_media_via_account: timeout acc=%s", (_acc or {}).get("id", "?"))
+        return False
+    except FloodWaitError:
+        raise
+    except (
+        AuthKeyUnregisteredError,
+        SessionRevokedError,
+        UserDeactivatedBanError,
+        UserDeactivatedError,
+    ):
+        raise
+    except Exception as e:
+        if is_dead_session_error(str(e)):
+            raise AuthKeyUnregisteredError(request=None) from e
+        log.exception("send_media error: %s", e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в send_media_via_account")
+
+
 # Псевдоним для обратной совместимости с хендлером accounts.py
 send_message = send_message_via_account
 

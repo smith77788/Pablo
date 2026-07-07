@@ -150,6 +150,7 @@ async def send_dm(
     text: str,
     _acc: dict | None = None,
     username: str | None = None,
+    media_url: str | None = None,
 ) -> dict:
     """
     Отправить одно личное сообщение через личный аккаунт Telegram.
@@ -168,8 +169,16 @@ async def send_dm(
     # Raw integer user_id requires the session to have seen this user before
     # (have their access_hash in cache). Username resolves via contacts.Search.
     target: str | int = username.lstrip("@") if username else user_id
+
+    async def _deliver(dest):
+        if media_url:
+            # Медиа с подписью (caption). URL валидируется на уровне API (SSRF-гард).
+            await account_manager.send_media_via_account(session_str, dest, media_url, text, _acc=_acc)
+        else:
+            await account_manager.send_message(session_str, dest, text, _acc=_acc)
+
     try:
-        await account_manager.send_message(session_str, target, text, _acc=_acc)
+        await _deliver(target)
         return {"status": "sent"}
     except Exception as exc:
         kind = _classify_error(exc)
@@ -177,7 +186,7 @@ async def send_dm(
         # If username resolution failed and we have user_id, fall back to int
         if kind == "retry" and username and user_id:
             try:
-                await account_manager.send_message(session_str, user_id, text, _acc=_acc)
+                await _deliver(user_id)
                 return {"status": "sent"}
             except Exception as exc2:
                 kind2 = _classify_error(exc2)
@@ -425,6 +434,7 @@ async def run_campaign(
             _cp = _json.loads(_cp)
         except Exception:
             _cp = {}
+    _media_url = (_cp or {}).get("media_url") or None
     try:
         _pace = (_cp or {}).get("pace")
         _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
@@ -513,7 +523,7 @@ async def run_campaign(
         text = expand_spintax(template)
         t0_dm = time.monotonic()
         result = await send_dm(
-            acc["session_str"], user_id, text, _acc=acc, username=username
+            acc["session_str"], user_id, text, _acc=acc, username=username, media_url=_media_url
         )
         status = result["status"]
 

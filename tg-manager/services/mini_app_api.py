@@ -4348,6 +4348,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _params["cohort_type"] = cohort_type
         if import_list:
             _params["import_list"] = import_list
+        # Медиа (фото/видео/док по URL) — send_dm отправит как файл с подписью.
+        media_url = (body.get("media_url") or "").strip()
+        if media_url:
+            if not is_safe_public_url(media_url):
+                return _err("Нужен публичный https URL медиа", 400)
+            _params["media_url"] = media_url
         # Дневной лимит отправок на аккаунт (защита от бана). Клампим 1..200.
         if body.get("per_account_daily") is not None:
             try:

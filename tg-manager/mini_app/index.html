@@ -4044,6 +4044,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
     <div class="field">
+      <label>Медиа (необязательно)</label>
+      <input type="url" id="cmpMedia" placeholder="https://example.com/photo.jpg">
+      <div class="field-note">Публичный https URL фото/видео. Текст станет подписью</div>
+    </div>
+    <div class="field">
       <label>Темп отправки</label>
       <select id="cmpPace">
         <option value="slow">🐢 Медленно — безопаснее от банов</option>
@@ -7189,6 +7194,7 @@ function openCmpModal() {
   document.getElementById('cmpTargetType').value='all_bots';
   document.getElementById('cmpText').value='';
   document.getElementById('cmpImport').value='';
+  { const _m=document.getElementById('cmpMedia'); if(_m) _m.value=''; }
   document.getElementById('cmpPerAcc').value='';
   document.getElementById('cmpLen').textContent='0';
   const sp=document.getElementById('cmpSpinPreview'); sp.style.display='none'; sp.textContent='';
@@ -7256,6 +7262,8 @@ async function saveCmp() {
     payload.import_list = imp;
   }
   if (perAccRaw) payload.per_account_daily = parseInt(perAccRaw);
+  const media = document.getElementById('cmpMedia')?.value.trim();
+  if (media) payload.media_url = media;
   const btn = document.getElementById('cmpBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
   try {
