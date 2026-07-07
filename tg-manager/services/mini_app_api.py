@@ -2337,6 +2337,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["privacy_key"] = key
             params["privacy_allow"] = bool(body.get("privacy_allow"))
             return params, "Настройка приватности"
+        if op == "reset_2fa":
+            cp = (body.get("current_password") or "").strip()
+            if not cp:
+                return None, "Укажите текущий пароль 2FA для снятия"
+            params["current_password"] = cp
+            return params, "Снятие 2FA"
+        if op in ("clear_bio", "remove_username", "remove_avatar", "set_online", "check_restriction"):
+            return params, {"clear_bio": "Очистка bio", "remove_username": "Снятие username",
+                            "remove_avatar": "Удаление фото", "set_online": "В сети",
+                            "check_restriction": "Проверка ограничений"}[op]
         return None, "Неизвестная операция"
 
     async def accounts_mass(request: web.Request) -> web.Response:
@@ -2385,7 +2395,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         uid, _json.dumps({"account_id": aid}), f"Выход из всех чатов (акк. {aid})")
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
-            if op in ("name", "avatar", "2fa", "username", "close_sessions", "privacy"):
+            if op in ("name", "avatar", "2fa", "username", "close_sessions", "privacy",
+                      "clear_bio", "remove_username", "remove_avatar", "reset_2fa",
+                      "set_online", "check_restriction"):
                 params, label = _build_profile_params(op, body, ids)
                 if params is None:
                     return _err(label, 400)
@@ -2455,6 +2467,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["privacy_key"] = pk
             params["privacy_allow"] = bool(body.get("privacy_allow", False))
             label = f"Приватность: {pk}"
+        elif op == "reset_2fa":
+            cp = (body.get("current_password") or "").strip()
+            if not cp:
+                return _err("Укажите текущий пароль 2FA для снятия", 400)
+            params["current_password"] = cp
+            label = "Снятие 2FA"
+        elif op in ("clear_bio", "remove_username", "remove_avatar", "set_online", "check_restriction"):
+            label = {"clear_bio": "Очистка bio", "remove_username": "Снятие username",
+                     "remove_avatar": "Удаление фото", "set_online": "В сети",
+                     "check_restriction": "Проверка ограничений"}[op]
         else:
             return _err("Неизвестная операция", 400)
         try:
@@ -2493,6 +2515,71 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("account_login_code uid=%d acc=%d", uid, acc_id)
             return _err("Ошибка получения кода", 500)
+
+    async def account_check_restriction(request: web.Request) -> web.Response:
+        """Инлайн-проверка ограничений одного аккаунта (жив/ограничен/удалён).
+        Аналог раздела «ПРОВЕРКА» Telegram Expert — результат сразу, без очереди."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import profile_setter_engine as pse
+            res = await pse.check_restriction(acc["session_str"], dict(acc))
+            if not res.get("ok"):
+                return _err(res.get("error") or "Ошибка проверки", 502)
+            return _json_resp({
+                "ok": True,
+                "alive": res.get("alive"),
+                "restricted": res.get("restricted"),
+                "deleted": res.get("deleted"),
+                "reason": res.get("reason"),
+                "username": res.get("username"),
+                "user_id": res.get("user_id"),
+            })
+        except Exception:
+            log.exception("account_check_restriction uid=%d acc=%d", uid, acc_id)
+            return _err("Ошибка проверки", 500)
+
+    async def accounts_export_json(request: web.Request) -> web.Response:
+        """Экспорт МЕТАДАННЫХ аккаунтов пользователя в JSON (аналог «РАБОТА С JSON»).
+        Секреты (session_str, proxy-креды) НАМЕРЕННО не выгружаются — иначе это
+        обнулило бы шифрование at-rest (см. AUDIT_LEDGER, разрыв №1). Экспортируем
+        то, что реально нужно для учёта: id, телефон, имя, username, кластер, статус,
+        есть ли прокси. Импорт tdata/session — отдельный защищённый путь."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        base = ("SELECT id, phone, first_name, username, cluster, acc_status, "
+                "real_check_status, warmup_level, is_active, "
+                "(proxy_id IS NOT NULL) AS has_proxy, added_at "
+                "FROM tg_accounts WHERE owner_id=$1 ORDER BY id")
+        try:
+            rows = await pool.fetch(base, uid)
+        except Exception:
+            # оборонительный фолбэк на гарантированно существующие колонки
+            rows = await _safe_fetch(pool,
+                "SELECT id, phone, first_name, username, is_active, "
+                "(proxy_id IS NOT NULL) AS has_proxy FROM tg_accounts "
+                "WHERE owner_id=$1 ORDER BY id", uid)
+        out = []
+        for r in (rows or []):
+            d = dict(r)
+            ca = d.get("added_at")
+            if hasattr(ca, "isoformat"):
+                d["added_at"] = ca.isoformat()
+            out.append(d)
+        return _json_resp({"ok": True, "count": len(out), "accounts": out})
 
     async def channel_edit(request: web.Request) -> web.Response:
         """Изменить название/описание/username канала (op: title|about|username).
@@ -9384,6 +9471,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
+    app.router.add_post("/api/miniapp/account/{acc_id}/check_restriction", account_check_restriction)
+    app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)
     app.router.add_post("/api/miniapp/channel/add", channel_add)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)

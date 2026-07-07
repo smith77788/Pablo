@@ -7260,15 +7260,39 @@ async def _exec_bulk_set_profile(
                     key=params.get("privacy_key", "phone"),
                     allow=bool(params.get("privacy_allow", False)),
                 )
+            elif op == "clear_bio":
+                res = await pse.clear_bio(acc["session_str"], dict(acc))
+            elif op == "remove_username":
+                res = await pse.remove_username(acc["session_str"], dict(acc))
+            elif op == "remove_avatar":
+                res = await pse.remove_avatar(acc["session_str"], dict(acc))
+            elif op == "reset_2fa":
+                res = await pse.reset_2fa(
+                    acc["session_str"], dict(acc),
+                    current_password=params.get("current_password", ""),
+                )
+            elif op == "set_online":
+                res = await pse.set_online(acc["session_str"], dict(acc))
+            elif op == "check_restriction":
+                res = await pse.check_restriction(acc["session_str"], dict(acc))
             else:
                 res = {"ok": False, "error": f"unknown op: {op}"}
 
             if res["ok"]:
                 ok_count += 1
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
-                )
+                # «Проверка» — фиксируем сам вердикт в лог, чтобы был виден результат
+                if op == "check_restriction":
+                    verdict = pse.format_restriction_verdict(res)
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
+                        op_id, idx, f"acc#{acc['id']}", verdict[:200],
+                    )
+                else:
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                        op_id, idx, f"acc#{acc['id']}",
+                    )
             else:
                 fail_count += 1
                 await pool.execute(
@@ -7285,7 +7309,10 @@ async def _exec_bulk_set_profile(
             await asyncio.sleep(2.0)
 
     op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль",
-                 "username": "Username", "close_sessions": "Закрыть сессии", "privacy": "Приватность"}
+                 "username": "Username", "close_sessions": "Закрыть сессии", "privacy": "Приватность",
+                 "clear_bio": "Очистить bio", "remove_username": "Снять username",
+                 "remove_avatar": "Удалить фото", "reset_2fa": "Снять 2FA",
+                 "set_online": "В сети", "check_restriction": "Проверка ограничений"}
     summary = (
         f"🎨 Сеттер: {op_labels.get(op, op)}\n"
         f"✅ Успешно: {ok_count}/{total}"

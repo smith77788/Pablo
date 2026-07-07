@@ -612,6 +612,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
       <button class="btn btn-s" onclick="openMassOps()" style="flex:1;font-size:13px;padding:10px 6px">⚡ История</button>
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+      <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:12px">
@@ -1708,10 +1709,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="close_sessions">🔒 Закрыть сторонние сессии</option>
         <option value="privacy">🛡 Приватность</option>
         <option value="login_code">📩 Получить код входа</option>
+        <option value="check_restriction">🔎 Проверка ограничений</option>
+        <option value="set_online">🟢 Выставить «в сети»</option>
+        <option value="clear_bio">🧹 Очистить bio</option>
+        <option value="remove_username">🗑 Снять username</option>
+        <option value="remove_avatar">🗑 Удалить фото профиля</option>
+        <option value="reset_2fa">🔓 Снять 2FA-пароль</option>
       </select>
     </div>
     <div id="apF-username">
       <div class="field"><label>Новый username (без @) *</label><input type="text" id="apUsername" placeholder="username" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+    </div>
+    <div id="apF-reset2fa">
+      <div class="field"><label>Текущий пароль 2FA *</label><input type="text" id="apResetCurPass" placeholder="действующий пароль" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
     </div>
     <div id="apF-privacy">
       <div class="field"><label>Что настраиваем</label>
@@ -5232,12 +5242,19 @@ async function submitAccMeta() {
 const AP_INFO = {
   close_sessions: '🔒 Завершит ВСЕ прочие авторизации аккаунта (кроме текущей). Защищает угнанные/прогретые аккаунты.',
   login_code: '📩 Прочитает последний код входа Telegram из служебного чата. Работает при одиночном аккаунте.',
+  check_restriction: '🔎 Проверит состояние аккаунта: жив / ограничен / удалён (restriction_reason). Для одного аккаунта — результат сразу.',
+  set_online: '🟢 Разово выставит статус «в сети». Непрерывное присутствие — задача прогрева/планировщика.',
+  clear_bio: '🧹 Полностью очистит поле «О себе» (bio).',
+  remove_username: '🗑 Снимет публичный @username (аккаунт станет без юзернейма).',
+  remove_avatar: '🗑 Удалит ВСЕ фотографии профиля.',
+  reset_2fa: '🔓 Снимет облачный пароль 2FA. Нужен действующий текущий пароль.',
 };
 function apToggle() {
   const op=document.getElementById('apOp').value;
   const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none';};
   show('apF-name', op==='name'); show('apF-avatar', op==='avatar'); show('apF-2fa', op==='2fa');
   show('apF-username', op==='username'); show('apF-privacy', op==='privacy');
+  show('apF-reset2fa', op==='reset_2fa');
   const info=document.getElementById('apF-info'); if(info){ info.textContent = AP_INFO[op]||''; info.style.display = AP_INFO[op]?'':'none'; }
 }
 async function submitAccProfile() {
@@ -5255,13 +5272,27 @@ async function submitAccProfile() {
     finally{ btn.disabled=false; btn.textContent='Применить'; }
     return;
   }
+  // «Проверка ограничений» одиночного — инлайн, вердикт сразу.
+  if(op==='check_restriction' && !AP_MASS){
+    const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Проверяю…';
+    try{
+      const r=await api(`/api/miniapp/account/${AP_ACC_ID}/check_restriction`,{method:'POST'});
+      if(r.deleted) toast('❌ Аккаунт удалён / не авторизован');
+      else if(r.restricted) toast('⛔ Ограничен: '+(r.reason||'без причины'));
+      else toast('✅ Аккаунт жив, без ограничений'+(r.username?(' (@'+r.username+')'):''));
+    }catch(e){ errEl.textContent=e.message||'Ошибка'; }
+    finally{ btn.disabled=false; btn.textContent='Применить'; }
+    return;
+  }
   const payload={op};
   if(op==='name'){ payload.first_name=document.getElementById('apFirst').value.trim(); payload.last_name=document.getElementById('apLast').value.trim(); payload.about=document.getElementById('apAbout').value.trim(); if(!payload.first_name){errEl.textContent='Укажите имя';return;} }
   else if(op==='avatar'){ payload.avatar_url=document.getElementById('apAvatar').value.trim(); if(!payload.avatar_url){errEl.textContent='Укажите ссылку';return;} }
   else if(op==='username'){ payload.username=document.getElementById('apUsername').value.trim().replace(/^@/,''); if(!payload.username){errEl.textContent='Укажите username';return;} }
   else if(op==='privacy'){ payload.privacy_key=document.getElementById('apPrivKey').value; payload.privacy_allow=document.getElementById('apPrivAllow').value==='1'; }
-  else if(op==='close_sessions'){ /* без полей */ }
-  else { payload.new_password=document.getElementById('apNewPass').value.trim(); payload.current_password=document.getElementById('apCurPass').value.trim(); payload.hint=document.getElementById('apHint').value.trim(); if(!payload.new_password){errEl.textContent='Укажите новый пароль';return;} }
+  else if(op==='reset_2fa'){ payload.current_password=document.getElementById('apResetCurPass').value.trim(); if(!payload.current_password){errEl.textContent='Укажите текущий пароль 2FA';return;} }
+  else if(op==='2fa'){ payload.new_password=document.getElementById('apNewPass').value.trim(); payload.current_password=document.getElementById('apCurPass').value.trim(); payload.hint=document.getElementById('apHint').value.trim(); if(!payload.new_password){errEl.textContent='Укажите новый пароль';return;} }
+  else if(op==='close_sessions'||op==='clear_bio'||op==='remove_username'||op==='remove_avatar'||op==='set_online'||op==='check_restriction'){ /* без полей (check_restriction здесь — только масс-режим) */ }
+  else { errEl.textContent='Неизвестная операция'; return; }
   const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
     let r;
@@ -5554,6 +5585,19 @@ function openMassProfile() {
   document.getElementById('apOp').value='name';
   apToggle();
   showModal('mo-acc-profile');
+}
+// Экспорт метаданных аккаунтов в JSON (без секретов) — скачивание файла
+async function exportAccountsJson() {
+  try {
+    const r = await api('/api/miniapp/accounts/export_json', {method:'GET'});
+    const blob = new Blob([JSON.stringify(r.accounts||[], null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'accounts_'+(new Date().toISOString().slice(0,10))+'.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    toast('📤 Экспортировано аккаунтов: '+(r.count||0));
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка экспорта')); }
 }
 
 // ── Account Detail ─────────────────────────────────────

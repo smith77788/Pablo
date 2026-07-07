@@ -7,7 +7,11 @@ Telethon в песочнице недоступен, поэтому провер
 """
 from __future__ import annotations
 
-from services.profile_setter_engine import extract_login_code, _PRIVACY_KEYS
+from services.profile_setter_engine import (
+    extract_login_code,
+    format_restriction_verdict,
+    _PRIVACY_KEYS,
+)
 
 
 def test_extract_login_code_near_keyword():
@@ -39,3 +43,26 @@ def test_extract_login_code_none_on_empty_or_no_digits():
 def test_privacy_keys_contract():
     # ключи приватности, которые понимает set_privacy и валидирует API-слой
     assert _PRIVACY_KEYS == {"phone", "invite", "lastseen"}
+
+
+def test_restriction_verdict_deleted_wins():
+    # удалённый аккаунт — приоритетнее любого другого состояния
+    assert format_restriction_verdict(
+        {"deleted": True, "restricted": True, "reason": "x"}
+    ).startswith("❌")
+
+
+def test_restriction_verdict_restricted_with_reason():
+    v = format_restriction_verdict({"deleted": False, "restricted": True, "reason": "spam"})
+    assert v.startswith("⛔") and "spam" in v
+
+
+def test_restriction_verdict_restricted_no_reason():
+    v = format_restriction_verdict({"restricted": True, "reason": None})
+    assert "без причины" in v
+
+
+def test_restriction_verdict_alive():
+    assert format_restriction_verdict(
+        {"deleted": False, "restricted": False}
+    ).startswith("✅")

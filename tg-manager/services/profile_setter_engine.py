@@ -285,6 +285,148 @@ async def get_login_code(session_string: str, _acc: dict | None) -> dict[str, An
             pass
 
 
+# ── Сброс/удаление полей профиля ──────────────────────────────────────────────
+
+async def clear_bio(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Очистить bio (О себе). Аналог «Удалить bio» Telegram Expert."""
+    from telethon.tl.functions.account import UpdateProfileRequest
+
+    client = await _connect(session_string, _acc)
+    try:
+        await asyncio.wait_for(
+            client(UpdateProfileRequest(about="")), timeout=_ACTION_TIMEOUT
+        )
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def remove_username(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Снять @username аккаунта (пустая строка). Аналог «Удалить username»."""
+    return await set_username(session_string, _acc, "")
+
+
+async def remove_avatar(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Удалить ВСЕ фото профиля. Аналог «Удалить фото» Telegram Expert."""
+    from telethon import utils
+    from telethon.tl.functions.photos import DeletePhotosRequest
+
+    client = await _connect(session_string, _acc)
+    try:
+        photos = await asyncio.wait_for(
+            client.get_profile_photos("me"), timeout=_ACTION_TIMEOUT
+        )
+        if not photos:
+            return {"ok": True, "error": None, "note": "нет фото"}
+        ids = [utils.get_input_photo(p) for p in photos]
+        await asyncio.wait_for(client(DeletePhotosRequest(id=ids)), timeout=_ACTION_TIMEOUT)
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ── Сброс 2FA (снять пароль) ──────────────────────────────────────────────────
+
+async def reset_2fa(
+    session_string: str, _acc: dict | None, current_password: str
+) -> dict[str, Any]:
+    """Снять 2FA-пароль (нужен текущий пароль). Аналог «Сбросить/удалить 2FA»."""
+    client = await _connect(session_string, _acc)
+    try:
+        if not current_password:
+            return {"ok": False, "error": "нужен текущий пароль для снятия 2FA"}
+        await asyncio.wait_for(
+            client.edit_2fa(current_password=current_password, new_password=None),
+            timeout=30.0,
+        )
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ── Держать онлайн (разовый пинг) ─────────────────────────────────────────────
+
+async def set_online(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Выставить статус «в сети» (offline=False). Разовый пинг присутствия.
+    Непрерывный keep-online — задача планировщика (см. backlog)."""
+    from telethon.tl.functions.account import UpdateStatusRequest
+
+    client = await _connect(session_string, _acc)
+    try:
+        await asyncio.wait_for(
+            client(UpdateStatusRequest(offline=False)), timeout=_ACTION_TIMEOUT
+        )
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+# ── Проверка ограничений (бан / restricted / deleted) ─────────────────────────
+
+async def check_restriction(session_string: str, _acc: dict | None) -> dict[str, Any]:
+    """Проверить состояние аккаунта: жив / ограничен / удалён.
+    Аналог раздела «ПРОВЕРКА» Telegram Expert. Возвращает
+    {ok, alive, restricted, deleted, reason, username, user_id}."""
+    client = await _connect(session_string, _acc)
+    try:
+        me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
+        if me is None:
+            return {"ok": True, "alive": False, "restricted": False,
+                    "deleted": True, "reason": "сессия не авторизована",
+                    "username": None, "user_id": None}
+        reasons = getattr(me, "restriction_reason", None) or []
+        reason_text = "; ".join(
+            f"{getattr(r, 'platform', '')}:{getattr(r, 'text', '')}" for r in reasons
+        ) if reasons else None
+        return {
+            "ok": True,
+            "alive": True,
+            "restricted": bool(getattr(me, "restricted", False)),
+            "deleted": bool(getattr(me, "deleted", False)),
+            "reason": reason_text,
+            "username": getattr(me, "username", None),
+            "user_id": getattr(me, "id", None),
+        }
+    except Exception as exc:
+        return {"ok": False, "alive": False, "restricted": False,
+                "deleted": False, "reason": None, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+def format_restriction_verdict(res: dict) -> str:
+    """Свернуть результат check_restriction в человекочитаемый вердикт.
+    Чистая функция (без Telethon) — тестируется отдельно от сетевого пути."""
+    if res.get("deleted"):
+        return "❌ удалён/не авторизован"
+    if res.get("restricted"):
+        return "⛔ ограничен: " + (res.get("reason") or "без причины")
+    return "✅ жив, без ограничений"
+
+
 # ── Спинтакс (рандомизация текста) ───────────────────────────────────────────
 
 def expand_spintax(text: str) -> str:
