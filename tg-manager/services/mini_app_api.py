@@ -7096,6 +7096,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "alive": bool(res.get("ok")),
                            "latency_ms": res.get("latency_ms"), "error": res.get("error")})
 
+    async def proxies_isolation_check(request: web.Request) -> web.Response:
+        """Проверка уникальности IP: активные аккаунты, делящие один IP прокси
+        (нарушение изоляции → риск бана), + аккаунты без прокси."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.proxy_selector import audit_proxy_isolation
+            return _json_resp(await audit_proxy_isolation(pool, uid))
+        except Exception as e:
+            log.exception("proxies_isolation_check uid=%s", uid)
+            return _err(str(e), 500)
+
     async def check_all_proxies(request: web.Request) -> web.Response:
         """Проверить все прокси владельца (ограниченная конкурентность)."""
         uid = _get_uid(request)
@@ -9384,6 +9397,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/proxy/{proxy_id}", delete_proxy)
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/check", check_proxy)
     app.router.add_post("/api/miniapp/proxies/check_all", check_all_proxies)
+    app.router.add_get("/api/miniapp/proxies/isolation_check", proxies_isolation_check)
     app.router.add_post("/api/miniapp/proxies/import", import_proxies)
     # Analytics
     app.router.add_get("/api/miniapp/analytics", analytics)

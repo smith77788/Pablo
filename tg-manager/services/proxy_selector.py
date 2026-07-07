@@ -131,6 +131,40 @@ def validate_ip_diversity(accounts: list[dict], max_per_ip: int = 3) -> dict:
     }
 
 
+async def audit_proxy_isolation(pool, owner_id: int, max_per_ip: int = 1) -> dict:
+    """Аудит изоляции: активные аккаунты, делящие один IP прокси (риск бана), и
+    аккаунты без прокси. max_per_ip=1 — строгая изоляция (каждый аккаунт на своём IP).
+
+    Подключает ранее «мёртвую» validate_ip_diversity к реальному owner-скоупу.
+    proxy_url зашифрован — extract_ip_from_proxy расшифровывает внутри.
+    """
+    rows = await pool.fetch(
+        "SELECT a.id, a.phone, p.proxy_url "
+        "FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+        "WHERE a.owner_id = $1 AND a.is_active = TRUE",
+        owner_id,
+    )
+    accounts = [dict(r) for r in rows]
+    diversity = validate_ip_diversity(accounts, max_per_ip=max_per_ip)
+    no_proxy = [r["id"] for r in accounts if not r.get("proxy_url")]
+    shared = {
+        ip: ids for ip, ids in diversity["ip_usage"].items() if len(ids) > max_per_ip
+    }
+    return {
+        "total_active": len(accounts),
+        "with_proxy": len(accounts) - len(no_proxy),
+        "accounts_without_proxy": no_proxy,
+        "shared_ip_groups": [
+            {"ip": ip, "account_ids": ids, "count": len(ids)}
+            for ip, ids in sorted(shared.items(), key=lambda kv: -len(kv[1]))
+        ],
+        "datacenter_warnings": diversity["datacenter_warnings"],
+        "datacenter_count": diversity["datacenter_count"],
+        "isolation_ok": not shared and not no_proxy,
+    }
+
+
 def get_proxy_score(proxy_url: str, action_type: str = "default") -> float:
     """Качество прокси по опыту infra_memory. 0.5 = нейтральный/новый.
 

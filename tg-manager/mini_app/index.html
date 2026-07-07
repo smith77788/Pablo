@@ -2328,6 +2328,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="checkAllProxies()">🔄 Проверить все</button>
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="toggleProxyImport()">📥 Импорт списком</button>
     </div>
+    <div style="margin-bottom:8px">
+      <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px" onclick="checkProxyIsolation()">🛡 Уникальность IP (изоляция)</button>
+    </div>
+    <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyImportBox" style="display:none;margin-bottom:8px">
       <textarea id="proxyImport" rows="4" placeholder="socks5://user:pass@host:port&#10;http://host:port&#10;по одному на строку"></textarea>
       <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitProxyImport()">Импортировать</button>
@@ -7318,6 +7322,30 @@ async function checkAllProxies() {
 function toggleProxyImport() {
   const b = document.getElementById('proxyImportBox');
   b.style.display = b.style.display==='none' ? 'block' : 'none';
+}
+async function checkProxyIsolation() {
+  const box = document.getElementById('proxyIsolationBox');
+  box.style.display='block';
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const r = await api('/api/miniapp/proxies/isolation_check');
+    let h = '';
+    if (r.isolation_ok) {
+      h = `<div style="color:#22c55e">✅ Изоляция в порядке: ${r.with_proxy}/${r.total_active} активных аккаунтов на уникальных IP.</div>`;
+    } else {
+      if ((r.shared_ip_groups||[]).length) {
+        h += `<div style="color:#ef4444">⚠️ Общий IP (риск бана):</div>`;
+        h += r.shared_ip_groups.map(g=>`<div>• <code>${esc(g.ip)}</code> — ${g.count} аккаунтов: ${g.account_ids.join(', ')}</div>`).join('');
+      }
+      if ((r.accounts_without_proxy||[]).length) {
+        h += `<div style="color:#f59e0b;margin-top:4px">🔌 Без прокси: ${r.accounts_without_proxy.length} (${r.accounts_without_proxy.slice(0,20).join(', ')})</div>`;
+      }
+    }
+    if ((r.datacenter_warnings||[]).length) {
+      h += `<div style="color:#f59e0b;margin-top:4px">🏢 Datacenter IP: ${r.datacenter_count}</div>`;
+    }
+    box.innerHTML = h;
+  } catch(e) { box.innerHTML = '<div class="err-msg-txt">⚠️ '+esc(e.message||'Ошибка')+'</div>'; }
 }
 async function submitProxyImport() {
   const raw = document.getElementById('proxyImport').value.trim();
