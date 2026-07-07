@@ -1239,7 +1239,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # Audience Parser: parse members/active from channel/group.
                 # params: {source_ref, parse_type, limit}
                 result = await _exec_parse_audience(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_set_profile" or op_type == "profile_setter":
+            elif op_type == "profile_setter":
+                # bulk_set_profile обрабатывается выше (единственная ветка) — здесь
+                # только псевдоним profile_setter, чтобы не было дубля диспетчера.
                 result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
             elif op_type == "reg_check":
                 # params: {target: "username or @username or link"}
