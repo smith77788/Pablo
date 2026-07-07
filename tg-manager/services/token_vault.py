@@ -50,3 +50,17 @@ def decrypt_token(enc: str) -> str:
         return cipher.decrypt_and_verify(ct, tag).decode()
     except Exception:
         return enc  # decryption failed — return raw value to avoid silent data loss
+
+
+def session_fingerprint(session_str: str) -> str:
+    """Детерминированный fingerprint сессии для ДЕДУПА (не для безопасности).
+
+    encrypt_token недетерминирован (случайный nonce) → одинаковая сессия каждый
+    раз шифруется по-разному, поэтому дедуп по равенству шифротекста невозможен.
+    Здесь считаем стабильный sha256 от PLAINTEXT-сессии: если на вход пришла уже
+    зашифрованная строка — сначала снимаем шифр, чтобы fp совпадал с plaintext.
+    """
+    if not session_str:
+        return ""
+    plain = decrypt_token(session_str) if session_str.startswith(_MARKER) else session_str
+    return hashlib.sha256(plain.encode()).hexdigest()

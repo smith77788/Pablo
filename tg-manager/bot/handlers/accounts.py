@@ -3404,16 +3404,19 @@ async def _finalize_import(
     if existing_by_uid:
         # Account already exists — update the session string instead of inserting.
         try:
+            from services.token_vault import encrypt_token, session_fingerprint
+
             await pool.execute(
                 """UPDATE tg_accounts
-                   SET session_str=$1, first_name=$2, username=$3,
+                   SET session_str=$1, session_fp=$5, first_name=$2, username=$3,
                        acc_status='active', status_reason=NULL,
                        status_checked_at=now(), is_active=true, last_used=now()
                    WHERE id=$4""",
-                session_str,
+                encrypt_token(session_str),
                 info.get("first_name", ""),
                 info.get("username", ""),
                 existing_by_uid["id"],
+                session_fingerprint(session_str),
             )
         except Exception as exc:
             await message.answer(
@@ -3686,16 +3689,19 @@ async def _do_batch_import(
 
             if existing_uid_row:
                 acc_id = existing_uid_row["id"]
+                from services.token_vault import encrypt_token, session_fingerprint
+
                 await pool.execute(
                     """UPDATE tg_accounts
-                       SET session_str=$1, first_name=$2, username=$3,
+                       SET session_str=$1, session_fp=$5, first_name=$2, username=$3,
                            acc_status='active', status_reason=NULL,
                            status_checked_at=now(), is_active=true, last_used=now()
                        WHERE id=$4""",
-                    validated_str,
+                    encrypt_token(validated_str),
                     info.get("first_name", ""),
                     info.get("username", ""),
                     acc_id,
+                    session_fingerprint(validated_str),
                 )
                 name = (
                     info.get("first_name")

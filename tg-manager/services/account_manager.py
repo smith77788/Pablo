@@ -596,6 +596,12 @@ def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
     from telethon.network.connection.tcpobfuscated import ConnectionTcpObfuscated
+    from services.token_vault import decrypt_token
+
+    # Единственная точка потребления сессии → здесь же расшифровываем.
+    # decrypt_token — passthrough для legacy-plaintext, поэтому старые строки
+    # продолжают работать без миграции.
+    session_string = decrypt_token(session_string or "")
 
     d = _normalize_device_profile(device)
 

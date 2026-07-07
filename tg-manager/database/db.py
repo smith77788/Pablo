@@ -2668,11 +2668,17 @@ async def add_tg_account(
     lang_code: str | None = None,
     system_lang_code: str | None = None,
 ) -> int:
+    # Шифруем сессию at-rest (session_str — эквивалент пароля к аккаунту).
+    # session_fp — детерминированный fingerprint для дедупа (шифр недетерминирован).
+    from services.token_vault import encrypt_token, session_fingerprint
+
+    _enc_session = encrypt_token(session_str)
+    _fp = session_fingerprint(session_str)
     row = await pool.fetchrow(
         """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
                first_name, username, device_model, system_version, app_version,
-               lang_code, system_lang_code)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               lang_code, system_lang_code, session_fp)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            ON CONFLICT (owner_id, phone) DO UPDATE
            SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
                device_model=COALESCE($7, tg_accounts.device_model),
@@ -2680,6 +2686,7 @@ async def add_tg_account(
                app_version=COALESCE($9, tg_accounts.app_version),
                lang_code=COALESCE($10, tg_accounts.lang_code),
                system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
+               session_fp=$12,
                acc_status='active',
                status_reason=NULL,
                status_checked_at=now(),
@@ -2688,7 +2695,7 @@ async def add_tg_account(
            RETURNING id""",
         owner_id,
         phone,
-        session_str,
+        _enc_session,
         tg_user_id,
         first_name,
         username,
@@ -2697,6 +2704,7 @@ async def add_tg_account(
         app_version,
         lang_code,
         system_lang_code,
+        _fp,
     )
     acc_id = row["id"]
     # Регистрируем связь телефон→владелец для анти-абуз системы

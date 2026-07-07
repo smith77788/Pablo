@@ -97,8 +97,15 @@ async def import_sessions(
             failed += 1
             errors.append(f"Строка {i+1}: невалидная сессия — {result.get('error', '?')}")
             continue
+        # Дедуп по детерминированному fingerprint (шифр недетерминирован, поэтому
+        # сравнение по session_str=шифротекст не сработало бы). Fallback на
+        # плейнтекст-равенство ловит legacy-строки, у которых session_fp ещё NULL.
+        from services.token_vault import encrypt_token, session_fingerprint
+
+        _fp = session_fingerprint(session_str)
         existing = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE session_str=$1", session_str
+            "SELECT id FROM tg_accounts WHERE session_fp=$1 OR session_str=$2",
+            _fp, session_str,
         )
         if existing:
             failed += 1
@@ -106,9 +113,9 @@ async def import_sessions(
             continue
         try:
             await pool.execute(
-                """INSERT INTO tg_accounts (owner_id, session_str, phone, is_active, acc_status)
-                   VALUES ($1, $2, $3, TRUE, 'active')""",
-                owner_id, session_str, result.get('phone', ''),
+                """INSERT INTO tg_accounts (owner_id, session_str, session_fp, phone, is_active, acc_status)
+                   VALUES ($1, $2, $3, $4, TRUE, 'active')""",
+                owner_id, encrypt_token(session_str), _fp, result.get('phone', ''),
             )
             imported += 1
         except Exception as e:

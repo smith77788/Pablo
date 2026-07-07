@@ -90,3 +90,8 @@
 Проверено: шифруются ли Telegram-сессии и прокси-креды в БД, как того требуют `.botmother/15` и `docs/SECURITY.md`.
 Найдено: **plaintext** — `tg_accounts.session_str` и `user_proxies.proxy_url` нигде не проходят через encrypt/decrypt, хотя `services/token_vault.py` (AES-256-GCM) уже реализован и используется для bot-токенов. Самый серьёзный разрыв документация↔реальность из найденных.
 Исправлено: нет — требует миграции + decrypt-on-read на ~30+ точках чтения, высокий blast radius на горячем проде. Зафиксировано в CLAUDE.md, ждёт отдельного спланированного захода.
+
+## tg-manager: session_str шифрование at-rest — РЕАЛИЗОВАНО — 2026-07-07
+Проверено/сделано: закрыта session-половина разрыва выше. `tg_accounts.session_str` теперь шифруется AES-256-GCM (token_vault, префикс `ENC:`) на всех 4 точках записи (`db.add_tg_account`, `session_importer`, `accounts.py` re-auth ×2, `auto_registrar`); decrypt — в единственной точке потребления `_make_client` (passthrough для legacy-plaintext → миграция ленивая, без простоя). Подводный камень: шифр недетерминирован (случайный nonce) → дедуп по равенству session_str ломался; добавлен детерминированный `session_fp = sha256(plaintext)` (schema_v143) + дедуп в импортёре по `session_fp OR legacy plaintext`.
+Верификация: реальный PostgreSQL 16 — сессия пишется с `ENC:`, decrypt возвращает исходник, fingerprint совпадает, upsert без дублей; 657 тестов + 7 новых регресс-тестов (`tests/test_session_encryption.py`).
+Осталось follow-up: `proxy_url` в `user_proxies`/`tg_accounts` (читается в ~8 разрозненных местах — отдельный заход) и `booster_sessions.session_str`.
