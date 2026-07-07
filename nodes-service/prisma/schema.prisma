@@ -1,0 +1,74 @@
+// Prisma-схема модуля Telegram Nodes.
+// Провайдер — postgresql (совместимо с существующим слоем данных Infragram).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TelegramNode {
+  id                  String            @id @default(cuid())
+  workspaceTelegramId String            @map("workspace_telegram_id")
+  accessHash          String?           @map("access_hash")
+  title               String
+  username            String?
+  description         String?
+  creatorAccountId    String            @map("creator_account_id")
+  status              String            @default("PROVISIONING")
+  createdAt           DateTime          @default(now()) @map("created_at")
+
+  subNodes SubNode[]
+  logs     NodeActivityLog[]
+
+  @@index([creatorAccountId, status])
+  @@map("telegram_nodes")
+}
+
+model SubNode {
+  id              String       @id @default(cuid())
+  nodeId          String       @map("node_id")
+  topicTelegramId String       @map("topic_telegram_id")
+  title           String
+  type            String // LOGS | METRICS | COMMANDS
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  node TelegramNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+  @@map("sub_nodes")
+}
+
+model NodeActivityLog {
+  id        String   @id @default(cuid())
+  nodeId    String   @map("node_id")
+  eventType String   @map("event_type")
+  message   String
+  payload   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  node TelegramNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, createdAt])
+  @@map("node_activity_logs")
+}
+
+// Пул авторизованных аккаунтов (источник StringSession для NodeClientFactory).
+// StringSession хранить ЗАШИФРОВАННЫМ; расшифровка — в AccountProvider.decrypt.
+model AccountSession {
+  accountId     String   @id @map("account_id")
+  stringSession String   @map("string_session")
+  apiId         Int?     @map("api_id")
+  apiHash       String?  @map("api_hash")
+  proxyIp       String?  @map("proxy_ip")
+  proxyPort     Int?     @map("proxy_port")
+  proxyUser     String?  @map("proxy_user")
+  proxyPass     String?  @map("proxy_pass")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("account_sessions")
+}
