@@ -676,6 +676,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="sel-bar-acts">
         <button class="mini-btn" onclick="openChMass('post')">📤 Пост</button>
+        <button class="mini-btn" onclick="openChMass('title')">📛 Название</button>
         <button class="mini-btn" onclick="openChMass('about')">✏️ Описание</button>
         <button class="mini-btn" onclick="openChMass('username')">🔗 Username</button>
         <button class="mini-btn" onclick="runChMass('promote')">👑 Админы</button>
@@ -1754,6 +1755,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field">
       <label>Что меняем</label>
       <select id="ceOp" onchange="ceToggle()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="title">Название</option>
         <option value="about">Описание</option>
         <option value="username">Username</option>
       </select>
@@ -5128,12 +5130,13 @@ function openChanEdit(id) {
   CE_CH_ID = id;
   const e=document.getElementById('ceErr'); if(e) e.textContent='';
   document.getElementById('ceValue').value='';
-  document.getElementById('ceOp').value='about'; ceToggle();
+  document.getElementById('ceOp').value='title'; ceToggle();
   showModal('mo-chan-edit');
 }
 function ceToggle() {
   const op=document.getElementById('ceOp').value;
-  document.getElementById('ceLbl').textContent = op==='about'?'Новое описание *':'Новый username (без @) *';
+  const lbl = op==='about'?'Новое описание *':op==='username'?'Новый username (без @) *':'Новое название *';
+  document.getElementById('ceLbl').textContent = lbl;
 }
 async function submitChanEdit() {
   const errEl=document.getElementById('ceErr'); errEl.textContent='';
@@ -5146,6 +5149,17 @@ async function submitChanEdit() {
     toast(`✅ Поставлено в очередь (#${r.op_id})`); closeModal('mo-chan-edit');
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Применить'; }
+}
+async function getChannelInviteLink(chId) {
+  toast('🔗 Получаю ссылку…');
+  try {
+    const r=await api(`/api/miniapp/channel/${chId}/invite_link`);
+    if(r.invite_link){
+      try { await navigator.clipboard.writeText(r.invite_link); } catch(_){}
+      if(tg?.showPopup){ tg.showPopup({title:'Инвайт-ссылка', message:r.invite_link, buttons:[{type:'ok'}]}); }
+      else { toast('🔗 '+r.invite_link); }
+    } else { toast('⚠️ Ссылка недоступна'); }
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function promoteChannel(chId) {
   if(!await askConfirm('Назначить все аккаунты администраторами этого канала?')) return;
@@ -5592,6 +5606,7 @@ function openChMass(op) {
   CHM_OP = op;
   const cfg = {
     post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах.`, ph:'Текст поста…'},
+    title:{t:'📛 Новое название', h:`Название изменится в ${CH_SEL.size} каналах.`, ph:'Новое название…'},
     about:{t:'✏️ Новое описание', h:`Описание изменится в ${CH_SEL.size} каналах.`, ph:'Новое описание…'},
     username:{t:'🔗 Новый username', h:'Без @. Применяется по одному каналу (username уникален).', ph:'newusername'},
   }[op];
@@ -5674,6 +5689,7 @@ function buildChDetail(d) {
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1;min-width:88px">📝 Опубликовать</button>
       <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1;min-width:88px">📌 Закрепить пост</button>
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1;min-width:88px">✏️ Изменить</button>
+      <button class="btn btn-s" onclick="getChannelInviteLink(${c.channel_id})" style="flex:1;min-width:88px">🔗 Ссылка</button>
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1;min-width:88px">👑 Админы</button>
       <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1;min-width:88px">🗑 Убрать</button>
     </div>

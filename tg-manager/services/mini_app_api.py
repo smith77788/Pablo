@@ -106,6 +106,17 @@ def _err(msg: str, status: int = 400) -> web.Response:
     return _json_resp({"error": msg}, status)
 
 
+# Единый маппинг UI-операции редактирования канала → op воркера bulk_chan_exec.
+# Используется и в channel_edit (одиночный), и в channels_mass (массовый) —
+# один источник истины, чтобы наборы не разъехались.
+_CHANNEL_EDIT_OPS = {"title": "chan_title", "about": "chan_about", "username": "chan_uname"}
+
+
+def channel_edit_worker_op(op) -> str | None:
+    """UI-op ('title'|'about'|'username') → воркер-op, либо None если не поддержан."""
+    return _CHANNEL_EDIT_OPS.get(op)
+
+
 def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dict[str, Any]]:
     """Список шаблонов → элементы для фронта: шаблон, пример, предупреждения.
 
@@ -1201,6 +1212,43 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("pin_channel_last_post ch=%d uid=%d", ch_id, uid)
             return _err("Failed to enqueue pin", 500)
 
+    async def channel_invite_link(request: web.Request) -> web.Response:
+        """Сгенерировать/получить инвайт-ссылку канала (инлайн, один Telethon-вызов).
+        Возможность account_manager.get_channel_invite_link раньше была недоступна в UI."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid ch_id", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
+            "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+        if not ch:
+            return _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return _err("У канала нет привязанного аккаунта", 400)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", int(ch["acc_id"]), uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Привязанный аккаунт недоступен", 400)
+        try:
+            from services import account_manager
+            link = await account_manager.get_channel_invite_link(
+                acc["session_str"], int(ch_id), _acc=dict(acc),
+                access_hash=int(ch.get("access_hash") or 0),
+            )
+            if not link:
+                return _err("Не удалось получить ссылку (нужны права администратора у аккаунта)", 502)
+            return _json_resp({"ok": True, "invite_link": link, "title": ch.get("title") or ""})
+        except Exception:
+            log.exception("channel_invite_link ch=%d uid=%d", ch_id, uid)
+            return _err("Ошибка получения ссылки", 500)
+
     async def channel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -2247,7 +2295,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def channel_edit(request: web.Request) -> web.Response:
-        """Изменить описание/username канала (op: about|username).
+        """Изменить название/описание/username канала (op: title|about|username).
         Маппится на op_type=bulk_chan_exec (per-channel пара)."""
         uid = _get_uid(request)
         if not uid:
@@ -2259,8 +2307,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid request", 400)
         op = body.get("op")
         value = (body.get("value") or "").strip()
-        if op not in ("about", "username") or not value:
-            return _err("Укажите op (about|username) и значение", 400)
+        worker_op = channel_edit_worker_op(op)
+        if not worker_op or not value:
+            return _err("Укажите op (title|about|username) и значение", 400)
+        if op == "title" and len(value) > 128:
+            return _err("Название канала — до 128 символов", 400)
         ch = await _safe_fetchrow(pool,
             "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
             ch_id, uid)
@@ -2268,7 +2319,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Канал не найден", 404)
         if not ch.get("acc_id"):
             return _err("У канала нет привязанного аккаунта", 400)
-        worker_op = "chan_about" if op == "about" else "chan_uname"
         params = {
             "op": worker_op,
             "value": value,
@@ -2334,11 +2384,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Каналы не найдены или нет привязанного аккаунта", 404)
         n = len(chans)
         try:
-            if op in ("about", "username"):
+            if channel_edit_worker_op(op):
                 value = (body.get("value") or "").strip()
                 if not value:
                     return _err("Укажите значение", 400)
-                worker_op = "chan_about" if op == "about" else "chan_uname"
+                if op == "title" and len(value) > 128:
+                    return _err("Название канала — до 128 символов", 400)
+                worker_op = channel_edit_worker_op(op)
                 pairs = [{"channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
                           "title": c.get("title") or ""} for c in chans]
                 params = {"op": worker_op, "value": value, "base_uname": value,
@@ -8455,6 +8507,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/channel/{ch_id}", channel_detail)
     app.router.add_post("/api/miniapp/channel/{ch_id}/post", post_to_channel)
     app.router.add_post("/api/miniapp/channel/{ch_id}/pin", pin_channel_last_post)
+    app.router.add_get("/api/miniapp/channel/{ch_id}/invite_link", channel_invite_link)
     # Bot subscribers
     app.router.add_get("/api/miniapp/bot/{bot_id}/subscribers", bot_subscribers)
     # DM campaigns

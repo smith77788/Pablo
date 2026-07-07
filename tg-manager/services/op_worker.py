@@ -5843,7 +5843,7 @@ async def _exec_bulk_chan_exec(
         except Exception as e:
             log_exc_swallow(log, f"bulk_chan_exec brand_injection failed: {e}")
 
-    if not channel_acc_pairs or op not in ("chan_uname", "chan_about"):
+    if not channel_acc_pairs or op not in ("chan_uname", "chan_about", "chan_title"):
         return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}
 
     # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
@@ -5943,6 +5943,22 @@ async def _exec_bulk_chan_exec(
                     else:
                         err_list.append(f"❌ {chan_title}: ошибка обновления")
 
+                elif op == "chan_title":
+                    ok = await account_manager.edit_channel_title(
+                        acc["session_str"], ch_id, value, _acc=acc
+                    )
+                    if ok:
+                        ok_list.append(f"✅ {chan_title} → {_html.escape(value[:40])}")
+                        try:
+                            await pool.execute(
+                                "UPDATE managed_channels SET title=$1 WHERE owner_id=$2 AND channel_id=$3",
+                                value, owner_id, ch_id,
+                            )
+                        except Exception as e:
+                            log_exc_swallow(log, f"bulk_chan_exec: persist title failed for ch={ch_id}: {e}")
+                    else:
+                        err_list.append(f"❌ {chan_title}: ошибка смены названия")
+
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -5957,7 +5973,7 @@ async def _exec_bulk_chan_exec(
     finally:
         await release_accounts(acc_ids)
 
-    op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
+    op_label = {"chan_uname": "🔤 Username", "chan_about": "📄 Описание", "chan_title": "📛 Название"}.get(op, op)
     summary_lines = [
         f"{op_label} — завершено: ✅ {len(ok_list)} ❌ {len(err_list)} из {total}"
     ] + (ok_list + err_list)[:40]
