@@ -92,12 +92,24 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         results["infra_memory_accounts(orphan)"] = -1
 
     try:
+        # user_proxies.proxy_url зашифрован → SQL-equality join с infra_memory_proxies
+        # (plaintext-ключи) невозможен. Считаем «сирот» в Python: decrypt активных
+        # user-прокси, затем удаляем строки памяти, которых нет среди них, ИЛИ старые.
+        from services.token_vault import decrypt_token
+
+        _user_rows = await pool.fetch("SELECT proxy_url FROM user_proxies")
+        _active = {
+            decrypt_token(r["proxy_url"]) for r in _user_rows if r["proxy_url"]
+        }
+        _im_urls = await pool.fetch("SELECT DISTINCT proxy_url FROM infra_memory_proxies")
+        _orphans = [r["proxy_url"] for r in _im_urls if r["proxy_url"] not in _active]
         deleted = await pool.fetchval(
             "WITH d AS (DELETE FROM infra_memory_proxies "
-            "WHERE NOT EXISTS (SELECT 1 FROM user_proxies WHERE proxy_url = infra_memory_proxies.proxy_url) "
+            "WHERE proxy_url = ANY($1::text[]) "
             "   OR updated_at < NOW() - INTERVAL '90 days' "
             "RETURNING 1) "
-            "SELECT COUNT(*) FROM d"
+            "SELECT COUNT(*) FROM d",
+            _orphans,
         )
         n = int(deleted or 0)
         results["infra_memory_proxies(orphan)"] = n

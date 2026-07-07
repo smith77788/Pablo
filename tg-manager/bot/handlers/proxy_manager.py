@@ -324,16 +324,21 @@ async def _save_proxy(
         proxy_type = "socks4"
 
     try:
+        # шифруем at-rest; дедуп по детерминированному proxy_fp (шифр недетерминирован)
+        from services.token_vault import encrypt_token, proxy_fingerprint
+
+        _fp = proxy_fingerprint(proxy_url)
         result = await pool.execute(
             """
-            INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (owner_id, proxy_url) DO NOTHING
+            INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type, proxy_fp)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO NOTHING
             """,
             owner_id,
             label,
-            proxy_url,
+            encrypt_token(proxy_url),
             proxy_type,
+            _fp,
         )
         display = html.escape(label or proxy_url)
         # "INSERT 0 1" — реально добавлено; "INSERT 0 0" — дубликат (ON CONFLICT).

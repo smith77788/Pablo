@@ -55,6 +55,11 @@ def extract_ip_from_proxy(proxy_url: str) -> Optional[str]:
     """Extract IP address from proxy URL."""
     if not proxy_url:
         return None
+    # proxy_url хранится зашифрованным — расшифровываем, иначе изоляция по IP
+    # сломается (regex не найдёт host в шифротексте). Passthrough для legacy.
+    from services.token_vault import decrypt_token
+
+    proxy_url = decrypt_token(proxy_url)
     # Try to extract IP from socks5://user:pass@host:port format
     match = re.search(r'@((\[?[0-9a-fA-F.:]+\]?)|(\d+\.\d+\.\d+\.\d+)):', proxy_url)
     if match:

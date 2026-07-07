@@ -6836,7 +6836,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         rows = await _safe_fetch(pool,
             """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
                FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
-        return _json_resp({"proxies": rows})
+        # proxy_url хранится зашифрованным — расшифровываем для отображения (passthrough legacy)
+        from services.token_vault import decrypt_token
+
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d.get("proxy_url"):
+                d["proxy_url"] = decrypt_token(d["proxy_url"])
+            out.append(d)
+        return _json_resp({"proxies": out})
 
     async def add_proxy(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6854,11 +6863,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not proxy_type:
             return _err("proxy_url must start with socks5://, socks4://, or http://")
         try:
+            # шифруем at-rest; дедуп по детерминированному proxy_fp (шифр недетерминирован)
+            from services.token_vault import encrypt_token, proxy_fingerprint
+
+            _fp = proxy_fingerprint(proxy_url)
             row = await pool.fetchrow(
-                """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type)
-                   VALUES($1,$2,$3,$4) ON CONFLICT(owner_id, proxy_url) DO UPDATE
+                """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type, proxy_fp)
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO UPDATE
                    SET label=EXCLUDED.label RETURNING id""",
-                uid, label, proxy_url, proxy_type)
+                uid, label, encrypt_token(proxy_url), proxy_type, _fp)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
             log.exception("add_proxy uid=%d", uid)

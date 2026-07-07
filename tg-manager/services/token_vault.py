@@ -64,3 +64,11 @@ def session_fingerprint(session_str: str) -> str:
         return ""
     plain = decrypt_token(session_str) if session_str.startswith(_MARKER) else session_str
     return hashlib.sha256(plain.encode()).hexdigest()
+
+
+def proxy_fingerprint(proxy_url: str) -> str:
+    """Детерминированный fingerprint proxy_url для дедупа/ключей (тот же приём,
+    что session_fingerprint): sha256 от PLAINTEXT. proxy_url — общий межтабличный
+    ключ (UNIQUE user_proxies, PK infra_memory_proxies), а шифр недетерминирован,
+    поэтому дедуп/ON CONFLICT переводятся на этот fp."""
+    return session_fingerprint(proxy_url)

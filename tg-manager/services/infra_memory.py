@@ -147,9 +147,17 @@ def record_proxy_op(
     success: bool,
     latency_ms: float = 0.0,
 ) -> None:
-    """Записать результат операции для прокси (in-memory, non-blocking)."""
+    """Записать результат операции для прокси (in-memory, non-blocking).
+
+    Ключ нормализуется к PLAINTEXT: proxy_url может прийти зашифрованным из
+    user_proxies (недетерминированный шифр) — без нормализации ключи бы «поплыли»
+    (разный шифротекст для одного прокси) и PK infra_memory_proxies размножился бы.
+    """
     if not proxy_url:
         return
+    from services.token_vault import decrypt_token
+
+    proxy_url = decrypt_token(proxy_url)
     key = (proxy_url, action_type)
     if key not in _proxy_memory:
         _proxy_memory[key] = _ProxyRecord(proxy_url=proxy_url, action_type=action_type)
@@ -189,10 +197,16 @@ def get_account_score(account_id: int, action_type: str) -> float:
 
 
 def get_proxy_score(proxy_url: str, action_type: str) -> float:
-    """Получить success_rate прокси для данного типа действия."""
+    """Получить success_rate прокси для данного типа действия.
+
+    Ключ нормализуется к plaintext (симметрично record_proxy_op): на вход может
+    прийти зашифрованный proxy_url из user_proxies — иначе lookup промахнётся.
+    """
     if not proxy_url:
         return 0.5
-    key = (proxy_url, action_type)
+    from services.token_vault import decrypt_token
+
+    key = (decrypt_token(proxy_url), action_type)
     if key not in _proxy_memory:
         return 0.5
     return _proxy_memory[key].success_rate

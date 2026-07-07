@@ -46,8 +46,10 @@ def _parse_proxy(proxy_url: str):
         return None
     try:
         import socks
+        from services.token_vault import decrypt_token
 
-        url = proxy_url.strip()
+        # proxy_url приходит зашифрованным из user_proxies; passthrough для legacy
+        url = decrypt_token(proxy_url).strip()
         if "://" in url:
             url = url.split("://", 1)[1]
         user, password = None, None
