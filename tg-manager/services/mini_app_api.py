@@ -5370,13 +5370,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not normalized or len(normalized) < 3:
                 return _err("Некорректный username или ссылка", 400)
 
+            # Настройки интенсивности (раньше UI слал только target+category):
+            # num_waves — эшелонирование (движок читает из params), max_accounts —
+            # сколько аккаунтов задействовать (меньше = щадящее, дольше живут).
+            try:
+                num_waves = max(1, min(5, int(body.get("num_waves") or 3)))
+            except (TypeError, ValueError):
+                num_waves = 3
+            try:
+                max_accounts = int(body.get("max_accounts") or 0)
+            except (TypeError, ValueError):
+                max_accounts = 0
+            acc_limit = max_accounts if 0 < max_accounts <= 50 else 50
+
             # Подсчёт доступных аккаунтов
             accs = await pool.fetch(
                 """SELECT id FROM tg_accounts
                    WHERE owner_id=$1 AND is_active=true
                      AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')
-                   LIMIT 50""",
-                uid,
+                   LIMIT $2""",
+                uid, acc_limit,
             )
             if not accs:
                 return _err("Нет доступных активных аккаунтов для Strike", 400)
@@ -5387,15 +5400,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    VALUES($1, 'strike', $2, 'pending', $3::jsonb, $4)
                    RETURNING id""",
                 uid,
-                f"Strike: {normalized} [{cat['label']}]",
+                f"Strike: {normalized} [{cat['label']}] · {num_waves} волн",
                 __import__("json").dumps({
                     "target": normalized,
                     "reason": cat["tg_reason"],
+                    "num_waves": num_waves,
                     "account_ids": [r["id"] for r in accs],
                 }),
                 len(accs),
             )
-            return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs)})
+            return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs), "num_waves": num_waves})
         except Exception as exc:
             log.exception("strike_launch uid=%d", uid)
             return _err(str(exc), 500)

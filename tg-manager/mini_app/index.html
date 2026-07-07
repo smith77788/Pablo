@@ -3243,6 +3243,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Step 3: Confirm -->
     <div id="strikeStep3" style="display:none">
       <div class="strike-preview" id="strikePreviewBox"></div>
+      <div class="field" style="margin-top:10px">
+        <label>Эшелонирование (волн)</label>
+        <select id="strikeWaves">
+          <option value="1">1 — одной волной</option>
+          <option value="3" selected>3 — по умолчанию</option>
+          <option value="5">5 — максимально растянуто (щадяще)</option>
+        </select>
+        <div class="field-note">Больше волн = аккаунты репортят с паузами, меньше риск для них</div>
+      </div>
+      <div class="field">
+        <label>Лимит аккаунтов</label>
+        <input type="number" id="strikeMaxAcc" min="1" max="50" placeholder="все доступные (до 50)">
+        <div class="field-note">Меньше аккаунтов = щадящий режим, дольше живут</div>
+      </div>
       <div style="font-size:12px;color:var(--hint);margin:10px 0;line-height:1.5">
         ⚠️ Strike отправляет официальные репорты через Telegram Trust &amp; Safety.
         Результат зависит от решения модераторов Telegram.
@@ -9571,6 +9585,7 @@ function openStrikeModal() {
   _STRIKE_TARGET = '';
   _STRIKE_CAT = null;
   document.getElementById('strikeTargetInput').value = '';
+  { const _w=document.getElementById('strikeWaves'); if(_w) _w.value='3'; const _m=document.getElementById('strikeMaxAcc'); if(_m) _m.value=''; }
   document.getElementById('strikeStep1').style.display = '';
   document.getElementById('strikeStep2').style.display = 'none';
   document.getElementById('strikeStep3').style.display = 'none';
@@ -9630,12 +9645,16 @@ async function strikeLaunch() {
   const btn = document.getElementById('strikeLaunchBtn');
   btn.disabled = true; btn.textContent = '⏳ Запуск...';
   try {
+    const _waves = parseInt(document.getElementById('strikeWaves')?.value)||3;
+    const _maxAccRaw = document.getElementById('strikeMaxAcc')?.value.trim();
+    const _payload = {target: _STRIKE_TARGET, category: _STRIKE_CAT.key, num_waves: _waves};
+    if (_maxAccRaw) _payload.max_accounts = parseInt(_maxAccRaw);
     const d = await api('/api/miniapp/strike/launch', {
       method: 'POST',
-      body: JSON.stringify({target: _STRIKE_TARGET, category: _STRIKE_CAT.key}),
+      body: JSON.stringify(_payload),
     });
     closeStrikeModal();
-    toast(`✅ Strike запущен — ${d.accounts} аккаунтов`);
+    toast(`✅ Strike запущен — ${d.accounts} аккаунтов, ${d.num_waves||_waves} волн`);
     openStrike();
   } catch(e) {
     toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
