@@ -16,6 +16,11 @@ from services.mini_app_auth import validate_init_data, make_token, parse_token
 
 log = logging.getLogger(__name__)
 
+# CRM-статусы жизненного цикла аккаунта (ручная воронка оператора, аналог
+# «ПЕРЕМЕСТИТЬ В СТАТУС» Telegram Expert). Отдельно от acc_status (техздоровье).
+# Ключ хранится в tg_accounts.stage; подпись/эмодзи — на клиенте.
+ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "reserve"}
+
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 30  # секунд
 
@@ -1062,7 +1067,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """SELECT id, phone, first_name, username, is_active, last_used, added_at,
                       COALESCE(trust_score, 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until
+                      cooldown_until, cluster, stage
                FROM tg_accounts WHERE owner_id=$1
                ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", uid)
         # Серверная агрегация KPI по ВСЕМ аккаунтам (список ограничен LIMIT 100 —
@@ -1093,7 +1098,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       is_active, added_at, last_used,
                       COALESCE(trust_score, 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until, cluster
+                      cooldown_until, cluster, stage
                FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Account not found", 404)
@@ -2385,6 +2390,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     uid, _json.dumps({"account_ids": ids}), n,
                     f"Скан ресурсов: {n} акк.")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
+            if op == "set_stage":
+                # Пере­мещение в CRM-статус — чистое DB-действие, без очереди/Telethon.
+                raw = body.get("stage")
+                stage = (str(raw).strip().lower() or None) if raw is not None else None
+                if stage is not None and stage not in ACCOUNT_STAGES:
+                    return _err("Неизвестный статус", 400)
+                await pool.execute(
+                    "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
+                    stage, uid, ids)
+                return _json_resp({"ok": True, "count": n, "stage": stage})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []
@@ -2923,6 +2938,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not label:
                 return _err("Метка не может быть пустой", 400)
             sets.append(f"first_name=${idx}"); args.append(label); idx += 1
+        if "stage" in body:
+            raw = body.get("stage")
+            stage = (str(raw).strip().lower() or None) if raw is not None else None
+            if stage is not None and stage not in ACCOUNT_STAGES:
+                return _err("Неизвестный статус", 400)
+            sets.append(f"stage=${idx}"); args.append(stage); idx += 1
         if not sets:
             return _err("Нечего обновлять", 400)
         args.extend([acc_id, uid])

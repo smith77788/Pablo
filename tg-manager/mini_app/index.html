@@ -633,6 +633,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <button class="mini-btn" onclick="runAccMass('check')">🔍 Проверка</button>
         <button class="mini-btn" onclick="runAccMass('scan')">🔎 Скан</button>
         <button class="mini-btn" onclick="openMassProfile()">🎨 Профиль</button>
+        <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
       </div>
     </div>
@@ -1799,8 +1800,45 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <label>Кластер</label>
       <input id="amCluster" type="text" maxlength="64" placeholder="Пусто = без кластера" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
     </div>
+    <div class="field">
+      <label>Статус (жизненный цикл)</label>
+      <select id="amStage" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="">— без статуса —</option>
+        <option value="new">🆕 Новый</option>
+        <option value="warming">🔥 Прогрев</option>
+        <option value="ready">✅ Готов</option>
+        <option value="in_work">⚙️ В работе</option>
+        <option value="resting">😴 Отдых</option>
+        <option value="frozen">🧊 Заморожен</option>
+        <option value="reserve">📦 Резерв</option>
+      </select>
+    </div>
     <div class="field-err" id="amErr"></div>
     <button class="btn btn-p" id="amBtn" onclick="submitAccMeta()" style="width:100%">Сохранить</button>
+  </div>
+</div>
+
+<!-- Modal: Mass stage move -->
+<div class="mbg" id="mo-acc-stage" onclick="if(event.target===this)closeModal('mo-acc-stage')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-acc-stage')">✕</div>
+    <div class="modal-title">📂 Переместить в статус</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Массовое перемещение выбранных аккаунтов в статус жизненного цикла.</div>
+    <div class="field">
+      <label>Статус</label>
+      <select id="msStage" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="">— снять статус —</option>
+        <option value="new">🆕 Новый</option>
+        <option value="warming">🔥 Прогрев</option>
+        <option value="ready">✅ Готов</option>
+        <option value="in_work">⚙️ В работе</option>
+        <option value="resting">😴 Отдых</option>
+        <option value="frozen">🧊 Заморожен</option>
+        <option value="reserve">📦 Резерв</option>
+      </select>
+    </div>
+    <div class="field-err" id="msErr"></div>
+    <button class="btn btn-p" id="msBtn" onclick="submitMassStage()" style="width:100%">Применить</button>
   </div>
 </div>
 
@@ -5215,6 +5253,20 @@ async function submitAccNote() {
   } catch(e){ err.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
 }
+// ── CRM-статусы аккаунта (жизненный цикл) ────────
+const ACC_STAGES = {
+  new:     {emoji:'🆕', label:'Новый'},
+  warming: {emoji:'🔥', label:'Прогрев'},
+  ready:   {emoji:'✅', label:'Готов'},
+  in_work: {emoji:'⚙️', label:'В работе'},
+  resting: {emoji:'😴', label:'Отдых'},
+  frozen:  {emoji:'🧊', label:'Заморожен'},
+  reserve: {emoji:'📦', label:'Резерв'},
+};
+function stageBadge(stage) {
+  const s = ACC_STAGES[stage]; if(!s) return '';
+  return `<span class="badge" style="background:rgba(255,255,255,.08);color:var(--hint)">${s.emoji} ${s.label}</span>`;
+}
 // ── Кластер / метка аккаунта ────────────────────
 let AM_ACC_ID = null;
 function openAccMeta(id) {
@@ -5222,6 +5274,7 @@ function openAccMeta(id) {
   const d = window._accDetail || {};
   const li=document.getElementById('amLabel'); if(li) li.value = d.first_name || '';
   const ci=document.getElementById('amCluster'); if(ci) ci.value = d.cluster || '';
+  const si=document.getElementById('amStage'); if(si) si.value = d.stage || '';
   const e=document.getElementById('amErr'); if(e) e.textContent='';
   showModal('mo-acc-meta');
 }
@@ -5229,15 +5282,36 @@ async function submitAccMeta() {
   const err=document.getElementById('amErr'); err.textContent='';
   const label=document.getElementById('amLabel').value.trim();
   const cluster=document.getElementById('amCluster').value.trim();
+  const stage=document.getElementById('amStage').value;
   if(!label){ err.textContent='Укажите метку'; return; }
   const btn=document.getElementById('amBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
   try {
-    await api('/api/miniapp/account/'+AM_ACC_ID+'/meta',{method:'POST',body:JSON.stringify({label, cluster})});
+    await api('/api/miniapp/account/'+AM_ACC_ID+'/meta',{method:'POST',body:JSON.stringify({label, cluster, stage})});
     toast('✅ Сохранено'); closeModal('mo-acc-meta');
-    if(window._accDetail){ window._accDetail.first_name=label; window._accDetail.cluster=cluster||null; }
+    if(window._accDetail){ window._accDetail.first_name=label; window._accDetail.cluster=cluster||null; window._accDetail.stage=stage||null; }
     openAccount(AM_ACC_ID);
   } catch(e){ err.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Сохранить'; }
+}
+// Массовое перемещение в статус
+function openMassStage() {
+  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  const e=document.getElementById('msErr'); if(e) e.textContent='';
+  showModal('mo-acc-stage');
+}
+async function submitMassStage() {
+  const err=document.getElementById('msErr'); err.textContent='';
+  const stage=document.getElementById('msStage').value;
+  const ids=[...ACC_SEL];
+  if(!ids.length){ err.textContent='Не выбраны аккаунты'; return; }
+  const btn=document.getElementById('msBtn'); btn.disabled=true; btn.textContent='Применяю…';
+  try {
+    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', account_ids:ids, stage})});
+    const nm = stage ? (ACC_STAGES[stage]?ACC_STAGES[stage].label:stage) : 'без статуса';
+    toast(`✅ Перемещено в «${nm}»: ${r.count||ids.length}`);
+    closeModal('mo-acc-stage'); toggleAccSelMode(); loadAccounts();
+  } catch(e){ err.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='Применить'; }
 }
 const AP_INFO = {
   close_sessions: '🔒 Завершит ВСЕ прочие авторизации аккаунта (кроме текущей). Защищает угнанные/прогретые аккаунты.',
@@ -5514,7 +5588,7 @@ function renderAccounts(list) {
       ${checkbox}
       <div class="ava ${ava_cls}" style="font-size:15px">${flag}</div>
       <div class="acc-body">
-        <div class="acc-name">${esc(name)}</div>
+        <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
       </div>
@@ -5638,6 +5712,7 @@ function buildAccDetail(d) {
   else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
 
   if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(245,158,11,.18);color:#f59e0b">⭐ Premium</span>';
+  if (a.stage && ACC_STAGES[a.stage]) statusBadge += ' '+stageBadge(a.stage);
 
   const warmupHtml = `
     <div class="sec" style="margin-top:8px">Прогрев аккаунта</div>
