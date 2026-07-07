@@ -262,3 +262,36 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
     if latency_ms is not None:
         result["latency_ms"] = latency_ms
     return result
+
+
+async def probe_proxy(proxy_url: str, timeout: float = 10.0) -> dict:
+    """Форсированная async-проверка прокси через подключение к api.telegram.org.
+
+    В отличие от check_proxy_health (тестирует только при нейтральном score),
+    ВСЕГДА выполняет реальную проверку. Полностью async (aiohttp + aiohttp_socks),
+    не блокирует event loop — в отличие от account_manager.test_proxy (блокирующий
+    сокет). Возвращает {ok, latency_ms?, error?}.
+    """
+    if not proxy_url:
+        return {"ok": False, "error": "empty"}
+    try:
+        import time as _t
+        import aiohttp
+        import importlib as _il
+
+        ProxyConnector = getattr(_il.import_module("aiohttp_socks"), "ProxyConnector")
+        connector = ProxyConnector.from_url(proxy_url)
+        t0 = _t.monotonic()
+        async with aiohttp.ClientSession(connector=connector) as _sess:
+            async with _sess.get(
+                "https://api.telegram.org",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                ssl=False,
+            ) as resp:
+                latency_ms = int((_t.monotonic() - t0) * 1000)
+                ok = resp.status < 500
+        record_proxy_result(proxy_url, "default", ok, latency_ms=float(latency_ms))
+        return {"ok": ok, "latency_ms": latency_ms}
+    except Exception as e:
+        record_proxy_result(proxy_url, "default", False)
+        return {"ok": False, "error": str(e)[:120]}

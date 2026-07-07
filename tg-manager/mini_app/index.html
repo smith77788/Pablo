@@ -2212,6 +2212,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="checkAllProxies()">🔄 Проверить все</button>
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="toggleProxyImport()">📥 Импорт списком</button>
+    </div>
+    <div id="proxyImportBox" style="display:none;margin-bottom:8px">
+      <textarea id="proxyImport" rows="4" placeholder="socks5://user:pass@host:port&#10;http://host:port&#10;по одному на строку"></textarea>
+      <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitProxyImport()">Импортировать</button>
+    </div>
     <div class="sec">Мои прокси</div>
     <div class="lst" id="proxyList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -6928,14 +6936,15 @@ async function loadProxies() {
       const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
       const type = (p.proxy_type||'socks5').toUpperCase();
       const host = (p.proxy_url||'').split('@').pop();
+      const checkedAt = p.last_check?' · '+ago(p.last_check):'';
       return `<div class="li">
         <div class="ava ava-blue">🌐</div>
         <div class="li-body">
           <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}</div>
-          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}</div>
+          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}</div>
         </div>
         <div class="li-right">
-          <span class="badge ${p.is_active?'b-gr':'b-gy'}">${p.is_active?'Вкл':'Выкл'}</span>
+          <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
           <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
         </div>
       </div>`;
@@ -6980,6 +6989,37 @@ async function deleteProxy(id) {
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
     toast('Удалено'); loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+async function checkProxy(id, el) {
+  if (el) { el.textContent='⏳'; el.style.pointerEvents='none'; }
+  try {
+    const r = await api('/api/miniapp/proxy/'+id+'/check', {method:'POST'});
+    toast(r.alive ? `🟢 Работает${r.latency_ms!=null?' · '+r.latency_ms+'мс':''}` : `🔴 Не отвечает${r.error?' · '+r.error:''}`);
+    loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); if(el){el.textContent='🔄';el.style.pointerEvents='';} }
+}
+async function checkAllProxies() {
+  toast('🔄 Проверяю все прокси…');
+  try {
+    const r = await api('/api/miniapp/proxies/check_all', {method:'POST'});
+    toast(`✅ Проверено: ${r.checked} · 🟢 живых: ${r.alive}`);
+    loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+function toggleProxyImport() {
+  const b = document.getElementById('proxyImportBox');
+  b.style.display = b.style.display==='none' ? 'block' : 'none';
+}
+async function submitProxyImport() {
+  const raw = document.getElementById('proxyImport').value.trim();
+  if (!raw) { toast('Вставьте список прокси'); return; }
+  try {
+    const r = await api('/api/miniapp/proxies/import', {method:'POST', body:JSON.stringify({proxies:raw})});
+    toast(`✅ Добавлено: ${r.added}${r.skipped?' · пропущено: '+r.skipped:''}`);
+    document.getElementById('proxyImport').value='';
+    toggleProxyImport();
+    loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 

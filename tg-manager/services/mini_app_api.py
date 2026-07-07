@@ -117,6 +117,22 @@ def channel_edit_worker_op(op) -> str | None:
     return _CHANNEL_EDIT_OPS.get(op)
 
 
+def parse_proxy_type(proxy_url: str) -> str | None:
+    """Определяет тип прокси по схеме URL. None — если схема не поддержана.
+
+    Единый источник истины для add_proxy и import_proxies. Поддержка:
+    socks5://, socks4://, http://. Чистая функция — тестируема.
+    """
+    u = (proxy_url or "").strip().lower()
+    if u.startswith("socks5://"):
+        return "socks5"
+    if u.startswith("socks4://"):
+        return "socks4"
+    if u.startswith("http://"):
+        return "http"
+    return None
+
+
 def parsed_audience_filters(q, base_params_count: int = 1):
     """Строит доп. условия WHERE + параметры для выборки parsed_audiences.
 
@@ -6568,7 +6584,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         rows = await _safe_fetch(pool,
             """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
-               FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50""", uid)
+               FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
         return _json_resp({"proxies": rows})
 
     async def add_proxy(request: web.Request) -> web.Response:
@@ -6583,14 +6599,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         label = (body.get("label") or "").strip() or None
         if not proxy_url:
             return _err("proxy_url required")
-        import re as _re
-        if not _re.match(r"^(socks5|socks4|http)://", proxy_url, _re.IGNORECASE):
+        proxy_type = parse_proxy_type(proxy_url)
+        if not proxy_type:
             return _err("proxy_url must start with socks5://, socks4://, or http://")
-        proxy_type = "socks5"
-        if proxy_url.lower().startswith("http://"):
-            proxy_type = "http"
-        elif proxy_url.lower().startswith("socks4://"):
-            proxy_type = "socks4"
         try:
             row = await pool.fetchrow(
                 """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type)
@@ -6616,6 +6627,89 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception:
             return _err("Failed to delete proxy", 500)
+
+    async def check_proxy(request: web.Request) -> web.Response:
+        """Проверить живость прокси (probe → api.telegram.org), сохранить is_alive/last_check.
+        Возможность test_proxy/check_proxy_health раньше была недоступна в UI."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            proxy_id = int(request.match_info["proxy_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid proxy_id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT id, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
+        if not row:
+            return _err("Прокси не найден", 404)
+        from services.proxy_selector import probe_proxy
+        res = await probe_proxy(row["proxy_url"])
+        try:
+            await pool.execute(
+                "UPDATE user_proxies SET is_alive=$1, last_check=now() WHERE id=$2 AND owner_id=$3",
+                bool(res.get("ok")), proxy_id, uid)
+        except Exception:
+            log_exc_swallow(log, "check_proxy persist")
+        return _json_resp({"ok": True, "alive": bool(res.get("ok")),
+                           "latency_ms": res.get("latency_ms"), "error": res.get("error")})
+
+    async def check_all_proxies(request: web.Request) -> web.Response:
+        """Проверить все прокси владельца (ограниченная конкурентность)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT id, proxy_url FROM user_proxies WHERE owner_id=$1 LIMIT 200", uid)
+        if not rows:
+            return _json_resp({"ok": True, "checked": 0, "alive": 0})
+        from services.proxy_selector import probe_proxy
+        sem = asyncio.Semaphore(10)
+        async def _one(r):
+            async with sem:
+                res = await probe_proxy(r["proxy_url"])
+                alive = bool(res.get("ok"))
+                try:
+                    await pool.execute(
+                        "UPDATE user_proxies SET is_alive=$1, last_check=now() WHERE id=$2 AND owner_id=$3",
+                        alive, r["id"], uid)
+                except Exception:
+                    log_exc_swallow(log, "check_all_proxies persist")
+                return alive
+        results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
+        alive = sum(1 for x in results if x is True)
+        return _json_resp({"ok": True, "checked": len(rows), "alive": alive})
+
+    async def import_proxies(request: web.Request) -> web.Response:
+        """Массовый импорт прокси: вставленный список (по одному на строку)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        import re as _re
+        raw = str(body.get("proxies") or "")
+        added, skipped = 0, 0
+        for line in _re.split(r"[\n,;]+", raw):
+            purl = line.strip()
+            if not purl:
+                continue
+            ptype = parse_proxy_type(purl)
+            if not ptype:
+                skipped += 1
+                continue
+            try:
+                await pool.execute(
+                    """INSERT INTO user_proxies(owner_id, proxy_url, proxy_type)
+                       VALUES($1,$2,$3) ON CONFLICT(owner_id, proxy_url) DO NOTHING""",
+                    uid, purl, ptype)
+                added += 1
+            except Exception:
+                skipped += 1
+            if added >= 500:
+                break
+        return _json_resp({"ok": True, "added": added, "skipped": skipped})
 
     # ── Analytics ────────────────────────────────────────────────────────────
 
@@ -8666,6 +8760,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/proxies", proxies)
     app.router.add_post("/api/miniapp/proxy", add_proxy)
     app.router.add_delete("/api/miniapp/proxy/{proxy_id}", delete_proxy)
+    app.router.add_post("/api/miniapp/proxy/{proxy_id}/check", check_proxy)
+    app.router.add_post("/api/miniapp/proxies/check_all", check_all_proxies)
+    app.router.add_post("/api/miniapp/proxies/import", import_proxies)
     # Analytics
     app.router.add_get("/api/miniapp/analytics", analytics)
     # Subscription
