@@ -11703,7 +11703,7 @@ async function openAutoFunnels() {
           <div class="row-val">Шагов: ${r.steps_count||0} · Активных: ${r.active_runs||0}</div>
         </div>
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();toggleFunnel(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();toggleAutoFunnel(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="event.stopPropagation();deleteAutoFunnel(${r.id},this)">✕</button>
           <span class="chev">›</span>
         </div>
@@ -11711,7 +11711,7 @@ async function openAutoFunnels() {
     `).join(''));
   } catch(e) { txt('afList', empty('⚠️','Ошибка',e.message)); }
 }
-async function toggleFunnel(fid, btn) {
+async function toggleAutoFunnel(fid, btn) {
   btn.disabled=true;
   try {
     const r = await api(`/api/miniapp/auto_funnel/${fid}/toggle`,{method:'PUT'});
