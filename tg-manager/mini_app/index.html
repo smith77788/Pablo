@@ -6281,13 +6281,31 @@ function buildFunnelDetail(d) {
             ${isLast?'':'<div class="ffstep-tail"></div>'}
           </div>
           <div class="ffstep-body">
-            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после запуска':''}</div>
+            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''}${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
             <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
             ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
           </div>
         </div>`;
       }).join('')}</div>`
-    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Нет шагов. Добавьте первый шаг через бота.</div></div>`;
+    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Нет шагов.</div></div>`;
+
+  const addStepForm = `
+    <div class="sec" style="margin-top:12px">➕ Добавить шаг</div>
+    <div class="lst" style="margin:0 16px">
+      <div class="field"><textarea id="fsText" rows="3" maxlength="4096" placeholder="Текст следующего сообщения…"></textarea></div>
+      <div class="field">
+        <label>Задержка после предыдущего шага</label>
+        <select id="fsDelay">
+          <option value="0">Сразу</option>
+          <option value="60">Через 1 час</option>
+          <option value="360">Через 6 часов</option>
+          <option value="1440" selected>Через 1 день</option>
+          <option value="4320">Через 3 дня</option>
+          <option value="10080">Через 7 дней</option>
+        </select>
+      </div>
+      <button class="btn btn-p" style="width:100%" onclick="addFunnelStep()">➕ Добавить шаг</button>
+    </div>`;
 
   return `
     <div class="kpi-bar" style="grid-template-columns:1fr 1fr 1fr">
@@ -6308,7 +6326,27 @@ function buildFunnelDetail(d) {
     </div>
     <div class="sec" style="margin-top:8px">🔀 Цепочка сообщений</div>
     ${stepsHtml}
+    ${addStepForm}
     <div style="height:16px"></div>`;
+}
+async function addFunnelStep() {
+  if (!CUR_FUNNEL_ID) return;
+  const text = document.getElementById('fsText').value.trim();
+  if (!text) { toast('Введите текст шага'); return; }
+  const delay = parseInt(document.getElementById('fsDelay').value)||0;
+  try {
+    await api('/api/miniapp/funnel/'+CUR_FUNNEL_ID+'/step', {method:'POST', body:JSON.stringify({message_text:text, delay_minutes:delay})});
+    toast('✅ Шаг добавлен');
+    openFunnelDetail(CUR_FUNNEL_ID, document.getElementById('fd-name')?.textContent);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function deleteFunnelStep(stepId) {
+  if (!await askConfirm('Удалить этот шаг?')) return;
+  try {
+    await api('/api/miniapp/funnel/step/'+stepId, {method:'DELETE'});
+    toast('Шаг удалён');
+    openFunnelDetail(CUR_FUNNEL_ID, document.getElementById('fd-name')?.textContent);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 function toggleFunnelFromDetail() {

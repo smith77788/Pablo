@@ -6090,6 +6090,73 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("create_funnel bot=%d uid=%d", bot_id, uid)
             return _err("Failed to create funnel", 500)
 
+    async def add_funnel_step(request: web.Request) -> web.Response:
+        """Добавить шаг в воронку (multi-step drip). funnel_steps умел delay_minutes и
+        порядок, но эндпоинта добавления шага не было — воронка застревала на шаге 1."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            funnel_id = int(request.match_info["funnel_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        # Владение через managed_bots.
+        funnel = await _safe_fetchrow(pool,
+            """SELECT f.id FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
+               WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
+        if not funnel:
+            return _err("Воронка не найдена", 404)
+        message_text = (body.get("message_text") or "").strip()
+        if not message_text:
+            return _err("Текст шага обязателен", 400)
+        if len(message_text) > 4096:
+            return _err("Текст шага — до 4096 символов", 400)
+        try:
+            delay_minutes = max(0, min(43200, int(body.get("delay_minutes") or 0)))  # ≤30 дней
+        except (TypeError, ValueError):
+            return _err("delay_minutes должен быть числом", 400)
+        # Ограничение на число шагов (защита от разрастания).
+        cnt = await _safe_count(pool, "SELECT COUNT(*) FROM funnel_steps WHERE funnel_id=$1", funnel_id)
+        if cnt >= 50:
+            return _err("Достигнут лимит шагов (50)", 400)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes)
+                   VALUES($1, COALESCE((SELECT MAX(step_order) FROM funnel_steps WHERE funnel_id=$1),0)+1, $2, $3)
+                   RETURNING id, step_order""",
+                funnel_id, message_text, delay_minutes)
+            return _json_resp({"ok": True, "step_id": row["id"], "step_order": row["step_order"]})
+        except Exception:
+            log.exception("add_funnel_step funnel=%d uid=%d", funnel_id, uid)
+            return _err("Не удалось добавить шаг", 500)
+
+    async def delete_funnel_step(request: web.Request) -> web.Response:
+        """Удалить шаг воронки. Шаг 1 (первое сообщение) удалить нельзя — это триггерный старт."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            step_id = int(request.match_info["step_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid step_id", 400)
+        # Владение + защита шага 1 через JOIN.
+        step = await _safe_fetchrow(pool,
+            """SELECT fs.id, fs.step_order FROM funnel_steps fs
+               JOIN funnels f ON f.id=fs.funnel_id
+               JOIN managed_bots mb ON mb.bot_id=f.bot_id
+               WHERE fs.id=$1 AND mb.added_by=$2""", step_id, uid)
+        if not step:
+            return _err("Шаг не найден", 404)
+        if int(step["step_order"]) <= 1:
+            return _err("Первый шаг удалить нельзя (это стартовое сообщение)", 400)
+        try:
+            await pool.execute("DELETE FROM funnel_steps WHERE id=$1", step_id)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("delete_funnel_step step=%d uid=%d", step_id, uid)
+            return _err("Не удалось удалить шаг", 500)
+
     # ── Competitors ────────────────────────────────────────────────────────────
 
     async def competitors_list(request: web.Request) -> web.Response:
@@ -8834,6 +8901,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)
     # Funnel steps
     app.router.add_get("/api/miniapp/funnel/{funnel_id}/steps", funnel_steps)
+    app.router.add_post("/api/miniapp/funnel/{funnel_id}/step", add_funnel_step)
+    app.router.add_delete("/api/miniapp/funnel/step/{step_id}", delete_funnel_step)
     app.router.add_post("/api/miniapp/bot/{bot_id}/funnel", create_funnel)
     # Competitors
     app.router.add_get("/api/miniapp/competitors", competitors_list)
