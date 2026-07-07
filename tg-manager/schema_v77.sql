@@ -6,7 +6,7 @@
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS gift_recipients (
     id              BIGSERIAL PRIMARY KEY,
-    owner_id        BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id        BIGINT NOT NULL REFERENCES platform_users(user_id) ON DELETE CASCADE,
     name            TEXT NOT NULL,          -- Display name (e.g., "Main Admin", "John Doe")
     username        TEXT,                   -- Telegram @username or empty for user ID
     user_id         BIGINT,                -- Telegram user ID if known
@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_gift_recipients_owner ON gift_recipients(owner_id
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS gift_inventory (
     id                  BIGSERIAL PRIMARY KEY,
-    owner_id            BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id            BIGINT NOT NULL REFERENCES platform_users(user_id) ON DELETE CASCADE,
     account_id          BIGINT NOT NULL REFERENCES tg_accounts(id) ON DELETE CASCADE,
     gift_id             TEXT NOT NULL,       -- Telegram gift ID (for transfer)
     gift_type           TEXT NOT NULL,       -- Gift type name (e.g., "Basic Star", "Limited Edition")
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_gift_inventory_transferable ON gift_inventory(own
 -- ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS gift_transfer_plans (
     id                  BIGSERIAL PRIMARY KEY,
-    owner_id            BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id            BIGINT NOT NULL REFERENCES platform_users(user_id) ON DELETE CASCADE,
     name                TEXT,                -- Optional plan name
     recipient_username  TEXT,                -- @username or empty
     recipient_user_id   BIGINT,              -- Telegram user ID
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS gift_transfer_reports (
     id                  BIGSERIAL PRIMARY KEY,
     plan_id             BIGINT NOT NULL REFERENCES gift_transfer_plans(id) ON DELETE CASCADE,
     operation_id        BIGINT,             -- May be NULL if operation was never created
-    owner_id            BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id            BIGINT NOT NULL REFERENCES platform_users(user_id) ON DELETE CASCADE,
     
     -- Summary stats
     total_gifts_found   INTEGER DEFAULT 0,
