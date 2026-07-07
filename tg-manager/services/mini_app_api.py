@@ -7059,16 +7059,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.token_vault import encrypt_token, proxy_fingerprint
 
             _fp = proxy_fingerprint(proxy_url)
-            row = await pool.fetchrow(
-                """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type, proxy_fp)
-                   VALUES($1,$2,$3,$4,$5)
-                   ON CONFLICT(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO UPDATE
-                   SET label=EXCLUDED.label RETURNING id""",
-                uid, label, encrypt_token(proxy_url), proxy_type, _fp)
+            _enc = encrypt_token(proxy_url)
+            try:
+                row = await pool.fetchrow(
+                    """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type, proxy_fp)
+                       VALUES($1,$2,$3,$4,$5)
+                       ON CONFLICT(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO UPDATE
+                       SET label=EXCLUDED.label RETURNING id""",
+                    uid, label, _enc, proxy_type, _fp)
+            except asyncpg.UndefinedColumnError:
+                # proxy_fp ещё не мигрирован (лаг деплоя schema_v146) — фолбэк без него,
+                # чтобы «добавить прокси» работало ВСЕГДА (без прокси не работает ничего).
+                # Шифротекст уникален → дублей на UNIQUE(owner_id, proxy_url) не будет.
+                row = await pool.fetchrow(
+                    """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type)
+                       VALUES($1,$2,$3,$4) RETURNING id""",
+                    uid, label, _enc, proxy_type)
             return _json_resp({"ok": True, "id": row["id"]})
-        except Exception:
+        except Exception as e:
             log.exception("add_proxy uid=%d", uid)
-            return _err("Failed to add proxy", 500)
+            return _err(f"Не удалось добавить прокси: {str(e)[:120]}", 400)
 
     async def delete_proxy(request: web.Request) -> web.Response:
         uid = _get_uid(request)
