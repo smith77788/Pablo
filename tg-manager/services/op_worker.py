@@ -7766,6 +7766,10 @@ async def _exec_parse_audience(
     source_ref = (params.get("source_ref") or "").strip()
     parse_type = params.get("parse_type", "members")
     limit = int(params.get("limit") or 500)
+    try:
+        days_back = max(1, min(365, int(params.get("days_back") or 30)))
+    except (TypeError, ValueError):
+        days_back = 30
 
     if not source_ref:
         return {"status": "failed", "summary": "⚠️ source_ref не указан"}
@@ -7775,7 +7779,9 @@ async def _exec_parse_audience(
 
     try:
         if parse_type == "active":
-            result = await _parser.parse_active_users(pool, owner_id, source_ref, limit=limit)
+            result = await _parser.parse_active_users(
+                pool, owner_id, source_ref, days_back=days_back, limit=limit
+            )
         else:
             result = await _parser.parse_members(pool, owner_id, source_ref, limit=limit)
 

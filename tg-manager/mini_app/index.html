@@ -3861,10 +3861,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Источник (@username или ссылка)</label><input type="text" id="parserSrc" placeholder="@channel или t.me/channel"></div>
     <div class="field">
       <label>Тип парсинга</label>
-      <select id="parserType" style="width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px;color:#fff;font-size:15px">
+      <select id="parserType" onchange="parserTypeToggle()" style="width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px;color:#fff;font-size:15px">
         <option value="members">👥 Все участники</option>
-        <option value="active">🔥 Активные (последние)</option>
+        <option value="active">🔥 Активные (писали недавно)</option>
       </select>
+    </div>
+    <div class="field" id="parserDaysField" style="display:none">
+      <label>Активны за последние (дней)</label>
+      <input type="number" id="parserDays" min="1" max="365" value="30">
+      <div class="field-note">Только для «Активные»: окно, за которое человек писал в группе</div>
     </div>
     <div class="field"><label>Лимит (макс. 10000)</label><input type="number" id="parserLimit" min="10" max="10000" value="500"></div>
     <div class="field-err" id="parserErr"></div>
@@ -9557,16 +9562,41 @@ async function loadParserRuns() {
     txt('m-parser-cnt', runs.filter(r=>r.status==='done').reduce((s,r)=>s+r.total_saved,0)+' спарсено');
   } catch(e) { txt('parserRunList', empty('⚠️','Ошибка',e.message)); }
 }
+let AUD_FILTERS = {premium:false, with_username:false, not_bot:false, active:false, with_phone:false};
+let AUD_SOURCE = '';
+function audFilterQS() {
+  let qs = '';
+  if (AUD_SOURCE) qs += '&source='+encodeURIComponent(AUD_SOURCE);
+  for (const k in AUD_FILTERS) if (AUD_FILTERS[k]) qs += '&'+k+'=1';
+  return qs;
+}
+function toggleAudFilter(k) { AUD_FILTERS[k] = !AUD_FILTERS[k]; loadParsedAudience(AUD_SOURCE); }
+function exportAudience() {
+  const url = '/api/miniapp/parser/audience/export?token='+encodeURIComponent(TK)+audFilterQS();
+  if (tg?.openLink) tg.openLink(location.origin+url); else window.open(url,'_blank');
+}
 async function loadParsedAudience(source) {
+  AUD_SOURCE = source||'';
   txt('parserAudList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/parser/audience?limit=50'+(source?'&source='+encodeURIComponent(source):''));
+    const d = await api('/api/miniapp/parser/audience?limit=50'+audFilterQS());
     const users = d.users||[];
-    if (!users.length) { txt('parserAudList', empty('👥','Нет данных','Запустите парсинг')); return; }
-    txt('parserAudList', `<div class="sec" style="margin-bottom:4px">Всего: ${num(d.total)}</div>`+users.map(u=>`
+    const sl = d.slices||{};
+    const chip = (k,lbl)=>`<button class="btn ${AUD_FILTERS[k]?'btn-p':'btn-s'}" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="toggleAudFilter('${k}')">${lbl}</button>`;
+    const filterBar = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+      ${chip('premium','⭐ Premium'+(sl.premium!=null?' '+num(sl.premium):''))}
+      ${chip('with_username','@ Username'+(sl.with_username!=null?' '+num(sl.with_username):''))}
+      ${chip('with_phone','📱 С телефоном'+(sl.with_phone!=null?' '+num(sl.with_phone):''))}
+      ${chip('active','🔥 Активные'+(sl.active!=null?' '+num(sl.active):''))}
+      ${chip('not_bot','🚫🤖 Не боты')}
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience()">📥 CSV</button>
+    </div>`;
+    const header = `<div class="sec" style="margin-bottom:4px">Найдено: ${num(d.total)}</div>`;
+    if (!users.length) { txt('parserAudList', filterBar+header+empty('👥','Пусто','Нет пользователей под фильтр')); return; }
+    txt('parserAudList', filterBar+header+users.map(u=>`
       <div class="row">
         <div class="row-body">
-          <div class="row-name">${u.username?'@'+esc(u.username):(esc(u.name)||'ID '+u.tg_user_id)}${u.is_premium?' ⭐':''}</div>
+          <div class="row-name">${u.username?'@'+esc(u.username):(esc(u.name)||'ID '+u.tg_user_id)}${u.is_premium?' ⭐':''}${u.is_bot?' 🤖':''}${u.has_phone?' 📱':''}</div>
           <div class="row-val">${esc(u.source_title)||u.source_type} · ${ago(u.parsed_at)}</div>
         </div>
       </div>
@@ -9576,8 +9606,15 @@ async function loadParsedAudience(source) {
 function openParserModal() {
   document.getElementById('parserSrc').value='';
   document.getElementById('parserLimit').value='500';
+  document.getElementById('parserType').value='members';
+  document.getElementById('parserDays').value='30';
   document.getElementById('parserErr').textContent='';
+  parserTypeToggle();
   document.getElementById('parserMbg').classList.add('show');
+}
+function parserTypeToggle() {
+  const active = document.getElementById('parserType').value==='active';
+  document.getElementById('parserDaysField').style.display = active?'block':'none';
 }
 function closeParserModal() { document.getElementById('parserMbg').classList.remove('show'); }
 async function submitParser() {
@@ -9592,6 +9629,7 @@ async function submitParser() {
       source_ref: src,
       parse_type: document.getElementById('parserType').value,
       limit: parseInt(document.getElementById('parserLimit').value)||500,
+      days_back: parseInt(document.getElementById('parserDays').value)||30,
     })});
     closeParserModal();
     toast(`✅ Парсинг поставлен в очередь (#${r.op_id})`);

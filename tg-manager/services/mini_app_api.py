@@ -117,6 +117,38 @@ def channel_edit_worker_op(op) -> str | None:
     return _CHANNEL_EDIT_OPS.get(op)
 
 
+def parsed_audience_filters(q, base_params_count: int = 1):
+    """Строит доп. условия WHERE + параметры для выборки parsed_audiences.
+
+    q: mapping с ключами source, premium, with_username, not_bot, active, with_phone.
+    Плейсхолдеры продолжаются с base_params_count (после owner_id=$1). Богатые
+    колонки (is_premium/is_bot/is_active/phone) раньше хранились, но не фильтровались.
+    Чистая функция — тестируема.
+    """
+    def _truthy(v) -> bool:
+        return str(v).lower() in ("1", "true", "yes", "on")
+    conds: list[str] = []
+    params: list = []
+    idx = base_params_count
+    src = (q.get("source") or "").strip()
+    if src:
+        idx += 1
+        conds.append(f"source_username ILIKE ${idx}")
+        params.append(f"%{src}%")
+    if _truthy(q.get("premium")):
+        conds.append("is_premium=TRUE")
+    if _truthy(q.get("with_username")):
+        conds.append("username IS NOT NULL AND username<>''")
+    if _truthy(q.get("not_bot")):
+        conds.append("COALESCE(is_bot,FALSE)=FALSE")
+    if _truthy(q.get("active")):
+        conds.append("is_active=TRUE")
+    if _truthy(q.get("with_phone")):
+        conds.append("phone IS NOT NULL AND phone<>''")
+    sql = (" AND " + " AND ".join(conds)) if conds else ""
+    return sql, params
+
+
 def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dict[str, Any]]:
     """Список шаблонов → элементы для фронта: шаблон, пример, предупреждения.
 
@@ -5292,46 +5324,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        source = request.rel_url.query.get("source", "")
+        q = request.rel_url.query
         try:
-            limit = min(int(request.rel_url.query.get("limit", "50")), 200)
+            limit = min(int(q.get("limit", "50")), 200)
         except (ValueError, TypeError):
             limit = 50
         try:
-            offset = int(request.rel_url.query.get("offset", "0"))
+            offset = int(q.get("offset", "0"))
         except (ValueError, TypeError):
             offset = 0
+        filt_sql, filt_params = parsed_audience_filters(q, base_params_count=1)
         try:
-            if source:
-                rows = await pool.fetch(
-                    """SELECT tg_user_id, username, first_name, last_name, is_premium,
-                              source_title, source_type, parsed_at
-                       FROM parsed_audiences WHERE owner_id=$1 AND source_username ILIKE $2
-                       ORDER BY parsed_at DESC LIMIT $3 OFFSET $4""",
-                    uid, f"%{source}%", limit, offset,
-                )
-            else:
-                rows = await pool.fetch(
-                    """SELECT tg_user_id, username, first_name, last_name, is_premium,
-                              source_title, source_type, parsed_at
-                       FROM parsed_audiences WHERE owner_id=$1
-                       ORDER BY parsed_at DESC LIMIT $2 OFFSET $3""",
-                    uid, limit, offset,
-                )
+            rows = await pool.fetch(
+                f"""SELECT tg_user_id, username, first_name, last_name, is_premium,
+                           is_bot, is_active, phone, source_title, source_type, parsed_at
+                    FROM parsed_audiences WHERE owner_id=$1{filt_sql}
+                    ORDER BY parsed_at DESC LIMIT ${len(filt_params)+2} OFFSET ${len(filt_params)+3}""",
+                uid, *filt_params, limit, offset,
+            )
             total = await pool.fetchval(
-                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1", uid
+                f"SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1{filt_sql}",
+                uid, *filt_params,
+            )
+            # Счётчики срезов (по всей аудитории владельца, без учёта фильтров) —
+            # чтобы показать «сколько premium / с телефоном / активных» есть вообще.
+            slices = await pool.fetchrow(
+                """SELECT COUNT(*) FILTER (WHERE is_premium) AS premium,
+                          COUNT(*) FILTER (WHERE username IS NOT NULL AND username<>'') AS with_username,
+                          COUNT(*) FILTER (WHERE phone IS NOT NULL AND phone<>'') AS with_phone,
+                          COUNT(*) FILTER (WHERE is_active) AS active
+                   FROM parsed_audiences WHERE owner_id=$1""",
+                uid,
             )
         except Exception as exc:
             log.exception("parsed_audience uid=%d", uid)
             return _err(str(exc), 500)
         return _json_resp({
             "total": int(total or 0),
+            "slices": {k: int(slices[k] or 0) for k in ("premium", "with_username", "with_phone", "active")} if slices else {},
             "users": [
                 {
                     "tg_user_id": r["tg_user_id"],
                     "username": r["username"] or "",
                     "name": " ".join(filter(None, [r["first_name"], r["last_name"]])),
                     "is_premium": bool(r["is_premium"]),
+                    "is_bot": bool(r["is_bot"]),
+                    "is_active": bool(r["is_active"]),
+                    "has_phone": bool(r["phone"]),
                     "source_title": r["source_title"] or "",
                     "source_type": r["source_type"] or "",
                     "parsed_at": r["parsed_at"].isoformat() if r["parsed_at"] else None,
@@ -5339,6 +5378,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 for r in rows
             ],
         })
+
+    async def parsed_audience_export(request: web.Request) -> web.Response:
+        """CSV-экспорт аудитории с теми же фильтрами, что и просмотр."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        q = request.rel_url.query
+        filt_sql, filt_params = parsed_audience_filters(q, base_params_count=1)
+        try:
+            rows = await pool.fetch(
+                f"""SELECT tg_user_id, username, first_name, last_name, phone,
+                           is_premium, is_bot, is_active, source_title, parsed_at
+                    FROM parsed_audiences WHERE owner_id=$1{filt_sql}
+                    ORDER BY parsed_at DESC LIMIT 50000""",
+                uid, *filt_params,
+            )
+        except Exception as exc:
+            log.exception("parsed_audience_export uid=%d", uid)
+            return _err(str(exc), 500)
+        header = ["tg_user_id", "username", "first_name", "last_name", "phone",
+                  "is_premium", "is_bot", "is_active", "source", "parsed_at"]
+        data = [
+            [r["tg_user_id"], r["username"] or "", r["first_name"] or "", r["last_name"] or "",
+             r["phone"] or "", r["is_premium"], r["is_bot"], r["is_active"],
+             r["source_title"] or "", r["parsed_at"].isoformat() if r["parsed_at"] else ""]
+            for r in rows
+        ]
+        return _csv_resp("parsed_audience.csv", header, data)
 
     async def submit_parse_job(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -5357,14 +5424,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             parse_type = "members"
         if limit < 1 or limit > 10000:
             limit = 500
+        # days_back — окно активности для режима "active" (бэкенд умел, UI хардкодил 30).
+        try:
+            days_back = max(1, min(365, int(body.get("days_back") or 30)))
+        except (TypeError, ValueError):
+            days_back = 30
         import json as _json
-        label = f"Парсинг {parse_type} из @{source_ref} (до {limit})"
+        _win = f", {days_back}д" if parse_type == "active" else ""
+        label = f"Парсинг {parse_type} из @{source_ref} (до {limit}{_win})"
         try:
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'parse_audience','pending',$2,$3,$4) RETURNING id",
                 uid,
-                _json.dumps({"source_ref": source_ref, "parse_type": parse_type, "limit": limit}),
+                _json.dumps({"source_ref": source_ref, "parse_type": parse_type,
+                             "limit": limit, "days_back": days_back}),
                 limit, label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
@@ -8645,6 +8719,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Audience Parser
     app.router.add_get("/api/miniapp/parser/runs", parser_runs)
     app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
+    app.router.add_get("/api/miniapp/parser/audience/export", parsed_audience_export)
     app.router.add_post("/api/miniapp/parser/submit", submit_parse_job)
     # CRM Deals
     app.router.add_get("/api/miniapp/crm/deals", crm_deals)
