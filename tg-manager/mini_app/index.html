@@ -3694,6 +3694,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <input type="datetime-local" id="schDate">
       <div class="field-note">Время UTC+0 — сервер отправит точно в указанное время</div>
     </div>
+    <div class="field">
+      <label>Повтор</label>
+      <select id="schRepeat">
+        <option value="none" selected>Один раз</option>
+        <option value="daily">Ежедневно</option>
+        <option value="weekly">Еженедельно</option>
+      </select>
+      <div class="field-note">Повторяемая рассылка сама планирует следующую отправку</div>
+    </div>
     <div class="field-err" id="schErr"></div>
     <button class="btn btn-p" id="schBtn" onclick="saveSchedule()" style="width:100%">⏰ Запланировать</button>
   </div>
@@ -6795,6 +6804,7 @@ async function loadSchedules() {
 
 function openSchModal() {
   document.getElementById('schText').value='';
+  { const _r=document.getElementById('schRepeat'); if(_r) _r.value='none'; }
   document.getElementById('schErr').style.display='none';
   document.getElementById('schBtn').disabled=false;
   document.getElementById('schBtn').textContent='⏰ Запланировать';
@@ -6818,12 +6828,13 @@ async function saveSchedule() {
   const btn = document.getElementById('schBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
   try {
+    const repeat = document.getElementById('schRepeat')?.value || 'none';
     await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedule', {
-      method:'POST', body: JSON.stringify({text, execute_at: dt.toISOString()})
+      method:'POST', body: JSON.stringify({text, execute_at: dt.toISOString(), repeat})
     });
     closeSchModal();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Рассылка запланирована');
+    toast(repeat==='none'?'✅ Рассылка запланирована':'✅ Повторяемая рассылка создана');
     await loadSchedules();
   } catch(e) {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';

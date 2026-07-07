@@ -50,6 +50,11 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             "UPDATE scheduled_broadcasts SET status='missed' WHERE id=$1",
                             row["id"],
                         )
+                        # Повторяемое: пропуск одной итерации не должен рвать цепочку.
+                        try:
+                            await db.reschedule_if_recurring(pool, dict(row))
+                        except Exception:
+                            log.exception("Scheduler: reschedule(missed) failed for #%d", row["id"])
                         log.warning(
                             "Scheduler: scheduled #%d missed (execute_at=%s, now=%s) — marking missed",
                             row["id"],
@@ -119,6 +124,13 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         row["message_text"],
                     )
                     await db.mark_scheduled_done(pool, row["id"])
+                    # Повторяемое расписание → ставим следующее вхождение.
+                    try:
+                        new_id = await db.reschedule_if_recurring(pool, dict(row))
+                        if new_id:
+                            log.info("Scheduled #%d recurring → next #%d", row["id"], new_id)
+                    except Exception:
+                        log.exception("Scheduler: reschedule failed for #%d", row["id"])
                     _in_flight.discard(row["id"])
                     log.info(
                         "Scheduled #%d fired → broadcast #%d (bot %d)",

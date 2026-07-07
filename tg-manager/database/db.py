@@ -765,6 +765,42 @@ async def mark_scheduled_done(pool: asyncpg.Pool, schedule_id: int) -> None:
     )
 
 
+async def reschedule_if_recurring(pool: asyncpg.Pool, row: dict) -> int | None:
+    """Если расписание повторяемое (repeat_interval_min>0) — создаёт следующее
+    вхождение через интервал от execute_at (но не в прошлом). Возвращает id нового
+    вхождения или None. Идемпотентно относительно исходной строки (она уже done/missed).
+    """
+    try:
+        interval = int(row.get("repeat_interval_min") or 0)
+    except (TypeError, ValueError):
+        interval = 0
+    if interval <= 0:
+        return None
+    import datetime as _dt
+    base = row.get("execute_at")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if base is None:
+        base = now
+    elif base.tzinfo is None:
+        base = base.replace(tzinfo=_dt.timezone.utc)
+    # Следующее вхождение: base + interval; если оно уже в прошлом (планировщик
+    # отставал), проматываем вперёд кратно интервалу до будущего.
+    nxt = base + _dt.timedelta(minutes=interval)
+    if nxt <= now:
+        missed = int((now - nxt).total_seconds() // (interval * 60)) + 1
+        nxt = nxt + _dt.timedelta(minutes=interval * missed)
+    try:
+        new_id = await pool.fetchval(
+            "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by, repeat_interval_min) "
+            "VALUES($1,$2,$3,$4,$5) RETURNING id",
+            row["bot_id"], row["message_text"], nxt, row["created_by"], interval,
+        )
+        return int(new_id) if new_id is not None else None
+    except Exception:
+        log.exception("reschedule_if_recurring failed for sched=%s", row.get("id"))
+        return None
+
+
 async def cancel_scheduled(pool: asyncpg.Pool, schedule_id: int, owner_id: int) -> bool:
     result = await pool.execute(
         """UPDATE scheduled_broadcasts SET status='cancelled'

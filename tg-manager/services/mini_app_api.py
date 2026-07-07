@@ -145,6 +145,15 @@ def is_safe_public_url(url: str) -> bool:
     return True
 
 
+_SCHEDULE_REPEAT_MIN = {"none": 0, "daily": 1440, "weekly": 10080}
+
+
+def schedule_repeat_minutes(kind) -> int:
+    """Период повтора расписания в минутах. none/неизвестное → 0 (одноразовое).
+    daily → 1440, weekly → 10080. Чистая функция — тестируема."""
+    return _SCHEDULE_REPEAT_MIN.get(str(kind or "none").lower(), 0)
+
+
 def parse_proxy_type(proxy_url: str) -> str | None:
     """Определяет тип прокси по схеме URL. None — если схема не поддержана.
 
@@ -6601,11 +6610,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 dt = dt.replace(tzinfo=_dt.timezone.utc)
         except ValueError:
             return _err("execute_at must be ISO datetime (e.g. 2025-12-31T15:00:00Z)")
+        repeat_min = schedule_repeat_minutes(body.get("repeat"))
         try:
-            row = await pool.fetchrow(
-                "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) VALUES($1,$2,$3,$4) RETURNING id",
-                bot_id, text, dt, uid)
-            return _json_resp({"ok": True, "id": row["id"]})
+            try:
+                row = await pool.fetchrow(
+                    "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by, repeat_interval_min) "
+                    "VALUES($1,$2,$3,$4,$5) RETURNING id",
+                    bot_id, text, dt, uid, repeat_min)
+            except asyncpg.UndefinedColumnError:
+                # schema_v145 ещё не применена — падаем на одноразовое.
+                row = await pool.fetchrow(
+                    "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) VALUES($1,$2,$3,$4) RETURNING id",
+                    bot_id, text, dt, uid)
+            return _json_resp({"ok": True, "id": row["id"], "repeat_min": repeat_min})
         except Exception:
             log.exception("create_schedule bot=%d uid=%d", bot_id, uid)
             return _err("Failed to create schedule", 500)
