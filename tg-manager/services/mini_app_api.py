@@ -1340,7 +1340,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 access_hash=int(ch.get("access_hash") or 0),
             )
             if not link:
-                return _err("Не удалось получить ссылку (нужны права администратора у аккаунта)", 502)
+                return _err("Не удалось получить ссылку (нужны права администратора у аккаунта)", 400)
             return _json_resp({"ok": True, "invite_link": link, "title": ch.get("title") or ""})
         except Exception:
             log.exception("channel_invite_link ch=%d uid=%d", ch_id, uid)
@@ -1859,7 +1859,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 ok = await bot_api.set_photo(sess, token, data)
             if ok:
                 return _json_resp({"ok": True})
-            return _err("Telegram отклонил картинку (формат/размер)", 502)
+            return _err("Telegram отклонил картинку (формат/размер)", 400)
         except Exception:
             log.exception("bot_avatar set uid=%d bot=%d", uid, bot_id)
             return _err("Ошибка установки аватара", 500)
@@ -2530,13 +2530,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Аккаунт недоступен", 400)
         try:
             from services import profile_setter_engine as pse
-            res = await pse.get_login_code(acc["session_str"], dict(acc))
+            # Таймаут на инлайн-коннект — иначе зависание → edge 502/520.
+            res = await asyncio.wait_for(
+                pse.get_login_code(acc["session_str"], dict(acc)), timeout=30
+            )
             if res.get("ok"):
                 return _json_resp({"ok": True, "code": res["code"]})
             return _err(res.get("error") or "Код не найден", 404)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 30с — проверьте прокси/сессию", 400)
         except Exception:
             log.exception("account_login_code uid=%d acc=%d", uid, acc_id)
-            return _err("Ошибка получения кода", 500)
+            return _err("Ошибка получения кода", 400)
 
     async def account_check_restriction(request: web.Request) -> web.Response:
         """Инлайн-проверка ограничений одного аккаунта (жив/ограничен/удалён).
@@ -2557,9 +2562,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Аккаунт недоступен", 400)
         try:
             from services import profile_setter_engine as pse
-            res = await pse.check_restriction(acc["session_str"], dict(acc))
+            # Инлайн-коннект к Telegram с ЖЁСТКИМ таймаутом: без него зависший
+            # коннект (мёртвая сессия/плохой прокси) висит до edge-таймаута и
+            # отдаёт 502/520 → фронт показывает «Сервис временно недоступен».
+            res = await asyncio.wait_for(
+                pse.check_restriction(acc["session_str"], dict(acc)), timeout=30
+            )
             if not res.get("ok"):
-                return _err(res.get("error") or "Ошибка проверки", 502)
+                # Бизнес-ошибка (не смогли проверить), НЕ 502 — иначе фронт покажет
+                # «сервис недоступен» вместо реальной причины.
+                return _err(res.get("error") or "Не удалось проверить аккаунт", 400)
             return _json_resp({
                 "ok": True,
                 "alive": res.get("alive"),
@@ -2569,9 +2581,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "username": res.get("username"),
                 "user_id": res.get("user_id"),
             })
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 30с — проверьте прокси/сессию", 400)
         except Exception:
             log.exception("account_check_restriction uid=%d acc=%d", uid, acc_id)
-            return _err("Ошибка проверки", 500)
+            return _err("Ошибка проверки аккаунта", 400)
 
     async def accounts_export_json(request: web.Request) -> web.Response:
         """Экспорт МЕТАДАННЫХ аккаунтов пользователя в JSON (аналог «РАБОТА С JSON»).
@@ -6173,7 +6187,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 level="ERROR", order_id=order["id"],
                 meta={"panel": panel["name"], "link": link},
             )
-            return _err(f"Ошибка панели: {str(err_msg)[:300]}", 502)
+            return _err(f"Ошибка панели: {str(err_msg)[:300]}", 400)
 
         smm_order_id = str(result["order"])
         await db.promo_update_order_status(
