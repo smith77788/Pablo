@@ -5384,7 +5384,8 @@ async function submitAccProfile() {
       toggleAccSelMode();
     } else {
       r = await api(`/api/miniapp/account/${AP_ACC_ID}/profile`,{method:'POST',body:JSON.stringify(payload)});
-      toast(`✅ Поставлено в очередь (#${r.op_id})`);
+      // единичный аккаунт исполняется инлайн — показываем реальный результат
+      toast('✅ '+(r.label||'Готово')+' — выполнено');
       closeModal('mo-acc-profile');
     }
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }

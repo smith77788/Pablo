@@ -7234,51 +7234,9 @@ async def _exec_bulk_set_profile(
         if await _is_cancelled(pool, op_id):
             break
         try:
-            if op == "name":
-                name_data = params.get("name_data", {})
-                # Раскрываем спинтакс для каждого аккаунта отдельно
-                fn = pse.expand_spintax(name_data.get("first_name", ""))
-                ln = pse.expand_spintax(name_data.get("last_name", ""))
-                ab = pse.expand_spintax(name_data.get("about", ""))
-                res = await pse.set_name_bio(acc["session_str"], dict(acc), fn, ln, ab)
-            elif op == "avatar":
-                url = params.get("avatar_url", "")
-                res = await pse.set_avatar_from_url(acc["session_str"], dict(acc), url)
-            elif op == "2fa":
-                res = await pse.set_2fa_password(
-                    acc["session_str"], dict(acc),
-                    new_password=params.get("new_password", ""),
-                    current_password=params.get("current_password", ""),
-                    hint=params.get("hint", ""),
-                )
-            elif op == "username":
-                uname = pse.expand_spintax(params.get("username", ""))
-                res = await pse.set_username(acc["session_str"], dict(acc), uname)
-            elif op == "close_sessions":
-                res = await pse.close_other_sessions(acc["session_str"], dict(acc))
-            elif op == "privacy":
-                res = await pse.set_privacy(
-                    acc["session_str"], dict(acc),
-                    key=params.get("privacy_key", "phone"),
-                    allow=bool(params.get("privacy_allow", False)),
-                )
-            elif op == "clear_bio":
-                res = await pse.clear_bio(acc["session_str"], dict(acc))
-            elif op == "remove_username":
-                res = await pse.remove_username(acc["session_str"], dict(acc))
-            elif op == "remove_avatar":
-                res = await pse.remove_avatar(acc["session_str"], dict(acc))
-            elif op == "reset_2fa":
-                res = await pse.reset_2fa(
-                    acc["session_str"], dict(acc),
-                    current_password=params.get("current_password", ""),
-                )
-            elif op == "set_online":
-                res = await pse.set_online(acc["session_str"], dict(acc))
-            elif op == "check_restriction":
-                res = await pse.check_restriction(acc["session_str"], dict(acc))
-            else:
-                res = {"ok": False, "error": f"unknown op: {op}"}
+            # Единый диспетчер op→движок (та же реализация, что инлайн-путь). Спинтакс
+            # раскрывается внутри apply_op — для каждого аккаунта отдельно.
+            res = await pse.apply_op(acc["session_str"], dict(acc), op, params)
 
             if res["ok"]:
                 ok_count += 1

@@ -2501,15 +2501,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                      "check_restriction": "Проверка ограничений"}[op]
         else:
             return _err("Неизвестная операция", 400)
+        # Единичный аккаунт — исполняем ИНЛАЙН с немедленным результатом (как
+        # check_restriction). Раньше op просто ставился в очередь и молча падал в
+        # фоне при мёртвой сессии/прокси → пользователь видел «ничего не происходит».
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'profile_setter','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps(params), label)
-            return _json_resp({"ok": True, "op_id": op_id})
+            from services import profile_setter_engine as pse
+            res = await asyncio.wait_for(
+                pse.apply_op(acc["session_str"], dict(acc), op, params), timeout=45)
+            if res.get("ok"):
+                return _json_resp({"ok": True, "result": res, "label": label})
+            return _err(res.get("error") or "Операция не выполнена", 400)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 45с — проверьте прокси/сессию", 400)
         except Exception as exc:
-            log.exception("account_profile uid=%d acc=%d op=%s", uid, acc_id, op)
-            return _err(str(exc), 500)
+            log.exception("account_profile inline uid=%d acc=%d op=%s", uid, acc_id, op)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
 
     async def account_login_code(request: web.Request) -> web.Response:
         """Получить последний код входа Telegram для аккаунта (инлайн, из чата 777000).

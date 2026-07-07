@@ -444,3 +444,51 @@ def expand_spintax(text: str) -> str:
             break
         result = new
     return result
+
+
+async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dict:
+    """Единый диспетчер аккаунт-операции (op → движковая функция).
+
+    ОДНА реализация для очереди (op_worker._exec_bulk_set_profile) и инлайн-пути
+    (mini_app account_profile) — без дублей. Возвращает {ok, error, ...}.
+    """
+    if op == "name":
+        nd = params.get("name_data", {})
+        return await set_name_bio(
+            session_string, acc,
+            expand_spintax(nd.get("first_name", "")),
+            expand_spintax(nd.get("last_name", "")),
+            expand_spintax(nd.get("about", "")),
+        )
+    if op == "avatar":
+        return await set_avatar_from_url(session_string, acc, params.get("avatar_url", ""))
+    if op == "2fa":
+        return await set_2fa_password(
+            session_string, acc,
+            new_password=params.get("new_password", ""),
+            current_password=params.get("current_password", ""),
+            hint=params.get("hint", ""),
+        )
+    if op == "username":
+        return await set_username(session_string, acc, expand_spintax(params.get("username", "")))
+    if op == "close_sessions":
+        return await close_other_sessions(session_string, acc)
+    if op == "privacy":
+        return await set_privacy(
+            session_string, acc,
+            key=params.get("privacy_key", "phone"),
+            allow=bool(params.get("privacy_allow", False)),
+        )
+    if op == "clear_bio":
+        return await clear_bio(session_string, acc)
+    if op == "remove_username":
+        return await remove_username(session_string, acc)
+    if op == "remove_avatar":
+        return await remove_avatar(session_string, acc)
+    if op == "reset_2fa":
+        return await reset_2fa(session_string, acc, current_password=params.get("current_password", ""))
+    if op == "set_online":
+        return await set_online(session_string, acc)
+    if op == "check_restriction":
+        return await check_restriction(session_string, acc)
+    return {"ok": False, "error": f"unknown op: {op}"}
