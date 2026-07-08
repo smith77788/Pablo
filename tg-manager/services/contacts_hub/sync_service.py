@@ -1,9 +1,18 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 import time
 
 log = logging.getLogger(__name__)
+
+# Сколько аккаунтов синхронизируем параллельно. Раньше sync_all_accounts обходил
+# аккаунты СТРОГО последовательно, а каждый мёртвый/медленный аккаунт держит
+# соединение до _CONNECT_TIMEOUT (~30с). При 5+ аккаунтах суммарное время
+# превышало таймаут HTTP-шлюза → запрос падал 502/timeout, и пользователь видел
+# «контакты не синхронизируются / модуль не работает». Ограниченная
+# параллельность режет wall-time на порядок, не создавая всплеска соединений.
+_SYNC_CONCURRENCY = 6
 
 
 async def sync_account(pool, owner_id: int, account_id: int) -> dict:
@@ -67,19 +76,55 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
 
 
 async def sync_all_accounts(pool, owner_id: int) -> dict:
-    accounts = await pool.fetch('SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL', owner_id)
-    results = []
-    for acc in accounts:
-        result = await sync_account(pool, owner_id, acc['id'])
-        results.append(result)
+    accounts = await pool.fetch(
+        'SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE '
+        'AND session_str IS NOT NULL', owner_id)
+    accounts_found = len(accounts)
+    if not accounts_found:
+        # Явная диагностика вместо немого «0» — самая частая причина «модуль не
+        # работает»: нет ни одного активного аккаунта с сессией для чтения контактов.
+        return {
+            'accounts_found': 0,
+            'accounts_synced': 0,
+            'total_synced': 0,
+            'total_created': 0,
+            'total_updated': 0,
+            'errors': [],
+            'message': 'Нет активных аккаунтов с сессией. Подключите аккаунт '
+                       'в разделе «Аккаунты», затем синхронизируйте контакты.',
+        }
+
+    sem = asyncio.Semaphore(_SYNC_CONCURRENCY)
+
+    async def _one(acc_id: int) -> dict:
+        async with sem:
+            try:
+                return await sync_account(pool, owner_id, acc_id)
+            except Exception as e:  # sync_account сам ловит, но страхуемся от gather-обрыва
+                log.warning('sync_all_accounts: acc=%s crashed: %s', acc_id, e)
+                return {'error': str(e)[:200], 'synced': 0}
+
+    results = await asyncio.gather(*[_one(a['id']) for a in accounts])
+
     total_synced = sum(r.get('synced', 0) for r in results)
     total_created = sum(r.get('created', 0) for r in results)
     total_updated = sum(r.get('updated', 0) for r in results)
     errors = [r.get('error') for r in results if r.get('error')]
+    # Понятное сообщение, когда аккаунты есть, но контактов не получено (мёртвые
+    # сессии / недоступные прокси) — чтобы «0» не выглядел как молчаливая поломка.
+    message = None
+    if total_synced == 0:
+        if errors:
+            message = ('Аккаунты найдены, но контакты не получены. Вероятно, '
+                       'сессии устарели или прокси недоступны — проверьте аккаунты.')
+        else:
+            message = 'Синхронизация прошла: у аккаунтов нет контактов для импорта.'
     return {
+        'accounts_found': accounts_found,
         'accounts_synced': len(results),
         'total_synced': total_synced,
         'total_created': total_created,
         'total_updated': total_updated,
         'errors': errors,
+        'message': message,
     }

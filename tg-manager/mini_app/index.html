@@ -9135,7 +9135,14 @@ async function syncContacts() {
   toast('🔄 Синхронизация...');
   try {
     const d = await api('/api/miniapp/uch/sync', {method:'POST'});
-    toast(`✅ Синхронизировано: ${d.total_synced||0} контактов, создано: ${d.total_created||0}`);
+    if ((d.total_synced||0) > 0) {
+      toast(`✅ Синхронизировано: ${d.total_synced} контактов, создано: ${d.total_created||0}`);
+    } else if (d.message) {
+      // Явная причина нулевого результата (нет аккаунтов / мёртвые сессии / нет контактов)
+      toast('⚠️ '+d.message);
+    } else {
+      toast('✅ Синхронизация завершена: новых контактов нет');
+    }
     loadContacts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
