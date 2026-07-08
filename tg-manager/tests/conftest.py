@@ -83,6 +83,23 @@ import importlib.abc
 import importlib.util
 
 
+# Имена telethon-ошибок должны быть НАСТОЯЩИМИ классами-исключениями, иначе
+# `except SomeTelethonError` под заглушкой падает с «catching classes that do not
+# inherit from BaseException». Кэшируем по имени, чтобы `except X` и `raise X`
+# ссылались на один класс.
+_stub_exc_cache: dict[str, type] = {}
+
+
+def _telethon_module_getattr(name: str):
+    if name.endswith("Error") or name.endswith("Exception"):
+        cls = _stub_exc_cache.get(name)
+        if cls is None:
+            cls = type(name, (Exception,), {})
+            _stub_exc_cache[name] = cls
+        return cls
+    return _Any()
+
+
 class _TelethonFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     """Meta-path finder (современный протокол find_spec/exec_module — работает на
     Python 3.11 И 3.12+, где легаси find_module/load_module удалён).
@@ -98,7 +115,7 @@ class _TelethonFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
     def create_module(self, spec):
         m = _stub(spec.name)
-        m.__getattr__ = lambda _n: _Any()  # type: ignore[attr-defined]
+        m.__getattr__ = _telethon_module_getattr  # type: ignore[attr-defined]
         m.TelegramClient = _Any  # type: ignore[attr-defined]
         m.StringSession = _Any  # type: ignore[attr-defined]
         return m
