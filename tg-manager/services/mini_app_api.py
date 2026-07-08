@@ -3057,6 +3057,50 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
             return _err(str(exc), 500)
 
+    async def account_spamblock_appeal(request: web.Request) -> web.Response:
+        """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
+        Инлайн, немедленный результат (реабилитация своего аккаунта)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import account_manager
+            res = await asyncio.wait_for(
+                account_manager.appeal_spamblock(acc["session_str"], dict(acc)), timeout=60)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_spamblock_appeal uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        # Синхронизируем acc_status в БД, если бот подтвердил «free».
+        if res.get("status") == "free":
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status='ok' WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            except Exception:
+                pass
+        labels = {"free": "✅ Спамблок снят — аккаунт активен",
+                  "appeal_sent": "📨 Аппеляция отправлена — ждите решения",
+                  "still_blocked": "🔴 Спамблок активен, кнопки аппеляции нет",
+                  "error": "⚠️ Ошибка обращения к @SpamBot",
+                  "no_session": "⚠️ Сессия недоступна"}
+        if not res.get("ok") and res.get("status") not in ("still_blocked", "appeal_sent", "free"):
+            return _err(labels.get(res.get("status"), "Не выполнено") + (f": {res.get('reply')}" if res.get("reply") else ""), 400)
+        return _json_resp({"ok": True, "status": res.get("status"),
+                           "label": labels.get(res.get("status"), res.get("status")),
+                           "reply": res.get("reply"), "steps": res.get("steps", 0)})
+
     async def account_set_proxy(request: web.Request) -> web.Response:
         """Назначить/снять прокси у аккаунта. body: {proxy_id: int|null}."""
         uid = _get_uid(request)
@@ -9782,6 +9826,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
+    app.router.add_post("/api/miniapp/account/{acc_id}/spamblock_appeal", account_spamblock_appeal)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)

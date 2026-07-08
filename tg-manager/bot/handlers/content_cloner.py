@@ -37,7 +37,7 @@ async def cb_cloner_menu(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Poo
     await state.clear()
     text = (
         "<b>📋 Контент-клонер</b>\n\n"
-        "Копирует или пересылает сообщения из канала-источника в один или несколько каналов-целей.\n\n"
+        "Копирует или пересылает сообщения из канала/группы-источника в один или несколько каналов/групп-целей.\n\n"
         "<b>Режимы:</b>\n"
         "• <b>Переслать</b> — пересылает с подписью «Из канала X»\n"
         "• <b>Скопировать</b> — скачивает контент и постит заново без attribution\n\n"
@@ -84,7 +84,7 @@ async def msg_cloner_source(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите ссылку или username канала.")
+        await msg.answer("⚠️ Введите ссылку или username канала/группы.")
         return
     source_ref = parse_channel_ref(raw)
     await state.update_data(source_ref=source_ref)
@@ -92,7 +92,7 @@ async def msg_cloner_source(msg: Message, state: FSMContext) -> None:
 
     text = (
         f"<b>📋 Источник:</b> <code>{html.escape(source_ref)}</code>\n\n"
-        "Шаг 2: Введите <b>каналы-цели</b> (куда клонировать).\n"
+        "Шаг 2: Введите <b>каналы/группы-цели</b> (куда клонировать).\n"
         "Вводите по одному или через запятую:\n\n"
         "<i>@channel1, @channel2, t.me/channel3</i>\n\n"
         "Когда введёте все цели — нажмите <b>Далее</b>."
@@ -112,7 +112,7 @@ async def msg_cloner_targets(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите username или ссылку канала.")
+        await msg.answer("⚠️ Введите username или ссылку канала/группы.")
         return
 
     data = await state.get_data()

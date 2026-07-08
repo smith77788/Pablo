@@ -18,7 +18,7 @@
 | Проверка уникальности IP прокси | 13 Прокси | **НЕТ → в работе (этот заход)** | ядро изоляции: два активных аккаунта на одном IP = риск бана |
 | Автопостинг в чаты v1/v2 | 7 Отправка | НЕТ | join по ключам + постинг циклом; конвейер есть |
 | Session Duplicator | 12 Спец | НЕТ | доп. авторизованная сессия для ротации/бэкапа |
-| Chat Cloner | 12 Спец | НЕТ | клон истории группы (Channel Cloner есть) |
+| Chat Cloner | 12 Спец | **WIRED (единый модуль)** | НЕ отдельный модуль (был бы дубль). Единый `content_cloner_engine` целе-агностичен: `get_entity`+`forward_messages`/copy работают и с группами; `parse_channel_ref` принимает групповые @username/id/invite. UI Контент-клонера явно поддерживает «канал/группу». Тест: `test_content_cloner_groups.py` |
 | Shadow Sessions | 12 Спец | НЕТ | |
 | AI Commenting | 12 Спец | НЕТ | GPT-комментинг в обсуждениях |
 | Global Search | 12 Спец | **WIRED** | `global_search_engine.search_public` (contacts.SearchRequest) + POST `/api/miniapp/global_search` + экран `s-gsearch`, тайл «Глобал. поиск» |
@@ -28,7 +28,10 @@
 
 ## Разделы, где база ЕСТЬ (аккаунт-операции активно добивает параллельный агент, waves 1-2)
 - **2 Панель аккаунтов**: категории, массовая проверка (бан/огранич), массовые действия (фото/имя/username/bio/2FA/close_sessions/online/приватность/прокси/роли), JSON generator/export, поиск/фильтр/импорт. Move-between-folders + set gender — backlog агента.
-- **3 Действие с аккаунтом**: add/снятие спамблока/чтение+удаление диалогов/массовые отписки/создание чатов+ботов+постов/экспорт/поиск админ-чатов — BACKEND (проверять wiring каждой кнопки).
+- **3 Действие с аккаунтом**: проверено wiring (правило №1):
+  - **WIRED**: Поиск админ-чатов (`scan` → op `scan_owned_resources` + `_exec_scan_owned_resources`), Массовые отписки/Выход из чатов (`leave_all` → op `leave_all_chats` + реальный `client.delete_dialog` цикл), обе кнопки в UI + `accAction` c `pollOpResult`.
+  - **WIRED (новое)**: Снятие спамблока — `account_manager.appeal_spamblock` (проход по кнопкам аппеляции @SpamBot) + POST `/account/{id}/spamblock_appeal` + кнопка «🛡 Снять спамблок» в карточке аккаунта. Раньше был только CHECK, снятия не было.
+  - Остальное (чтение/удаление диалогов, создание чатов+ботов+постов, экспорт) — база есть, wiring добивается.
 - **4 Авто-регистрация**: генератор device-параметров, SMS-провайдеры (`sms_api_engine`), авто-рег — есть; Flash Call/Voice — НЕТ.
 - **5 Сбор аудитории**: parser (`/parser/*`) — WIRED.
 - **6 Инвайт**: mass_invite (op) — WIRED; Invite V2/через ботов/пакетами — проверять.

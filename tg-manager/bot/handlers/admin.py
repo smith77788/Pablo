@@ -2951,7 +2951,8 @@ async def notify_new_platform_user(
         # найти любого пользователя с ролью owner в БД.
         try:
             fallback = await pool.fetchval(
-                "SELECT user_id FROM platform_users WHERE current_plan IS NOT NULL ORDER BY created_at ASC LIMIT 1"
+                "SELECT user_id FROM platform_users WHERE current_plan IS NOT NULL "
+                "ORDER BY COALESCE(registered_at, first_seen) ASC LIMIT 1"
             )
             if fallback:
                 admin_ids = {int(fallback)}

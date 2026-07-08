@@ -107,3 +107,57 @@ async def test_sync_account_propagates_is_premium():
     assert insert is not None
     # is_premium — 9-й позиционный аргумент INSERT ($9)
     assert insert[1][8] is True, "is_premium=True должен был пройти в INSERT"
+
+
+class _ListPool:
+    """Pool-мок для sync_all_accounts: возвращает список аккаунтов из fetch."""
+
+    def __init__(self, account_ids):
+        self._ids = account_ids
+
+    async def fetch(self, query, *args):
+        return [{"id": i} for i in self._ids]
+
+
+@pytest.mark.asyncio
+async def test_sync_all_accounts_no_accounts_returns_diagnostic():
+    """0 аккаунтов → явное сообщение вместо немого нуля (частая причина
+    жалобы «контакты не синхронизируются»)."""
+    pool = _ListPool([])
+    result = await sync_service.sync_all_accounts(pool, owner_id=1)
+    assert result["accounts_found"] == 0
+    assert result["total_synced"] == 0
+    assert result.get("message"), "должна быть подсказка про подключение аккаунта"
+
+
+@pytest.mark.asyncio
+async def test_sync_all_accounts_all_failed_returns_diagnostic():
+    """Аккаунты есть, но контактов 0 и есть ошибки → понятное сообщение
+    про сессии/прокси, а не молчаливый ноль."""
+    pool = _ListPool([10, 11])
+    with patch.object(sync_service, "sync_account",
+                      new=AsyncMock(return_value={"error": "timeout", "synced": 0})):
+        result = await sync_service.sync_all_accounts(pool, owner_id=1)
+    assert result["accounts_found"] == 2
+    assert result["total_synced"] == 0
+    assert result["errors"], "ошибки должны прокидываться наверх"
+    assert result.get("message"), "должна быть подсказка проверить аккаунты"
+
+
+@pytest.mark.asyncio
+async def test_sync_all_accounts_runs_bounded_parallel():
+    """Синхронизация аккаунтов должна идти параллельно (asyncio.gather), а не
+    строго последовательно — иначе запрос упирается в таймаут шлюза."""
+    src = inspect.getsource(sync_service.sync_all_accounts)
+    assert "asyncio.gather" in src, "sync_all_accounts должен использовать gather"
+    assert "Semaphore" in src, "должна быть ограниченная конкурентность (Semaphore)"
+
+
+@pytest.mark.asyncio
+async def test_sync_all_accounts_success_has_no_error_message():
+    pool = _ListPool([10])
+    with patch.object(sync_service, "sync_account",
+                      new=AsyncMock(return_value={"synced": 3, "created": 3, "updated": 0})):
+        result = await sync_service.sync_all_accounts(pool, owner_id=1)
+    assert result["total_synced"] == 3
+    assert result.get("message") is None

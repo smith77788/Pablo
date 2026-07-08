@@ -6311,6 +6311,20 @@ async def _exec_check_accounts_health(
     reactivated = 0
     errors = 0
 
+    # Читаемые подписи статусов — используются и для per-account лога (секция
+    # «📋 Лог» в деталях операции), и для итоговой сводки ниже.
+    _STATUS_LABELS = {
+        "active": "✅ активен",
+        "spamblock": "🚫 спам-блок",
+        "banned": "❌ заблокирован",
+        "cooldown": "⏳ FloodWait",
+        "session_expired": "🔑 сессия истекла",
+        "no_session": "⚪ нет сессии",
+        "unknown": "❓ ошибка проверки",
+    }
+    # Статусы, считающиеся «здоровыми» для бейджа лога (ok vs error).
+    _HEALTHY = {"active"}
+
     for idx, acc in enumerate(accounts):
         if await _is_cancelled(pool, op_id):
             return {
@@ -6369,18 +6383,23 @@ async def _exec_check_accounts_health(
             except Exception as e:
                 log.warning("check_accounts_health: update_acc_status for acc %s failed: %s", acc["id"], e)
 
+        # Per-account запись в лог операции — чтобы секция «📋 Лог» в деталях
+        # (mini-app) показывала вердикт по каждому аккаунту, а не пустоту.
+        _acc_label = acc.get("first_name") or acc.get("phone") or f"acc#{acc['id']}"
+        _verdict = _STATUS_LABELS.get(status, status)
+        _reason = (result.get("reason") or "").strip()
+        _log_msg = f"{_verdict}{(' — ' + _reason) if _reason else ''}"
+        await _safe_execute(
+            pool,
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,$2,$3,$4,$5)",
+            op_id, idx + 1, str(_acc_label)[:64],
+            "ok" if status in _HEALTHY else "error", _log_msg[:200],
+        )
+
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
-    _STATUS_LABELS = {
-        "active": "✅ активен",
-        "spamblock": "🚫 спам-блок",
-        "banned": "❌ заблокирован",
-        "cooldown": "⏳ FloodWait",
-        "session_expired": "🔑 сессия истекла",
-        "no_session": "⚪ нет сессии",
-        "unknown": "❓ ошибка проверки",
-    }
     parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
     react_note = f"\n🔄 Восстановлено: {reactivated}" if reactivated else ""
@@ -6468,6 +6487,7 @@ async def _exec_scan_owned_resources(
         label = (
             acc.get("first_name") or acc.get("username") or acc.get("phone") or f"ID {acc_id}"
         )
+        _lines_before = len(acc_lines)
 
         try:
             session_str = acc.get("session_str") or ""
@@ -6527,14 +6547,41 @@ async def _exec_scan_owned_resources(
             else:
                 acc_lines.append(f"❌ {label}: {str(exc)[:60]}")
 
+        # Per-account запись в лог операции — раньше acc_lines с детальным
+        # результатом по каждому аккаунту НИКУДА не шли (сводка их не включает),
+        # т.е. вся детализация вычислялась и терялась. Теперь она видна в секции
+        # «📋 Лог» деталей операции. Статус бейджа выводим по эмодзи-префиксу.
+        if len(acc_lines) > _lines_before:
+            _line = acc_lines[-1]
+            if _line.startswith("✅"):
+                _lstatus = "ok"
+            elif _line.startswith(("⛔️", "ℹ️")):
+                _lstatus = "skip"
+            else:
+                _lstatus = "error"
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, idx + 1, str(label)[:64], _lstatus, _line[:200],
+            )
+
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
     dead_count = len(dead_acc_ids)
     dead_note = f"\n🔑 Мёртвых сессий: {dead_count}" if dead_count else ""
+    # Показываем детализацию по аккаунтам прямо в сводке (до 10 строк, остальное —
+    # в секции «📋 Лог»). Раньше acc_lines собирались, но нигде не отображались.
+    detail = ""
+    if acc_lines:
+        shown = acc_lines[:10]
+        detail = "\n\n" + "\n".join(shown)
+        if len(acc_lines) > len(shown):
+            detail += f"\n… ещё {len(acc_lines) - len(shown)} (см. лог операции)"
     summary = (
         f"🔎 Просканировано {n} аккаунтов\n"
-        f"📡 Импортировано новых ресурсов: {total_imported}{dead_note}"
+        f"📡 Импортировано новых ресурсов: {total_imported}{dead_note}{detail}"
     )
 
     return {
