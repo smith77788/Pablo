@@ -1128,7 +1128,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    GROUP BY f.id, f.name, f.is_active, mb.username
                    ORDER BY active_subs DESC LIMIT 30""", uid)
             return _json_resp({"funnels": [dict(r) for r in rows]})
-        except Exception:
+        except Exception as e:
+            log.warning("funnels_all uid=%d: %s", uid, e)
             return _json_resp({"funnels": []})
 
     # ── Accounts ─────────────────────────────────────────────────────────────
@@ -1568,7 +1569,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not row:
                 return _err("Not found or already finished", 404)
             return _json_resp({"ok": True})
-        except Exception:
+        except Exception as e:
+            log.warning("cancel_operation op=%d uid=%d: %s", op_id, uid, e)
             return _err("Failed to cancel", 500)
 
     async def retry_operation(request: web.Request) -> web.Response:
@@ -1696,7 +1698,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)""",
                 link_id, uid)
             return _json_resp({"ok": True})
-        except Exception:
+        except Exception as e:
+            log.warning("delete_deeplink link=%d uid=%d: %s", link_id, uid, e)
             return _err("Failed to delete", 500)
 
     # ── Engagement segments ───────────────────────────────────────────────────
@@ -1725,7 +1728,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                      COUNT(*) FILTER (WHERE last_seen < now()-INTERVAL '30 days') AS lost,
                      COUNT(*) AS total
                    FROM user_activity WHERE bot_id=$1""", bot_id)
-        except Exception:
+        except Exception as e:
+            log.warning("bot_engagement user_activity uid=%d bot=%d: %s", uid, bot_id, e)
             try:
                 row = await pool.fetchrow(
                     """SELECT
@@ -1737,7 +1741,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                          COUNT(*) FILTER (WHERE last_seen < now()-INTERVAL '30 days') AS lost,
                          COUNT(*) AS total
                        FROM bot_users WHERE bot_id=$1""", bot_id)
-            except Exception:
+            except Exception as e2:
+                log.warning("bot_engagement bot_users uid=%d bot=%d: %s", uid, bot_id, e2)
                 row = None
         if not row:
             return _json_resp({"hot": 0, "warm": 0, "cold": 0, "lost": 0, "total": 0})
@@ -2177,7 +2182,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id IS NOT NULL",
                     uid,
                 )
-            except Exception:
+            except Exception as e:
+                log.warning("topology_overview links uid=%d: %s", uid, e)
                 links = 0
             # Bot-user relationships
             try:
@@ -2187,7 +2193,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        WHERE b.added_by=$1""",
                     uid,
                 )
-            except Exception:
+            except Exception as e:
+                log.warning("topology_overview bot_users uid=%d: %s", uid, e)
                 bot_users_total = 0
             return _json_resp({
                 "accounts": accs, "channels": channels, "bots": bots,
@@ -2263,7 +2270,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             active_accs = await pool.fetchval(
                 "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
             )
-        except Exception:
+        except Exception as e:
+            log.warning("infra_analytics active_accs uid=%d: %s", uid, e)
             active_accs = 0
         try:
             flood_24h = await pool.fetchval(
@@ -2272,14 +2280,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE ta.owner_id=$1 AND fl.created_at > NOW()-INTERVAL '24h'""",
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning("infra_analytics flood_24h uid=%d: %s", uid, e)
             flood_24h = 0
         try:
             ops_24h = await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '24h'",
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning("infra_analytics ops_24h uid=%d: %s", uid, e)
             ops_24h = 0
         try:
             warmup_active = await pool.fetchval(
@@ -2287,7 +2297,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE wp.owner_id=$1 AND wp.status='active'""",
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning("infra_analytics warmup uid=%d: %s", uid, e)
             warmup_active = 0
         try:
             pools = await pool.fetch(
@@ -2296,7 +2307,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    GROUP BY pool ORDER BY cnt DESC LIMIT 10""",
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning("infra_analytics pools uid=%d: %s", uid, e)
             pools = []
         try:
             audit_rows = await pool.fetch(
@@ -2305,7 +2317,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    ORDER BY occurred_at DESC LIMIT 10""",
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning("infra_analytics audit uid=%d: %s", uid, e)
             audit_rows = []
         return _json_resp({
             "active_accounts": int(active_accs or 0),
@@ -7469,7 +7482,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception:
+        except Exception as e:
+            log.warning("payments_history uid=%d: %s", uid, e)
             return _json_resp([])
 
     async def referral(request: web.Request) -> web.Response:
