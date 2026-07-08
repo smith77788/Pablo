@@ -203,8 +203,8 @@ async def cb_qp_cancel(callback: CallbackQuery, state: FSMContext) -> None:
             "Используйте /post или кнопку «✍️ Создать пост» в меню операций.",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("handler error in cb_qp_cancel: %s", e)
 
 
 # ── Step 2: channel picker ─────────────────────────────────────────────────
@@ -612,8 +612,8 @@ async def _show_step3_media(target, has_media: bool = False, edit: bool = True) 
                 try:
                     await target.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb.as_markup())
                     return
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("handler error in _show_step3_media: %s", e)
             if "message to edit not found" in _es or "message can't be edited" in _es:
                 pass  # fall through
             else:

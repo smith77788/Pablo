@@ -63,6 +63,7 @@ async def _edit(cb: CallbackQuery, text: str, markup=None, **kw) -> None:
     try:
         await cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup, **kw)
     except Exception as e:
+        log.warning('handler error in _edit: %s', e)
         err_str = str(e).lower()
         if "message is not modified" in err_str:
             return
@@ -308,8 +309,8 @@ async def cb_eco_view(
                 parse_mode="HTML",
                 reply_markup=kb_back.as_markup(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_eco_view: %s', e)
         return
 
     text = _eb.format_snapshot(snap)
@@ -906,8 +907,8 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 "📊 Экосистем нет. Создайте первую в разделе 🌐 Ecosystem Brain.",
                 reply_markup=kb_back.as_markup(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_eco_summary: %s', e)
         return
 
     lines = ["🌐 <b>Сводка всех экосистем</b>\n"]
@@ -1325,8 +1326,8 @@ async def cb_eco_snooze(callback: CallbackQuery, callback_data: EcoCb) -> None:
     await callback.answer(f"😴 Уведомления отложены на {hours}ч", show_alert=False)
     try:
         await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_eco_snooze: %s', e)
 
 
 @router.callback_query(EcoCb.filter(F.action == "eco_snooze_clear"))
@@ -1344,8 +1345,8 @@ async def cb_eco_snooze_clear(callback: CallbackQuery) -> None:
     kb.adjust(3, 1)
     try:
         await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_eco_snooze_clear: %s', e)
 
 
 # ── Sync: Preview ────────────────────────────────────────────────────────────
@@ -1472,6 +1473,7 @@ async def cb_eco_sync_exec(
                 )
         text = "\n".join(lines)
     except Exception as e:
+        log.warning('handler error in cb_eco_sync_exec: %s', e)
         text = f"❌ Ошибка синхронизации: {html.escape(str(e)[:100])}"
 
     kb = InlineKeyboardBuilder()
@@ -1576,6 +1578,7 @@ async def cb_eco_clone_skip_region(
             reply_markup=kb.as_markup(),
         )
     except Exception as e:
+        log.warning('handler error in cb_eco_clone_skip_region: %s', e)
         await callback.message.edit_text(
             f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML"
         )
@@ -1621,6 +1624,7 @@ async def fsm_eco_clone_region(
             reply_markup=kb.as_markup(),
         )
     except Exception as e:
+        log.warning('handler error in fsm_eco_clone_region: %s', e)
         await message.answer(
             f"❌ Ошибка клонирования: {html.escape(str(e)[:100])}", parse_mode="HTML"
         )
@@ -1763,6 +1767,7 @@ async def fsm_eco_dna_name(
             reply_markup=kb.as_markup(),
         )
     except Exception as e:
+        log.warning('handler error in fsm_eco_dna_name: %s', e)
         await message.answer(
             f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML"
         )
@@ -1787,7 +1792,8 @@ async def cb_eco_dna_view(
     if isinstance(td, str):
         try:
             td = _json.loads(td)
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_eco_dna_view: %s', e)
             td = {}
 
     mc = td.get("member_counts") or {}
@@ -1837,6 +1843,7 @@ async def cb_eco_dna_apply(
         )
         text = f"✅ <b>DNA применена</b>\n\n{ch_lines}"
     except Exception as e:
+        log.warning('handler error in cb_eco_dna_apply: %s', e)
         text = f"❌ Ошибка: {html.escape(str(e)[:100])}"
 
     kb = InlineKeyboardBuilder()
@@ -1883,8 +1890,8 @@ async def cb_eco_dna_delete(
         await callback.message.edit_text(
             "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_eco_dna_delete: %s', e)
 
 
 # ── Recommendations ───────────────────────────────────────────────────────────
@@ -1907,8 +1914,8 @@ async def cb_eco_recs(
             await callback.message.edit_text(
                 "❌ Экосистема не найдена.", reply_markup=kb_back.as_markup()
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_eco_recs: %s', e)
         return
 
     recs = await _eb.generate_recommendations(pool, eco_id, callback.from_user.id)
@@ -2064,5 +2071,5 @@ async def cb_ecopick_add(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_ecopick_add: %s', e)

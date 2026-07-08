@@ -55,8 +55,8 @@ async def _edit(cb: CallbackQuery, text: str, markup=None) -> None:
             try:
                 await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("handler error in _edit: %s", e)
         if "message to edit not found" in err_str or "message can't be edited" in err_str:
             await cb.bot.send_message(cb.from_user.id, text, reply_markup=markup, parse_mode="HTML")
         else:
@@ -1272,8 +1272,8 @@ async def cb_gp_confirm_preview(
             await callback.message.answer(
                 "⚠️ Внутренняя ошибка. Попробуйте ещё раз или нажмите ❌ Отмена."
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("handler error in cb_gp_confirm_preview: %s", e)
 
 
 async def _cb_gp_confirm_preview_impl(

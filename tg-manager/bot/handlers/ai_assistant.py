@@ -747,8 +747,8 @@ async def _process_ai_turn(
         # Показываем индикатор набора текста перед вызовом API
         try:
             await message.bot.send_chat_action(message.chat.id, "typing")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("handler error in _process_ai_turn send_chat_action: %s", e)
 
         thinking = await message.answer(thinking_text, parse_mode="HTML")
 
@@ -1071,8 +1071,8 @@ async def cb_ai_confirm_action(
                     parse_mode="HTML",
                     reply_markup=kb.as_markup(),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("handler error in _do_action: %s", e)
 
     asyncio.create_task(_do_action())
 

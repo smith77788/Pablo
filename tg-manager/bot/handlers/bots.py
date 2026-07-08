@@ -1,6 +1,7 @@
 """Add, list, select, delete managed bots."""
 
 import html
+import logging
 import re
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -18,6 +19,7 @@ from bot.utils.op_helpers import safe_answer
 
 _TOKEN_RE = re.compile(r"^\d{8,10}:[A-Za-z0-9_-]{35,}$")
 
+log = logging.getLogger(__name__)
 router = Router()
 
 
@@ -453,8 +455,8 @@ async def cb_pset_apply(
         if kw and resp:
             try:
                 await db.add_auto_reply(pool, bot_id, "keyword", kw, resp)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in cb_pset_apply: %s', e)
     if replies:
         applied.append(f"✅ Авто-ответы ({len(replies)} шт.)")
 

@@ -339,7 +339,8 @@ async def _show_preview(
             callback.from_user.id,
             acc_ids,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _show_preview: %s', e)
         channel_counts = []
     total_channels = sum(r["cnt"] for r in channel_counts)
     acc_count = len(channel_counts)
@@ -379,7 +380,8 @@ async def _show_preview(
                 account_ids=acc_ids if acc_ids else None,
             )
             intel_text = "\n\n" + intelligence_engine.format_pre_launch_block(intel)
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _show_preview: %s', e)
             intel_text = ""
 
     media_hint = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
@@ -449,8 +451,8 @@ async def cb_mpub_confirm_send(
             acc_ids,
         )
         total_channels = row["cnt"] if row else 0
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_mpub_confirm_send: %s', e)
 
     from services import operation_bus
 
@@ -606,7 +608,8 @@ async def cb_mpub_dry_run(
         return
     try:
         accounts = await _get_active_accounts(pool, callback.from_user.id)
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_mpub_dry_run: %s', e)
         await state.clear()
         await callback.message.edit_text(
             "❌ Ошибка загрузки аккаунтов. Попробуйте позже.",
@@ -653,7 +656,8 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "ORDER BY oq.created_at DESC LIMIT 10",
             callback.from_user.id,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_mpub_history: %s', e)
         rows = []
 
     if not rows:

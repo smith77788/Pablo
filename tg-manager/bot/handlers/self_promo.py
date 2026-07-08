@@ -196,7 +196,8 @@ async def cb_sp_menu(callback: CallbackQuery, state: FSMContext) -> None:
     )
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_menu_kb())
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_menu: %s', e)
         await callback.message.answer(text, parse_mode="HTML", reply_markup=_menu_kb())
 
 
@@ -221,7 +222,8 @@ async def cb_sp_list(callback: CallbackQuery, callback_data: SelfPromoCb, pool: 
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=_list_kb(page_rows, page, total, is_adm)
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_list: %s', e)
         await callback.message.answer(
             text, parse_mode="HTML", reply_markup=_list_kb(page_rows, page, total, is_adm)
         )
@@ -253,7 +255,8 @@ async def cb_sp_view(callback: CallbackQuery, callback_data: SelfPromoCb, pool: 
     )
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_view_kb(tpl["id"], is_adm))
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_view: %s', e)
         await callback.message.answer(text, parse_mode="HTML", reply_markup=_view_kb(tpl["id"], is_adm))
 
 
@@ -275,8 +278,8 @@ async def cb_sp_del_confirm(callback: CallbackQuery, callback_data: SelfPromoCb,
             parse_mode="HTML",
             reply_markup=_del_confirm_kb(callback_data.item_id),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_sp_del_confirm: %s', e)
 
 
 @router.callback_query(SelfPromoCb.filter(F.action == "del_do"))
@@ -297,8 +300,8 @@ async def cb_sp_del_do(callback: CallbackQuery, callback_data: SelfPromoCb, pool
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=_list_kb(page_rows, 0, len(all_rows), True)
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_sp_del_do: %s', e)
 
 
 # ─── Add template FSM ─────────────────────────────────────────────────────────
@@ -316,7 +319,8 @@ async def cb_sp_add_ask(callback: CallbackQuery, state: FSMContext) -> None:
             parse_mode="HTML",
             reply_markup=_style_kb(),
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_add_ask: %s', e)
         await callback.message.answer(
             "➕ <b>Новый шаблон</b>\n\nВыберите тип рекламы:",
             parse_mode="HTML",
@@ -336,7 +340,8 @@ async def cb_sp_add_style(callback: CallbackQuery, callback_data: SelfPromoCb, s
             parse_mode="HTML",
             reply_markup=_cancel_kb(),
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_add_style: %s', e)
         await callback.message.answer(
             f"Тип: <b>{badge}</b>\n\nВведите <b>название</b> шаблона (до 100 символов):",
             parse_mode="HTML",
@@ -384,8 +389,8 @@ async def cb_sp_skip_cta(callback: CallbackQuery, state: FSMContext, pool: async
         await callback.message.edit_text(
             "✅ <b>Шаблон сохранён!</b>", parse_mode="HTML", reply_markup=_back_to_list_kb()
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_sp_skip_cta: %s', e)
 
 
 @router.message(SelfPromoFSM.add_cta_text)
@@ -411,8 +416,8 @@ async def cb_sp_skip_url(callback: CallbackQuery, state: FSMContext, pool: async
         await callback.message.edit_text(
             "✅ <b>Шаблон сохранён!</b>", parse_mode="HTML", reply_markup=_back_to_list_kb()
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_sp_skip_url: %s', e)
 
 
 @router.message(SelfPromoFSM.add_cta_url)
@@ -462,7 +467,8 @@ async def cb_sp_launch_channel(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_launch_channel: %s', e)
         await callback.message.answer(
             "🚀 <b>Выберите шаблон для публикации:</b>",
             parse_mode="HTML",
@@ -505,7 +511,8 @@ async def cb_sp_run_confirm(
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=_run_confirm_kb(tpl["id"])
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_run_confirm: %s', e)
         await callback.message.answer(
             text, parse_mode="HTML", reply_markup=_run_confirm_kb(tpl["id"])
         )
@@ -528,8 +535,8 @@ async def cb_sp_run_now(
             me = await callback.bot.get_me()
             code = await db.get_or_create_referral_code(pool, user_id)
             content += f"\n\n🔗 t.me/{me.username}?start={code}"
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_sp_run_now: %s', e)
     # Record the run
     run_id = await pool.fetchval(
         """INSERT INTO self_promo_runs(template_id, run_type, initiated_by)
@@ -551,8 +558,8 @@ async def cb_sp_run_now(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_sp_run_now: %s', e)
 
 
 async def _post_to_channels_bg(
@@ -602,8 +609,8 @@ async def _post_to_channels_bg(
             f"⚠️ Ошибок: <b>{failed}</b>",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in _post_to_channels_bg: %s', e)
 
 
 # ─── Referral link ─────────────────────────────────────────────────────────────
@@ -616,7 +623,8 @@ async def cb_sp_share_link(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         me = await callback.bot.get_me()
         code = await db.get_or_create_referral_code(pool, user_id)
         link = f"https://t.me/{me.username}?start={code}"
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_share_link: %s', e)
         link = "https://t.me/InfragramBot"
     ready_text = (
         f"🚀 Пользуюсь Infragram — автоматизация Telegram на новом уровне. "
@@ -634,7 +642,8 @@ async def cb_sp_share_link(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_share_link: %s', e)
         await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -672,8 +681,8 @@ async def cb_sp_history(
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_sp_history: %s', e)
         return
     type_map = {"channel_post": "📢", "dm_blast": "📨", "manual": "✍️"}
     lines = []
@@ -692,5 +701,6 @@ async def cb_sp_history(
     kb.adjust(2, 1) if page > 0 or (page + 1) * limit < total else kb.adjust(1)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_sp_history: %s', e)
         await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())

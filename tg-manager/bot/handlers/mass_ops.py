@@ -102,7 +102,8 @@ async def _capacity_line(
             risk = "medium"
         emoji, label = _RISK_LABEL.get(risk, ("⚪", "неизвестно"))
         return f"⏱ Прогноз: ~{minutes:.0f} мин · {emoji} {label} риск"
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _capacity_line: %s', e)
         return ""
 
 
@@ -123,8 +124,8 @@ async def _intel_block(
                 pool, owner_id, op_type, total_items, acc_ids or None
             )
             base_block = _ie.format_pre_launch_block(intel)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in _intel_block: %s', e)
 
     if not base_block:
         # Fallback: simple state block via infra_orchestrator
@@ -161,8 +162,8 @@ async def _intel_block(
                     shown += 1
 
             base_block = "\n".join(lines)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in _intel_block: %s', e)
 
     # Append ecosystem health summary if ecosystems exist
     eco_lines: list[str] = []
@@ -181,8 +182,8 @@ async def _intel_block(
                     else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
                 )
                 eco_lines.append(f"  {_health_icon} {_eco['name']}: {_health_pct}%")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in _intel_block: %s', e)
 
     parts = [p for p in (base_block, "\n".join(eco_lines)) if p]
     return "\n\n".join(parts)
@@ -363,7 +364,8 @@ async def cb_mp_filter_chosen(
                 "WHERE owner_id=$1 AND is_active=TRUE AND cluster IS NOT NULL",
                 callback.from_user.id,
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_mp_filter_chosen: %s', e)
             rows = []
         clusters = [r["cluster"] for r in rows if r["cluster"]]
         if not clusters:
@@ -586,7 +588,8 @@ async def cb_mp_timing(
             acc_row = await pool.fetchrow(
                 "SELECT first_name, phone FROM tg_accounts WHERE id=$1", mp_acc_id
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_mp_timing: %s', e)
             acc_row = None
         if acc_row:
             filter_label = f"Аккаунт: {acc_row['first_name'] or acc_row['phone']}"
@@ -692,7 +695,8 @@ async def cb_mp_confirm(
                 )
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_mp_confirm: %s', e)
             has_managed = 0
         from bot.callbacks import ChanCb as _ChanCb
 
@@ -875,7 +879,8 @@ async def cb_op_detail(
             "FROM operation_log WHERE op_id=$1 ORDER BY step_num DESC LIMIT 30",
             op_id,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_op_detail: %s', e)
         log_rows = []
 
     _STATUS_ICONS = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
@@ -904,8 +909,8 @@ async def cb_op_detail(
             summary = res_data.get("summary", "")
             if summary:
                 lines.append(f"\n📊 <b>Итог:</b> {html.escape(summary[:200])}")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_op_detail: %s', e)
 
     # Per-step log
     if log_rows:
@@ -1022,8 +1027,8 @@ async def cb_queue(
     # delegate from cb_cancel_op / cb_retry_op which may have answered it first).
     try:
         await safe_answer(callback)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_queue: %s', e)
     page = callback_data.page
     # op_type field reused as status filter key (e.g. "all", "active", "failed")
     status_filter_key = callback_data.op_type or "all"
@@ -1138,8 +1143,8 @@ async def cb_queue(
                         else json.loads(r["result"])
                     )
                     result_summary = res_data.get("summary", "")
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in cb_queue: %s', e)
             progress = html.escape(result_summary[:70]) if result_summary else f"✓ {done}/{total} · {created}"
         elif status == "failed":
             if is_dead_letter:
@@ -1763,7 +1768,8 @@ async def cb_bulk_join_accs(
                 callback_data.op_id,
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_bulk_join_accs: %s', e)
             acc = None
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
         acc_list_preview = f"  👤 {html.escape(acc_label)}"
@@ -2126,7 +2132,8 @@ async def cb_bulk_leave_accs(
                 callback_data.op_id,
                 uid,
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_bulk_leave_accs: %s', e)
             acc = None
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
         bl_acc_list_preview = f"  👤 {html.escape(acc_label)}"

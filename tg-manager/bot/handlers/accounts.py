@@ -1085,7 +1085,8 @@ async def _finalize_login(
             message.from_user.id,
             normalized_phone,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _finalize_login: %s', e)
         existing = None
 
     try:
@@ -1505,7 +1506,8 @@ async def cb_set_proxy(
             "WHERE owner_id=$1 AND is_active=TRUE ORDER BY label",
             callback.from_user.id,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_set_proxy: %s', e)
         proxies = []
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -2344,7 +2346,8 @@ async def cb_purge_expired_sessions(
                ORDER BY added_at DESC""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_purge_expired_sessions: %s', e)
         expired = []
     if not expired:
         await callback.message.edit_text(
@@ -3398,7 +3401,8 @@ async def _finalize_import(
                 message.from_user.id,
                 tg_user_id,
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _finalize_import: %s', e)
             existing_by_uid = None
 
     if existing_by_uid:
@@ -3608,7 +3612,8 @@ def _prevalidate_sessions(
         # Check base64-decodable (StringSession = base64)
         try:
             base64.b64decode(session_str + "=" * (-len(session_str) % 4))
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _prevalidate_sessions: %s', e)
             warnings.append(
                 f"Сессия #{i + 1}: не в формате base64 — может быть другой формат"
             )
@@ -3684,7 +3689,8 @@ async def _do_batch_import(
                         user_id,
                         tg_uid,
                     )
-                except Exception:
+                except Exception as e:
+                    log.warning('handler error in _do_batch_import: %s', e)
                     existing_uid_row = None
 
             if existing_uid_row:
@@ -4138,7 +4144,8 @@ async def cb_scan_connect(
     chan_limit = await get_channel_limit(pool, user_id)
     try:
         current_count = await get_effective_channel_count(pool, user_id)
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_scan_connect: %s', e)
         current_count = await pool.fetchval(
             "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
         ) or 0

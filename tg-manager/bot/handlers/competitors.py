@@ -301,8 +301,8 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
                 raw = re.sub(r"[\s\xa0]", "", m.group(1))
                 if raw.isdigit():
                     return int(raw)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in _fetch_members: %s', e)
         return None
 
     async def _refresh_bg() -> None:

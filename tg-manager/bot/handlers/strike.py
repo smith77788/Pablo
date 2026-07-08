@@ -953,8 +953,8 @@ async def cb_mini_strike_category(
             intel_block = _build_strike_intelligence_text(
                 _intel_state.to_dict(), _intel_cap
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("cb_mini_strike_category intel fallback: %s", e)
 
     # Ecosystem context block
     eco_block = ""
@@ -976,8 +976,8 @@ async def cb_mini_strike_category(
                 )
                 _eco_lines.append(f"  {_health_icon} {_eco['name']}: {_health_pct}%")
             eco_block = "\n".join(_eco_lines)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("cb_mini_strike_category eco_block: %s", e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить страйк", callback_data=StrikeCb(action="mini_run"))
@@ -1126,8 +1126,8 @@ async def cb_mini_strike_run(
         last_text[0] = full
         try:
             await msg.edit_text(full, parse_mode="HTML")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("cb_mini_strike_run progress edit: %s", e)
 
     await progress(
         f"🎯 Цель: <code>{html.escape(format_telegram_join_ref_display(str(target)))}</code>\n📂 Категория: {category}\n\n⚙️ Запуск..."
@@ -1437,8 +1437,8 @@ async def msg_password_input(
     # Немедленно удаляем сообщение с паролем
     try:
         await message.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("msg_password_input delete: %s", e)
 
     if not password or len(password) < 4:
         kb = InlineKeyboardBuilder()

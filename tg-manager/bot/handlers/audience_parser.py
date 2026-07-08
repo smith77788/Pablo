@@ -702,8 +702,8 @@ async def cb_parser_geo_radius(
                 f"{lat},{lon}",
             )
             saved += 1
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("handler error in cb_parser_geo_radius: %s", e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Посмотреть аудиторию", callback_data=ParserCb(action="audience"))
@@ -750,6 +750,6 @@ async def _exec_geo_parse(acc: dict, lat: float, lon: float, radius: int) -> lis
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("handler error in _exec_geo_parse: %s", e)
     return users

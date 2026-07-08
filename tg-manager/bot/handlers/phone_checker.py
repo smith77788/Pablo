@@ -31,7 +31,8 @@ class PhoneCheckerFSM(StatesGroup):
 async def _edit(cb: CallbackQuery, text: str, markup=None):
     try:
         await cb.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _edit: %s', e)
         await cb.message.answer(text, reply_markup=markup, parse_mode="HTML")
     await cb.answer()
 
@@ -159,8 +160,8 @@ async def msg_phone_checker_phones(
 
     try:
         await prog_msg.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in msg_phone_checker_phones: %s', e)
 
     await message.answer_document(
         csv_file,

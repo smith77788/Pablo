@@ -55,8 +55,8 @@ async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
             try:
                 await callback.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_edit edit_caption fallback: %s", e)
         if "message to edit not found" in err_str or "message can't be edited" in err_str:
             await callback.bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=markup)
         else:
@@ -1002,8 +1002,8 @@ async def cb_dm_launch_or_draft(
         if not ready:
             try:
                 await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("cb_dm_launch_or_draft delete campaign: %s", e)
             await _edit(
                 callback,
                 f"⚠️ {reason}\n\nКампания не запущена.",
@@ -1226,6 +1226,6 @@ async def cb_dm_delete(
             callback_data.campaign_id,
             callback.from_user.id,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("cb_dm_delete campaign: %s", e)
     await cb_dm_menu(callback, pool, state)

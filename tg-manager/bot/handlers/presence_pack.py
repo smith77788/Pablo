@@ -49,8 +49,8 @@ async def _edit(cb: CallbackQuery, text: str, markup=None):
             try:
                 await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("handler error in _edit: %s", e)
         if "message to edit not found" in err_str or "message can't be edited" in err_str:
             await cb.bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=markup)
         else:
@@ -66,8 +66,8 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     # which may have already answered the query; silently skip the double-answer.
     try:
         await safe_answer(callback)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("handler error in cb_pack_menu: %s", e)
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await _edit(
             callback,

@@ -64,7 +64,8 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_menu: %s', e)
         acc_total = 0
     try:
         floods_24h = (
@@ -76,7 +77,8 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_menu: %s', e)
         floods_24h = 0
     try:
         # Завершённые операции из operation_audit (реальные данные)
@@ -87,7 +89,8 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_menu: %s', e)
         ops_audit = 0
     try:
         ops_queued = (
@@ -97,7 +100,8 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_menu: %s', e)
         ops_queued = 0
     ops_today = ops_audit + ops_queued
     try:
@@ -110,7 +114,8 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_menu: %s', e)
         warmup_active = 0
     try:
         pool_count = (
@@ -120,7 +125,8 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_menu: %s', e)
         pool_count = 0
 
     # Infrastructure Pressure Score
@@ -186,7 +192,8 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_health: %s', e)
         accounts = []
 
     if not accounts:
@@ -222,7 +229,8 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                ORDER BY pool""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_health: %s', e)
         pool_rows = []
     if pool_rows:
         lines.append("\n<b>📊 По пулам:</b>")
@@ -261,7 +269,8 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                ORDER BY floods_24h DESC, floods_7d DESC""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_flood: %s', e)
         rows = []
 
     lines = ["⚡ <b>Flood Intelligence</b>\n"]
@@ -289,7 +298,8 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                GROUP BY action_type ORDER BY cnt DESC LIMIT 5""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_flood: %s', e)
         action_stats = []
     if action_stats:
         lines.append("\n<b>Топ действий с flood (7 дней):</b>")
@@ -328,7 +338,8 @@ async def cb_infra_audit(
             page * _PAGE,
             _PAGE,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_audit: %s', e)
         rows = []
 
     try:
@@ -338,7 +349,8 @@ async def cb_infra_audit(
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_audit: %s', e)
         total = 0
 
     # Bad proxies (success_rate < 50%)
@@ -444,7 +456,8 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
                ORDER BY (COUNT(oa.id) FILTER (WHERE oa.result = 'success') + COUNT(fl.id)) DESC""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_daily_stats: %s', e)
         rows = []
 
     lines = [f"📊 <b>Статистика за {today.strftime('%d.%m.%Y')}</b>\n"]
@@ -501,7 +514,8 @@ async def cb_infra_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) -> 
                ORDER BY a.trust_score DESC NULLS LAST""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_capabilities: %s', e)
         rows = []
 
     if not rows:
@@ -554,7 +568,8 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
             "SELECT id, acc_status, trust_score FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_discover_capabilities: %s', e)
         accounts = []
 
     updated = 0
@@ -628,7 +643,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
                FROM tg_accounts WHERE owner_id=$1""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         acc_row = None
     try:
         bot_row = await pool.fetchrow(
@@ -642,7 +658,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
                WHERE b.added_by=$1""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         bot_row = None
 
     # Channels and groups via managed_channels
@@ -653,7 +670,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         chan_total = 0
 
     try:
@@ -664,7 +682,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         group_total = 0
 
     try:
@@ -672,7 +691,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             await pool.fetchval("SELECT COUNT(*) FROM clusters WHERE owner_id=$1", uid)
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         cluster_total = 0
 
     try:
@@ -685,7 +705,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         funnel_total = 0
 
     try:
@@ -696,7 +717,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         keyword_total = 0
 
     try:
@@ -708,7 +730,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         proxy_total = 0
 
     try:
@@ -718,7 +741,8 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_asset_registry: %s', e)
         template_total = 0
 
     acc = acc_row or {}
@@ -807,7 +831,8 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
                FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_rebalance_preview: %s', e)
         accounts = []
 
     if not accounts:
@@ -1051,7 +1076,8 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
                FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_rebalance_apply: %s', e)
         accounts = []
 
     changed = 0
@@ -1100,8 +1126,8 @@ async def cb_copilot_snooze(
         await _db.set_platform_setting(
             pool, f"copilot_snooze_{callback.from_user.id}", str(exp)
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_copilot_snooze: %s', e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Снять снуз", callback_data=InfraCb(action="snooze_clear"))
@@ -1111,8 +1137,8 @@ async def cb_copilot_snooze(
     await callback.answer(f"😴 Уведомления отложены на {hours}ч", show_alert=False)
     try:
         await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_copilot_snooze: %s', e)
 
 
 @router.callback_query(InfraCb.filter(F.action == "snooze_clear"))
@@ -1126,8 +1152,8 @@ async def cb_copilot_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
         await _db.set_platform_setting(
             pool, f"copilot_snooze_{callback.from_user.id}", "0"
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_copilot_snooze_clear: %s', e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="😴 1ч", callback_data=InfraCb(action="snooze", page=1))
@@ -1139,8 +1165,8 @@ async def cb_copilot_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
     await callback.answer("✅ Уведомления возобновлены", show_alert=False)
     try:
         await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_copilot_snooze_clear: %s', e)
 
 
 # ── Deploy accounts ────────────────────────────────────────────────────────────
@@ -1166,7 +1192,8 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                ORDER BY added_at DESC""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_deploy: %s', e)
         accounts = []
 
     if not accounts:
@@ -1242,8 +1269,8 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                         can_create,
                         dm_limit,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning('handler error in cb_infra_deploy: %s', e)
 
             deployed += 1
 
@@ -1258,8 +1285,8 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     target=f"acc_{acc_id}",
                     account_id=acc_id,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in cb_infra_deploy: %s', e)
 
         except Exception as exc:
             log.warning("infra deploy: acc=%d error=%s", acc_id, exc)
@@ -1307,7 +1334,8 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
                ORDER BY id""",
             uid,
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_infra_health_check: %s', e)
         accounts = []
 
     if not accounts:
@@ -1403,8 +1431,8 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
                     account_id=acc_id,
                     error_msg=None if status == "active" else status,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in cb_infra_health_check: %s', e)
             _done += 1
 
         # Прогресс-апдейт после каждого батча
@@ -1415,8 +1443,8 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
                     f"⏱ {_done} / {n_total} готово…",
                     parse_mode="HTML",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in cb_infra_health_check: %s', e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Проверить снова", callback_data=InfraCb(action="health_check"))

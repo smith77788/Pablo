@@ -148,7 +148,8 @@ async def _get_promo(pool: asyncpg.Pool) -> tuple[int, str]:
         disc_str = await get_platform_setting(pool, "promo_discount", "0")
         until = await get_platform_setting(pool, "promo_until", "")
         disc = int(disc_str or "0")
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _get_promo: %s', e)
         disc, until = 0, ""
     if not _promo_active(disc, until):
         disc = 0
@@ -206,7 +207,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
         )
         weekly_ops = int(stats_row["weekly_ops"] or 0) if stats_row else 0
         today_ops = int(stats_row["today_ops"] or 0) if stats_row else 0
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _build_menu_text_and_kb: %s', e)
         weekly_ops = today_ops = 0
 
     # Блок информации о текущем плане
@@ -328,8 +330,8 @@ async def cb_sub_menu(
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_sub_menu: %s', e)
         return
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)

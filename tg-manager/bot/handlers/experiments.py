@@ -1,5 +1,6 @@
 """A/B experiment management."""
 
+import logging
 import math
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -19,6 +20,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from bot.utils.op_helpers import safe_answer
 
+log = logging.getLogger(__name__)
 router = Router()
 
 
@@ -522,8 +524,8 @@ async def cb_set_winner(
                 f"Результаты доступны в разделе A/B Тесты.",
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in cb_set_winner: %s', e)
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "delete"))

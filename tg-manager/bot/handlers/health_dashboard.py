@@ -1949,8 +1949,8 @@ async def cb_reset_cooldown_one(
     try:
         from services.flood_engine import clear_account_cooldown
         clear_account_cooldown(acc_id)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("cb_reset_cooldown_one clear_account_cooldown: %s", e)
 
     try:
         acc = await pool.fetchrow(
@@ -1993,8 +1993,8 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
             user_id,
         )
         cooled_ids = [r["id"] for r in cooled_rows]
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("cb_reset_cooldown_all fetch cooled_ids: %s", e)
 
     try:
         result = await pool.execute(
@@ -2021,8 +2021,8 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     try:
         from services.flood_engine import clear_all_cooldowns
         clear_all_cooldowns(cooled_ids)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("cb_reset_cooldown_all clear_all_cooldowns: %s", e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К дашборду", callback_data=HealthCb(action="menu"))

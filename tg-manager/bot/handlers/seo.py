@@ -1679,8 +1679,8 @@ async def _apply_chan_field(
                 await pool.execute(
                     "UPDATE managed_channels SET title=$1 WHERE id=$2", value, chan_id
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_apply_chan_field update title: %s", e)
         return ok, "" if ok else "Ошибка обновления названия"
     elif field == "about":
         ok = await account_manager.edit_channel_about(
@@ -1691,8 +1691,8 @@ async def _apply_chan_field(
                 await pool.execute(
                     "UPDATE managed_channels SET about=$1 WHERE id=$2", value, chan_id
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_apply_chan_field update about: %s", e)
         return ok, "" if ok else "Ошибка обновления описания"
     elif field == "username":
         err = await account_manager.set_channel_username(
@@ -1703,8 +1703,8 @@ async def _apply_chan_field(
                 await pool.execute(
                     "UPDATE managed_channels SET username=$1 WHERE id=$2", value, chan_id
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_apply_chan_field update username: %s", e)
         return not bool(err), err
     return False, "Неизвестное поле"
 

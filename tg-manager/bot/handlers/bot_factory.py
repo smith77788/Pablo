@@ -294,8 +294,8 @@ async def cb_factory_do_create_bots(
     """Submit bot_factory operation to queue."""
     try:
         await callback.answer("⏳ Ставлю в очередь...")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_factory_do_create_bots: %s', e)
     data = await state.get_data()
     await state.clear()
 

@@ -976,21 +976,12 @@ async def get_or_create_relay_session(
     first_name: str | None,
 ) -> int:
     row = await pool.fetchrow(
-        "SELECT id FROM relay_sessions WHERE bot_id=$1 AND user_id=$2", bot_id, user_id
-    )
-    if row:
-        await pool.execute(
-            "UPDATE relay_sessions SET last_activity=now(), username=$3, first_name=$4, "
-            "messages_count=messages_count+1 WHERE bot_id=$1 AND user_id=$2",
-            bot_id,
-            user_id,
-            username,
-            first_name,
-        )
-        return row["id"]
-    row = await pool.fetchrow(
-        "INSERT INTO relay_sessions(bot_id,user_id,username,first_name) "
-        "VALUES($1,$2,$3,$4) RETURNING id",
+        "INSERT INTO relay_sessions(bot_id,user_id,username,first_name,last_activity) "
+        "VALUES($1,$2,$3,$4,NOW()) "
+        "ON CONFLICT (bot_id,user_id) DO UPDATE SET "
+        "last_activity=NOW(), username=$3, first_name=$4, "
+        "messages_count=relay_sessions.messages_count+1 "
+        "RETURNING id",
         bot_id,
         user_id,
         username,
@@ -1798,7 +1789,9 @@ async def assign_experiment_variant(
 
     try:
         await pool.execute(
-            "INSERT INTO experiment_assignments(bot_id,user_id,experiment_id,variant_id) VALUES($1,$2,$3,$4)",
+            "INSERT INTO experiment_assignments(bot_id,user_id,experiment_id,variant_id) "
+            "VALUES($1,$2,$3,$4) "
+            "ON CONFLICT DO NOTHING",
             bot_id,
             user_id,
             exp_id,

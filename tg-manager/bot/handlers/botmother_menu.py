@@ -398,8 +398,8 @@ async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
                     caption=text, parse_mode="HTML", reply_markup=markup
                 )
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_edit edit_caption fallback: %s", e)
         if (
             "message to edit not found" in err_str
             or "message can't be edited" in err_str
@@ -660,8 +660,8 @@ async def cb_ops_dashboard(
     """Operation dashboard: running count, recent history (last 5), quick actions."""
     try:
         await safe_answer(callback)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("cb_ops_dashboard safe_answer: %s", e)
     user_id = callback.from_user.id
 
     running_count = 0
@@ -1157,8 +1157,8 @@ async def cb_alerts(
                 acc_ids,
             ):
                 acc_names[a["id"]] = a["nm"]
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("cb_alerts resolve acc_names: %s", e)
     if bot_ids_a:
         try:
             for b in await pool.fetch(
@@ -1166,8 +1166,8 @@ async def cb_alerts(
                 bot_ids_a,
             ):
                 bot_names_a[b["bot_id"]] = b["nm"]
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("cb_alerts resolve bot_names: %s", e)
 
     sev_emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
     lines = []

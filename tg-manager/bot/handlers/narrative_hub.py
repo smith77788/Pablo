@@ -88,8 +88,8 @@ async def _edit(cb: CallbackQuery, text: str, markup=None) -> None:
             try:
                 await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in _edit: %s', e)
         if "message to edit not found" in err or "message can't be edited" in err:
             await cb.bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=markup)
         else:

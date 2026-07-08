@@ -349,6 +349,7 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         try:
             await msg_or_cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
         except Exception as e:
+            log.warning('handler error in _show_admin_main: %s', e)
             if "message is not modified" not in str(e):
                 raise
     else:
@@ -856,7 +857,8 @@ async def cb_admin(
                    FROM operation_audit
                    ORDER BY occurred_at DESC LIMIT 25"""
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in cb_admin: %s', e)
             rows = []
         if rows:
             lines = []
@@ -1035,7 +1037,8 @@ async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     async def _safe_count(query: str) -> int:
         try:
             return int(await pool.fetchval(query) or 0)
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _adm_section_assets: %s', e)
             return 0
 
     bots = await _safe_count("SELECT COUNT(*) FROM managed_bots")
@@ -1151,7 +1154,8 @@ async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     ok = resp.status < 500
                     ms = int((_time.monotonic() - t0) * 1000)
                     return provider.name, ok, ms
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _adm_ai_status: %s', e)
             ms = int((_time.monotonic() - t0) * 1000)
             return provider.name, False, ms
 
@@ -1334,19 +1338,23 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         total_msgs = (
             await pool.fetchval("SELECT COALESCE(SUM(sent_count),0) FROM broadcasts") or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_system_stats: %s', e)
         total_msgs = 0
     try:
         total_bc = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_system_stats: %s', e)
         total_bc = 0
     try:
         total_relay = await pool.fetchval("SELECT COUNT(*) FROM relay_sessions") or 0
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_system_stats: %s', e)
         total_relay = 0
     try:
         total_funnels = await pool.fetchval("SELECT COUNT(*) FROM funnels") or 0
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_system_stats: %s', e)
         total_funnels = 0
     try:
         total_schedules = (
@@ -1355,11 +1363,13 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             )
             or 0
         )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_system_stats: %s', e)
         total_schedules = 0
     try:
         db_users = await pool.fetchval("SELECT COUNT(*) FROM bot_users") or 0
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_system_stats: %s', e)
         db_users = 0
     mode = await db.get_system_mode(pool)
 
@@ -1675,8 +1685,8 @@ async def handle_admin_message(
                         f"✅ Отправлено: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
                         parse_mode="HTML",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning('handler error in handle_admin_message: %s', e)
         await message.answer(
             f"✅ <b>Рассылка завершена</b> [{seg_label}]\n\n"
             f"Всего: <b>{len(users)}</b>\n"
@@ -1755,8 +1765,8 @@ async def handle_admin_message(
                     f"✅ Отправлено: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
                     parse_mode="HTML",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in handle_admin_message: %s', e)
         # Деактивируем мёртвых подписчиков пачкой
         cleaned = 0
         if dead_to_mark:
@@ -1854,8 +1864,8 @@ async def handle_admin_message(
                         f"✅ Опубликовано: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
                         parse_mode="HTML",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning('handler error in handle_admin_message: %s', e)
         fail_block = ("\n\n" + "\n".join(fail_lines)) if fail_lines else ""
         await message.answer(
             f"✅ <b>Публикация в каналы завершена</b>\n\n"
@@ -2269,7 +2279,8 @@ async def handle_admin_message(
                 )
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in handle_admin_message: %s', e)
             flood_del = 0
         try:
             ops_del = (
@@ -2279,7 +2290,8 @@ async def handle_admin_message(
                 )
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in handle_admin_message: %s', e)
             ops_del = 0
         try:
             audit_del = (
@@ -2288,7 +2300,8 @@ async def handle_admin_message(
                 )
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in handle_admin_message: %s', e)
             audit_del = 0
         try:
             dm_del = (
@@ -2297,7 +2310,8 @@ async def handle_admin_message(
                 )
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in handle_admin_message: %s', e)
             dm_del = 0
         try:
             act_del = (
@@ -2306,7 +2320,8 @@ async def handle_admin_message(
                 )
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in handle_admin_message: %s', e)
             act_del = 0
         await message.answer(
             f"🧹 <b>Очистка завершена</b>\n\n"
@@ -2335,7 +2350,8 @@ async def handle_admin_message(
                         tmp, f"PRICE_{plan.upper()}", str(price)
                     )
                 note = "Сохранено в Railway."
-            except Exception:
+            except Exception as e:
+                log.warning('handler error in handle_admin_message: %s', e)
                 note = "⚠️ Railway не настроен — цена активна до перезапуска."
             await message.answer(
                 f"✅ Цена <b>{plan.upper()}</b> обновлена: <b>${price}/мес</b>\n\n{note}",
@@ -2364,6 +2380,7 @@ async def handle_admin_message(
                     reply_markup=_admin_main_kb(),
                 )
             except Exception as e:
+                log.warning('handler error in handle_admin_message: %s', e)
                 err_str = str(e)
                 # Keep in-process value for RAILWAY_TOKEN bootstrap (so next call works),
                 # but revert everything else on failure to avoid inconsistent state
@@ -2417,6 +2434,7 @@ async def handle_admin_message(
                     reply_markup=_admin_main_kb(),
                 )
             except Exception as e:
+                log.warning('handler error in handle_admin_message: %s', e)
                 err_str = str(e)
                 if key != "RAILWAY_TOKEN":
                     if old_env_val is not None:
@@ -2466,6 +2484,7 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
     try:
         vars_online = await railway_api.list_variables(http)
     except Exception as e:
+        log.warning('handler error in _adm_env_list: %s', e)
         api_error = str(e)
 
     if api_error:
@@ -2568,6 +2587,7 @@ async def _adm_env_delete(
         os.environ.pop(key, None)
         await _adm_env_list(callback, http)
     except Exception as e:
+        log.warning('handler error in _adm_env_delete: %s', e)
         await callback.message.edit_text(
             f"❌ Ошибка удаления {_html.escape(key)}: {_html.escape(str(e))}",
             parse_mode="HTML",
@@ -2634,6 +2654,7 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             or 0
         )
     except Exception as e:
+        log.warning('handler error in _adm_platform_ops: %s', e)
         await callback.message.edit_text(
             f"❌ Ошибка получения данных: {e}",
             parse_mode="HTML",
@@ -2680,8 +2701,8 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             lines.append(
                 "\n🧠 <b>ML-темп:</b> набирает статистику (нужно ≥10 операций)"
             )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in _adm_platform_ops: %s', e)
 
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb()
@@ -2955,13 +2976,15 @@ async def notify_new_platform_user(
     sent = 0
     try:
         total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in notify_new_platform_user: %s', e)
         try:
             total = (
                 await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots")
                 or 0
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in notify_new_platform_user: %s', e)
             total = 0
     label = f"@{username}" if username else first_name
     for admin_id in admin_ids:
@@ -3063,7 +3086,8 @@ async def _adm_logs(
                 limit=_LOG_PAGE_SIZE + 1,
                 offset=offset,
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _adm_logs: %s', e)
             rows = []
         has_next = len(rows) > _LOG_PAGE_SIZE
         rows = rows[:_LOG_PAGE_SIZE]
@@ -3123,8 +3147,8 @@ async def _adm_logs(
                 f"👥 {stats['active_users_hour']} активных · "
                 f"🔴 Ошибок/24ч: {stats['errors_day']}",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('handler error in _adm_logs: %s', e)
 
     else:  # ops
         try:
@@ -3135,7 +3159,8 @@ async def _adm_logs(
                 limit=_LOG_PAGE_SIZE + 1,
                 offset=offset,
             )
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _adm_logs: %s', e)
             rows = []
         has_next = len(rows) > _LOG_PAGE_SIZE
         rows = rows[:_LOG_PAGE_SIZE]
@@ -3203,14 +3228,15 @@ async def _adm_logs(
             text, parse_mode="HTML", reply_markup=kb.as_markup()
         )
     except Exception as _e:
+        log.warning('handler error in _adm_logs: %s', _e)
         _e_str = str(_e).lower()
         if "not modified" not in _e_str:
             try:
                 await callback.message.answer(
                     text, parse_mode="HTML", reply_markup=kb.as_markup()
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('handler error in _adm_logs: %s', e)
 
 
 # ── Subscription Gate Management ──────────────────────────────────────────────
@@ -3528,7 +3554,8 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
             _me = await _bot.get_me()
             _mem = await _bot.get_chat_member(username, _me.id)
             bot_in_channel = _mem.status in ("member", "administrator", "creator")
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in msg_gate_add: %s', e)
             bot_in_channel = False
         if not bot_in_channel:
             resolve_warning = (
@@ -3536,7 +3563,8 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
                 "Добавьте бота в канал (лучше администратором), иначе гейт "
                 "не сможет проверять подписку и заблокирует всех пользователей."
             )
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in msg_gate_add: %s', e)
         resolve_warning = (
             "\n\n⚠️ <b>Не удалось открыть канал.</b>\n"
             f"Проверьте, что <code>{_html.escape(username)}</code> существует и "
@@ -3546,6 +3574,7 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     try:
         await db.add_subscription_gate_channel(pool, username, title=resolved_title)
     except Exception as exc:
+        log.warning('handler error in msg_gate_add: %s', exc)
         await state.clear()
         await message.answer(f"❌ Ошибка БД: {_html.escape(str(exc)[:100])}", parse_mode="HTML")
         return
@@ -3609,7 +3638,8 @@ async def _gate_notify_all_task(
                 await bot.send_message(uid, text, reply_markup=markup, parse_mode="HTML")
                 sent += 1
                 await asyncio.sleep(1.0)  # 1 сообщение/сек — безопасный темп
-        except Exception:
+        except Exception as e:
+            log.warning('handler error in _gate_notify_all_task: %s', e)
             errors += 1
             await asyncio.sleep(0.1)
 
@@ -3623,8 +3653,8 @@ async def _gate_notify_all_task(
             f"Всего обработано: <b>{sent + skipped + errors}</b>",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in _gate_notify_all_task: %s', e)
 
 
 @router.callback_query(F.data == "adm:gate_notify_all")
@@ -3697,7 +3727,8 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
     msg = event.message if hasattr(event, "message") else event
     try:
         await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in _adm_bm_channel: %s', e)
         await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 

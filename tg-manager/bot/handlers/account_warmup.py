@@ -322,6 +322,7 @@ async def cb_warmup_start(
     try:
         plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, "standard")
     except Exception as exc:
+        log.warning('handler error in cb_warmup_start: %s', exc)
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания плана:</b> <code>{html.escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
@@ -376,6 +377,7 @@ async def cb_warmup_create_plan(
     try:
         plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
     except Exception as _e:
+        log.warning('handler error in cb_warmup_create_plan: %s', _e)
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания плана:</b> {html.escape(str(_e)[:200])}",
             parse_mode="HTML",
@@ -528,6 +530,7 @@ async def cb_warmup_delete_plan(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_warmup_delete_plan: %s', exc)
         mark_handled_error(f"warmup_delete_plan: {exc}")
         await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
         return
@@ -1231,6 +1234,7 @@ async def cb_wu_sess_start(
             cfg["daily"],
         )
     except Exception as exc:
+        log.warning('handler error in cb_wu_sess_start: %s', exc)
         mark_handled_error(f"wu_sess_start insert: {exc}")
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
@@ -1493,6 +1497,7 @@ async def cb_wu_sess_pause(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_wu_sess_pause: %s', exc)
         mark_handled_error(f"wu_sess_pause: {exc}")
         await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
         return
@@ -1511,6 +1516,7 @@ async def cb_wu_sess_resume(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_wu_sess_resume: %s', exc)
         mark_handled_error(f"wu_sess_resume: {exc}")
         await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
         return
@@ -1530,6 +1536,7 @@ async def cb_wu_sess_delete(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_wu_sess_delete: %s', exc)
         mark_handled_error(f"wu_sess_delete: {exc}")
         await callback.message.edit_text(
             f"❌ <b>Ошибка удаления:</b> <code>{html.escape(str(exc)[:200])}</code>",
@@ -1845,6 +1852,7 @@ async def cb_ract_start(
             cfg["daily"],
         )
     except Exception as exc:
+        log.warning('handler error in cb_ract_start: %s', exc)
         mark_handled_error(f"ract_start insert: {exc}")
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
@@ -2099,6 +2107,7 @@ async def cb_ract_pause(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_ract_pause: %s', exc)
         mark_handled_error(f"ract_pause: {exc}")
         await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
         return
@@ -2116,6 +2125,7 @@ async def cb_ract_resume(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_ract_resume: %s', exc)
         mark_handled_error(f"ract_resume: {exc}")
         await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
         return
@@ -2134,6 +2144,7 @@ async def cb_ract_delete(
             callback.from_user.id,
         )
     except Exception as exc:
+        log.warning('handler error in cb_ract_delete: %s', exc)
         mark_handled_error(f"ract_delete: {exc}")
         await callback.message.edit_text(
             f"❌ <b>Ошибка удаления:</b> <code>{html.escape(str(exc)[:200])}</code>",

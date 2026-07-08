@@ -266,7 +266,8 @@ async def cb_user_actions(
     user_id = callback_data.user_id
     try:
         user = await db.get_user_info(pool, user_id)
-    except Exception:
+    except Exception as e:
+        log.warning('handler error in cb_user_actions: %s', e)
         await callback.answer("Ошибка базы данных.", show_alert=True)
         return
     if not user:
@@ -629,8 +630,8 @@ async def cb_ban(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_ban: %s', e)
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "unban"))
@@ -693,8 +694,8 @@ async def cb_unban(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_unban: %s', e)
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "quick_ban"))
@@ -721,8 +722,8 @@ async def cb_quick_ban(
             "🚫 <b>Ваш аккаунт был заблокирован администратором.</b>",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_quick_ban: %s', e)
     # Обновить список
     text, total, users = await _users_list_text(pool, page)
     max_page = max(0, (total - 1) // 5)
@@ -751,8 +752,8 @@ async def cb_quick_ban(
     kb.adjust(1)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_quick_ban: %s', e)
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "quick_grant30"))
@@ -784,8 +785,8 @@ async def cb_quick_grant30(
             "🎉 <b>Вам выдана подписка Starter на 30 дней!</b>\n\nИспользуйте /menu для начала работы.",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_quick_grant30: %s', e)
     # Обновить список
     text, total, users = await _users_list_text(pool, page)
     max_page = max(0, (total - 1) // 5)
@@ -813,8 +814,8 @@ async def cb_quick_grant30(
     kb.adjust(1)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('handler error in cb_quick_grant30: %s', e)
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "export_csv"))

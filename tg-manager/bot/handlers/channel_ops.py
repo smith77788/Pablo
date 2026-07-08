@@ -2767,6 +2767,7 @@ async def fsm_invite_usernames_file(
             "utf-8", errors="ignore"
         )
     except Exception as e:
+        log.warning('handler error in fsm_invite_usernames_file: %s', e)
         await state.clear()
         await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
         return
@@ -4258,6 +4259,7 @@ async def cb_br_confirm(
             )
             op_ids.append(op_id)
         except Exception as e:
+            log.warning('handler error in cb_br_confirm: %s', e)
             errors.append(f"{peer}: {e}")
 
     if not op_ids:
@@ -5087,6 +5089,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
             "utf-8", errors="ignore"
         )
     except Exception as e:
+        log.warning('handler error in fsm_bulk_dm_usernames_file: %s', e)
         await state.clear()
         await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
         return
@@ -5596,6 +5599,7 @@ async def _show_my_chans_page(
             for gr in raw_groups:
                 raw.append({**gr, "type": "megagroup"})
         except Exception as e:
+            log.warning('handler error in _show_my_chans_page: %s', e)
             kb = _back_kb()
             try:
                 await msg.edit_text(
