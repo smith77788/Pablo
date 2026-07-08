@@ -360,6 +360,7 @@ class KeywordAlertFSM(StatesGroup):
 class AddProxyFSM(StatesGroup):
     waiting_url = State()  # socks5://user:pass@host:port
     waiting_label = State()
+    waiting_bulk = State()  # one proxy URL per line, optional "|label" suffix
 
 
 class CreateClusterFSM(StatesGroup):
