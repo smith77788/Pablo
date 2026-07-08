@@ -10054,9 +10054,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         search = request.query.get('search', '')
         tag = request.query.get('tag')
         favorite = request.query.get('favorite') == '1'
+        premium = request.query.get('premium') == '1'
+        multi = request.query.get('multi') == '1'
         try:
             from services.contacts_hub.repository import get_contacts
-            result = await get_contacts(pool, uid, search=search, favorite_only=favorite, tag=tag)
+            result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
+                                        tag=tag, premium_only=premium, multi_only=multi)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)
@@ -10142,6 +10145,460 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def uch_group_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import create_group
+            gid = await create_group(pool, uid, data.get('name', ''), data.get('color'))
+            return _json_resp({'ok': True, 'id': gid})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_group_update(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            gid = int(request.match_info['group_id'])
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import update_group
+            ok = await update_group(pool, gid, uid, data.get('name'), data.get('color'))
+            return _json_resp({'ok': ok})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_group_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            gid = int(request.match_info['group_id'])
+            from services.contacts_hub.bulk_ops_engine import delete_group
+            ok = await delete_group(pool, gid, uid)
+            return _json_resp({'ok': ok})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_toggle_favorite(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contacts_hub.repository import update_contact
+            row = await pool.fetchrow('SELECT is_favorite FROM unified_contacts WHERE id=$1 AND owner_id=$2', cid, uid)
+            if not row: return _err("Not found", 404)
+            new_val = not row['is_favorite']
+            await update_contact(pool, cid, uid, {'is_favorite': new_val})
+            return _json_resp({'ok': True, 'is_favorite': new_val})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_add_to_group(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            gid = int(request.match_info['group_id'])
+            from services.contacts_hub.repository import add_contact_to_group
+            ok = await add_contact_to_group(pool, cid, gid)
+            return _json_resp({'ok': ok})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_remove_from_group(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            gid = int(request.match_info['group_id'])
+            from services.contacts_hub.repository import remove_contact_from_group
+            ok = await remove_contact_from_group(pool, cid, gid)
+            return _json_resp({'ok': ok})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            rows = await pool.fetch(
+                'SELECT * FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 100',
+                cid, uid)
+            return _json_resp({'history': [dict(r) for r in rows]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_versions(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contacts_hub.versioning_engine import get_versions
+            versions = await get_versions(pool, cid, uid)
+            return _json_resp({'versions': versions})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_rollback(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            vnum = int(request.match_info['version_num'])
+            from services.contacts_hub.versioning_engine import rollback_to_version
+            ok = await rollback_to_version(pool, cid, uid, vnum)
+            if not ok: return _err("Version not found", 404)
+            return _json_resp({'ok': True})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_timeline(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            history = await pool.fetch(
+                'SELECT action, field_name, old_value, new_value, source, created_at FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 50',
+                cid, uid)
+            return _json_resp({'timeline': [dict(r) for r in history]})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_relationships(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contacts_hub.relationship_engine import get_relationships
+            rels = await get_relationships(pool, uid, cid)
+            return _json_resp({'relationships': rels})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_identity(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contacts_hub.identity_engine import build_identity_graph, get_last_active
+            graph = await build_identity_graph(pool, uid, cid)
+            last_active = await get_last_active(pool, cid)
+            return _json_resp({**graph, 'last_active': last_active})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_crm_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contacts_hub.crm_engine import get_crm_data, get_crm_activity
+            crm = await get_crm_data(pool, uid, cid)
+            activity = await get_crm_activity(pool, uid, cid)
+            return _json_resp({'crm': crm, 'activity': activity})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_crm_upsert(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            data = await request.json()
+            from services.contacts_hub.crm_engine import upsert_crm
+            crm = await upsert_crm(pool, uid, cid, data)
+            return _json_resp({'ok': True, 'crm': crm})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_crm_activity(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            data = await request.json()
+            from services.contacts_hub.crm_engine import log_crm_activity
+            await log_crm_activity(pool, uid, cid, data.get('type', 'note'),
+                                   data.get('description'), data.get('metadata'))
+            return _json_resp({'ok': True})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_crm_activity_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contacts_hub.crm_engine import get_crm_activity
+            activity = await get_crm_activity(pool, uid, cid)
+            return _json_resp({'activity': activity})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_crm_reminder(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            data = await request.json()
+            from services.contacts_hub.crm_engine import upsert_crm
+            await upsert_crm(pool, uid, cid, {
+                'next_reminder_at': data.get('remind_at'),
+                'next_reminder_text': data.get('text', ''),
+            })
+            return _json_resp({'ok': True})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_duplicates(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.trust_engine import detect_smart_duplicates
+            dupes = await detect_smart_duplicates(pool, uid)
+            return _json_resp({'duplicates': dupes, 'count': len(dupes)})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_merge(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            primary_id = data.get('primary_id')
+            secondary_id = data.get('secondary_id')
+            if not primary_id or not secondary_id:
+                return _err("primary_id and secondary_id required", 400)
+            from services.contacts_hub.merge_engine import manual_merge
+            result = await manual_merge(pool, primary_id, secondary_id, uid)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_conflicts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.trust_engine import get_conflicts
+            conflicts = await get_conflicts(pool, uid)
+            return _json_resp({'conflicts': conflicts})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_resolve_conflict(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = int(request.match_info['conflict_id'])
+            data = await request.json()
+            from services.contacts_hub.trust_engine import resolve_conflict
+            ok = await resolve_conflict(pool, cid, uid, data.get('resolution', 'accepted'),
+                                        data.get('value'), uid)
+            return _json_resp({'ok': ok})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_smart_tags(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.smart_tags_engine import get_smart_tags
+            tags = await get_smart_tags(pool, uid)
+            return _json_resp({'tags': tags})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_smart_tag_rules(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.smart_tags_engine import get_smart_tag_rules
+            rules = await get_smart_tag_rules(pool, uid)
+            return _json_resp({'rules': rules})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_smart_tags_apply(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.smart_tags_engine import apply_smart_tags
+            result = await apply_smart_tags(pool, uid)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_smart_tag_rule_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.smart_tags_engine import create_smart_tag_rule
+            rid = await create_smart_tag_rule(pool, uid, data.get('name', ''),
+                                              data.get('tag', ''), data.get('conditions', {}))
+            return _json_resp({'ok': True, 'id': rid})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_smart_tag_rule_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info['rule_id'])
+            from services.contacts_hub.smart_tags_engine import delete_smart_tag_rule
+            ok = await delete_smart_tag_rule(pool, rid, uid)
+            return _json_resp({'ok': ok})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_smart_tag_rule_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info['rule_id'])
+            from services.contacts_hub.smart_tags_engine import toggle_smart_tag_rule
+            active = await toggle_smart_tag_rule(pool, rid, uid)
+            return _json_resp({'ok': True, 'is_active': active})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_tag(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import bulk_tag
+            result = await bulk_tag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_untag(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import bulk_untag
+            result = await bulk_untag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_favorite(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import bulk_set_favorite
+            result = await bulk_set_favorite(pool, uid, data.get('contact_ids', []), data.get('is_favorite', True))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import bulk_delete
+            result = await bulk_delete(pool, uid, data.get('contact_ids', []))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_group(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            gid = data.get('group_id')
+            if not gid: return _err("group_id required", 400)
+            action = data.get('action', 'add')
+            if action == 'add':
+                from services.contacts_hub.bulk_ops_engine import bulk_add_to_group
+                result = await bulk_add_to_group(pool, uid, data.get('contact_ids', []), gid)
+            else:
+                from services.contacts_hub.bulk_ops_engine import bulk_remove_from_group
+                result = await bulk_remove_from_group(pool, uid, data.get('contact_ids', []), gid)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_export_csv(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.export_engine import export_csv
+            csv_data = await export_csv(pool, uid)
+            return web.Response(body=csv_data, content_type='text/csv',
+                                headers={'Content-Disposition': 'attachment; filename="contacts.csv"'})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_export_vcf(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.export_engine import export_vcf
+            vcf_data = await export_vcf(pool, uid)
+            return web.Response(body=vcf_data, content_type='text/vcard',
+                                headers={'Content-Disposition': 'attachment; filename="contacts.vcf"'})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_export_json(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.export_engine import export_json
+            json_data = await export_json(pool, uid)
+            return web.Response(body=json_data, content_type='application/json',
+                                headers={'Content-Disposition': 'attachment; filename="contacts.json"'})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_reminders(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.crm_engine import get_upcoming_reminders, get_crm_overdue
+            upcoming = await get_upcoming_reminders(pool, uid)
+            overdue = await get_crm_overdue(pool, uid)
+            return _json_resp({'upcoming': upcoming, 'overdue': overdue})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_graph_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.relationship_engine import get_graph_stats
+            stats = await get_graph_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_graph_compute(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.relationship_engine import compute_relationships
+            result = await compute_relationships(pool, uid)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_trust_update(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.trust_engine import update_trust_scores
+            updated = await update_trust_scores(pool, uid)
+            return _json_resp({'updated': updated})
+        except Exception as e:
+            return _err(str(e), 500)
+
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
@@ -10150,6 +10607,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
     app.router.add_get("/api/miniapp/uch/groups", uch_groups)
+    app.router.add_post("/api/miniapp/uch/groups", uch_group_create)
+    app.router.add_put("/api/miniapp/uch/groups/{group_id}", uch_group_update)
+    app.router.add_delete("/api/miniapp/uch/groups/{group_id}", uch_group_delete)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/favorite", uch_toggle_favorite)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_add_to_group)
+    app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_remove_from_group)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/history", uch_contact_history)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/versions", uch_contact_versions)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", uch_timeline)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", uch_relationships)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/identity", uch_identity)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_get)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_upsert)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity_list)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/reminder", uch_crm_reminder)
+    app.router.add_get("/api/miniapp/uch/duplicates", uch_duplicates)
+    app.router.add_post("/api/miniapp/uch/merge", uch_merge)
+    app.router.add_get("/api/miniapp/uch/conflicts", uch_conflicts)
+    app.router.add_post("/api/miniapp/uch/conflicts/{conflict_id}/resolve", uch_resolve_conflict)
+    app.router.add_get("/api/miniapp/uch/smart-tags", uch_smart_tags)
+    app.router.add_get("/api/miniapp/uch/smart-tags/rules", uch_smart_tag_rules)
+    app.router.add_post("/api/miniapp/uch/smart-tags/apply", uch_smart_tags_apply)
+    app.router.add_post("/api/miniapp/uch/smart-tags/rules", uch_smart_tag_rule_create)
+    app.router.add_delete("/api/miniapp/uch/smart-tags/rules/{rule_id}", uch_smart_tag_rule_delete)
+    app.router.add_put("/api/miniapp/uch/smart-tags/rules/{rule_id}/toggle", uch_smart_tag_rule_toggle)
+    app.router.add_post("/api/miniapp/uch/bulk/tag", uch_bulk_tag)
+    app.router.add_post("/api/miniapp/uch/bulk/untag", uch_bulk_untag)
+    app.router.add_post("/api/miniapp/uch/bulk/favorite", uch_bulk_favorite)
+    app.router.add_post("/api/miniapp/uch/bulk/delete", uch_bulk_delete)
+    app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
+    app.router.add_get("/api/miniapp/uch/export/csv", uch_export_csv)
+    app.router.add_get("/api/miniapp/uch/export/vcf", uch_export_vcf)
+    app.router.add_get("/api/miniapp/uch/export/json", uch_export_json)
+    app.router.add_get("/api/miniapp/uch/reminders", uch_reminders)
+    app.router.add_get("/api/miniapp/uch/graph/stats", uch_graph_stats)
+    app.router.add_post("/api/miniapp/uch/graph/compute", uch_graph_compute)
+    app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
 
     # SSE
     app.router.add_get("/api/miniapp/events", events)

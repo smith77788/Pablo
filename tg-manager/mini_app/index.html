@@ -918,6 +918,41 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Контакты</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openUchSyncCenter()">
+        <div class="mgmt-tile-ico">🔄</div>
+        <div class="mgmt-tile-lbl">Синхронизация</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUchGraph()">
+        <div class="mgmt-tile-ico">🕸</div>
+        <div class="mgmt-tile-lbl">Граф связей</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="detectDuplicates()">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">Дубликаты</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUchConflicts()">
+        <div class="mgmt-tile-ico">⚠️</div>
+        <div class="mgmt-tile-lbl">Конфликты</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUchSmartTags()">
+        <div class="mgmt-tile-ico">🏷</div>
+        <div class="mgmt-tile-lbl">Умные теги</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUchReminders()">
+        <div class="mgmt-tile-ico">⏰</div>
+        <div class="mgmt-tile-lbl">Напоминания</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUchExport()">
+        <div class="mgmt-tile-ico">📤</div>
+        <div class="mgmt-tile-lbl">Экспорт</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Аналитика и CRM -->
@@ -2189,6 +2224,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-contacts">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="toggleContactSelect()" title="Выбор" id="contactSelectBtn">☑️</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="syncContacts()" title="Синхронизация">🔄</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openContactStats()" title="Статистика">📊</span>
     </div>
@@ -2204,18 +2240,77 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
     </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
+    <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
+      <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-s" style="font-size:11px" onclick="bulkTagSelected()">🏷 Тег</button>
+        <button class="btn btn-s" style="font-size:11px" onclick="bulkFavSelected()">⭐ Избранное</button>
+        <button class="btn btn-s" style="font-size:11px" onclick="bulkDeleteSelected()">🗑 Удалить</button>
+      </div>
+    </div>
     <div class="lst" id="contactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
 <div class="screen" id="s-contactdetail">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cdTitle">Контакт</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cdTitle">Контакт</div>
+    <div class="hdr-meta" style="display:flex;gap:6px">
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="editContact()" title="Редактировать">✏️</span>
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="toggleContactFavorite()" title="Избранное" id="cdFavBtn">⭐</span>
+    </div>
+  </div>
   <div class="sub-sb" id="cdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-contactedit">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">Редактировать контакт</div></div>
+  <div class="sub-sb" id="ceBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-contactstats">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📊 Статистика контактов</div></div>
   <div class="sub-sb" id="csBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchduplicates">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔍 Возможные дубликаты</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="detectDuplicates()">🔄 Проверить</button></div>
+  </div>
+  <div class="sub-sb" id="dupBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchconflicts">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚠️ Конфликты данных</div></div>
+  <div class="sub-sb" id="confBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchsmarttags">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🏷 Умные теги</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="applySmartTags()">⚡ Применить</button></div>
+  </div>
+  <div class="sub-sb" id="stBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchexport">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📤 Экспорт контактов</div></div>
+  <div class="sub-sb" id="expBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchgraph">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Граф связей</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="computeGraph()">🔄 Рассчитать</button></div>
+  </div>
+  <div class="sub-sb" id="graphBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchreminders">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⏰ Напоминания</div></div>
+  <div class="sub-sb" id="remBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchsynccenter">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
+  <div class="sub-sb" id="syncBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
@@ -8565,7 +8660,17 @@ function openContacts() { push('s-contacts'); txt('contactsList','<div class="sp
 
 async function loadContacts() {
   const q = (document.getElementById('contactSearch')?.value||'').trim();
-  const url = q ? '/api/miniapp/uch/search?q='+encodeURIComponent(q) : '/api/miniapp/uch/contacts';
+  let url;
+  if (q) {
+    url = '/api/miniapp/uch/search?q='+encodeURIComponent(q);
+  } else {
+    const params = new URLSearchParams();
+    if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
+    if (CONTACT_FILTER === 'premium') params.set('premium', '1');
+    if (CONTACT_FILTER === 'multi') params.set('multi', '1');
+    const qs = params.toString();
+    url = '/api/miniapp/uch/contacts' + (qs ? '?'+qs : '');
+  }
   try {
     const d = await api(url);
     const contacts = d.results||d.contacts||[];
@@ -8573,13 +8678,14 @@ async function loadContacts() {
     txt('contactsList', contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
       const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
-      return `<div class="li tap" onclick="openContactDetail('${c.id}')">
+      const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${c.id}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
+      return `<div class="li tap" ${sel} onclick="${CONTACT_SELECT_MODE?'':'openContactDetail(\''+c.id+'\')'}">
         <div class="ava" style="background:${c.color_label||'rgba(59,130,246,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
         <div class="li-body">
           <div class="li-name">${esc(name)} ${c.is_favorite?'⭐':''}</div>
           <div class="li-sub">${esc(sub)}</div>
         </div>
-        <div class="li-right"><span class="chev">›</span></div>
+        ${CONTACT_SELECT_MODE?'':`<div class="li-right"><span class="chev">›</span></div>`}
       </div>`;
     }).join(''));
   } catch(e) { txt('contactsList', errHtml(e.message)); }
@@ -8594,6 +8700,57 @@ function filterContacts(filter, btn) {
   loadContacts();
 }
 
+let CONTACT_SELECT_MODE = false;
+let CONTACT_SELECTED = new Set();
+
+function toggleContactSelect() {
+  CONTACT_SELECT_MODE = !CONTACT_SELECT_MODE;
+  CONTACT_SELECTED.clear();
+  document.getElementById('contactBulkBar').style.display = CONTACT_SELECT_MODE ? 'block' : 'none';
+  document.getElementById('contactSelectBtn').style.opacity = CONTACT_SELECT_MODE ? '1' : '.7';
+  document.getElementById('contactSelCount').textContent = '0';
+  loadContacts();
+}
+
+function toggleContactCheck(id, el) {
+  if (CONTACT_SELECTED.has(id)) { CONTACT_SELECTED.delete(id); el.style.borderColor = 'transparent'; }
+  else { CONTACT_SELECTED.add(id); el.style.borderColor = 'var(--accent)'; }
+  document.getElementById('contactSelCount').textContent = CONTACT_SELECTED.size;
+}
+
+async function bulkTagSelected() {
+  const tag = prompt('Тег:');
+  if (!tag) return;
+  try {
+    await api('/api/miniapp/uch/bulk/tag', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], tag})});
+    toast('✅ Тег добавлен');
+    CONTACT_SELECTED.clear(); CONTACT_SELECT_MODE = false;
+    document.getElementById('contactBulkBar').style.display = 'none';
+    loadContacts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function bulkFavSelected() {
+  try {
+    await api('/api/miniapp/uch/bulk/favorite', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], is_favorite:true})});
+    toast('⭐ Добавлено в избранное');
+    CONTACT_SELECTED.clear(); CONTACT_SELECT_MODE = false;
+    document.getElementById('contactBulkBar').style.display = 'none';
+    loadContacts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function bulkDeleteSelected() {
+  if (!confirm('Удалить '+CONTACT_SELECTED.size+' контактов?')) return;
+  try {
+    await api('/api/miniapp/uch/bulk/delete', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED]})});
+    toast('🗑 Удалено');
+    CONTACT_SELECTED.clear(); CONTACT_SELECT_MODE = false;
+    document.getElementById('contactBulkBar').style.display = 'none';
+    loadContacts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
 async function loadContactStats() {
   try {
     const d = await api('/api/miniapp/uch/stats');
@@ -8606,7 +8763,10 @@ async function loadContactStats() {
   } catch(_) {}
 }
 
+let CURRENT_CONTACT_ID = null;
+
 async function openContactDetail(id) {
+  CURRENT_CONTACT_ID = id;
   push('s-contactdetail');
   txt('cdTitle','Контакт');
   txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -8616,19 +8776,35 @@ async function openContactDetail(id) {
     const sources = d.sources||[];
     const groups = d.groups||[];
     const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'';
+    document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
       <div class="row"><div class="row-body"><div class="row-name">Имя</div><div class="row-val">${esc(name)}</div></div></div>
       ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
       ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.phones&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
+      ${c.emails&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Email</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
+      ${c.position?`<div class="row"><div class="row-body"><div class="row-name">Должность</div><div class="row-val">${esc(c.position)}</div></div></div>`:''}
+      ${c.websites&&c.websites.length?`<div class="row"><div class="row-body"><div class="row-name">Сайты</div><div class="row-val">${c.websites.map(w=>'<a href="'+esc(w)+'" target="_blank" style="color:var(--accent)">'+esc(w)+'</a>').join(', ')}</div></div></div>`:''}
+      ${c.birthday?`<div class="row"><div class="row-body"><div class="row-name">День рождения</div><div class="row-val">🎂 ${esc(c.birthday)}</div></div></div>`:''}
       ${c.notes?`<div class="row"><div class="row-body"><div class="row-name">Заметки</div><div class="row-val">${esc(c.notes)}</div></div></div>`:''}
       ${c.tags&&c.tags.length?`<div class="row"><div class="row-body"><div class="row-name">Теги</div><div class="row-val">${c.tags.map(t=>'<span class="badge b-bl">'+esc(t)+'</span>').join(' ')}</div></div></div>`:''}
+      ${c.trust_score?`<div class="row"><div class="row-body"><div class="row-name">Trust</div><div class="row-val">${Math.round((c.trust_score||0)*100)}%</div></div></div>`:''}
+    </div>`;
+    html += `<div style="padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:0">📋 Username</button>
+      <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:0">📋 ID</button>
+      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:0">📋 Тел.</button>`:''}
+      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0">📋 Email</button>`:''}
+    </div>`;
+    html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
+      ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0;text-decoration:none">💬 Написать</a>`:''}
+      ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0;text-decoration:none">👤 Профиль</a>`:''}
     </div>`;
     if (sources.length) {
-      html += `<div class="sec" style="margin-top:8px">📡 Источники (${sources.length})</div><div class="lst" style="margin:0 16px">`;
-      sources.forEach(s=>{ html += `<div class="row"><div class="row-body"><div class="row-name">Аккаунт #${s.account_id}</div><div class="row-val">${esc(s.local_name||'')} · ${s.status}</div></div></div>`; });
+      html += `<div class="sec" style="margin-top:4px">📡 Найден в (${sources.length})</div><div class="lst" style="margin:0 16px">`;
+      sources.forEach(s=>{ html += `<div class="row"><div class="row-body"><div class="row-name">Аккаунт #${s.account_id}</div><div class="row-val">${esc(s.local_name||'')} · ${s.status||'active'}</div></div></div>`; });
       html += '</div>';
     }
     if (groups.length) {
@@ -8636,13 +8812,239 @@ async function openContactDetail(id) {
       groups.forEach(g=>{ html += `<div class="row"><div class="row-body"><div class="row-name">${esc(g.name)}</div></div></div>`; });
       html += '</div>';
     }
-    html += `<div style="padding:12px 16px;display:flex;gap:8px">
-      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:1">📋 Username</button>
-      <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:1">📋 ID</button>
-      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:1">📋 Тел.</button>`:''}
+    html += `<div class="sec" style="margin-top:8px">Действия</div><div style="padding:4px 16px 12px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0">📅 Timeline</button>
+      <button class="btn btn-s" onclick="openContactVersions('${id}')" style="flex:0">📜 Версии</button>
+      <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0">🕸 Связи</button>
+      <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0">🔑 Identity</button>
+      <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0">💼 CRM</button>
     </div>`;
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+function editContact() {
+  if (!CURRENT_CONTACT_ID) return;
+  push('s-contactedit');
+  txt('ceBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadEditForm(CURRENT_CONTACT_ID);
+}
+
+async function loadEditForm(id) {
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id);
+    const c = d.contact;
+    let html = `<div style="padding:12px 16px">
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Имя</label><input id="ef-first" value="${esc(c.first_name||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Фамилия</label><input id="ef-last" value="${esc(c.last_name||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Username</label><input id="ef-username" value="${esc(c.username||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Компания</label><input id="ef-company" value="${esc(c.company||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Должность</label><input id="ef-position" value="${esc(c.position||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Телефоны (через запятую)</label><input id="ef-phones" value="${esc((c.phones||[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Email (через запятую)</label><input id="ef-emails" value="${esc((c.emails||[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сайты (через запятую)</label><input id="ef-websites" value="${esc((c.websites||[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">День рождения</label><input id="ef-birthday" type="date" value="${esc(c.birthday||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Теги (через запятую)</label><input id="ef-tags" value="${esc((c.tags||[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Заметки</label><textarea id="ef-notes" rows="3" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px;resize:vertical">${esc(c.notes||'')}</textarea></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Цветовая метка</label>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          ${['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4',''].map(cl=>`<div onclick="document.getElementById('ef-color').value='${cl}';document.querySelectorAll('.color-pick').forEach(e=>e.style.outline='none');this.style.outline='2px solid #fff'" class="color-pick" style="width:32px;height:32px;border-radius:8px;background:${cl||'rgba(255,255,255,.1)'};cursor:pointer;${c.color_label===cl?'outline:2px solid #fff':''}"></div>`).join('')}
+        </div>
+        <input id="ef-color" type="hidden" value="${esc(c.color_label||'')}">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-p" onclick="saveContactEdit('${id}')" style="flex:1">💾 Сохранить</button>
+        <button class="btn" onclick="back()" style="flex:1;background:var(--bg2)">Отмена</button>
+      </div>
+      <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(239,68,68,.15);color:#ef4444" onclick="deleteContact('${id}')">🗑 Удалить контакт</button></div>
+    </div>`;
+    txt('ceBody', html);
+  } catch(e) { txt('ceBody', errHtml(e.message)); }
+}
+
+async function saveContactEdit(id) {
+  const data = {
+    first_name: document.getElementById('ef-first').value.trim(),
+    last_name: document.getElementById('ef-last').value.trim(),
+    username: document.getElementById('ef-username').value.trim() || null,
+    company: document.getElementById('ef-company').value.trim() || null,
+    position: document.getElementById('ef-position').value.trim() || null,
+    phones: document.getElementById('ef-phones').value.split(',').map(s=>s.trim()).filter(Boolean),
+    emails: document.getElementById('ef-emails').value.split(',').map(s=>s.trim()).filter(Boolean),
+    websites: document.getElementById('ef-websites').value.split(',').map(s=>s.trim()).filter(Boolean),
+    birthday: document.getElementById('ef-birthday').value || null,
+    tags: document.getElementById('ef-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
+    notes: document.getElementById('ef-notes').value.trim() || null,
+    color_label: document.getElementById('ef-color').value || null,
+  };
+  try {
+    await api('/api/miniapp/uch/contacts/'+id, {method:'POST', body:JSON.stringify(data)});
+    toast('✅ Контакт обновлён');
+    back();
+    if (CURRENT_CONTACT_ID === id) openContactDetail(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function deleteContact(id) {
+  if (!confirm('Удалить контакт?')) return;
+  try {
+    await api('/api/miniapp/uch/contacts/'+id, {method:'DELETE'});
+    toast('🗑 Контакт удалён');
+    back(); back();
+    loadContacts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function toggleContactFavorite() {
+  if (!CURRENT_CONTACT_ID) return;
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/favorite', {method:'POST'});
+    document.getElementById('cdFavBtn').style.opacity = d.is_favorite ? '1' : '.4';
+    toast(d.is_favorite ? '⭐ Добавлено в избранное' : 'Убрано из избранного');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openContactTimeline(id) {
+  push('s-contactdetail');
+  txt('cdTitle','📅 Timeline');
+  txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id+'/timeline');
+    const items = d.timeline||[];
+    if (!items.length) { txt('cdBody', empty('📅','Нет событий','Timeline пуст')); return; }
+    let html = '<div style="padding:12px 16px">';
+    items.forEach(t=>{
+      const date = t.created_at ? new Date(t.created_at).toLocaleString('ru') : '';
+      const label = t.action||'';
+      html += `<div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start">
+        <div style="min-width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div>
+        <div><div style="font-size:13px;color:var(--hint)">${esc(date)}</div><div style="font-size:14px;margin-top:2px">${esc(label)}${t.field_name?' · '+esc(t.field_name):''}</div>
+        ${t.old_value||t.new_value?`<div style="font-size:12px;color:var(--hint);margin-top:2px">${t.old_value?esc(String(t.old_value).substring(0,50))+' → ':''}${t.new_value?esc(String(t.new_value).substring(0,50)):''}</div>`:''}
+        </div></div>`;
+    });
+    html += '</div>';
+    txt('cdBody', html);
+  } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+async function openContactVersions(id) {
+  push('s-contactdetail');
+  txt('cdTitle','📜 Версии');
+  txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id+'/versions');
+    const vers = d.versions||[];
+    if (!vers.length) { txt('cdBody', empty('📜','Нет версий','Версии создаются при изменениях')); return; }
+    let html = '<div style="padding:12px 16px">';
+    vers.forEach(v=>{
+      const date = v.created_at ? new Date(v.created_at).toLocaleString('ru') : '';
+      html += `<div class="li"><div class="li-body"><div class="li-name">v${v.version_num} · ${esc(v.changed_by||'sync')}</div><div class="li-sub">${esc(date)}${v.change_summary?' · '+esc(v.change_summary):''}</div></div>
+        <div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="rollbackVersion('${id}',${v.version_num})">Откат</button></div></div>`;
+    });
+    html += '</div>';
+    txt('cdBody', html);
+  } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+async function rollbackVersion(id, vnum) {
+  if (!confirm('Откатить к версии '+vnum+'?')) return;
+  try {
+    await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum, {method:'POST'});
+    toast('✅ Контакт откачен к v'+vnum);
+    openContactDetail(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openContactRelationships(id) {
+  push('s-contactdetail');
+  txt('cdTitle','🕸 Связи');
+  txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id+'/relationships');
+    const rels = d.relationships||[];
+    if (!rels.length) { txt('cdBody', empty('🕸','Нет связей','Связи обнаруживаются автоматически')); return; }
+    const typeLabels = {'mutual_group':'Общая группа','mutual_channel':'Общий канал','mutual_account':'Общий аккаунт','same_company':'Одна компания','same_username_pattern':'Похожий username','phone_match':'Телефон'};
+    let html = '<div style="padding:12px 16px">';
+    rels.forEach(r=>{
+      html += `<div class="li"><div class="li-body"><div class="li-name">${esc(r.related_contact_name||'?')}</div><div class="li-sub">${esc(typeLabels[r.relationship_type]||r.relationship_type)} · ${Math.round((r.strength||0)*100)}%</div></div></div>`;
+    });
+    html += '</div>';
+    txt('cdBody', html);
+  } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+async function openContactIdentity(id) {
+  push('s-contactdetail');
+  txt('cdTitle','🔑 Identity Graph');
+  txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id+'/identity');
+    const ids = d.identities||[];
+    let html = '<div style="padding:12px 16px">';
+    if (d.last_active) html += `<div style="padding:8px 12px;background:rgba(59,130,246,.1);border-radius:8px;margin-bottom:8px;font-size:13px">🕐 ${esc(d.last_active)}</div>`;
+    const grouped = {};
+    ids.forEach(i=>{ grouped[i.identity_type] = grouped[i.identity_type]||[]; grouped[i.identity_type].push(i); });
+    const typeEmoji = {'telegram_id':'🆔','username':'📛','phone':'📱','email':'📧','website':'🌐','tg_account':'🤖'};
+    Object.entries(grouped).forEach(([type, items])=>{
+      html += `<div class="sec">${typeEmoji[type]||'🔗'} ${esc(type)}</div>`;
+      items.forEach(i=>{
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(i.identity_value)}</div><div class="li-sub">${i.is_primary?'⭐ Primary':''} · ${Math.round((i.confidence||0)*100)}% · ${esc(i.source||'')}</div></div></div>`;
+      });
+    });
+    html += '</div>';
+    txt('cdBody', html);
+  } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+async function openContactCRM(id) {
+  push('s-contactdetail');
+  txt('cdTitle','💼 CRM');
+  txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id+'/crm');
+    const crm = d.crm||{};
+    const activity = d.activity||[];
+    const stageLabels = {'lead':'Лид','contact':'Контакт','proposal':'Предложение','negotiation':'Переговоры','won':'Выиграно','lost':'Проиграно'};
+    let html = `<div style="padding:12px 16px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        ${Object.entries(stageLabels).map(([k,v])=>`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;${crm.stage===k?'background:var(--accent);color:#fff':''}" onclick="setCrmStage('${id}','${k}')">${v}</button>`).join('')}
+      </div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <button class="btn btn-p" onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
+    </div>`;
+    if (crm.next_reminder_at) {
+      html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(245,158,11,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
+    }
+    if (activity.length) {
+      html += `<div class="sec" style="margin:0 16px">📝 Активность</div><div class="lst" style="margin:0 16px">`;
+      activity.forEach(a=>{
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru'):''}</div></div></div>`;
+      });
+      html += '</div>';
+    }
+    txt('cdBody', html);
+  } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+async function setCrmStage(id, stage) {
+  try {
+    await api('/api/miniapp/uch/contacts/'+id+'/crm', {method:'POST', body:JSON.stringify({stage})});
+    toast('✅ Стадия обновлена');
+    openContactCRM(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function saveCrmReminder(id) {
+  const remindAt = document.getElementById('crm-remind').value;
+  const text = document.getElementById('crm-remind-text').value.trim();
+  if (!remindAt) { toast('⚠️ Укажите дату'); return; }
+  try {
+    await api('/api/miniapp/uch/contacts/'+id+'/crm/reminder', {method:'POST', body:JSON.stringify({remind_at: remindAt, text})});
+    toast('⏰ Напоминание установлено');
+    openContactCRM(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 function copyText(t) { navigator.clipboard?.writeText(t); toast('📋 Скопировано'); }
@@ -8654,6 +9056,180 @@ async function syncContacts() {
     toast(`✅ Синхронизировано: ${d.total_synced||0} контактов, создано: ${d.total_created||0}`);
     loadContacts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function detectDuplicates() {
+  txt('dupBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/duplicates');
+    const dupes = d.duplicates||[];
+    if (!dupes.length) { txt('dupBody', empty('✅','Дубликатов нет','Все контакты уникальны')); return; }
+    let html = `<div style="padding:12px 16px;font-size:13px;color:var(--hint)">Найдено ${dupes.length} возможных дубликатов</div>`;
+    dupes.forEach(dp=>{
+      html += `<div class="li" style="margin:0 16px 8px">
+        <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${dp.reasons.join(', ')}</div></div>
+        <div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="mergeContacts('${dp.contact_a.id}','${dp.contact_b.id}')">Объединить</button></div></div>`;
+    });
+    txt('dupBody', html);
+  } catch(e) { txt('dupBody', errHtml(e.message)); }
+}
+
+async function mergeContacts(primary, secondary) {
+  if (!confirm('Объединить контакты?')) return;
+  try {
+    await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
+    toast('✅ Контакты объединены');
+    detectDuplicates();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openUchConflicts() {
+  push('s-uchconflicts');
+  txt('confBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/conflicts');
+    const conflicts = d.conflicts||[];
+    if (!conflicts.length) { txt('confBody', empty('✅','Нет конфликтов','Все данные согласованы')); return; }
+    let html = '';
+    conflicts.forEach(c=>{
+      html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(c.first_name||'')} ${esc(c.last_name||'')} · ${esc(c.field_name)}</div><div class="li-sub">A: ${esc(c.value_a||'')} vs B: ${esc(c.value_b||'')}</div></div>
+        <div class="li-right" style="flex-direction:column;gap:4px">
+          <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${esc((c.value_a||'').replace(/'/g,"\\'"))}')">A</button>
+          <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="resolveConflict(${c.id},'accepted','${esc((c.value_b||'').replace(/'/g,"\\'"))}')">B</button>
+        </div></div>`;
+    });
+    txt('confBody', html);
+  } catch(e) { txt('confBody', errHtml(e.message)); }
+}
+
+async function resolveConflict(id, resolution, value) {
+  try {
+    await api('/api/miniapp/uch/conflicts/'+id+'/resolve', {method:'POST', body:JSON.stringify({resolution, value})});
+    toast('✅ Конфликт разрешён');
+    openUchConflicts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openUchSmartTags() {
+  push('s-uchsmarttags');
+  txt('stBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/smart-tags');
+    const tags = d.tags||[];
+    if (!tags.length) { txt('stBody', empty('🏷','Нет тегов','Нажмите "Применить" для генерации')); return; }
+    let html = '<div style="padding:12px 16px">';
+    tags.forEach(t=>{
+      html += `<div class="li"><div class="li-body"><div class="li-name">${esc(t.tag)}</div><div class="li-sub">${t.cnt} контактов · ${esc(t.source||'')}</div></div></div>`;
+    });
+    html += '</div>';
+    txt('stBody', html);
+  } catch(e) { txt('stBody', errHtml(e.message)); }
+}
+
+async function applySmartTags() {
+  toast('⚡ Применяю правила...');
+  try {
+    const d = await api('/api/miniapp/uch/smart-tags/apply', {method:'POST'});
+    toast(`✅ Применено: ${d.applied||0} тегов, проверено правил: ${d.rules_checked||0}`);
+    openUchSmartTags();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openUchExport() {
+  push('s-uchexport');
+  let html = `<div style="padding:16px">
+    <div class="sec">Экспорт всех контактов</div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <a class="btn btn-p" href="/api/miniapp/uch/export/csv" target="_blank" style="flex:1;text-decoration:none;text-align:center">📄 CSV</a>
+      <a class="btn btn-p" href="/api/miniapp/uch/export/vcf" target="_blank" style="flex:1;text-decoration:none;text-align:center">📇 VCF</a>
+      <a class="btn btn-p" href="/api/miniapp/uch/export/json" target="_blank" style="flex:1;text-decoration:none;text-align:center">{ } JSON</a>
+    </div>
+  </div>`;
+  txt('expBody', html);
+}
+
+async function openUchGraph() {
+  push('s-uchgraph');
+  txt('graphBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/graph/stats');
+    let html = `<div style="padding:12px 16px">
+      <div class="kpi-card" style="margin-bottom:12px"><div class="kpi-val">${num(d.total_relationships||0)}</div><div class="kpi-lbl">Связей</div></div>`;
+    if (d.by_type&&d.by_type.length) {
+      html += '<div class="sec">По типам</div>';
+      d.by_type.forEach(t=>{
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(t.relationship_type)}</div><div class="li-sub">${t.cnt} связей</div></div></div>`;
+      });
+    }
+    if (d.strongest&&d.strongest.length) {
+      html += '<div class="sec" style="margin-top:8px">Сильнейшие</div>';
+      d.strongest.forEach(r=>{
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(r.a_name||'?')} ↔ ${esc(r.b_name||'?')}</div><div class="li-sub">${esc(r.relationship_type)} · ${Math.round((r.strength||0)*100)}%</div></div></div>`;
+      });
+    }
+    html += '</div>';
+    txt('graphBody', html);
+  } catch(e) { txt('graphBody', errHtml(e.message)); }
+}
+
+async function computeGraph() {
+  toast('🕸 Рассчитываю связи...');
+  try {
+    const d = await api('/api/miniapp/uch/graph/compute', {method:'POST'});
+    toast(`✅ Найдено ${d.count||0} связей`);
+    openUchGraph();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openUchReminders() {
+  push('s-uchreminders');
+  txt('remBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/reminders');
+    const overdue = d.overdue||[];
+    const upcoming = d.upcoming||[];
+    let html = '';
+    if (overdue.length) {
+      html += '<div class="sec" style="color:#ef4444">⚠️ Просроченные</div>';
+      overdue.forEach(r=>{
+        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru'):''}</div></div></div>`;
+      });
+    }
+    if (upcoming.length) {
+      html += '<div class="sec" style="margin-top:8px">⏰ Ближайшие</div>';
+      upcoming.forEach(r=>{
+        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru'):''}</div></div></div>`;
+      });
+    }
+    if (!overdue.length && !upcoming.length) { html = empty('⏰','Нет напоминаний','Установите напоминания в CRM контакта'); }
+    txt('remBody', html);
+  } catch(e) { txt('remBody', errHtml(e.message)); }
+}
+
+function openUchSyncCenter() {
+  push('s-uchsynccenter');
+  txt('syncBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  setTimeout(()=>{ loadSyncCenter(); }, 100);
+}
+
+async function loadSyncCenter() {
+  try {
+    const d = await api('/api/miniapp/uch/stats');
+    let html = `<div style="padding:12px 16px">
+      <div class="kpi-card" style="margin-bottom:12px;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Всего контактов</div></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div class="kpi-card" style="flex:1;text-align:center"><div class="kpi-val" style="font-size:18px">${d.last_sync?new Date(d.last_sync).toLocaleString('ru'):'—'}</div><div class="kpi-lbl">Последняя синхр.</div></div>
+      </div>`;
+    const accs = d.account_stats||[];
+    if (accs.length) {
+      html += '<div class="sec">По аккаунтам</div>';
+      accs.forEach(a=>{
+        html += `<div class="li"><div class="li-body"><div class="li-name">Аккаунт #${a.account_id} ${esc(a.account_name||'')}</div><div class="li-sub">${num(a.contact_count)} контактов</div></div></div>`;
+      });
+    }
+    html += `<div style="margin-top:12px"><button class="btn btn-p" style="width:100%" onclick="syncContacts()">🔄 Синхронизировать все</button></div></div>`;
+    txt('syncBody', html);
+  } catch(e) { txt('syncBody', errHtml(e.message)); }
 }
 
 async function openContactStats() {
