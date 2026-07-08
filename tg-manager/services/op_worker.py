@@ -912,6 +912,7 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
         from bot.utils.subscription import _admin_ids
         admin_ids = _admin_ids()
     except Exception:
+        log.debug('admin_ids fallback: returning empty set')
         admin_ids = set()
     if not admin_ids:
         return
@@ -2421,6 +2422,7 @@ async def _exec_bulk_join_inner(
                 acc["id"],
             )
         except Exception:
+            log.debug('joins_today query failed, defaulting to 0')
             joins_today = 0
         if (joins_today or 0) >= day_limit:
             log.info(
@@ -2723,6 +2725,7 @@ async def _exec_bulk_leave(
                 acc["id"],
             )
         except Exception:
+            log.debug('leaves_today query failed, defaulting to 0')
             leaves_today = 0
         if (leaves_today or 0) >= day_limit:
             log.info(

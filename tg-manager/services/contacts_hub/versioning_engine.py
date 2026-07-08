@@ -11,16 +11,21 @@ log = logging.getLogger(__name__)
 async def create_version(pool, contact_id: str, owner_id: int, snapshot: dict,
                          changed_fields: list = None, changed_by: str = 'sync',
                          change_summary: str = None) -> int:
-    row = await pool.fetchval(
-        'SELECT COALESCE(MAX(version_num), 0) FROM contact_versions WHERE contact_id=$1',
-        contact_id)
-    version_num = row + 1
-    version_id = await pool.fetchval(
-        '''INSERT INTO contact_versions (contact_id, owner_id, version_num, snapshot,
-            changed_fields, changed_by, change_summary)
-           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id''',
-        contact_id, owner_id, version_num, json.dumps(snapshot),
-        changed_fields or [], changed_by, change_summary)
+    conn = await pool.acquire()
+    try:
+        async with conn.transaction():
+            row = await conn.fetchval(
+                'SELECT COALESCE(MAX(version_num), 0) FROM contact_versions WHERE contact_id=$1',
+                contact_id)
+            version_num = row + 1
+            version_id = await conn.fetchval(
+                '''INSERT INTO contact_versions (contact_id, owner_id, version_num, snapshot,
+                    changed_fields, changed_by, change_summary)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id''',
+                contact_id, owner_id, version_num, json.dumps(snapshot),
+                changed_fields or [], changed_by, change_summary)
+    finally:
+        await pool.release(conn)
     return version_id
 
 

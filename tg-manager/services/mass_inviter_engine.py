@@ -135,6 +135,7 @@ async def invite_batch(
                 errors.append(f"group error: {e}")
                 break  # нет прав/группа закрыта
             except Exception as e:
+                log.warning('invite failed: %s', e)
                 failed += 1
                 errors.append(f"{ref}: {str(e)[:80]}")
 
@@ -217,6 +218,7 @@ async def invite_by_phones(
                 await asyncio.sleep(min(e.seconds, 60))
                 failed += 1
             except Exception as e:
+                log.warning('invite failed: %s', e)
                 failed += 1
                 errors.append(str(e)[:80])
 

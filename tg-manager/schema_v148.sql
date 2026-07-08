@@ -4,7 +4,7 @@
 -- ── Contact Versioning (снимки состояния) ─────────────────────────────
 CREATE TABLE IF NOT EXISTS contact_versions (
     id SERIAL PRIMARY KEY,
-    contact_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     owner_id BIGINT NOT NULL,
     version_num INTEGER NOT NULL,
     snapshot JSONB NOT NULL,
@@ -20,8 +20,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_versions_num ON contact_versions(c
 CREATE TABLE IF NOT EXISTS contact_relationships (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
-    contact_a_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
-    contact_b_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_a_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_b_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     relationship_type TEXT NOT NULL DEFAULT 'mutual_group',
     strength REAL DEFAULT 0.5,
     shared_groups TEXT[],
@@ -49,7 +49,7 @@ ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS source_accounts_count INTE
 CREATE TABLE IF NOT EXISTS contact_conflicts (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
-    contact_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     field_name TEXT NOT NULL,
     source_a_id INTEGER,
     value_a TEXT,
@@ -68,7 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_conflicts_contact ON contact_conflicts(co
 CREATE TABLE IF NOT EXISTS contact_smart_tags (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
-    contact_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     tag TEXT NOT NULL,
     source TEXT DEFAULT 'rule',
     confidence REAL DEFAULT 1.0,
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_smart_tag_rules_owner ON smart_tag_rules(owner_id
 CREATE TABLE IF NOT EXISTS contact_crm (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
-    contact_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     stage TEXT DEFAULT 'lead',
     deal_value REAL DEFAULT 0,
     currency TEXT DEFAULT 'USD',
@@ -118,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_crm_stage ON contact_crm(owner_id, stage)
 CREATE TABLE IF NOT EXISTS contact_crm_activity (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
-    contact_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     activity_type TEXT NOT NULL,
     description TEXT,
     metadata JSONB DEFAULT '{}',
@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_crm_activity_contact ON contact_crm_activity(cont
 CREATE TABLE IF NOT EXISTS contact_identity_graph (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
-    contact_id TEXT NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
+    contact_id UUID NOT NULL REFERENCES unified_contacts(id) ON DELETE CASCADE,
     identity_type TEXT NOT NULL,
     identity_value TEXT NOT NULL,
     is_primary BOOLEAN DEFAULT FALSE,
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS contact_bulk_ops (
     id SERIAL PRIMARY KEY,
     owner_id BIGINT NOT NULL,
     op_type TEXT NOT NULL,
-    contact_ids TEXT[] NOT NULL,
+    contact_ids UUID[] NOT NULL,
     params JSONB DEFAULT '{}',
     status TEXT DEFAULT 'pending',
     result JSONB DEFAULT '{}',
@@ -188,3 +188,9 @@ CREATE TABLE IF NOT EXISTS contact_sync_state (
     UNIQUE(owner_id, account_id)
 );
 CREATE INDEX IF NOT EXISTS idx_sync_state_owner ON contact_sync_state(owner_id);
+
+-- ── Missing indexes for performance ───────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_contact_conflicts_owner ON contact_conflicts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_crm_activity_owner ON contact_crm_activity(owner_id);
+CREATE INDEX IF NOT EXISTS idx_export_jobs_owner ON contact_export_jobs(owner_id, status);
+CREATE INDEX IF NOT EXISTS idx_contact_versions_owner ON contact_versions(owner_id);

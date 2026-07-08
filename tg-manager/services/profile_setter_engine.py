@@ -57,6 +57,7 @@ async def set_name_bio(
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -93,6 +94,7 @@ async def set_avatar_from_url(
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -123,6 +125,7 @@ async def set_avatar_from_bytes(
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -148,6 +151,7 @@ async def set_username(
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -185,6 +189,7 @@ async def set_2fa_password(
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -205,6 +210,7 @@ async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[s
         await asyncio.wait_for(client(ResetAuthorizationsRequest()), timeout=_ACTION_TIMEOUT)
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -244,6 +250,7 @@ async def set_privacy(session_string: str, _acc: dict | None, key: str, allow: b
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -278,6 +285,7 @@ async def get_login_code(session_string: str, _acc: dict | None) -> dict[str, An
                 return {"ok": True, "code": code, "error": None}
         return {"ok": False, "code": None, "error": "Код не найден в последних сообщениях"}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "code": None, "error": str(exc)[:150]}
     finally:
         try:
@@ -299,6 +307,7 @@ async def clear_bio(session_string: str, _acc: dict | None) -> dict[str, Any]:
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -328,6 +337,7 @@ async def remove_avatar(session_string: str, _acc: dict | None) -> dict[str, Any
         await asyncio.wait_for(client(DeletePhotosRequest(id=ids)), timeout=_ACTION_TIMEOUT)
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -352,6 +362,7 @@ async def reset_2fa(
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -374,6 +385,7 @@ async def set_online(session_string: str, _acc: dict | None) -> dict[str, Any]:
         )
         return {"ok": True, "error": None}
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
@@ -409,6 +421,7 @@ async def check_restriction(session_string: str, _acc: dict | None) -> dict[str,
             "user_id": getattr(me, "id", None),
         }
     except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
         return {"ok": False, "alive": False, "restricted": False,
                 "deleted": False, "reason": None, "error": str(exc)[:150]}
     finally:

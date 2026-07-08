@@ -264,6 +264,7 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             try:
                 params = _json.loads(params)
             except Exception:
+                log.debug('campaign params parse error')
                 params = {}
         cohort = params.get("cohort_type", "warm")
         cohort_sql = {
@@ -325,6 +326,7 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             try:
                 params = _json.loads(params)
             except Exception:
+                log.debug('campaign params parse error')
                 params = {}
         import_items = params.get("import_list", [])
         targets = []
@@ -433,6 +435,7 @@ async def run_campaign(
             import json as _json
             _cp = _json.loads(_cp)
         except Exception:
+            log.debug('campaign params parse error')
             _cp = {}
     _media_url = (_cp or {}).get("media_url") or None
     try:

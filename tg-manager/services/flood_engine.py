@@ -117,6 +117,7 @@ def recommended_delay(account_id: int, action_type: str = "default") -> float:
 
         pacing_mult = get_pacing_engine().get_multiplier(action_type)
     except Exception:
+        log.debug('pacing_engine unavailable, using default')
         pacing_mult = 1.0
     return min(base * multiplier * pacing_mult, 900.0)
 
