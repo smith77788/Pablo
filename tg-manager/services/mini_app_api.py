@@ -3045,6 +3045,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "scan_owned_resources", {"account_ids": [acc_id]}, "Скан ресурсов аккаунта"
         elif act == "leave_all":
             op_type, params, label = "leave_all_chats", {"account_id": acc_id}, "Выход из всех чатов"
+        elif act == "read_all":
+            op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
         else:
             return _err("Неизвестное действие", 400)
         try:

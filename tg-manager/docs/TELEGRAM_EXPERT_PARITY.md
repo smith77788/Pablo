@@ -31,7 +31,9 @@
 - **3 Действие с аккаунтом**: проверено wiring (правило №1):
   - **WIRED**: Поиск админ-чатов (`scan` → op `scan_owned_resources` + `_exec_scan_owned_resources`), Массовые отписки/Выход из чатов (`leave_all` → op `leave_all_chats` + реальный `client.delete_dialog` цикл), обе кнопки в UI + `accAction` c `pollOpResult`.
   - **WIRED (новое)**: Снятие спамблока — `account_manager.appeal_spamblock` (проход по кнопкам аппеляции @SpamBot) + POST `/account/{id}/spamblock_appeal` + кнопка «🛡 Снять спамблок» в карточке аккаунта. Раньше был только CHECK, снятия не было.
-  - Остальное (чтение/удаление диалогов, создание чатов+ботов+постов, экспорт) — база есть, wiring добивается.
+  - **WIRED (новое)**: Чтение диалогов — op `read_all_dialogs` + `_exec_read_all_dialogs` (реальный `send_read_acknowledge` только по непрочитанным) + `accAction(read_all)` + кнопка «📖 Прочитать всё».
+  - **WIRED**: Создание чатов/ботов (op `create_channel`/`create_group`/`bot_factory` + исполнители), Экспорт аккаунта (`/accounts/export` CSV + `/export_json`).
+  - Остальное (удаление истории диалогов, Story Manager) — добивается.
 - **4 Авто-регистрация**: генератор device-параметров, SMS-провайдеры (`sms_api_engine`), авто-рег — есть; Flash Call/Voice — НЕТ.
 - **5 Сбор аудитории**: parser (`/parser/*`) — WIRED.
 - **6 Инвайт**: mass_invite (op) — WIRED; Invite V2/через ботов/пакетами — проверять.
