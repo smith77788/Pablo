@@ -11233,7 +11233,7 @@ function renderPromoTab(tab) {
       <div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div>
       <div class="row-body">
         <div class="row-name">@${esc(b.bot_username)}</div>
-        <div class="row-val">${BOT_STATUS[b.status]||b.status}${b.ready_at&&b.status==='aging'?' · готов '+ago(b.ready_at):''}</div>
+        <div class="row-val">${esc(BOT_STATUS[b.status]||b.status)}${b.ready_at&&b.status==='aging'?' · готов '+ago(b.ready_at):''}</div>
       </div>
     </div>
   `).join(''));
@@ -11261,7 +11261,7 @@ function openPromoOrderModal() {
   const panelSel = document.getElementById('promoOrderPanel');
   const bots = (PROMO_DATA&&PROMO_DATA.bots||[]).filter(b=>b.status!=='transferred');
   const panels = (PROMO_DATA&&PROMO_DATA.panels||[]).filter(p=>p.is_active);
-  botSel.innerHTML = '<option value="">— не выбран —</option>' + bots.map(b=>`<option value="${b.id}">@${esc(b.bot_username)} (${BOT_STATUS[b.status]||b.status})</option>`).join('');
+  botSel.innerHTML = '<option value="">— не выбран —</option>' + bots.map(b=>`<option value="${b.id}">@${esc(b.bot_username)} (${esc(BOT_STATUS[b.status]||b.status)})</option>`).join('');
   panelSel.innerHTML = '<option value="">— не выбрана —</option>' + panels.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   document.getElementById('promoOrderMbg').classList.add('show');
 }

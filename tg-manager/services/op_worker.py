@@ -1373,7 +1373,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 log.warning("pacing_engine record_result failed for op %d: %s", op_id, e)
             await _safe_execute(
                 pool,
-                "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2",
+                "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2 AND status NOT IN ('done','failed','cancelled')",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
                 _final_status,

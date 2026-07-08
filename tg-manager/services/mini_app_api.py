@@ -693,7 +693,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("Invalid bot_id", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            """SELECT COUNT(*) FROM managed_bots mb
+               WHERE mb.bot_id=$1 AND (
+                   mb.added_by=$2
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                       JOIN ecosystems e ON e.id=eb.ecosystem_id
+                       WHERE e.owner_id=$2
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
+                   )
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT b.bot_id FROM managed_bots b
+                       JOIN workspaces w ON w.owner_id=b.added_by
+                       JOIN workspace_members wm ON wm.workspace_id=w.id
+                       WHERE wm.user_id=$2
+                   )
+               )""", bot_id, uid)
         if not owns:
             return _err("Bot not found", 404)
         # Счётчик срабатываний из auto_reply_log — аналитика прямо в списке.
@@ -730,123 +745,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid request", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
-        if not owns:
-            return _err("Bot not found", 404)
-        trigger_type = body.get("trigger_type", "keyword")
-        keyword = (body.get("keyword") or "").strip()
-        response_text = (body.get("response_text") or "").strip()
-        match_mode = (body.get("match_mode") or "contains").strip().lower()
-        if match_mode not in ("contains", "exact", "starts"):
-            match_mode = "contains"
-        if trigger_type not in ("start", "keyword", "any"):
-            return _err("trigger_type must be start/keyword/any")
-        if not response_text:
-            return _err("response_text required")
-        if trigger_type == "keyword" and not keyword:
-            return _err("keyword required for keyword trigger")
-        # Инлайн-кнопки (необязательно): [{text,url}]
-        buttons = []
-        for b in (body.get("buttons") or [])[:10]:
-            try:
-                bt = str(b.get("text") or "").strip()[:64]
-                bu = str(b.get("url") or "").strip()
-            except Exception:
-                continue
-            if bt and bu.lower().startswith(("http://", "https://")):
-                buttons.append({"text": bt, "url": bu})
-        buttons_json = _json.dumps(buttons) if buttons else None
-
-        # Углублённые поля правила (schema_v142). Все клампятся/валидируются.
-        def _clamp_int(val, lo, hi, default=None):
-            if val is None or val == "":
-                return default
-            try:
-                return max(lo, min(hi, int(val)))
-            except (TypeError, ValueError):
-                return default
-        reply_delay_sec = _clamp_int(body.get("reply_delay_sec"), 0, 300, 0)
-        active_from_hour = _clamp_int(body.get("active_from_hour"), 0, 23, None)
-        active_to_hour = _clamp_int(body.get("active_to_hour"), 0, 23, None)
-        priority = _clamp_int(body.get("priority"), -100, 100, 0)
-        # Окно рабочих часов задаётся парой — либо оба часа, либо ни одного.
-        if (active_from_hour is None) != (active_to_hour is None):
-            return _err("Укажите оба часа рабочего окна или ни одного", 400)
-
-        try:
-            try:
-                row = await pool.fetchrow(
-                    "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode, buttons, "
-                    "reply_delay_sec, active_from_hour, active_to_hour, priority) "
-                    "VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10) RETURNING id",
-                    bot_id, trigger_type, keyword or None, response_text, match_mode, buttons_json,
-                    reply_delay_sec, active_from_hour, active_to_hour, priority)
-            except asyncpg.UndefinedColumnError:
-                try:
-                    row = await pool.fetchrow(
-                        "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode, buttons) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING id",
-                        bot_id, trigger_type, keyword or None, response_text, match_mode, buttons_json)
-                except asyncpg.UndefinedColumnError:
-                    try:
-                        row = await pool.fetchrow(
-                            "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text, match_mode) VALUES($1,$2,$3,$4,$5) RETURNING id",
-                            bot_id, trigger_type, keyword or None, response_text, match_mode)
-                    except asyncpg.UndefinedColumnError:
-                        row = await pool.fetchrow(
-                            "INSERT INTO auto_replies(bot_id, trigger_type, keyword, response_text) VALUES($1,$2,$3,$4) RETURNING id",
-                            bot_id, trigger_type, keyword or None, response_text)
-            return _json_resp({"ok": True, "id": row["id"]})
-        except Exception as e:
-            log.exception("create_auto_reply bot=%d uid=%d", bot_id, uid)
-            return _err("Failed to create", 500)
-
-    async def toggle_auto_reply(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            reply_id = int(request.match_info["reply_id"])
-        except (KeyError, ValueError):
-            return _err("Invalid reply_id", 400)
-        try:
-            row = await pool.fetchrow(
-                """UPDATE auto_replies SET is_active = NOT is_active
-                   WHERE id=$1 AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)
-                   RETURNING id, is_active""",
-                reply_id, uid)
-            if not row:
-                return _err("Not found", 404)
-            return _json_resp({"ok": True, "is_active": row["is_active"]})
-        except Exception:
-            return _err("Failed to toggle", 500)
-
-    async def delete_auto_reply(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            reply_id = int(request.match_info["reply_id"])
-        except (KeyError, ValueError):
-            return _err("Invalid reply_id", 400)
-        try:
-            await pool.execute(
-                """DELETE FROM auto_replies WHERE id=$1
-                   AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)""",
-                reply_id, uid)
-            return _json_resp({"ok": True})
-        except Exception:
-            return _err("Failed to delete", 500)
-
-    async def bot_funnels(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            bot_id = int(request.match_info["bot_id"])
-        except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            """SELECT COUNT(*) FROM managed_bots mb
+               WHERE mb.bot_id=$1 AND (
+                   mb.added_by=$2
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                       JOIN ecosystems e ON e.id=eb.ecosystem_id
+                       WHERE e.owner_id=$2
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
+                   )
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT b.bot_id FROM managed_bots b
+                       JOIN workspaces w ON w.owner_id=b.added_by
+                       JOIN workspace_members wm ON wm.workspace_id=w.id
+                       WHERE wm.user_id=$2
+                   )
+               )""", bot_id, uid)
         if not owns:
             return _err("Bot not found", 404)
         rows = await _safe_fetch(pool,
