@@ -10011,6 +10011,111 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/team/audit", team_audit)
     app.router.add_get("/api/miniapp/my_activity", user_activity_log)
 
+    # ── Unified Contacts Hub ──────────────────────────────────────────────────
+
+    async def uch_contacts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        search = request.query.get('search', '')
+        tag = request.query.get('tag')
+        favorite = request.query.get('favorite') == '1'
+        try:
+            from services.contacts_hub.repository import get_contacts
+            result = await get_contacts(pool, uid, search=search, favorite_only=favorite, tag=tag)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            contact_id = request.match_info['contact_id']
+            from services.contacts_hub.repository import get_contact
+            result = await get_contact(pool, contact_id, uid)
+            if not result: return _err("Not found", 404)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_update(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            contact_id = request.match_info['contact_id']
+            data = await request.json()
+            from services.contacts_hub.repository import update_contact, log_contact_history
+            success = await update_contact(pool, contact_id, uid, data)
+            if not success: return _err("Not found", 404)
+            await log_contact_history(pool, contact_id, uid, 'edit', source='user')
+            return _json_resp({'ok': True})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            contact_id = request.match_info['contact_id']
+            from services.contacts_hub.repository import delete_contact
+            success = await delete_contact(pool, contact_id, uid)
+            if not success: return _err("Not found", 404)
+            return _json_resp({'ok': True})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_search(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        query = request.query.get('q', '')
+        if not query: return _err("Query required", 400)
+        try:
+            from services.contacts_hub.search_engine import search_contacts
+            results = await search_contacts(pool, uid, query)
+            return _json_resp({'results': results, 'total': len(results)})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.stats_engine import get_full_stats, get_account_stats
+            stats = await get_full_stats(pool, uid)
+            account_stats = await get_account_stats(pool, uid)
+            return _json_resp({**stats, 'account_stats': account_stats})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_sync(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.sync_service import sync_all_accounts
+            result = await sync_all_accounts(pool, uid)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_groups(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.repository import get_contact_groups
+            groups = await get_contact_groups(pool, uid)
+            return _json_resp({'groups': groups})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
+    app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
+    app.router.add_get("/api/miniapp/uch/search", uch_search)
+    app.router.add_get("/api/miniapp/uch/stats", uch_stats)
+    app.router.add_post("/api/miniapp/uch/sync", uch_sync)
+    app.router.add_get("/api/miniapp/uch/groups", uch_groups)
+
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 

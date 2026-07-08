@@ -435,6 +435,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="qa-tile" onclick="openChannels()"><div class="qa-tile-ico">📡</div><div class="qa-tile-lbl">Каналы</div><div class="qa-tile-val" id="qa-chs">—</div></div>
       <div class="qa-tile" onclick="goTab('broadcasts')"><div class="qa-tile-ico">📨</div><div class="qa-tile-lbl">Рассылки</div><div class="qa-tile-val" id="qa-bc">—</div></div>
       <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div><div class="qa-tile-val" id="qa-ops">—</div></div>
+      <div class="qa-tile" onclick="openContacts()"><div class="qa-tile-ico">📇</div><div class="qa-tile-lbl">Контакты</div><div class="qa-tile-val" id="qa-contacts">—</div></div>
       <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div><div class="qa-tile-val" style="color:var(--blue)">→</div></div>
     </div>
     <!-- Activity chart -->
@@ -911,6 +912,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-ico">📱</div>
         <div class="mgmt-tile-lbl">Авторег</div>
         <div class="mgmt-tile-val" id="m-autoreg-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openContacts()">
+        <div class="mgmt-tile-ico">📇</div>
+        <div class="mgmt-tile-lbl">Контакты</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -2177,6 +2183,39 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Выберите тип операции — все они исполняются через ваши аккаунты и попадают в очередь.</div>
     <div id="opCreateList"></div>
   </div>
+</div>
+
+<!-- ══════════════════════ UNIFIED CONTACTS HUB ══════════════════════ -->
+<div class="screen" id="s-contacts">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="syncContacts()" title="Синхронизация">🔄</span>
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openContactStats()" title="Статистика">📊</span>
+    </div>
+  </div>
+  <div class="sub-sb">
+    <div style="padding:6px 0">
+      <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов..." oninput="searchContacts()" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+    </div>
+    <div class="seg" id="contactFilterSeg">
+      <div class="seg-opt on" onclick="filterContacts(null,this)">Все</div>
+      <div class="seg-opt" onclick="filterContacts('favorite',this)">⭐ Избранные</div>
+      <div class="seg-opt" onclick="filterContacts('premium',this)">💎 Premium</div>
+      <div class="seg-opt" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
+    </div>
+    <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
+    <div class="lst" id="contactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-contactdetail">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cdTitle">Контакт</div></div>
+  <div class="sub-sb" id="cdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-contactstats">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📊 Статистика контактов</div></div>
+  <div class="sub-sb" id="csBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
@@ -8518,6 +8557,129 @@ async function openSeo() {
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
   }
+}
+
+// ── Unified Contacts Hub ──────────────────────────────────
+let CONTACT_FILTER = null;
+function openContacts() { push('s-contacts'); txt('contactsList','<div class="spin-wrap"><div class="spin"></div></div>'); loadContacts(); loadContactStats(); }
+
+async function loadContacts() {
+  const q = (document.getElementById('contactSearch')?.value||'').trim();
+  const url = q ? '/api/miniapp/uch/search?q='+encodeURIComponent(q) : '/api/miniapp/uch/contacts';
+  try {
+    const d = await api(url);
+    const contacts = d.results||d.contacts||[];
+    if (!contacts.length) { txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки')); return; }
+    txt('contactsList', contacts.map(c=>{
+      const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
+      const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
+      return `<div class="li tap" onclick="openContactDetail('${c.id}')">
+        <div class="ava" style="background:${c.color_label||'rgba(59,130,246,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
+        <div class="li-body">
+          <div class="li-name">${esc(name)} ${c.is_favorite?'⭐':''}</div>
+          <div class="li-sub">${esc(sub)}</div>
+        </div>
+        <div class="li-right"><span class="chev">›</span></div>
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('contactsList', errHtml(e.message)); }
+}
+
+async function searchContacts() { loadContacts(); }
+
+function filterContacts(filter, btn) {
+  CONTACT_FILTER = filter;
+  document.querySelectorAll('#contactFilterSeg .seg-opt').forEach(el=>el.classList.remove('on'));
+  if (btn) btn.classList.add('on');
+  loadContacts();
+}
+
+async function loadContactStats() {
+  try {
+    const d = await api('/api/miniapp/uch/stats');
+    txt('contactsKpi', `
+      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Всего</div></div>
+      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(d.favorites||0)}</div><div class="kpi-lbl">⭐ Избр.</div></div>
+      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--purple)">${num(d.premium||0)}</div><div class="kpi-lbl">💎 Premium</div></div>
+      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_username||0)}</div><div class="kpi-lbl">Username</div></div>
+    `);
+  } catch(_) {}
+}
+
+async function openContactDetail(id) {
+  push('s-contactdetail');
+  txt('cdTitle','Контакт');
+  txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/contacts/'+id);
+    const c = d.contact;
+    const sources = d.sources||[];
+    const groups = d.groups||[];
+    const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'';
+    let html = `<div class="lst" style="margin:12px 16px 0">
+      <div class="row"><div class="row-body"><div class="row-name">Имя</div><div class="row-val">${esc(name)}</div></div></div>
+      ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
+      ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
+      ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
+      ${c.phones&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
+      ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
+      ${c.notes?`<div class="row"><div class="row-body"><div class="row-name">Заметки</div><div class="row-val">${esc(c.notes)}</div></div></div>`:''}
+      ${c.tags&&c.tags.length?`<div class="row"><div class="row-body"><div class="row-name">Теги</div><div class="row-val">${c.tags.map(t=>'<span class="badge b-bl">'+esc(t)+'</span>').join(' ')}</div></div></div>`:''}
+    </div>`;
+    if (sources.length) {
+      html += `<div class="sec" style="margin-top:8px">📡 Источники (${sources.length})</div><div class="lst" style="margin:0 16px">`;
+      sources.forEach(s=>{ html += `<div class="row"><div class="row-body"><div class="row-name">Аккаунт #${s.account_id}</div><div class="row-val">${esc(s.local_name||'')} · ${s.status}</div></div></div>`; });
+      html += '</div>';
+    }
+    if (groups.length) {
+      html += `<div class="sec" style="margin-top:8px">📂 Группы (${groups.length})</div><div class="lst" style="margin:0 16px">`;
+      groups.forEach(g=>{ html += `<div class="row"><div class="row-body"><div class="row-name">${esc(g.name)}</div></div></div>`; });
+      html += '</div>';
+    }
+    html += `<div style="padding:12px 16px;display:flex;gap:8px">
+      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:1">📋 Username</button>
+      <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:1">📋 ID</button>
+      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:1">📋 Тел.</button>`:''}
+    </div>`;
+    txt('cdBody', html);
+  } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+function copyText(t) { navigator.clipboard?.writeText(t); toast('📋 Скопировано'); }
+
+async function syncContacts() {
+  toast('🔄 Синхронизация...');
+  try {
+    const d = await api('/api/miniapp/uch/sync', {method:'POST'});
+    toast(`✅ Синхронизировано: ${d.total_synced||0} контактов, создано: ${d.total_created||0}`);
+    loadContacts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function openContactStats() {
+  push('s-contactstats');
+  txt('csBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/stats');
+    const accs = d.account_stats||[];
+    let html = `<div class="lst" style="margin:12px 16px 0">
+      <div class="row"><div class="row-body"><div class="row-name">Всего контактов</div><div class="row-val">${num(d.total||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 ${num(d.premium||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">С username</div><div class="row-val">${num(d.with_username||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">С телефоном</div><div class="row-val">📱 ${num(d.with_phone||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Избранные</div><div class="row-val">⭐ ${num(d.favorites||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">С заметками</div><div class="row-val">📝 ${num(d.notes||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Тегов</div><div class="row-val">🏷 ${num(d.tags||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Групп</div><div class="row-val">📂 ${num(d.groups||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Последняя синхронизация</div><div class="row-val">${d.last_sync?new Date(d.last_sync).toLocaleString('ru'):'—'}</div></div></div>
+    </div>`;
+    if (accs.length) {
+      html += `<div class="sec" style="margin-top:8px">📡 По аккаунтам</div><div class="lst" style="margin:0 16px">`;
+      accs.forEach(a=>{ html += `<div class="row"><div class="row-body"><div class="row-name">Аккаунт #${a.account_id}</div><div class="row-val">${esc(a.account_name||'')} · ${num(a.contact_count)} контактов</div></div></div>`; });
+      html += '</div>';
+    }
+    txt('csBody', html);
+  } catch(e) { txt('csBody', errHtml(e.message)); }
 }
 
 // ── Bot Factory ──────────────────────────────────────────
