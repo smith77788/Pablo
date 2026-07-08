@@ -2944,8 +2944,10 @@ async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
-    Returns list of {user_id, username, phone, first_name, last_name}.
-    Bots and deleted accounts are excluded.
+    Returns list of {user_id, username, phone, first_name, last_name, is_mutual}.
+    Bots and deleted accounts are excluded. is_mutual is True when the contact
+    has this account added back (from contacts.GetContacts' Contact.mutual —
+    previously discarded, only the flat user list was read).
     """
     from telethon.tl.functions.contacts import GetContactsRequest
 
@@ -2953,6 +2955,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(GetContactsRequest(hash=0))
+        mutual_ids = {c.user_id for c in getattr(result, "contacts", []) if getattr(c, "mutual", False)}
         contacts = []
         for user in result.users:
             if getattr(user, "deleted", False) or getattr(user, "bot", False):
@@ -2964,6 +2967,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
                     "phone": getattr(user, "phone", "") or "",
                     "first_name": getattr(user, "first_name", "") or "",
                     "last_name": getattr(user, "last_name", "") or "",
+                    "is_mutual": user.id in mutual_ids,
                 }
             )
         return contacts

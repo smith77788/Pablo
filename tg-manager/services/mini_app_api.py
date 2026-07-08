@@ -595,7 +595,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                       JOIN ecosystems e ON e.id=eb.ecosystem_id
                       WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
                   )
                   OR mb.bot_id IN (
                       SELECT DISTINCT b.bot_id FROM managed_bots b
@@ -612,7 +612,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                       JOIN ecosystems e ON e.id=eb.ecosystem_id
                       WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
                   )
                   OR bot_id IN (
                       SELECT DISTINCT b.bot_id FROM managed_bots b
@@ -639,7 +639,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                        JOIN ecosystems e ON e.id=eb.ecosystem_id
                        WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$2)
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
                    )
                    OR mb.bot_id IN (
                        SELECT DISTINCT b.bot_id FROM managed_bots b
@@ -1074,7 +1074,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       SELECT DISTINCT ec.channel_id FROM ecosystem_channels ec
                       JOIN ecosystems e ON e.id=ec.ecosystem_id
                       WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
                   )
                   OR id IN (
                       SELECT DISTINCT mc.id FROM managed_channels mc
@@ -1091,7 +1091,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       SELECT DISTINCT ec.channel_id FROM ecosystem_channels ec
                       JOIN ecosystems e ON e.id=ec.ecosystem_id
                       WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
                   )
                   OR id IN (
                       SELECT DISTINCT mc.id FROM managed_channels mc
@@ -10744,8 +10744,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 """SELECT user_id, username, first_name, current_plan, plan_expires_at,
-                          created_at, last_active_at
-                   FROM platform_users ORDER BY created_at DESC LIMIT 100""")
+                          registered_at AS created_at, last_seen AS last_active_at
+                   FROM platform_users ORDER BY registered_at DESC LIMIT 100""")
             return _json_resp({"users": [dict(r) for r in rows]})
         except Exception as e:
             log.exception("admin_users uid=%d", uid)
@@ -10786,7 +10786,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad user_id", 400)
         try:
             user = await pool.fetchrow(
-                "SELECT * FROM platform_users WHERE user_id=$1", target_id)
+                """SELECT *, registered_at AS created_at, last_seen AS last_active_at
+                   FROM platform_users WHERE user_id=$1""", target_id)
             if not user:
                 return _err("User not found", 404)
             bots = await pool.fetchval(
