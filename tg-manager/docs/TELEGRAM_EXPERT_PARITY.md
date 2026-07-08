@@ -18,7 +18,7 @@
 | Проверка уникальности IP прокси | 13 Прокси | **НЕТ → в работе (этот заход)** | ядро изоляции: два активных аккаунта на одном IP = риск бана |
 | Автопостинг в чаты v1/v2 | 7 Отправка | НЕТ | join по ключам + постинг циклом; конвейер есть |
 | Session Duplicator | 12 Спец | НЕТ | доп. авторизованная сессия для ротации/бэкапа |
-| Chat Cloner | 12 Спец | НЕТ | клон истории группы (Channel Cloner есть) |
+| Chat Cloner | 12 Спец | **WIRED (единый модуль)** | НЕ отдельный модуль (был бы дубль). Единый `content_cloner_engine` целе-агностичен: `get_entity`+`forward_messages`/copy работают и с группами; `parse_channel_ref` принимает групповые @username/id/invite. UI Контент-клонера явно поддерживает «канал/группу». Тест: `test_content_cloner_groups.py` |
 | Shadow Sessions | 12 Спец | НЕТ | |
 | AI Commenting | 12 Спец | НЕТ | GPT-комментинг в обсуждениях |
 | Global Search | 12 Спец | **WIRED** | `global_search_engine.search_public` (contacts.SearchRequest) + POST `/api/miniapp/global_search` + экран `s-gsearch`, тайл «Глобал. поиск» |
