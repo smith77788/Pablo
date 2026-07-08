@@ -10619,6 +10619,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def uch_spotlight(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        q = request.query.get('q', '').strip()
+        if not q: return _json_resp({'results': []})
+        try:
+            from services.contacts_hub.search_engine import search_contacts_spotlight
+            results = await search_contacts_spotlight(pool, uid, q)
+            return _json_resp({'results': results, 'total': len(results)})
+        except Exception as e:
+            return _err(str(e), 500)
+
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
@@ -10667,6 +10679,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/graph/compute", uch_graph_compute)
     app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
+    app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
 
     # SSE
     app.router.add_get("/api/miniapp/events", events)
