@@ -391,6 +391,8 @@ async def main() -> None:
         "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS proxy_fp TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_proxies_owner_fp "
         "ON user_proxies(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL",
+        # Backup Proxy (failover) — колонка нужна до первого запроса (schema_v150).
+        "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS is_backup BOOLEAN DEFAULT FALSE",
     ):
         try:
             await pool.execute(_ddl)

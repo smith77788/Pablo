@@ -23,7 +23,7 @@
 | AI Commenting | 12 Спец | НЕТ | GPT-комментинг в обсуждениях |
 | Global Search | 12 Спец | **WIRED** | `global_search_engine.search_public` (contacts.SearchRequest) + POST `/api/miniapp/global_search` + экран `s-gsearch`, тайл «Глобал. поиск» |
 | Flash Call / Voice reg | 4 Авто-рег | НЕТ | сейчас только SMS-коды |
-| Backup Proxy | 13 Прокси | НЕТ | резервный прокси при падении основного |
+| Backup Proxy | 13 Прокси | **WIRED** | `proxy_selector.failover_dead_proxies` (пробит + переназначение на живой резерв с IP-изоляцией) + POST `/proxy/failover` + `/proxy/{id}/backup` + кнопка «🛟 Failover» и переключатель резерва в списке прокси; `is_backup` (schema_v150). Попутно: `probe_proxy`/`check_proxy_health` теперь расшифровывают proxy_url (был баг — прокси всегда «мёртв») |
 | Message Interceptor | 12 Спец | НЕТ | (auto_responder ≠ перехват входящих) |
 
 ## Разделы, где база ЕСТЬ (аккаунт-операции активно добивает параллельный агент, waves 1-2)

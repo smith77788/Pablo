@@ -7290,9 +7290,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
-               FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
+        # is_backup может ещё не примениться (лаг миграции) — тогда селект с колонкой
+        # упадёт; фолбэк без неё, чтобы список прокси НИКОГДА не ломался.
+        try:
+            rows = await pool.fetch(
+                """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check,
+                          created_at, COALESCE(is_backup, FALSE) AS is_backup
+                   FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
+        except Exception:
+            rows = await _safe_fetch(pool,
+                """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
+                   FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
+            rows = [dict(r, is_backup=False) for r in rows]
         # proxy_url хранится зашифрованным — расшифровываем для отображения (passthrough legacy)
         from services.token_vault import decrypt_token
 
@@ -7384,6 +7393,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log_exc_swallow(log, "check_proxy persist")
         return _json_resp({"ok": True, "alive": bool(res.get("ok")),
                            "latency_ms": res.get("latency_ms"), "error": res.get("error")})
+
+    async def proxy_toggle_backup(request: web.Request) -> web.Response:
+        """Пометить/снять прокси как резервный (is_backup) для failover."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            proxy_id = int(request.match_info["proxy_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid proxy_id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT COALESCE(is_backup, FALSE) AS is_backup FROM user_proxies "
+            "WHERE id=$1 AND owner_id=$2", proxy_id, uid)
+        if row is None:
+            return _err("Прокси не найден", 404)
+        new_val = not bool(row["is_backup"])
+        try:
+            await pool.execute(
+                "UPDATE user_proxies SET is_backup=$1 WHERE id=$2 AND owner_id=$3",
+                new_val, proxy_id, uid)
+        except Exception as e:
+            log.exception("proxy_toggle_backup uid=%s proxy=%s", uid, proxy_id)
+            return _err(f"Не удалось изменить: {str(e)[:120]}", 400)
+        return _json_resp({"ok": True, "is_backup": new_val})
+
+    async def proxy_failover(request: web.Request) -> web.Response:
+        """Failover: переназначить аккаунты с мёртвым прокси на живой резервный."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.proxy_selector import failover_dead_proxies
+            res = await asyncio.wait_for(failover_dead_proxies(pool, uid), timeout=180)
+            return _json_resp({"ok": True, **res})
+        except asyncio.TimeoutError:
+            return _err("Проверка прокси заняла слишком долго — повторите", 400)
+        except Exception as e:
+            log.exception("proxy_failover uid=%s", uid)
+            return _err(str(e)[:160], 500)
 
     async def proxies_isolation_check(request: web.Request) -> web.Response:
         """Проверка уникальности IP: активные аккаунты, делящие один IP прокси
@@ -9688,6 +9736,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/proxy", add_proxy)
     app.router.add_delete("/api/miniapp/proxy/{proxy_id}", delete_proxy)
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/check", check_proxy)
+    app.router.add_post("/api/miniapp/proxy/{proxy_id}/backup", proxy_toggle_backup)
+    app.router.add_post("/api/miniapp/proxy/failover", proxy_failover)
     app.router.add_post("/api/miniapp/proxies/check_all", check_all_proxies)
     app.router.add_get("/api/miniapp/proxies/isolation_check", proxies_isolation_check)
     app.router.add_post("/api/miniapp/proxies/import", import_proxies)

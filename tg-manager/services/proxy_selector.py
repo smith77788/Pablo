@@ -165,6 +165,121 @@ async def audit_proxy_isolation(pool, owner_id: int, max_per_ip: int = 1) -> dic
     }
 
 
+async def _fetch_backup_proxies(pool, owner_id: int) -> list[dict]:
+    """Живые активные резервные прокси владельца. Колонка is_backup может ещё не
+    примениться (лаг миграции) — в этом случае возвращаем пустой список, а не падаем."""
+    try:
+        rows = await pool.fetch(
+            "SELECT id, proxy_url FROM user_proxies "
+            "WHERE owner_id=$1 AND is_active=TRUE AND is_backup=TRUE ORDER BY id",
+            owner_id,
+        )
+    except Exception as e:  # UndefinedColumnError при лаге миграции и т.п.
+        log.warning("failover: backup proxies unavailable owner=%s: %s", owner_id, e)
+        return []
+    return [dict(r) for r in rows]
+
+
+async def failover_dead_proxies(pool, owner_id: int) -> dict:
+    """Переназначить аккаунты с МЁРТВЫМ прокси на здоровый РЕЗЕРВНЫЙ (is_backup).
+
+    Реально пробит (probe_proxy → api.telegram.org) каждый назначенный и каждый
+    резервный прокси. Аккаунт с мёртвым прокси переводится на живой резервный,
+    соблюдая IP-изоляцию: один резервный IP — одному аккаунту. Идемпотентно и
+    безопасно: любые сбои по отдельному аккаунту/прокси не роняют весь проход.
+
+    Возвращает {checked, healthy, reassigned:[{account_id, from_proxy_id, to_proxy_id}],
+    still_dead_no_backup:[account_id], backups_available, backups_healthy}.
+    """
+    result = {
+        "checked": 0,
+        "healthy": 0,
+        "reassigned": [],
+        "still_dead_no_backup": [],
+        "backups_available": 0,
+        "backups_healthy": 0,
+    }
+    try:
+        accounts = await pool.fetch(
+            "SELECT a.id AS account_id, a.proxy_id, p.proxy_url "
+            "FROM tg_accounts a "
+            "JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+            "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.proxy_id IS NOT NULL",
+            owner_id,
+        )
+    except Exception as e:
+        log.warning("failover: cannot list accounts owner=%s: %s", owner_id, e)
+        return result
+
+    backups = await _fetch_backup_proxies(pool, owner_id)
+    result["backups_available"] = len(backups)
+
+    # IP уже занятые активными аккаунтами (для изоляции резервных).
+    used_ips: set[str] = set()
+    for acc in accounts:
+        ip = extract_ip_from_proxy(acc["proxy_url"] or "")
+        if ip:
+            used_ips.add(ip)
+
+    # Пробим резервные один раз, оставляем живые с уникальным IP.
+    healthy_backups: list[dict] = []
+    for b in backups:
+        probe = await probe_proxy(b["proxy_url"])
+        if not probe.get("ok"):
+            continue
+        ip = extract_ip_from_proxy(b["proxy_url"] or "")
+        # Резервный на уже занятом IP не берём (иначе нарушим изоляцию).
+        if ip and ip in used_ips:
+            continue
+        healthy_backups.append({"id": b["id"], "ip": ip})
+    result["backups_healthy"] = len(healthy_backups)
+
+    # Кэш проб основных прокси по proxy_id (несколько аккаунтов могут делить прокси).
+    probe_cache: dict[int, bool] = {}
+    for acc in accounts:
+        result["checked"] += 1
+        pid = acc["proxy_id"]
+        if pid not in probe_cache:
+            probe_cache[pid] = bool((await probe_proxy(acc["proxy_url"])).get("ok"))
+        alive = probe_cache[pid]
+        if alive:
+            result["healthy"] += 1
+            continue
+
+        # Прокси мёртв — помечаем и ищем резервный.
+        try:
+            await pool.execute(
+                "UPDATE user_proxies SET is_alive=FALSE, last_check=now() WHERE id=$1 AND owner_id=$2",
+                pid, owner_id,
+            )
+        except Exception:
+            pass
+
+        if not healthy_backups:
+            result["still_dead_no_backup"].append(acc["account_id"])
+            continue
+
+        backup = healthy_backups.pop(0)  # один резервный — одному аккаунту (изоляция)
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+                backup["id"], acc["account_id"], owner_id,
+            )
+            result["reassigned"].append({
+                "account_id": acc["account_id"],
+                "from_proxy_id": pid,
+                "to_proxy_id": backup["id"],
+            })
+            if backup["ip"]:
+                used_ips.add(backup["ip"])
+        except Exception as e:
+            log.warning("failover: reassign failed acc=%s: %s", acc["account_id"], e)
+            healthy_backups.insert(0, backup)  # вернуть резервный в пул
+            result["still_dead_no_backup"].append(acc["account_id"])
+
+    return result
+
+
 def get_proxy_score(proxy_url: str, action_type: str = "default") -> float:
     """Качество прокси по опыту infra_memory. 0.5 = нейтральный/новый.
 
@@ -269,9 +384,13 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
             import aiohttp
             import importlib as _il
 
+            # proxy_url зашифрован — расшифровываем перед подключением (иначе
+            # from_url падает и прокси всегда «мёртв»). Passthrough для plaintext.
+            from services.token_vault import decrypt_token
+
             socks_module = _il.import_module("aiohttp_socks")
             ProxyConnector = getattr(socks_module, "ProxyConnector")
-            connector = ProxyConnector.from_url(proxy_url)
+            connector = ProxyConnector.from_url(decrypt_token(proxy_url))
             t0 = _time.monotonic()
             async with aiohttp.ClientSession(connector=connector) as _sess:
                 async with _sess.get(
@@ -318,8 +437,14 @@ async def probe_proxy(proxy_url: str, timeout: float = 10.0) -> dict:
         import aiohttp
         import importlib as _il
 
+        # proxy_url в БД зашифрован (add_proxy → encrypt_token). ProxyConnector ждёт
+        # plaintext-URL, иначе from_url падает и прокси ВСЕГДА «мёртв».
+        # decrypt_token — passthrough для legacy-plaintext.
+        from services.token_vault import decrypt_token
+
+        plain_url = decrypt_token(proxy_url)
         ProxyConnector = getattr(_il.import_module("aiohttp_socks"), "ProxyConnector")
-        connector = ProxyConnector.from_url(proxy_url)
+        connector = ProxyConnector.from_url(plain_url)
         t0 = _t.monotonic()
         async with aiohttp.ClientSession(connector=connector) as _sess:
             async with _sess.get(
