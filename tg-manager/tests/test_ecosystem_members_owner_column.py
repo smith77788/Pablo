@@ -27,3 +27,16 @@ def test_ecosystem_members_queries_use_owner_id():
     assert len(matches) >= 5, (
         "ожидались запросы к ecosystem_members, скоупленные по owner_id"
     )
+
+
+def test_db_module_has_no_ecosystem_members_user_id():
+    """database/db.py тоже фильтровал ecosystem_members по user_id (проверка
+    владения ботом через экосистему) — тот же баг, что в mini_app_api."""
+    from database import db as _db
+
+    src = inspect.getsource(_db)
+    bad = re.findall(r"ecosystem_members WHERE user_id=", src)
+    assert not bad, (
+        "database/db.py: ecosystem_members не имеет колонки user_id (только owner_id)"
+    )
+

@@ -1597,6 +1597,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Операция не найдена", 404)
         return _json_resp(dict(row))
 
+    async def operation_log(request: web.Request) -> web.Response:
+        """Пошаговый лог одной операции (per-target: канал/бот/аккаунт → статус).
+
+        Фронт (openOpDetail) рендерит секцию «📋 Лог» из этого ответа. Раньше
+        маршрут не был зарегистрирован → api() ловил 404 через .catch и секция
+        лога ВСЕГДА была пустой (мёртвая кнопка). Скоуп по owner_id обязателен —
+        иначе можно прочитать лог чужой операции по её id.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("bad op_id", 400)
+        # Проверяем владение операцией перед чтением её лога.
+        owns = await _safe_fetchrow(pool,
+            "SELECT 1 FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
+        if not owns:
+            return _err("Операция не найдена", 404)
+        rows = await _safe_fetch(pool,
+            "SELECT step_num, target, status, message, created_at "
+            "FROM operation_log WHERE op_id=$1 "
+            "ORDER BY step_num, id LIMIT 500", op_id)
+        return _json_resp({"logs": rows})
+
     async def cancel_operation(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -2703,6 +2729,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Аккаунт не ответил за 45с — проверьте прокси/сессию", 400)
         except Exception as exc:
             log.exception("account_profile inline uid=%d acc=%d op=%s", uid, acc_id, op)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+
+    async def global_search(request: web.Request) -> web.Response:
+        """Global Search — глобальный поиск публичных каналов/групп/ботов/юзеров
+        по строке-запросу (Telethon contacts.SearchRequest). Раздел 12 паритета TE.
+        Исполняется инлайн реальным аккаунтом владельца, результат — сразу."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        query = (body.get("query") or "").strip()
+        if not query:
+            return _err("Укажите поисковый запрос", 400)
+        try:
+            limit = max(1, min(int(body.get("limit") or 20), 50))
+        except (TypeError, ValueError):
+            limit = 20
+        # Аккаунт: указанный (если принадлежит владельцу и активен) либо первый активный.
+        acc_id = body.get("account_id")
+        base = (
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+        )
+        if acc_id:
+            acc = await _safe_fetchrow(pool, base + "AND id=$2 LIMIT 1", uid, int(acc_id))
+        else:
+            acc = await _safe_fetchrow(pool, base + "ORDER BY last_used DESC NULLS LAST LIMIT 1", uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Нет активного аккаунта для поиска — добавьте аккаунт", 400)
+        try:
+            from services import global_search_engine as gse
+            res = await asyncio.wait_for(
+                gse.search_public(acc["session_str"], query, limit, _acc=dict(acc)),
+                timeout=40,
+            )
+            if res.get("ok"):
+                return _json_resp({"ok": True, "results": res.get("results", []), "query": query})
+            return _err(res.get("error") or "Поиск не выполнен", 400)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 40с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("global_search uid=%d q=%r", uid, query)
             return _err(f"Ошибка: {str(exc)[:140]}", 400)
 
     async def account_login_code(request: web.Request) -> web.Response:
@@ -9572,6 +9645,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_get("/api/miniapp/operation/{op_id}", operation_status)
+    app.router.add_get("/api/miniapp/operation/{op_id}/log", operation_log)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     # Bot toggle
@@ -9732,6 +9806,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
+    app.router.add_post("/api/miniapp/global_search", global_search)
     app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
     app.router.add_post("/api/miniapp/account/{acc_id}/check_restriction", account_check_restriction)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)

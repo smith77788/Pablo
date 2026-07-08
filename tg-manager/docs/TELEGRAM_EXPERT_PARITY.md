@@ -21,7 +21,7 @@
 | Chat Cloner | 12 Спец | НЕТ | клон истории группы (Channel Cloner есть) |
 | Shadow Sessions | 12 Спец | НЕТ | |
 | AI Commenting | 12 Спец | НЕТ | GPT-комментинг в обсуждениях |
-| Global Search | 12 Спец | НЕТ | глобальный поиск чатов/каналов |
+| Global Search | 12 Спец | **WIRED** | `global_search_engine.search_public` (contacts.SearchRequest) + POST `/api/miniapp/global_search` + экран `s-gsearch`, тайл «Глобал. поиск» |
 | Flash Call / Voice reg | 4 Авто-рег | НЕТ | сейчас только SMS-коды |
 | Backup Proxy | 13 Прокси | НЕТ | резервный прокси при падении основного |
 | Message Interceptor | 12 Спец | НЕТ | (auto_responder ≠ перехват входящих) |

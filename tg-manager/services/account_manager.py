@@ -2944,10 +2944,11 @@ async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
-    Returns list of {user_id, username, phone, first_name, last_name, is_mutual}.
-    Bots and deleted accounts are excluded. is_mutual is True when the contact
-    has this account added back (from contacts.GetContacts' Contact.mutual —
-    previously discarded, only the flat user list was read).
+    Returns list of {user_id, username, phone, first_name, last_name,
+    is_mutual, is_premium}. Bots and deleted accounts are excluded. is_mutual is
+    True when the contact has this account added back (from contacts.GetContacts'
+    Contact.mutual — previously discarded, only the flat user list was read).
+    is_premium отражает статус Telegram Premium контакта (User.premium).
     """
     from telethon.tl.functions.contacts import GetContactsRequest
 
@@ -2968,6 +2969,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
                     "first_name": getattr(user, "first_name", "") or "",
                     "last_name": getattr(user, "last_name", "") or "",
                     "is_mutual": user.id in mutual_ids,
+                    "is_premium": bool(getattr(user, "premium", False)),
                 }
             )
         return contacts
