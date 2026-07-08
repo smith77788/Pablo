@@ -7542,18 +7542,25 @@ async function loadProxies() {
     const items = d.proxies||[];
     txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
     if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
-    txt('proxyList', items.map(p=>{
+    const backupCount = items.filter(p=>p.is_backup).length;
+    const failoverBar = `<div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="btn btn-p" style="flex:1" onclick="runProxyFailover()">🛟 Failover (резерв: ${backupCount})</button>
+      </div>`;
+    txt('proxyList', failoverBar + items.map(p=>{
       const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
       const type = (p.proxy_type||'socks5').toUpperCase();
       const host = (p.proxy_url||'').split('@').pop();
       const checkedAt = p.last_check?' · '+ago(p.last_check):'';
+      const backupBadge = p.is_backup?' 🛟':'';
+      const backupIco = p.is_backup?'🛟':'⚪';
       return `<div class="li">
         <div class="ava ava-blue">🌐</div>
         <div class="li-body">
-          <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}</div>
+          <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}${backupBadge}</div>
           <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}</div>
         </div>
         <div class="li-right">
+          <span title="Резервный прокси" style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
           <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
           <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
         </div>
@@ -7564,6 +7571,27 @@ async function loadProxies() {
   }
 }
 
+async function toggleProxyBackup(id){
+  try{
+    const r=await api(`/api/miniapp/proxy/${id}/backup`,{method:'POST'});
+    toast(r.is_backup?'🛟 Помечен резервным':'Снята пометка резерва');
+    loadProxies();
+  }catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+async function runProxyFailover(){
+  if(!await askConfirm('Проверить все прокси и перевести аккаунты с мёртвым прокси на резервные?')) return;
+  toast('🛟 Проверяю прокси…');
+  try{
+    const r=await api('/api/miniapp/proxy/failover',{method:'POST'});
+    const reassigned=(r.reassigned||[]).length;
+    const stuck=(r.still_dead_no_backup||[]).length;
+    let msg=`✅ Проверено: ${r.checked||0} · живых: ${r.healthy||0}`;
+    if(reassigned) msg+=` · переведено на резерв: ${reassigned}`;
+    if(stuck) msg+=` · без резерва: ${stuck}`;
+    toast(msg);
+    loadProxies();
+  }catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
 function openProxyModal() {
   document.getElementById('proxyUrl').value='';
   document.getElementById('proxyLabel').value='';
