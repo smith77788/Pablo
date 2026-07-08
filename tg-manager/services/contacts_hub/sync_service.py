@@ -10,11 +10,20 @@ log = logging.getLogger(__name__)
 
 
 async def sync_account(pool, owner_id: int, account_id: int) -> dict:
-    from services.account_manager import _make_client, get_account_for_telethon
-    acc = await get_account_for_telethon(pool, account_id)
+    # get_account_for_telethon живёт в database.db, НЕ в account_manager
+    # (в account_manager есть только _make_client). Прежний импорт из
+    # account_manager падал с ImportError → синхронизация контактов не работала
+    # (на экране «CRM — Контакты» баннер "cannot import name ...").
+    from services.account_manager import _make_client
+    from database.db import get_account_for_telethon
+    # owner_id обязателен — иначе можно синхронизировать чужой аккаунт (утечка).
+    acc = await get_account_for_telethon(pool, account_id, owner_id)
     if not acc or not acc.get('session_str'):
         return {'error': 'Session not found', 'synced': 0}
+    # _make_client расшифровывает session_str внутри (decrypt_token passthrough
+    # для legacy-plaintext), поэтому передаём как есть.
     client = _make_client(acc['session_str'])
+    t0 = time.time()
     try:
         await asyncio.wait_for(client.connect(), timeout=30)
         contacts = await client.get_contacts()
@@ -53,7 +62,7 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
                     contact_id, account_id, data['display_name'], data['last_synced_at'])
                 created += 1
         await client.disconnect()
-        duration_ms = int((time.time() - time.time()) * 1000)
+        duration_ms = int((time.time() - t0) * 1000)  # noqa: F841 — метрика длительности
         from services.contacts_hub.repository import log_sync
         await log_sync(pool, owner_id, account_id, 'auto', len(contacts), created, updated, 0, 0)
         return {'synced': len(contacts), 'created': created, 'updated': updated}
