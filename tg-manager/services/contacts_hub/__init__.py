@@ -30,3 +30,4 @@ from .bulk_ops_engine import (
 )
 from .export_engine import export_csv, export_vcf, export_json
 from .identity_engine import build_identity_graph, get_identity_graph, get_last_active
+from .ai_assistant import process_ai_query

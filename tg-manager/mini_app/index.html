@@ -2224,6 +2224,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-contacts">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openUchAI()" title="AI Ассистент">🤖</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="toggleContactSelect()" title="Выбор" id="contactSelectBtn">☑️</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="syncContacts()" title="Синхронизация">🔄</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openContactStats()" title="Статистика">📊</span>
@@ -2311,6 +2312,24 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-uchsynccenter">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
   <div class="sub-sb" id="syncBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchai">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🤖 AI Ассистент</div></div>
+  <div class="sub-sb">
+    <div id="aiChat" style="padding:12px 16px;height:calc(100vh - 180px);overflow-y:auto"></div>
+    <div style="padding:8px 16px;display:flex;gap:8px;border-top:1px solid var(--sep);background:var(--bg)">
+      <input id="aiInput" type="text" placeholder="Спросите о контактах..." onkeydown="if(event.key==='Enter')sendAiQuery()" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      <button class="btn btn-p" onclick="sendAiQuery()" style="padding:10px 16px">➤</button>
+    </div>
+    <div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
+      <span class="chip" onclick="quickAi('Сколько контактов?')">📊 Статистика</span>
+      <span class="chip" onclick="quickAi('Покажи дубликаты')">🔍 Дубли</span>
+      <span class="chip" onclick="quickAi('Контакты с телефоном')">📱 С телефоном</span>
+      <span class="chip" onclick="quickAi('Избранные')">⭐ Избранные</span>
+      <span class="chip" onclick="quickAi('Напоминания')">⏰ Напоминания</span>
+    </div>
+  </div>
 </div>
 
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
@@ -9230,6 +9249,71 @@ async function loadSyncCenter() {
     html += `<div style="margin-top:12px"><button class="btn btn-p" style="width:100%" onclick="syncContacts()">🔄 Синхронизировать все</button></div></div>`;
     txt('syncBody', html);
   } catch(e) { txt('syncBody', errHtml(e.message)); }
+}
+
+let AI_CHAT_HISTORY = [];
+
+function openUchAI() {
+  push('s-uchai');
+  if (!AI_CHAT_HISTORY.length) {
+    document.getElementById('aiChat').innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--hint)">
+      <div style="font-size:48px;margin-bottom:12px">🤖</div>
+      <div style="font-size:15px;margin-bottom:8px">AI Ассистент контактов</div>
+      <div style="font-size:13px">Задайте вопрос о ваших контактах</div>
+    </div>`;
+  }
+  document.getElementById('aiInput').focus();
+}
+
+function appendAiMsg(role, text) {
+  const chat = document.getElementById('aiChat');
+  const isUser = role === 'user';
+  chat.innerHTML += `<div style="margin-bottom:12px;display:flex;${isUser?'justify-content:flex-end':''}">
+    <div style="max-width:85%;padding:10px 14px;border-radius:14px;font-size:14px;${isUser?'background:var(--accent);color:#fff;border-bottom-right-radius:4px':'background:rgba(255,255,255,.08);color:var(--text);border-bottom-left-radius:4px'}">
+      <div style="white-space:pre-wrap">${esc(text)}</div>
+    </div>
+  </div>`;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function appendAiContacts(contacts) {
+  if (!contacts || !contacts.length) return;
+  const chat = document.getElementById('aiChat');
+  let html = '<div style="margin-bottom:12px;padding:8px;background:rgba(255,255,255,.04);border-radius:10px">';
+  contacts.forEach(c=>{
+    html += `<div class="li tap" onclick="openContactDetail('${c.id}')" style="padding:6px 0">
+      <div class="li-body"><div class="li-name" style="font-size:13px">${esc(c.name)}</div></div>
+      ${c.extra?`<div class="li-right"><span style="font-size:11px;color:var(--hint)">${esc(c.extra)}</span></div>`:''}
+    </div>`;
+  });
+  html += '</div>';
+  chat.innerHTML += html;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendAiQuery() {
+  const input = document.getElementById('aiInput');
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+  appendAiMsg('user', q);
+  AI_CHAT_HISTORY.push({role:'user', text:q});
+  document.getElementById('aiChat').innerHTML += '<div id="aiLoading" style="text-align:center;padding:8px;color:var(--hint)"><div class="spin" style="width:20px;height:20px;border-width:2px;margin:0 auto"></div></div>';
+  try {
+    const d = await api('/api/miniapp/uch/ai', {method:'POST', body:JSON.stringify({query:q})});
+    document.getElementById('aiLoading')?.remove();
+    appendAiMsg('assistant', d.answer||'Нет ответа');
+    appendAiContacts(d.contacts);
+    AI_CHAT_HISTORY.push({role:'assistant', text:d.answer});
+  } catch(e) {
+    document.getElementById('aiLoading')?.remove();
+    appendAiMsg('assistant', '⚠️ Ошибка: '+(e.message||'Неизвестная'));
+  }
+}
+
+function quickAi(q) {
+  document.getElementById('aiInput').value = q;
+  sendAiQuery();
 }
 
 async function openContactStats() {

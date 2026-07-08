@@ -10599,6 +10599,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def uch_ai_query(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            query = data.get('query', '').strip()
+            if not query: return _err("Query required", 400)
+            from services.contacts_hub.ai_assistant import process_ai_query
+            result = await process_ai_query(pool, uid, query)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
@@ -10646,6 +10659,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/graph/stats", uch_graph_stats)
     app.router.add_post("/api/miniapp/uch/graph/compute", uch_graph_compute)
     app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
+    app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
 
     # SSE
     app.router.add_get("/api/miniapp/events", events)
