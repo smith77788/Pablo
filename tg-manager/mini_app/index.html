@@ -9301,7 +9301,7 @@ function appendAiContacts(contacts) {
   const chat = document.getElementById('aiChat');
   let html = '<div style="margin-bottom:12px;padding:8px;background:rgba(255,255,255,.04);border-radius:10px">';
   contacts.forEach(c=>{
-    html += `<div class="li tap" onclick="openContactDetail('${c.id}')" style="padding:6px 0">
+    html += `<div class="li tap" onclick="openContactDetail('${esc(c.id)}')" style="padding:6px 0">
       <div class="li-body"><div class="li-name" style="font-size:13px">${esc(c.name)}</div></div>
       ${c.extra?`<div class="li-right"><span style="font-size:11px;color:var(--hint)">${esc(c.extra)}</span></div>`:''}
     </div>`;

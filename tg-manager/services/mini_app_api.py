@@ -285,12 +285,14 @@ def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Respons
     w.writerow(header)
     for r in rows:
         w.writerow(["" if c is None else c for c in r])
+    import re as _re
+    safe_name = _re.sub(r'[^a-zA-Z0-9_\-.]', '_', filename)
     return web.Response(
         text=buf.getvalue(),
         content_type="text/csv",
         charset="utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
             "Access-Control-Allow-Origin": "*",
         },
     )

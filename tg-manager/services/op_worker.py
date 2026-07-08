@@ -273,8 +273,14 @@ async def release_operation_accounts(op_id: int) -> None:
         for aid in acc_ids:
             _accounts_in_use.discard(aid)
             freed.append(aid)
-    if freed:
-        _fire_db_flag(freed, False)
+    if freed and _db_pool:
+        try:
+            await _db_pool.execute(
+                "UPDATE tg_accounts SET in_operation=FALSE WHERE id = ANY($1::int[])",
+                freed,
+            )
+        except Exception as e:
+            log.warning("op_worker: db flag update (release_operation) failed: %s", e)
 
 
 async def _claim_available_accounts(op_id: int, accounts: list) -> list:
@@ -285,8 +291,14 @@ async def _claim_available_accounts(op_id: int, accounts: list) -> list:
         _accounts_in_use.update(acc_ids)
         if acc_ids:
             _operation_account_locks.setdefault(op_id, set()).update(acc_ids)
-    if claimed:
-        _fire_db_flag([int(a["id"]) for a in claimed], True)
+    if claimed and _db_pool:
+        try:
+            await _db_pool.execute(
+                "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
+                [int(a["id"]) for a in claimed],
+            )
+        except Exception as e:
+            log.warning("op_worker: db flag update (claim_accounts) failed: %s", e)
     return claimed
 
 
