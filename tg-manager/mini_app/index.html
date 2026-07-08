@@ -5072,6 +5072,7 @@ async function submitQuickChannel() {
     const r=await api('/api/miniapp/channel/add',{method:'POST',body:JSON.stringify({channel_identifier:link})});
     toast(`⏳ Поставлено в очередь (#${r.op_id}) — вступаем в ${link}…`);
     document.getElementById('quickChLink').value='';
+    if(r.op_id) pollOpResult(r.op_id, 'Вступление в канал');
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
 }
 
@@ -5580,6 +5581,7 @@ async function submitChanEdit() {
   try {
     const r=await api(`/api/miniapp/channel/${CE_CH_ID}/edit`,{method:'POST',body:JSON.stringify({op,value})});
     toast(`✅ Поставлено в очередь (#${r.op_id})`); closeModal('mo-chan-edit');
+    if(r.op_id) pollOpResult(r.op_id, 'Изменение канала');
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Применить'; }
 }
@@ -5599,6 +5601,7 @@ async function promoteChannel(chId) {
   try {
     const r=await api(`/api/miniapp/channel/${chId}/promote`,{method:'POST'});
     toast(`👑 Поставлено в очередь (#${r.op_id})`);
+    if(r.op_id) pollOpResult(r.op_id, 'Назначение админов');
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function accAction(id, act, confirmMsg) {
@@ -5606,12 +5609,14 @@ async function accAction(id, act, confirmMsg) {
   try {
     const r = await api(`/api/miniapp/account/${id}/action/${act}`, {method:'POST'});
     toast(`✅ Поставлено в очередь (#${r.op_id})`);
+    if(r.op_id) pollOpResult(r.op_id, `Действие: ${act}`);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function checkAccount(id) {
   try {
     const r = await api(`/api/miniapp/account/${id}/check`, {method:'POST'});
-    toast(`🔍 Проверка запущена (#${r.op_id}). Результат — в боте.`);
+    toast(`🔍 Проверка запущена (#${r.op_id}).`);
+    if(r.op_id) pollOpResult(r.op_id, 'Проверка аккаунта');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function toggleAccount(id) {
@@ -6593,6 +6598,21 @@ async function cancelOp(id) {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
     toast('Операция отменена'); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+// Опрос статуса операции после enqueue — показывает РЕАЛЬНЫЙ итог (успех/ошибка),
+// а не только «поставлено в очередь». Для единичных действий: устраняет ощущение
+// «ничего не происходит» при тихом фоновом провале (мёртвый аккаунт/прокси).
+async function pollOpResult(opId, label){
+  if(!opId) return;
+  for(let i=0;i<24;i++){            // ~24 × 2.5с ≈ 60с
+    await new Promise(r=>setTimeout(r,2500));
+    let d;
+    try { d = await api('/api/miniapp/operation/'+opId); } catch(_){ continue; }
+    if(d.status==='done'){ toast('✅ '+(label||'Готово')+': '+(d.summary||'выполнено')); return; }
+    if(d.status==='failed'){ toast('❌ '+(label||'Ошибка')+': '+(d.error_msg||d.summary||'не выполнено')); return; }
+    if(d.status==='cancelled'){ toast('⏹ '+(label||'Отменено')); return; }
+  }
+  toast('⏳ '+(label||'Операция')+' ещё выполняется — см. Очередь операций');
 }
 
 async function retryOp(id) {
@@ -10478,6 +10498,7 @@ async function submitAdIntelChannel() {
   try {
     const r = await api('/api/miniapp/ad_intel/channel',{method:'POST',body:JSON.stringify({channel:ch})});
     toast(`📡 Сканирование запущено (#${r.op_id})`);
+    if(r.op_id) pollOpResult(r.op_id, 'Ad Intelligence');
     closeAdIntelModal();
     openAdIntel();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }

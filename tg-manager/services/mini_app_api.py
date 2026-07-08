@@ -1559,6 +1559,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    ORDER BY oq.created_at DESC LIMIT 30""", uid)
         return _json_resp({"operations": rows})
 
+    async def operation_status(request: web.Request) -> web.Response:
+        """Статус одной операции (для инлайн-опроса результата после enqueue)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("bad op_id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT id, op_type, status, label, total_items, done_items, error_msg, "
+            "(result->>'summary') AS summary "
+            "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
+        if not row:
+            return _err("Операция не найдена", 404)
+        return _json_resp(dict(row))
+
     async def cancel_operation(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -9533,6 +9550,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/dm_campaign", create_dm_campaign)
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
+    app.router.add_get("/api/miniapp/operation/{op_id}", operation_status)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     # Bot toggle
