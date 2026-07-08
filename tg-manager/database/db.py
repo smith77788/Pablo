@@ -6420,3 +6420,28 @@ async def run_pool_monitor(pool: asyncpg.Pool) -> None:
         except Exception as e:
             log.error("pool_monitor: error: %s", e)
         await asyncio.sleep(300)  # каждые 5 минут
+
+
+# ── Auto-Registrar: saved device-emulation preference ("Генератор параметров") ──
+
+
+async def get_autoreg_device_profile(pool: asyncpg.Pool, owner_id: int) -> dict | None:
+    """Owner's saved manufacturer/app_version pin for Auto-Registrar, or None
+    if unset (fully random device pool, the default)."""
+    row = await pool.fetchrow(
+        "SELECT manufacturer, app_version FROM autoreg_device_profiles WHERE owner_id=$1",
+        owner_id,
+    )
+    return dict(row) if row else None
+
+
+async def set_autoreg_device_profile(
+    pool: asyncpg.Pool, owner_id: int, manufacturer: str | None, app_version: str | None
+) -> None:
+    await pool.execute(
+        """INSERT INTO autoreg_device_profiles(owner_id, manufacturer, app_version)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (owner_id) DO UPDATE
+             SET manufacturer=$2, app_version=$3, updated_at=NOW()""",
+        owner_id, manufacturer, app_version,
+    )

@@ -565,14 +565,43 @@ def _resolve_client_proxy(device: dict[str, Any]) -> Any:
     return None
 
 
-def generate_device_fingerprint(country_code: str | None = None) -> dict[str, str]:
-    """Return a realistic Android device fingerprint with a locale binding."""
-    device_model, system_version = random.choice(_ANDROID_DEVICES)
+def device_manufacturers() -> list[str]:
+    """Distinct manufacturer names available in the device pool, in a stable
+    order — used to populate the "Генератор параметров" picker."""
+    seen: list[str] = []
+    for model, _ in _ANDROID_DEVICES:
+        make = model.split()[0]
+        if make not in seen:
+            seen.append(make)
+    return seen
+
+
+def app_versions() -> list[str]:
+    return list(_APP_VERSIONS)
+
+
+def generate_device_fingerprint(
+    country_code: str | None = None,
+    manufacturer: str | None = None,
+    app_version: str | None = None,
+) -> dict[str, str]:
+    """Return a realistic Android device fingerprint with a locale binding.
+
+    manufacturer/app_version let a caller pin the emulated device to a
+    specific make (e.g. "Samsung") or Telegram build instead of the fully
+    random pick — mirrors the "Генератор параметров" control competitor
+    account-farming panels expose (Производитель / Версия приложения).
+    """
+    pool = _ANDROID_DEVICES
+    if manufacturer:
+        filtered = [d for d in pool if d[0].split()[0].lower() == manufacturer.strip().lower()]
+        pool = filtered or pool
+    device_model, system_version = random.choice(pool)
     lang_code, system_lang_code = _locale_for_country(country_code)
     return {
         "device_model": device_model,
         "system_version": system_version,
-        "app_version": random.choice(_APP_VERSIONS),
+        "app_version": app_version if app_version in _APP_VERSIONS else random.choice(_APP_VERSIONS),
         "lang_code": lang_code,
         "system_lang_code": system_lang_code,
     }
@@ -643,7 +672,12 @@ def _make_client(session_string: str = "", device: dict | None = None):
     )
 
 
-async def start_login(phone: str, proxy_url: str | None = None) -> tuple[str, str]:
+async def start_login(
+    phone: str,
+    proxy_url: str | None = None,
+    manufacturer: str | None = None,
+    app_version: str | None = None,
+) -> tuple[str, str]:
     """Начинает авторизацию по номеру телефона.
 
     Device fingerprint's locale is derived from the phone's own calling code
@@ -652,7 +686,9 @@ async def start_login(phone: str, proxy_url: str | None = None) -> tuple[str, st
     this login (and therefore the saved account) to that proxy — callers
     doing mass/auto-registration should pass a per-registration proxy (see
     pick_registration_proxy) so numbers from different countries/batches
-    don't all connect through the same IP.
+    don't all connect through the same IP. manufacturer/app_version pin the
+    emulated device to the owner's saved "Генератор параметров" preference
+    (see auto_registrar.py) instead of a fully random pick.
 
     Возвращает (phone_code_hash, delivery_hint) где delivery_hint — строка о способе доставки.
     """
@@ -662,7 +698,9 @@ async def start_login(phone: str, proxy_url: str | None = None) -> tuple[str, st
         raise ValueError(
             "TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды."
         )
-    device = generate_device_fingerprint(country_code_from_phone(phone))
+    device = generate_device_fingerprint(
+        country_code_from_phone(phone), manufacturer=manufacturer, app_version=app_version
+    )
     if proxy_url:
         device["proxy_url"] = proxy_url
     _pending_device[phone] = device

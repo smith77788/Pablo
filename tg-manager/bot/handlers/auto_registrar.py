@@ -182,6 +182,7 @@ async def cb_autoreg_menu(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Po
         kb.button(text="➕ Зарегистрировать 1 аккаунт", callback_data=AutoRegCb(action="pick_country", sub="single"))
         kb.button(text="📦 Батч (несколько аккаунтов)", callback_data=AutoRegCb(action="batch_ask"))
     kb.button(text="⚙️ Настройки SMS API", callback_data=AutoRegCb(action="settings"))
+    kb.button(text="🧬 Параметры устройства", callback_data=AutoRegCb(action="device_profile"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(1)
     try:
@@ -216,6 +217,104 @@ async def cb_autoreg_settings(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception:
         log_exc_swallow(log, "cb_autoreg_settings: edit_text failed")
         await cb.message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+
+# ── Генератор параметров: производитель/версия приложения устройства ─────────
+# По умолчанию device fingerprint полностью случайный (см. account_manager.
+# generate_device_fingerprint). Это позволяет закрепить пул за конкретным
+# производителем/версией — как в конкурентных панелях массовой регистрации.
+
+
+@router.callback_query(AutoRegCb.filter(F.action == "device_profile"))
+async def cb_autoreg_device_profile(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await cb.answer()
+    profile = await db.get_autoreg_device_profile(pool, cb.from_user.id) or {}
+    manuf = profile.get("manufacturer") or "🎲 Авто (любой)"
+    appver = profile.get("app_version") or "🎲 Авто (любая)"
+    text = (
+        "<b>🧬 Параметры устройства для авторега</b>\n\n"
+        "Закрепляет пул эмулируемых устройств за конкретным производителем "
+        "и/или версией Telegram вместо полностью случайного выбора при "
+        "каждой регистрации. Гео и язык всегда подбираются автоматически "
+        "по стране номера.\n\n"
+        f"<b>Производитель:</b> {html.escape(manuf)}\n"
+        f"<b>Версия приложения:</b> {html.escape(appver)}"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Производитель", callback_data=AutoRegCb(action="pick_manuf"))
+    kb.button(text="🔢 Версия приложения", callback_data=AutoRegCb(action="pick_appver"))
+    kb.button(text="🎲 Сбросить на авто", callback_data=AutoRegCb(action="reset_device_profile"))
+    kb.button(text="◀️ Назад", callback_data=AutoRegCb(action="menu"))
+    kb.adjust(1)
+    try:
+        await cb.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except Exception:
+        await cb.message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(AutoRegCb.filter(F.action == "pick_manuf"))
+async def cb_autoreg_pick_manuf(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await cb.answer()
+    from services.account_manager import device_manufacturers
+
+    profile = await db.get_autoreg_device_profile(pool, cb.from_user.id) or {}
+    current = profile.get("manufacturer")
+    kb = InlineKeyboardBuilder()
+    mark = "✅ " if not current else ""
+    kb.button(text=f"{mark}🎲 Авто (любой)", callback_data=AutoRegCb(action="set_manuf", sub="_auto_"))
+    for m in device_manufacturers():
+        mark = "✅ " if current == m else ""
+        kb.button(text=f"{mark}{m}", callback_data=AutoRegCb(action="set_manuf", sub=m))
+    kb.button(text="◀️ Назад", callback_data=AutoRegCb(action="device_profile"))
+    kb.adjust(2)
+    await cb.message.edit_text(
+        "<b>📱 Выберите производителя устройства</b>", reply_markup=kb.as_markup(), parse_mode="HTML"
+    )
+
+
+@router.callback_query(AutoRegCb.filter(F.action == "set_manuf"))
+async def cb_autoreg_set_manuf(cb: CallbackQuery, callback_data: AutoRegCb, pool: asyncpg.Pool) -> None:
+    manuf = None if callback_data.sub == "_auto_" else callback_data.sub
+    profile = await db.get_autoreg_device_profile(pool, cb.from_user.id) or {}
+    await db.set_autoreg_device_profile(pool, cb.from_user.id, manuf, profile.get("app_version"))
+    await cb.answer(f"✅ {manuf or 'Авто'}")
+    await cb_autoreg_device_profile(cb, pool)
+
+
+@router.callback_query(AutoRegCb.filter(F.action == "pick_appver"))
+async def cb_autoreg_pick_appver(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await cb.answer()
+    from services.account_manager import app_versions
+
+    profile = await db.get_autoreg_device_profile(pool, cb.from_user.id) or {}
+    current = profile.get("app_version")
+    kb = InlineKeyboardBuilder()
+    mark = "✅ " if not current else ""
+    kb.button(text=f"{mark}🎲 Авто (любая)", callback_data=AutoRegCb(action="set_appver", sub="_auto_"))
+    for v in app_versions():
+        mark = "✅ " if current == v else ""
+        kb.button(text=f"{mark}{v}", callback_data=AutoRegCb(action="set_appver", sub=v))
+    kb.button(text="◀️ Назад", callback_data=AutoRegCb(action="device_profile"))
+    kb.adjust(3)
+    await cb.message.edit_text(
+        "<b>🔢 Выберите версию приложения</b>", reply_markup=kb.as_markup(), parse_mode="HTML"
+    )
+
+
+@router.callback_query(AutoRegCb.filter(F.action == "set_appver"))
+async def cb_autoreg_set_appver(cb: CallbackQuery, callback_data: AutoRegCb, pool: asyncpg.Pool) -> None:
+    appver = None if callback_data.sub == "_auto_" else callback_data.sub
+    profile = await db.get_autoreg_device_profile(pool, cb.from_user.id) or {}
+    await db.set_autoreg_device_profile(pool, cb.from_user.id, profile.get("manufacturer"), appver)
+    await cb.answer(f"✅ {appver or 'Авто'}")
+    await cb_autoreg_device_profile(cb, pool)
+
+
+@router.callback_query(AutoRegCb.filter(F.action == "reset_device_profile"))
+async def cb_autoreg_reset_device_profile(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await db.set_autoreg_device_profile(pool, cb.from_user.id, None, None)
+    await cb.answer("✅ Сброшено на авто")
+    await cb_autoreg_device_profile(cb, pool)
 
 
 @router.callback_query(AutoRegCb.filter(F.action == "set_service"))
@@ -480,7 +579,15 @@ async def _start_single_register(
         cc = country_code_from_phone(phone)
         picked = await pick_registration_proxy(pool, owner_id, cc)
         proxy_id, proxy_url = picked if picked else (None, None)
-        phone_code_hash, hint = await asyncio.wait_for(start_login(phone, proxy_url), timeout=20)
+        dev_profile = await db.get_autoreg_device_profile(pool, owner_id) or {}
+        phone_code_hash, hint = await asyncio.wait_for(
+            start_login(
+                phone, proxy_url,
+                manufacturer=dev_profile.get("manufacturer"),
+                app_version=dev_profile.get("app_version"),
+            ),
+            timeout=20,
+        )
     except Exception as exc:
         await sms_client.cancel_order(order_id)
         await cb.message.edit_text(
@@ -745,6 +852,7 @@ async def _do_batch_register(
 
     ok_accs: list[str] = []
     failed: list[str] = []
+    dev_profile = await db.get_autoreg_device_profile(pool, owner_id) or {}
 
     for i in range(1, cnt + 1):
         if status_msg is not None:
@@ -777,7 +885,14 @@ async def _do_batch_register(
             cc = country_code_from_phone(phone)
             picked = await pick_registration_proxy(pool, owner_id, cc)
             proxy_id, proxy_url = picked if picked else (None, None)
-            phone_code_hash, _ = await asyncio.wait_for(start_login(phone, proxy_url), timeout=20)
+            phone_code_hash, _ = await asyncio.wait_for(
+                start_login(
+                    phone, proxy_url,
+                    manufacturer=dev_profile.get("manufacturer"),
+                    app_version=dev_profile.get("app_version"),
+                ),
+                timeout=20,
+            )
 
             # Ждём SMS
             code = await sms_client.get_sms(order_id, timeout_sec=_SMS_WAIT_SEC)
