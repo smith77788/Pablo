@@ -112,11 +112,16 @@ async def test_sync_account_propagates_is_premium():
 class _ListPool:
     """Pool-мок для sync_all_accounts: возвращает список аккаунтов из fetch."""
 
-    def __init__(self, account_ids):
+    def __init__(self, account_ids, total_accounts=None):
         self._ids = account_ids
+        self._total = total_accounts if total_accounts is not None else len(account_ids)
 
     async def fetch(self, query, *args):
-        return [{"id": i} for i in self._ids]
+        return [{"id": i, "phone": f"+{i}", "first_name": f"acc{i}",
+                 "is_active": True} for i in self._ids]
+
+    async def fetchval(self, query, *args):
+        return self._total
 
 
 @pytest.mark.asyncio
@@ -161,3 +166,41 @@ async def test_sync_all_accounts_success_has_no_error_message():
         result = await sync_service.sync_all_accounts(pool, owner_id=1)
     assert result["total_synced"] == 3
     assert result.get("message") is None
+
+
+@pytest.mark.asyncio
+async def test_sync_all_accounts_returns_per_account_details():
+    """Ответ должен содержать пер-аккаунт детализацию, чтобы пользователь видел,
+    что произошло с каждым аккаунтом (а не только агрегат)."""
+    pool = _ListPool([10, 11])
+
+    async def _fake(pool_, owner_id, acc_id):
+        if acc_id == 10:
+            return {"synced": 5, "created": 5, "updated": 0}
+        return {"error": "session expired", "synced": 0}
+
+    with patch.object(sync_service, "sync_account", new=_fake):
+        result = await sync_service.sync_all_accounts(pool, owner_id=1)
+    details = result["details"]
+    assert len(details) == 2
+    ok = [d for d in details if d["ok"]]
+    bad = [d for d in details if not d["ok"]]
+    assert ok and ok[0]["synced"] == 5
+    assert bad and "session expired" in bad[0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_sync_all_accounts_includes_inactive_accounts():
+    """Фильтр is_active=TRUE убран — деактивированные health-проверкой аккаунты
+    с валидной сессией тоже должны синхронизироваться (частая причина «0»)."""
+    src = inspect.getsource(sync_service.sync_all_accounts)
+    # В самом SELECT-запросе не должно быть фильтрации по is_active (в комментарии —
+    # можно). Проверяем строки с FROM tg_accounts.
+    query_lines = [ln for ln in src.splitlines()
+                   if "tg_accounts" in ln or "session_str IS NOT NULL" in ln]
+    joined = " ".join(query_lines)
+    assert "is_active=TRUE" not in joined and "is_active = TRUE" not in joined, (
+        "sync не должен отсекать аккаунты по is_active в SELECT — сессия "
+        "деактивированного аккаунта всё ещё валидна для чтения контактов"
+    )
+    assert "session_str IS NOT NULL" in src

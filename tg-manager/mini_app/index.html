@@ -9148,8 +9148,14 @@ async function syncContacts() {
     if ((d.total_synced||0) > 0) {
       toast(`✅ Синхронизировано: ${d.total_synced} контактов, создано: ${d.total_created||0}`);
     } else if (d.message) {
-      // Явная причина нулевого результата (нет аккаунтов / мёртвые сессии / нет контактов)
+      // Явная причина нулевого результата + детализация по аккаунтам (если есть)
       toast('⚠️ '+d.message);
+      const det = (d.details||[]).filter(x=>!x.ok);
+      if (det.length) {
+        const lines = det.slice(0,6).map(x=>`• ${esc(x.account)}: ${esc(x.reason||'ошибка')}`).join('\n');
+        alert('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
+          + (det.length>6?`\n… ещё ${det.length-6}`:''));
+      }
     } else {
       toast('✅ Синхронизация завершена: новых контактов нет');
     }
