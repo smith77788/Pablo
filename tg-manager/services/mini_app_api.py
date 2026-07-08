@@ -1296,7 +1296,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("Invalid bot_id", 400)
         owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+            """SELECT COUNT(*) FROM managed_bots mb
+               WHERE mb.bot_id=$1 AND (
+                   mb.added_by=$2
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+                       JOIN ecosystems e ON e.id=eb.ecosystem_id
+                       WHERE e.owner_id=$2
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$2)
+                   )
+                   OR mb.bot_id IN (
+                       SELECT DISTINCT b.bot_id FROM managed_bots b
+                       JOIN workspaces w ON w.owner_id=b.added_by
+                       JOIN workspace_members wm ON wm.workspace_id=w.id
+                       WHERE wm.user_id=$2
+                   )
+               )""", bot_id, uid)
         if not owns:
             return _err("Bot not found", 404)
         try:
@@ -10708,21 +10723,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
     async def api_health(request: web.Request) -> web.Response:
-        """Публичный health endpoint для диагностики — не требует токена."""
+        """Публичный health endpoint — только статус БД, без sensitive данных."""
         checks = {}
         try:
             await pool.fetchval("SELECT 1")
             checks["db"] = "ok"
         except Exception as e:
             checks["db"] = f"error: {e}"
-        try:
-            n_accounts = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts")
-            n_ops = await pool.fetchval("SELECT COUNT(*) FROM operation_queue WHERE status IN ('pending','running')")
-            checks["accounts_total"] = int(n_accounts or 0)
-            checks["ops_active"] = int(n_ops or 0)
-        except Exception as e:
-            checks["stats"] = f"error: {e}"
-        checks["routes"] = len([r for r in request.app.router.routes()])
         checks["status"] = "ok" if checks.get("db") == "ok" else "degraded"
         return _json_resp(checks)
     app.router.add_get("/api/miniapp/sys_health", api_health)

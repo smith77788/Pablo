@@ -4916,7 +4916,7 @@ function renderAct(items) {
           : a.includes('добавлени') || a.includes('invite') ? '➕'
           : a.includes('growth') || a.includes('нишев') ? '🌿'
           : '⚙️';
-      lbl = i.action || 'Операция';
+      lbl = esc(i.action || 'Операция');
     }
     const detail = i.detail ? i.detail : (i.bot_username ? `@${i.bot_username||''}` : '');
     const stCls = i.status==='error'?'b-rd':i.status==='warning'?'b-or':i.status==='completed'?'b-gr':'b-bl';
