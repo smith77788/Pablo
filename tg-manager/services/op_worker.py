@@ -3449,7 +3449,8 @@ async def _exec_global_presence_bot(
 
         try:
             account_selection = _json.loads(account_selection)
-        except Exception:
+        except (_json.JSONDecodeError, TypeError, ValueError) as e:
+            log.warning("_exec_bot_factory: invalid account_selection=%r, using all accounts: %s", account_selection, e)
             account_selection = {}
     selected_acc_ids = account_selection.get("account_ids") or []
 
@@ -4236,17 +4237,25 @@ async def _exec_bot_factory_multi(
                                 bot_id = data["result"]["id"]
                                 actual_uname = data["result"].get("username", actual_uname)
                 except Exception as e:
-                    log_exc_swallow(log, f"bot_factory_multi getMe failed: {e}")
+                    log.warning("bot_factory_multi getMe failed for token=...%s: %s", token[-8:], e)
+                if not bot_id:
+                    failed_count += 1
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    )
+                    if global_i < total - 1:
+                        await asyncio.sleep(1)
+                    continue
                 try:
                     from services.token_vault import encrypt_token as _enc_tok_mf
                     await pool.execute(
                         """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
                            VALUES($1,$2,$3,$4,$5,TRUE)
                            ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
-                        owner_id, _enc_tok_mf(token), bot_id or 0, actual_uname, display_name,
+                        owner_id, _enc_tok_mf(token), bot_id, actual_uname, display_name,
                     )
-                except Exception:
-                    log_exc_swallow(log, "_exec_bot_factory_multi: managed_bots upsert failed")
+                except Exception as e:
+                    log.warning("_exec_bot_factory_multi: managed_bots upsert failed bot_id=%s: %s", bot_id, e)
                 created_count += 1
             else:
                 failed_count += 1

@@ -1346,20 +1346,25 @@ async def _run_daily_warmup_impl(
                         etype,
                         account_id,
                     )
-                    try:
-                        await pool.execute(
-                            "UPDATE tg_accounts SET is_active=FALSE, acc_status='banned' WHERE id=$1",
-                            account_id,
-                        )
-                    except Exception:
-                        log_exc_swallow(log, "warmup: deactivate on fatal failed")
+                    for _retry in range(3):
+                        try:
+                            await pool.execute(
+                                "UPDATE tg_accounts SET is_active=FALSE, acc_status='banned' WHERE id=$1",
+                                account_id,
+                            )
+                            break
+                        except Exception as e:
+                            if _retry == 2:
+                                log.warning("warmup: CRITICAL failed to deactivate banned acc=%d after 3 retries: %s", account_id, e)
+                            else:
+                                await asyncio.sleep(1)
                     try:
                         await pool.execute(
                             "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
                             plan_id,
                         )
-                    except Exception:
-                        log_exc_swallow(log, "warmup: pause plan on fatal failed")
+                    except Exception as e:
+                        log.warning("warmup: pause plan on fatal failed plan=%d: %s", plan_id, e)
                     await _log_warmup_action(
                         pool, account_id, action, target, False, error
                     )
