@@ -1235,14 +1235,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            """SELECT id, phone, first_name, username, tg_user_id,
-                      is_active, added_at, last_used,
-                      COALESCE(trust_score, 100) AS trust_score,
-                      COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until
-               FROM tg_accounts WHERE owner_id=$1
-               ORDER BY is_active DESC, last_used DESC NULLS LAST""", uid)
+        admin = _is_admin(uid)
+        if admin:
+            rows = await _safe_fetch(pool,
+                """SELECT id, phone, first_name, username, tg_user_id,
+                          is_active, added_at, last_used,
+                          COALESCE(trust_score, 100) AS trust_score,
+                          COALESCE(acc_status, 'ok') AS acc_status,
+                          cooldown_until
+                   FROM tg_accounts
+                   ORDER BY is_active DESC, last_used DESC NULLS LAST""")
+        else:
+            rows = await _safe_fetch(pool,
+                """SELECT id, phone, first_name, username, tg_user_id,
+                          is_active, added_at, last_used,
+                          COALESCE(trust_score, 100) AS trust_score,
+                          COALESCE(acc_status, 'ok') AS acc_status,
+                          cooldown_until
+                   FROM tg_accounts WHERE owner_id=$1
+                   ORDER BY is_active DESC, last_used DESC NULLS LAST""", uid)
         header = ["id", "phone", "first_name", "username", "tg_user_id",
                   "is_active", "trust_score", "acc_status", "cooldown_until",
                   "last_used", "added_at"]
@@ -2388,12 +2399,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                          ["user_id", "username", "first_name", "plan", "joined_at", "last_seen"], data)
 
     async def accounts_check(request: web.Request) -> web.Response:
-        """Массовая проверка всех аккаунтов владельца (с реактивацией рабочих)."""
+        """Массовая проверка аккаунтов (админ: все, обычный: свои)."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            "SELECT id FROM tg_accounts WHERE owner_id=$1", uid)
+        admin = _is_admin(uid)
+        if admin:
+            rows = await _safe_fetch(pool, "SELECT id FROM tg_accounts WHERE is_active=TRUE")
+        else:
+            rows = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1", uid)
         ids = [int(r["id"]) for r in (rows or [])]
         if not ids:
             return _err("Нет аккаунтов для проверки", 400)
@@ -2477,9 +2492,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
         if not ids_in:
             return _err("Выберите аккаунты", 400)
-        owned = await _safe_fetch(pool,
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-            uid, ids_in)
+        admin = _is_admin(uid)
+        if admin:
+            owned = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[])",
+                ids_in)
+        else:
+            owned = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                uid, ids_in)
         ids = [int(r["id"]) for r in (owned or [])]
         if not ids:
             return _err("Аккаунты не найдены", 404)
