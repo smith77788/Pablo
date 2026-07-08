@@ -85,3 +85,25 @@ async def test_sync_account_end_to_end_creates_contact():
     assert "error" not in result
     insert_queries = [q for q, _ in pool.executed if "INSERT INTO unified_contacts" in q]
     assert insert_queries, "должен был вставить новый контакт"
+
+
+@pytest.mark.asyncio
+async def test_sync_account_propagates_is_premium():
+    """is_premium из account_manager.get_contacts должен доходить до INSERT,
+    а не жёстко зашиваться в False (иначе Telegram Premium-статус теряется)."""
+    pool = _FakePool()
+    fake_acc = {"id": 7, "session_str": "abc", "owner_id": 1}
+    fake_contacts = [
+        {"user_id": 555, "username": "ivan", "phone": "+123",
+         "first_name": "Ivan", "last_name": "Ivanov", "is_mutual": True,
+         "is_premium": True}
+    ]
+    with patch("database.db.get_account_for_telethon", new=AsyncMock(return_value=fake_acc)), \
+         patch("services.account_manager.get_contacts", new=AsyncMock(return_value=fake_contacts)), \
+         patch("services.contacts_hub.repository.log_sync", new=AsyncMock()):
+        await sync_service.sync_account(pool, owner_id=1, account_id=7)
+
+    insert = next(((q, a) for q, a in pool.executed if "INSERT INTO unified_contacts" in q), None)
+    assert insert is not None
+    # is_premium — 9-й позиционный аргумент INSERT ($9)
+    assert insert[1][8] is True, "is_premium=True должен был пройти в INSERT"

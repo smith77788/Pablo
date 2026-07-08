@@ -30,7 +30,7 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
             last_name = c.get('last_name') or ''
             display_name = f"{first_name} {last_name}".strip()
             phones = [c['phone']] if c.get('phone') else []
-            is_premium = False  # not exposed by GetContactsRequest's user fields we read
+            is_premium = bool(c.get('is_premium'))
 
             existing = await pool.fetchrow(
                 'SELECT id FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2',
