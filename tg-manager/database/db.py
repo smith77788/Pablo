@@ -333,7 +333,7 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                   SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                   JOIN ecosystems e ON e.id=eb.ecosystem_id
                   WHERE e.owner_id=$1
-                     OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$1)
+                     OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
               )
               OR m.bot_id IN (
                   SELECT DISTINCT b.bot_id FROM managed_bots b
@@ -359,7 +359,7 @@ async def get_bot(
                        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                        JOIN ecosystems e ON e.id=eb.ecosystem_id
                        WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$2)
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
                    )
                    OR bot_id IN (
                        SELECT DISTINCT b.bot_id FROM managed_bots b

@@ -1303,7 +1303,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                        JOIN ecosystems e ON e.id=eb.ecosystem_id
                        WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE user_id=$2)
+                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
                    )
                    OR mb.bot_id IN (
                        SELECT DISTINCT b.bot_id FROM managed_bots b
