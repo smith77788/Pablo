@@ -23,12 +23,15 @@ def _build_search_conditions(tokens: list, param_offset: int) -> tuple:
 
     for token in tokens:
         q = f'%{token}%'
+        # unified_contacts has no scalar "email" column (only emails JSONB) —
+        # referencing it here crashed every 2+ word search with
+        # 'column "email" does not exist'.
         token_conditions = (
             f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
             f'username ILIKE ${idx} OR display_name ILIKE ${idx} OR '
             f'CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR '
             f'company ILIKE ${idx} OR notes ILIKE ${idx} OR '
-            f'position ILIKE ${idx} OR email ILIKE ${idx} OR '
+            f'position ILIKE ${idx} OR '
             f'${idx} = ANY(tags))'
         )
         conditions.append(token_conditions)
@@ -72,7 +75,7 @@ async def search_contacts(pool, owner_id: int, query: str, limit: int = 50) -> l
                    username ILIKE $2 OR display_name ILIKE $2 OR
                    CAST(telegram_user_id AS TEXT) ILIKE $2 OR
                    company ILIKE $2 OR notes ILIKE $2 OR
-                   position ILIKE $2 OR email ILIKE $2 OR
+                   position ILIKE $2 OR
                    $2 = ANY(tags)
                )
                ORDER BY
@@ -87,7 +90,6 @@ async def search_contacts(pool, owner_id: int, query: str, limit: int = 50) -> l
         return [dict(r) for r in rows]
 
     where_clause, params = _build_search_conditions(tokens, 3)
-    count_params = params.copy()
     idx = 3 + len(params)
 
     rows = await pool.fetch(

@@ -1,74 +1,68 @@
 from __future__ import annotations
-import asyncio
 import json
 import logging
 import time
-
-import asyncpg
 
 log = logging.getLogger(__name__)
 
 
 async def sync_account(pool, owner_id: int, account_id: int) -> dict:
-    # get_account_for_telethon живёт в database.db, НЕ в account_manager
-    # (в account_manager есть только _make_client). Прежний импорт из
-    # account_manager падал с ImportError → синхронизация контактов не работала
-    # (на экране «CRM — Контакты» баннер "cannot import name ...").
-    from services.account_manager import _make_client
     from database.db import get_account_for_telethon
-    # owner_id обязателен — иначе можно синхронизировать чужой аккаунт (утечка).
+    from services import account_manager
+    from services.contacts_hub.repository import log_sync
+
+    started = time.monotonic()
     acc = await get_account_for_telethon(pool, account_id, owner_id)
     if not acc or not acc.get('session_str'):
         return {'error': 'Session not found', 'synced': 0}
-    # _make_client расшифровывает session_str внутри (decrypt_token passthrough
-    # для legacy-plaintext), поэтому передаём как есть.
-    client = _make_client(acc['session_str'])
-    t0 = time.time()
+
     try:
-        await asyncio.wait_for(client.connect(), timeout=30)
-        contacts = await client.get_contacts()
+        # account_manager.get_contacts owns its own client connect/disconnect and
+        # uses the real GetContactsRequest TL call — client.get_contacts() is not
+        # a real Telethon method (this used to raise AttributeError on every sync).
+        contacts = await account_manager.get_contacts(acc['session_str'], _acc=dict(acc))
         created = 0
         updated = 0
         for c in contacts:
+            user_id = c['user_id']
+            username = c.get('username') or None
+            first_name = c.get('first_name') or ''
+            last_name = c.get('last_name') or ''
+            display_name = f"{first_name} {last_name}".strip()
+            phones = [c['phone']] if c.get('phone') else []
+            is_premium = False  # not exposed by GetContactsRequest's user fields we read
+
             existing = await pool.fetchrow(
                 'SELECT id FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2',
-                owner_id, c.id)
-            data = {
-                'telegram_user_id': c.id,
-                'username': c.username,
-                'first_name': c.first_name or '',
-                'last_name': c.last_name or '',
-                'display_name': f"{c.first_name or ''} {c.last_name or ''}".strip(),
-                'phones': [c.phone] if c.phone else [],
-                'is_premium': getattr(c, 'premium', False),
-                'discovered_at': c.date if hasattr(c, 'date') else None,
-                'last_synced_at': int(time.time()),
-            }
+                owner_id, user_id)
             if existing:
                 await pool.execute(
-                    'UPDATE unified_contacts SET username=$1, first_name=$2, last_name=$3, display_name=$4, phones=$5::jsonb, is_premium=$6, last_synced_at=$7, updated_at=NOW() WHERE id=$8',
-                    data['username'], data['first_name'], data['last_name'], data['display_name'],
-                    json.dumps(data['phones']), data['is_premium'], data['last_synced_at'], existing['id'])
+                    'UPDATE unified_contacts SET username=$1, first_name=$2, last_name=$3, display_name=$4, '
+                    'phones=$5::jsonb, is_premium=$6, last_synced_at=NOW(), updated_at=NOW() WHERE id=$7',
+                    username, first_name, last_name, display_name,
+                    json.dumps(phones), is_premium, existing['id'])
                 updated += 1
             else:
                 contact_id = str(__import__('uuid').uuid4())
                 await pool.execute(
-                    'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, last_name, display_name, phones, is_premium, discovered_at, last_synced_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)',
-                    contact_id, owner_id, data['telegram_user_id'], data['username'], data['first_name'],
-                    data['last_name'], data['display_name'], json.dumps(data['phones']), data['is_premium'],
-                    data['discovered_at'], data['last_synced_at'])
+                    'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, '
+                    'last_name, display_name, phones, is_premium, last_synced_at) '
+                    'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,NOW())',
+                    contact_id, owner_id, user_id, username, first_name,
+                    last_name, display_name, json.dumps(phones), is_premium)
                 await pool.execute(
-                    'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
-                    contact_id, account_id, data['display_name'], data['last_synced_at'])
+                    'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) '
+                    'VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING',
+                    contact_id, account_id, display_name)
                 created += 1
-        await client.disconnect()
-        duration_ms = int((time.time() - t0) * 1000)  # noqa: F841 — метрика длительности
-        from services.contacts_hub.repository import log_sync
-        await log_sync(pool, owner_id, account_id, 'auto', len(contacts), created, updated, 0, 0)
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await log_sync(pool, owner_id, account_id, 'auto', len(contacts), created, updated, 0, duration_ms)
         return {'synced': len(contacts), 'created': created, 'updated': updated}
     except Exception as e:
-        from services.contacts_hub.repository import log_sync
-        await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, 0, str(e)[:200])
+        duration_ms = int((time.monotonic() - started) * 1000)
+        log.warning('contacts_hub sync_account failed acc=%s: %s', account_id, e)
+        await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, str(e)[:200])
         return {'error': str(e)[:200], 'synced': 0}
 
 
