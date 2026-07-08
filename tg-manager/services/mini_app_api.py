@@ -650,6 +650,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                )""", bot_id, uid)
         if not owns:
             return _err("Bot not found or access denied", 404)
+        bot = await _safe_fetchrow(pool,
+            "SELECT * FROM managed_bots WHERE bot_id=$1", bot_id)
+        if not bot:
+            return _err("Bot not found", 404)
         subs_active = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id)
         subs_total = await _safe_count(pool,

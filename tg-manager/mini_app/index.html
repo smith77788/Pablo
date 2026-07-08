@@ -4536,7 +4536,7 @@ function renderOpProgress(items) {
     const bar = '█'.repeat(Math.floor(op.pct/10)) + '░'.repeat(10 - Math.floor(op.pct/10));
     return `<div class="op-progress-item">
       <div class="op-progress-header">
-        <span class="op-progress-label">${op.label || op.op_type}</span>
+        <span class="op-progress-label">${esc(op.label || op.op_type)}</span>
         <span class="op-progress-pct">${op.pct}%</span>
       </div>
       <div class="op-progress-bar">[${bar}] ${op.done}/${op.total}</div>
@@ -13004,7 +13004,7 @@ function num(v) {
   return String(v);
 }
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function ago(ts) {
   if (!ts) return '';

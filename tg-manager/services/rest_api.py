@@ -31,14 +31,21 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 
+import hashlib
+import hmac
+
+
 def _check_auth(request: web.Request) -> bool:
-    if not ADMIN_SECRET:
+    if ADMIN_SECRET is None:
         return True
+    if not ADMIN_SECRET:
+        log.warning("rest_api: ADMIN_SECRET is empty — all requests rejected")
+        return False
     key = (
         request.headers.get("X-Api-Key", "")
         or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     )
-    return key == ADMIN_SECRET
+    return hmac.compare_digest(key, ADMIN_SECRET)
 
 
 def _unauth() -> web.Response:

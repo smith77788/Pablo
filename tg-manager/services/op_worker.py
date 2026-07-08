@@ -238,7 +238,14 @@ async def mark_accounts_in_use(acc_ids: list[int]) -> None:
     """Пометить аккаунты как занятые op_worker-операцией."""
     async with _accounts_lock:
         _accounts_in_use.update(acc_ids)
-    _fire_db_flag(acc_ids, True)
+    if _db_pool and acc_ids:
+        try:
+            await _db_pool.execute(
+                "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
+                acc_ids,
+            )
+        except Exception as e:
+            log.warning("op_worker: db flag update (mark_in_use) failed: %s", e)
 
 
 async def release_accounts(acc_ids: list[int]) -> None:
@@ -248,7 +255,14 @@ async def release_accounts(acc_ids: list[int]) -> None:
             _accounts_in_use.discard(aid)
             for locked_acc_ids in _operation_account_locks.values():
                 locked_acc_ids.discard(aid)
-    _fire_db_flag(acc_ids, False)
+    if _db_pool and acc_ids:
+        try:
+            await _db_pool.execute(
+                "UPDATE tg_accounts SET in_operation=FALSE WHERE id = ANY($1::int[])",
+                acc_ids,
+            )
+        except Exception as e:
+            log.warning("op_worker: db flag update (release) failed: %s", e)
 
 
 async def release_operation_accounts(op_id: int) -> None:
