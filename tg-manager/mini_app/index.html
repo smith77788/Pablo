@@ -5634,6 +5634,14 @@ async function checkAccount(id) {
     if(r.op_id) pollOpResult(r.op_id, 'Проверка аккаунта');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
+async function appealSpamblock(id) {
+  if(!await askConfirm('Запросить снятие спамблока через @SpamBot для этого аккаунта?')) return;
+  toast('🛡 Обращаюсь к @SpamBot…');
+  try {
+    const r = await api(`/api/miniapp/account/${id}/spamblock_appeal`, {method:'POST'});
+    toast(r.label || '✅ Готово');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
 async function toggleAccount(id) {
   try {
     const r = await api(`/api/miniapp/account/${id}/toggle`, {method:'POST'});
@@ -5999,6 +6007,7 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
+      <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
       <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
       <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
       <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>

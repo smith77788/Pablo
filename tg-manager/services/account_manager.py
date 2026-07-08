@@ -1777,6 +1777,91 @@ def classify_spambot_reply(reply_text: str) -> str | None:
     return None
 
 
+# Кнопки аппеляции @SpamBot, которые надо нажать для запроса снятия спамблока
+# (свой аккаунт — легитимная реабилитация). Порядок шагов: «это ошибка» → «да».
+_SPAMBOT_APPEAL_BTN_PATTERNS = (
+    "this is a mistake", "это ошибк", "какая-то ошибка", "mistake",
+    "yes", "да", "уверен", "sure", "confirm",
+)
+
+
+def _pick_appeal_button(message) -> object | None:
+    """Найти в reply_markup сообщения кнопку аппеляции. Возвращает текст кнопки
+    или None. Telethon: message.buttons — список рядов InlineKeyboardButton."""
+    rows = getattr(message, "buttons", None)
+    if not rows:
+        return None
+    for row in rows:
+        for btn in row:
+            text = (getattr(btn, "text", "") or "").lower()
+            if any(p in text for p in _SPAMBOT_APPEAL_BTN_PATTERNS):
+                return getattr(btn, "text", None)
+    return None
+
+
+async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dict:
+    """Запросить снятие спамблока через @SpamBot (реабилитация своего аккаунта).
+
+    Пишет /start боту @SpamBot и последовательно нажимает кнопки аппеляции
+    («This is a mistake» → «Yes»), читая ответ на каждом шаге. Возвращает
+    {ok, status: 'free'|'still_blocked'|'appeal_sent'|'no_session', reply, steps}.
+    Ничего не рассылает третьим лицам — только диалог с системным ботом Telegram.
+    """
+    if not session_string or len(session_string.strip()) < 10:
+        return {"ok": False, "status": "no_session", "reply": "", "steps": 0}
+
+    client = _make_client(session_string, _acc)
+    steps = 0
+    last_text = ""
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+        if not await client.is_user_authorized():
+            return {"ok": False, "status": "no_session", "reply": "", "steps": 0}
+
+        spam_bot = await asyncio.wait_for(client.get_entity("@SpamBot"), timeout=10.0)
+        await asyncio.wait_for(client.send_message(spam_bot, "/start"), timeout=10.0)
+        await asyncio.sleep(2.5)
+
+        # До 4 шагов: читаем последний ответ, если есть кнопка аппеляции — жмём.
+        for _ in range(4):
+            msgs = await asyncio.wait_for(client.get_messages(spam_bot, limit=1), timeout=10.0)
+            if not msgs:
+                break
+            msg = msgs[0]
+            last_text = msg.text or ""
+            status = classify_spambot_reply(last_text)
+            if status == "active":
+                return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps}
+            btn_text = _pick_appeal_button(msg)
+            if not btn_text:
+                break  # кнопок аппеляции нет — дальше нажимать нечего
+            try:
+                await asyncio.wait_for(msg.click(text=btn_text), timeout=10.0)
+                steps += 1
+                await asyncio.sleep(2.5)
+            except Exception as exc:
+                log.debug("appeal_spamblock: click failed: %s", exc)
+                break
+
+        # Финальная переоценка статуса по последнему ответу.
+        final = classify_spambot_reply(last_text)
+        if final == "active":
+            return {"ok": True, "status": "free", "reply": last_text[:200], "steps": steps}
+        if steps > 0:
+            return {"ok": True, "status": "appeal_sent", "reply": last_text[:200], "steps": steps}
+        return {"ok": True, "status": "still_blocked", "reply": last_text[:200], "steps": steps}
+    except asyncio.TimeoutError:
+        return {"ok": False, "status": "error", "reply": "таймаут @SpamBot", "steps": steps}
+    except Exception as exc:
+        log.warning("appeal_spamblock failed: %s", exc)
+        return {"ok": False, "status": "error", "reply": str(exc)[:160], "steps": steps}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 def is_verified_account_restriction(status: str, *, has_session: bool = True) -> bool:
     if status in _VERIFIED_RESTRICTION_STATUSES:
         return True
