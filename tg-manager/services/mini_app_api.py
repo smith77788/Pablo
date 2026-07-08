@@ -1177,9 +1177,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           ) AS active
                    FROM tg_accounts WHERE owner_id=$1""", uid)
         stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "cooldown", "active")} if st else {}
-        stage_rows = await _safe_fetch(pool,
-            "SELECT stage, COUNT(*) AS c FROM tg_accounts "
-            "WHERE stage IS NOT NULL GROUP BY stage")
+        # by_stage скоупим по owner_id для не-админа (иначе — межтенантная утечка
+        # разбивки стадий по ВСЕЙ платформе). Админ видит всё, как в основной статистике.
+        if admin:
+            stage_rows = await _safe_fetch(pool,
+                "SELECT stage, COUNT(*) AS c FROM tg_accounts "
+                "WHERE stage IS NOT NULL GROUP BY stage")
+        else:
+            stage_rows = await _safe_fetch(pool,
+                "SELECT stage, COUNT(*) AS c FROM tg_accounts "
+                "WHERE owner_id=$1 AND stage IS NOT NULL GROUP BY stage", uid)
         by_stage = {r["stage"]: int(r["c"] or 0) for r in (stage_rows or [])
                     if r.get("stage") in ACCOUNT_STAGES}
         stats["by_stage"] = by_stage
