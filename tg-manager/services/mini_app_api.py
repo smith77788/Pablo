@@ -11167,6 +11167,193 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
 
+    # ── Search Ranking Engine ──────────────────────────────────────────────────
+    async def ranking_track(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.ranking_engine import track_keyword
+            result = await track_keyword(pool, uid, data.get('keyword', ''),
+                                         data.get('channel_id'), data.get('check_interval', 3600))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_untrack(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.ranking_engine import untrack_keyword
+            result = await untrack_keyword(pool, uid, data.get('keyword', ''), data.get('channel_id'))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_record(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.ranking_engine import record_position
+            result = await record_position(pool, uid, data.get('channel_id', 0),
+                                           data.get('keyword', ''), data.get('position', 0))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channel_id = int(request.match_info.get('channel_id', 0))
+            keyword = request.query.get('keyword', '')
+            days = int(request.query.get('days', 30))
+            from services.ranking_engine import get_position_history
+            history = await get_position_history(pool, uid, channel_id, keyword, days)
+            return _json_resp({'history': history})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_positions(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_all_positions
+            positions = await get_all_positions(pool, uid)
+            return _json_resp({'positions': positions})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_keywords(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_tracked_keywords
+            keywords = await get_tracked_keywords(pool, uid)
+            return _json_resp({'keywords': keywords})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_alerts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_alerts
+            alerts = await get_alerts(pool, uid)
+            return _json_resp({'alerts': alerts})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_ranking_stats
+            stats = await get_ranking_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_post("/api/miniapp/ranking/track", ranking_track)
+    app.router.add_post("/api/miniapp/ranking/untrack", ranking_untrack)
+    app.router.add_post("/api/miniapp/ranking/record", ranking_record)
+    app.router.add_get("/api/miniapp/ranking/history/{channel_id}", ranking_history)
+    app.router.add_get("/api/miniapp/ranking/positions", ranking_positions)
+    app.router.add_get("/api/miniapp/ranking/keywords", ranking_keywords)
+    app.router.add_get("/api/miniapp/ranking/alerts", ranking_alerts)
+    app.router.add_get("/api/miniapp/ranking/stats", ranking_stats)
+
+    # ── Network Builder ──────────────────────────────────────────────────────
+    async def network_templates(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.network_builder import get_templates
+            templates = await get_templates(pool, uid)
+            return _json_resp({'templates': templates})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_template_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.network_builder import create_template
+            result = await create_template(pool, uid, data.get('name', ''),
+                                           data.get('description', ''),
+                                           data.get('template_type', 'channel_group'),
+                                           data.get('nodes'), data.get('edges'))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_template_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            template_id = int(request.match_info['template_id'])
+            from services.network_builder import delete_template
+            result = await delete_template(pool, uid, template_id)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_instances(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.network_builder import get_instances
+            instances = await get_instances(pool, uid)
+            return _json_resp({'instances': instances})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_instance_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.network_builder import create_instance
+            result = await create_instance(pool, uid, data.get('template_id', 0),
+                                           data.get('name', ''))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_instance_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            instance_id = int(request.match_info['instance_id'])
+            from services.network_builder import get_instance_detail
+            detail = await get_instance_detail(pool, uid, instance_id)
+            if not detail:
+                return _err("Not found", 404)
+            return _json_resp(detail)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.network_builder import get_network_stats
+            stats = await get_network_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/network/templates", network_templates)
+    app.router.add_post("/api/miniapp/network/template", network_template_create)
+    app.router.add_delete("/api/miniapp/network/template/{template_id}", network_template_delete)
+    app.router.add_get("/api/miniapp/network/instances", network_instances)
+    app.router.add_post("/api/miniapp/network/instance", network_instance_create)
+    app.router.add_get("/api/miniapp/network/instance/{instance_id}", network_instance_detail)
+    app.router.add_get("/api/miniapp/network/stats", network_stats)
+
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
