@@ -3695,6 +3695,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("growth_submit uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def ai_comment_submit(request: web.Request) -> web.Response:
+        """AI Commenting: контекстные LLM-комментарии под постами целевых каналов.
+        body: {channels: [ref...], niche?, tone?, acc_count?}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        raw_ch = body.get("channels") or []
+        if isinstance(raw_ch, str):
+            raw_ch = re.split(r"[\s,]+", raw_ch)
+        channels = [str(c).strip().lstrip("@") for c in raw_ch if str(c).strip()][:50]
+        niche = validate_string(body.get("niche"), max_len=200) or ""
+        from services.ai_comment_engine import COMMENT_TONES
+        tone = (body.get("tone") or "neutral").strip()
+        if tone not in COMMENT_TONES:
+            tone = "neutral"
+        try:
+            acc_count = max(1, min(validate_integer(body.get("acc_count") or 3, min_val=1, max_val=10) or 3, 10))
+        except (TypeError, ValueError):
+            acc_count = 3
+        if not channels:
+            return _err("Укажите хотя бы один канал", 400)
+        from services import content_safety
+        _v = await content_safety.enforce(pool, uid, niche or "comment", "", surface="ai_comment")
+        if _v.blocked:
+            return _err("Контент заблокирован политикой платформы", 403)
+        has_acc = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            uid)
+        if not has_acc:
+            return _err("Нет активных аккаунтов", 400)
+        try:
+            label = f"AI-комментинг: {len(channels)} каналов"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'ai_comment','pending',$2,$3,$4) RETURNING id",
+                uid,
+                _json.dumps({"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count}),
+                len(channels), label)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "channels": len(channels)})
+        except Exception as exc:
+            log.exception("ai_comment_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10267,6 +10314,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
+    app.router.add_post("/api/miniapp/ai_comment", ai_comment_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)

@@ -2937,6 +2937,24 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
     </div>
+    <div class="sec" style="margin-top:14px">💬 AI-комментинг</div>
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны AI-ключи). Естественно, по теме, на языке поста.</div>
+    <div style="padding:8px 0">
+      <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><label>Тематика (опционально, контекст для ИИ)</label><input type="text" id="aicNiche" placeholder="например: крипта, фитнес"></div>
+      <div class="field"><label>Тон</label>
+        <select id="aicTone" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
+          <option value="neutral">Нейтральный</option>
+          <option value="friendly">Дружелюбный</option>
+          <option value="expert">Экспертный</option>
+          <option value="question">Вопрос по теме</option>
+          <option value="support">Поддержка</option>
+        </select>
+      </div>
+      <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="aicAccCount" min="1" max="10" value="3"></div>
+      <div class="field-err" id="aicErr"></div>
+      <button class="btn btn-p" id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить AI-комментинг</button>
+    </div>
     <div class="sec" style="margin-top:8px">История</div>
     <div class="lst" id="growthHistory"></div>
   </div>
@@ -8836,6 +8854,22 @@ async function submitGrowth() {
     openGrowth();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🌿 Запустить'; }
+}
+async function submitAiComment() {
+  const errEl=document.getElementById('aicErr'); errEl.textContent='';
+  const channels=document.getElementById('aicChannels').value.trim();
+  const niche=document.getElementById('aicNiche').value.trim();
+  const tone=document.getElementById('aicTone').value;
+  const acc_count=parseInt(document.getElementById('aicAccCount').value)||3;
+  const list=channels.split(/[\s,]+/).map(s=>s.trim().replace(/^@/,'')).filter(Boolean);
+  if(!list.length){ errEl.textContent='Укажите хотя бы один канал'; return; }
+  const btn=document.getElementById('aicBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r=await api('/api/miniapp/ai_comment',{method:'POST',body:JSON.stringify({channels:list,niche,tone,acc_count})});
+    toast(`💬 AI-комментинг запущен: ${r.channels||list.length} каналов (#${r.op_id})`);
+    openGrowth();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='💬 Запустить AI-комментинг'; }
 }
 
 // ── Quick Post ───────────────────────────────────────────
