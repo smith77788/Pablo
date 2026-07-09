@@ -3078,9 +3078,17 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
                 }
             )
         return contacts
+    except asyncio.TimeoutError:
+        # asyncio.TimeoutError несёт пустой str() → в UI была бы пустая причина.
+        log.warning("get_contacts timeout (connect)")
+        raise RuntimeError("аккаунт не ответил (таймаут коннекта — проверьте прокси/сессию)")
     except Exception as e:
+        # НЕ глотаем в []: пустой список = «у аккаунта реально нет контактов», а
+        # проглоченный сбой (мёртвая сессия/прокси) выглядел бы так же и маскировал
+        # причину — синхронизация показывала «нет контактов» вместо реальной ошибки.
+        # Пробрасываем; вызывающий (sync_account / инвайтер) либо репортит, либо ловит.
         log.warning("get_contacts error: %s", e)
-        return []
+        raise
     finally:
         try:
             await client.disconnect()
