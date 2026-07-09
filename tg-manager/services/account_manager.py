@@ -604,8 +604,14 @@ def _resolve_client_proxy(device: dict[str, Any], low_risk: bool = False) -> Any
     policy = policy or _DEFAULT_PROXY_POLICY
     enforce = bool(device.get("enforce_proxy"))
     proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else None
+    # «Привязан к прокси» = НАЗНАЧЕН proxy_id ЛИБО есть URL. Ключевой момент: если
+    # proxy_id задан, но прокси неактивен (JOIN вернул proxy_url=NULL), аккаунт всё
+    # равно привязан к IP этого прокси — подключать его напрямую НЕЛЬЗЯ (иначе
+    # AUTH_KEY_DUPLICATED убьёт сессию). Поэтому опираемся на proxy_id, а не только
+    # на наличие распарсенного URL.
+    has_assigned_proxy = bool(acc_proxy_url) or bool(device.get("proxy_id"))
     decision = proxy_decision(
-        has_proxy_url=bool(acc_proxy_url),
+        has_proxy_url=has_assigned_proxy,
         proxy_parsed_ok=proxy is not None,
         policy=policy,
         enforce=enforce,

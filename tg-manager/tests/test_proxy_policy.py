@@ -93,6 +93,23 @@ def test_mass_path_per_owner_policy_wired():
     assert "set_owner_proxy_policy(owner_id, await db.get_proxy_policy(pool, owner_id))" in ow
 
 
+def test_resolver_keys_on_proxy_id_not_just_url():
+    # КРИТИЧНО: аккаунт с назначенным proxy_id, но неактивным прокси (proxy_url=NULL)
+    # всё равно «привязан к прокси» → нельзя подключать напрямую. Резолвер должен
+    # опираться на proxy_id, иначе снова убьёт сессию (AUTH_KEY_DUPLICATED).
+    with open(os.path.join(ROOT, "services/account_manager.py"), encoding="utf-8") as f:
+        am = f.read()
+    assert 'has_assigned_proxy = bool(acc_proxy_url) or bool(device.get("proxy_id"))' in am
+    assert "has_proxy_url=has_assigned_proxy" in am
+
+
+def test_mass_detach_proxy_scoped_and_nulls():
+    with open(os.path.join(ROOT, "services/mini_app_api.py"), encoding="utf-8") as f:
+        api = f.read()
+    assert 'op == "detach_proxy"' in api
+    assert "SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])" in api
+
+
 def test_low_risk_via_account_dict_and_inline_reads_marked():
     with open(os.path.join(ROOT, "services/account_manager.py"), encoding="utf-8") as f:
         am = f.read()

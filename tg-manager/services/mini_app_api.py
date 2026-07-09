@@ -2691,6 +2691,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
                     stage, uid, ids)
                 return _json_resp({"ok": True, "count": n, "stage": stage})
+            if op == "detach_proxy":
+                # Снять прокси у выбранных аккаунтов — чтобы работать БЕЗ прокси
+                # (прямое соединение). Чистое DB-действие. После этого аккаунт
+                # не привязан к IP прокси и подключается напрямую.
+                await pool.execute(
+                    "UPDATE tg_accounts SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+                    uid, ids)
+                return _json_resp({"ok": True, "count": n})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []
