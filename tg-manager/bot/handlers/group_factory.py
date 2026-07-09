@@ -671,7 +671,7 @@ async def cb_group_import_acc(
     await callback.answer("⏳ Загружаю группы из Telegram...")
 
     from services import account_manager
-    from database.db import upsert_managed_channels
+    from database.db import add_managed_channels
 
     try:
         dialogs = (
@@ -703,7 +703,11 @@ async def cb_group_import_acc(
         )
         return
 
-    await upsert_managed_channels(pool, callback.from_user.id, acc["id"], groups)
+    # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
+    # возвращает максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
+    # срез, если у аккаунта суммарно больше 200 диалогов. upsert_managed_channels()
+    # удалила бы ВСЕ ранее сохранённые группы/каналы аккаунта перед вставкой среза.
+    await add_managed_channels(pool, callback.from_user.id, acc["id"], groups)
 
     lines = [f"📥 <b>Импортировано групп: {len(groups)}</b>\n"]
     lines += [
