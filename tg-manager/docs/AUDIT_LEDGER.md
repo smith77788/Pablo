@@ -335,3 +335,14 @@ E2E-верификация разрыва №1 (проверь все сцена
 Исправлено: get_contacts больше НЕ глотает в [] — пробрасывает исключение (asyncio.TimeoutError → понятное «аккаунт не ответил (таймаут коннекта — проверьте прокси/сессию)», прочее → как есть). Пустой [] теперь означает ТОЛЬКО «успешно прочитано, контактов реально нет». sync_account ловит → пишет error → sync_all_accounts отдаёт message «сессии устарели/прокси недоступны — проверьте детали» + пер-аккаунт details[ok:false, reason]. UI уже показывает эти детали (alert с причиной по каждому аккаунту) — теперь они наполняются. Все 3 вызова get_contacts проверены: sync_account (репортит), инвайтер channel_ops ×2 (сами ловят в try/except→[], поведение сохранено). get_account_for_telethon отдаёт proxy_url+session_str (декрипт в _make_client) — прокси доходит, изоляция не рвётся.
 Верификация: 1173 теста (+2: сбой get_contacts всплывает как error, а не молчаливый synced:0; guard что get_contacts не возвращает [] в except). Python AST чист.
 Осталось: сама причина падения коннекта у конкретных аккаунтов — теперь видна пользователю в деталях (прокси/сессия), диагностируется по месту; кода-бага в путиcontacts больше нет.
+
+## tg-manager: широкий скан колонок по всему коду (bot+services) — 2026-07-09
+Расширил сверку сырых SQL-запросов против схемы с mini_app_api на ВЕСЬ bot/services/database (с учётом Python-embedded ALTER — ключевой источник ложных, напр. self_promo_templates.owner_id добавляется в mini_app_api:396). Метод: скан FROM/UPDATE/INTO <table> без алиаса → колонки в WHERE/ORDER/SET → сверка с CREATE TABLE + ALTER (schema + Python). Из 99 сырых кандидатов после автосверки и ручного триажа контекста — 5 реальных.
+Найдено+исправлено (живые, 500 при вызове):
+  - topology_nodes (/api/miniapp/topology/nodes, граф сети): SELECT is_active FROM tg_channels (нет колонки) + managed_bots WHERE owner_id (реальная added_by). Эндпоинт падал. → is_active убран (active=true), owner_id→added_by.
+  - ecosystem_brain.sync_ecosystem_members: managed_channels ... AND is_active=TRUE (нет колонки) → убрано.
+Найдено+исправлено (dead-code, 0 вызовов, латентные — не удалял):
+  - strike_engine.is_strike_allowed: strike_history.target_id → target (маскировалось except→return True: rate-limit молча не работал бы).
+  - ecosystem_brain.auto_post_scheduling: tg_channels.is_active убран; operation_queue.target (нет колонки) → params->'channel_ids' @> containment (mass_publish хранит цели в params.channel_ids).
+Ключевой урок про скан: высокий FP-rate из трёх источников — (1) алиасы агрегатов (AS cnt/total/strength), (2) Python-embedded ALTER (колонка есть, но не в schema-файле), (3) таблица в подзапросе/NOT EXISTS/JOIN отличается от FROM. Доверять ТОЛЬКО хитам, подтверждённым ручной сверкой CREATE TABLE + Python-ALTER + контекста строки. Регресс: tests/test_topology_and_channel_columns.py.
+Класс «несуществующая колонка» теперь проверен по всему коду; известные носители закрыты.
