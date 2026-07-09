@@ -8344,14 +8344,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите паттерн названия или референс", 400)
 
         # ── Гео: пресет (страны/города мира) ИЛИ свой список городов ИЛИ страны.
-        from services.geo_data import GEO_PRESETS, parse_custom_geo_list, enrich_geo_list
+        from services.geo_data import (
+            GEO_PRESETS, parse_custom_geo_list, enrich_geo_list, filter_preset_cities,
+        )
         geo_preset = (body.get("geo_preset") or "").strip()
         custom_cities = (body.get("custom_cities") or "").strip()
         countries = body.get("countries") or []
+        preset_cities = body.get("preset_cities") or []  # выбранное подмножество городов пресета
         geo_list: list = []
         geo_source = ""
         if geo_preset and geo_preset in GEO_PRESETS:
-            geo_list = list(GEO_PRESETS[geo_preset]["cities"])
+            # Пустой preset_cities → весь пресет; иначе — только отмеченные города.
+            geo_list = filter_preset_cities(geo_preset, preset_cities)
             geo_source = geo_preset
         elif custom_cities:
             geo_list = parse_custom_geo_list(custom_cities)
@@ -8424,11 +8428,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def geo_presets(request: web.Request) -> web.Response:
-        """Список гео-пресетов (страны/города мира) для Global Presence."""
+        """Список гео-пресетов (страны/города мира) для Global Presence.
+        ?cities=<key> — вернуть города конкретного пресета для выбора галочками."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        from services.geo_data import GEO_PRESETS
+        from services.geo_data import GEO_PRESETS, preset_city_options
+        want = (request.rel_url.query.get("cities") or "").strip()
+        if want:
+            if want not in GEO_PRESETS:
+                return _err("Неизвестный пресет", 404)
+            return _json_resp({"key": want, "cities": preset_city_options(want)})
         return _json_resp({"presets": [
             {"key": k, "label": v.get("label", k), "count": v.get("count", len(v.get("cities", [])))}
             for k, v in GEO_PRESETS.items()

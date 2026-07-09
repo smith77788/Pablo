@@ -1505,6 +1505,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <textarea id="gpCustomCities" rows="4" placeholder="Москва&#10;Санкт-Петербург&#10;Київ" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:11px;color:var(--hint);margin-top:4px">По одному городу на строку. Нативные названия подтянутся автоматически</div>
       </div>
+      <div id="gpPresetCitiesWrap" style="display:none;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:12px;color:var(--hint)">Города пресета (<span id="gpCitiesCount">0</span> выбрано)</span>
+          <span class="sel-bar-link" style="font-size:12px" onclick="gpToggleAllCities()">Все / никого</span>
+        </div>
+        <div id="gpPresetCities" style="max-height:180px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:6px;-webkit-overflow-scrolling:touch"></div>
+      </div>
       
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Аккаунты (выберите для создания)</label>
       <div id="gpAccountsList" style="max-height:120px;overflow-y:auto;border:1px solid var(--border-input);border-radius:10px;padding:8px"></div>
@@ -11992,6 +11999,34 @@ async function openGpCreateModal() {
 function gpGeoToggle() {
   const v = document.getElementById('gpGeoPreset').value;
   document.getElementById('gpCustomCitiesWrap').style.display = (v==='__custom') ? 'block' : 'none';
+  const cityWrap = document.getElementById('gpPresetCitiesWrap');
+  if (v && v!=='__custom') { cityWrap.style.display='block'; gpLoadPresetCities(v); }
+  else { cityWrap.style.display='none'; document.getElementById('gpPresetCities').innerHTML=''; }
+}
+async function gpLoadPresetCities(key) {
+  const box = document.getElementById('gpPresetCities');
+  box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/geo_presets?cities='+encodeURIComponent(key));
+    const cities = d.cities||[];
+    box.innerHTML = cities.map(c=>{
+      const slug = esc(c.city_slug||c.city||'');
+      const lbl = esc(c.city_native||c.city||slug);
+      return `<label class="gp-city-chip" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:5px 9px;border-radius:16px;border:1px solid var(--sep);cursor:pointer">
+        <input type="checkbox" class="gp-city-cb" value="${slug}" checked onchange="gpUpdateCityCount()" style="width:14px;height:14px;accent-color:var(--accent)">${lbl}</label>`;
+    }).join('');
+    gpUpdateCityCount();
+  } catch(e) { box.innerHTML='<div style="font-size:12px;color:var(--red)">'+(e.message||'Ошибка загрузки городов')+'</div>'; }
+}
+function gpUpdateCityCount() {
+  const n = document.querySelectorAll('#gpPresetCities .gp-city-cb:checked').length;
+  const el = document.getElementById('gpCitiesCount'); if(el) el.textContent = n;
+}
+function gpToggleAllCities() {
+  const cbs = [...document.querySelectorAll('#gpPresetCities .gp-city-cb')];
+  const allOn = cbs.every(c=>c.checked);
+  cbs.forEach(c=>c.checked = !allOn);
+  gpUpdateCityCount();
 }
 function gpApplyReference() {
   const refName = document.getElementById('gpRefName').value.trim();
@@ -12046,7 +12081,16 @@ async function submitGpCreate() {
     ecosystem_id: ecosystemId ? +ecosystemId : null,
   };
   if (geoPreset==='__custom') payload.custom_cities = customCities;
-  else payload.geo_preset = geoPreset;
+  else {
+    payload.geo_preset = geoPreset;
+    // выбранное подмножество городов пресета (если пусто — бэкенд берёт все)
+    const cbs = [...document.querySelectorAll('#gpPresetCities .gp-city-cb')];
+    if (cbs.length) {
+      const chosen = cbs.filter(c=>c.checked).map(c=>c.value);
+      if (!chosen.length) { errEl.textContent = 'Выберите хотя бы один город пресета'; return; }
+      if (chosen.length !== cbs.length) payload.preset_cities = chosen;  // не все → шлём подмножество
+    }
+  }
 
   try {
     const r = await api('/api/miniapp/global_presence', { method: 'POST', body: JSON.stringify(payload) });
