@@ -35,6 +35,20 @@ import os as _os
 from services.proxy_policy import normalize_policy as _normalize_policy, DEFAULT_POLICY as _DEFAULT_POL
 _DEFAULT_PROXY_POLICY = _normalize_policy(_os.getenv("PROXY_POLICY", _DEFAULT_POL))
 
+# Per-owner политика прокси (process-local кэш; НЕ переживает рестарт и не шарится
+# между воркерами — праймится на входе в операцию из БД). Нужен потому, что
+# _resolve_client_proxy синхронна и не может сходить в БД: массовый путь кладёт
+# owner_id в словарь аккаунта, а политику берём отсюда.
+_OWNER_PROXY_POLICY: dict[int, str] = {}
+
+
+def set_owner_proxy_policy(owner_id: int | None, policy: str | None) -> None:
+    """Обновить кэш политики прокси владельца (зовётся при старте операции и при
+    сохранении настроек). None owner_id игнорируется."""
+    if owner_id is None:
+        return
+    _OWNER_PROXY_POLICY[int(owner_id)] = _normalize_policy(policy)
+
 # ── get_me() caching to reduce API calls ────────────────────────────────────
 _GET_ME_CACHE: dict[int, tuple[Any, float]] = {}
 _GET_ME_TTL = 300  # 5 minutes cache
@@ -577,8 +591,17 @@ def _resolve_client_proxy(device: dict[str, Any], low_risk: bool = False) -> Any
     """
     from services.proxy_policy import proxy_decision
 
+    # Аккаунт-словарь может пометить соединение низкорисковым (одиночное чтение),
+    # чтобы не тащить low_risk через все сигнатуры движков.
+    low_risk = low_risk or bool(device.get("_low_risk"))
     acc_proxy_url = str(device.get("proxy_url") or "").strip()
-    policy = device.get("proxy_policy") or _DEFAULT_PROXY_POLICY
+    # Приоритет политики: явная в словаре аккаунта → per-owner кэш (массовый путь
+    # кладёт owner_id) → процессный дефолт.
+    policy = device.get("proxy_policy")
+    if not policy:
+        _oid = device.get("owner_id")
+        policy = _OWNER_PROXY_POLICY.get(int(_oid)) if _oid is not None else None
+    policy = policy or _DEFAULT_PROXY_POLICY
     enforce = bool(device.get("enforce_proxy"))
     proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else None
     decision = proxy_decision(

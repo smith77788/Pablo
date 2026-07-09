@@ -2876,7 +2876,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services import profile_setter_engine as pse
             # Таймаут на инлайн-коннект — иначе зависание → edge 502/520.
             res = await asyncio.wait_for(
-                pse.get_login_code(acc["session_str"], dict(acc)), timeout=30
+                pse.get_login_code(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30
             )
             if res.get("ok"):
                 return _json_resp({"ok": True, "code": res["code"]})
@@ -2910,7 +2910,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # коннект (мёртвая сессия/плохой прокси) висит до edge-таймаута и
             # отдаёт 502/520 → фронт показывает «Сервис временно недоступен».
             res = await asyncio.wait_for(
-                pse.check_restriction(acc["session_str"], dict(acc)), timeout=30
+                pse.check_restriction(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30
             )
             if not res.get("ok"):
                 # Бизнес-ошибка (не смогли проверить), НЕ 502 — иначе фронт покажет
@@ -7883,6 +7883,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await pool.execute(
                 """UPDATE platform_users SET settings_json=$1 WHERE user_id=$2""",
                 settings_json, uid)
+            # Немедленно применяем выбор политики прокси (не ждём старта операции).
+            try:
+                from services import account_manager as _am
+                _am.set_owner_proxy_policy(uid, data.get("proxy_policy"))
+            except Exception:
+                pass
             return _json_resp({"ok": True})
         except Exception as e:
             log.warning("user_settings_save uid=%d: %s", uid, e)

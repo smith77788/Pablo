@@ -1167,6 +1167,15 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     log, f"Сбой отправки уведомления о запуске операции #{op_id}"
                 )
 
+            # Праймим per-owner политику прокси в кэш account_manager, чтобы
+            # массовые исполнители (словари аккаунтов несут owner_id) применяли
+            # выбор владельца strict/allow_direct, а не только процессный дефолт.
+            try:
+                from services import account_manager as _am
+                _am.set_owner_proxy_policy(owner_id, await db.get_proxy_policy(pool, owner_id))
+            except Exception:
+                log_exc_swallow(log, f"prime proxy_policy op#{op_id}")
+
             # Запустить фоновый монитор прогресса для длинных операций
             progress_task = asyncio.create_task(
                 _progress_monitor(pool, bot, op_id, owner_id, op_type)

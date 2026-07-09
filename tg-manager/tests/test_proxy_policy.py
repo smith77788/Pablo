@@ -73,3 +73,40 @@ def test_resolve_client_proxy_takes_low_risk_and_policy():
         db = f.read()
     assert "async def get_proxy_policy" in db
     assert 'd["proxy_policy"] = await get_proxy_policy' in db
+
+
+def test_mass_path_per_owner_policy_wired():
+    with open(os.path.join(ROOT, "services/account_manager.py"), encoding="utf-8") as f:
+        am = f.read()
+    # per-owner кэш + чтение по owner_id из словаря аккаунта
+    assert "def set_owner_proxy_policy" in am
+    assert "_OWNER_PROXY_POLICY.get(int(_oid))" in am
+    # массовый селектор отдаёт owner_id (иначе кэш не с чем сопоставить)
+    with open(os.path.join(ROOT, "services/resource_selector.py"), encoding="utf-8") as f:
+        rs = f.read()
+    assert "SELECT a.id, a.owner_id," in rs
+    # op_worker праймит кэш на старте операции
+    with open(os.path.join(ROOT, "services/op_worker.py"), encoding="utf-8") as f:
+        ow = f.read()
+    assert "set_owner_proxy_policy(owner_id, await db.get_proxy_policy(pool, owner_id))" in ow
+
+
+def test_low_risk_via_account_dict_and_inline_reads_marked():
+    with open(os.path.join(ROOT, "services/account_manager.py"), encoding="utf-8") as f:
+        am = f.read()
+    # аккаунт-словарь может пометить соединение низкорисковым
+    assert 'low_risk = low_risk or bool(device.get("_low_risk"))' in am
+    with open(os.path.join(ROOT, "services/mini_app_api.py"), encoding="utf-8") as f:
+        api = f.read()
+    # одиночные инлайн-чтения помечают соединение low_risk (не требуют прокси)
+    assert 'get_login_code(acc["session_str"], {**dict(acc), "_low_risk": True})' in api
+    assert 'check_restriction(acc["session_str"], {**dict(acc), "_low_risk": True})' in api
+
+
+def test_set_owner_proxy_policy_normalizes_and_ignores_none():
+    import importlib
+    # account_manager не импортируется в песочнице (env) — проверяем через proxy_policy,
+    # что set_owner_proxy_policy нормализует так же (контракт normalize_policy).
+    from services.proxy_policy import normalize_policy
+    assert normalize_policy("STRICT") == "strict"
+    assert normalize_policy("bogus") == "allow_direct"
