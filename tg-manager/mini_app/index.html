@@ -5988,7 +5988,8 @@ function renderAccounts(list) {
     const trust = a.trust_score!=null?Math.round(a.trust_score):100;
     const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
     let status, cls, ava_cls;
-    if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
+    if (a.acc_status==='session_expired') { status='🔑 Релог'; cls='b-or'; ava_cls='ava-orange'; }
+    else if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
     else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
     else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
     else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
@@ -6146,7 +6147,8 @@ function buildAccDetail(d) {
   const cd = a.cooldown_until && new Date(a.cooldown_until) > new Date();
 
   let statusBadge = '';
-  if (!a.is_active) statusBadge = '<span class="badge b-gy">Выключен</span>';
+  if (a.acc_status==='session_expired') statusBadge = '<span class="badge b-or">🔑 Нужна переавторизация — в боте: Аккаунты → Переавторизатор</span>';
+  else if (!a.is_active) statusBadge = '<span class="badge b-gy">Выключен</span>';
   else if (a.acc_status==='banned') statusBadge = '<span class="badge b-rd">🚫 Заблокирован</span>';
   else if (cd) statusBadge = `<span class="badge b-or">⏳ Кулдаун до ${new Date(a.cooldown_until).toLocaleDateString('ru-RU')}</span>`;
   else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
