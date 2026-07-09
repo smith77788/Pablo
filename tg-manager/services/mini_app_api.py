@@ -934,6 +934,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _op_params["silent"] = True
             if _seg_sql:
                 _op_params["segment"] = segment
+            # Autopost v2: рекуррентная рассылка (0 = разовая). Движок op_worker
+            # сам переочередит следующий запуск через repeat_interval_min минут.
+            try:
+                _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+            except (TypeError, ValueError):
+                _rmin = 0
+            if _rmin > 0:
+                _op_params["repeat_interval_min"] = _rmin
+                _rc = body.get("repeat_count")
+                if _rc is not None:
+                    try:
+                        _op_params["repeat_count"] = max(1, min(int(_rc), 1000))
+                    except (TypeError, ValueError):
+                        pass
 
             broadcast_id = None
             if schedule_minutes <= 0:
@@ -3733,9 +3747,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
         except (TypeError, ValueError):
             schedule_minutes = 0
+        # Autopost v2: рекуррентная публикация (0 = разовая).
+        try:
+            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            _rmin = 0
         try:
             label = f"Quick Post в {len(channel_ids)} каналов"
-            _params = _json.dumps({"text": text, "channel_ids": channel_ids})
+            _pd = {"text": text, "channel_ids": channel_ids}
+            if _rmin > 0:
+                _pd["repeat_interval_min"] = _rmin
+                _rc = body.get("repeat_count")
+                if _rc is not None:
+                    try:
+                        _pd["repeat_count"] = max(1, min(int(_rc), 1000))
+                    except (TypeError, ValueError):
+                        pass
+            _params = _json.dumps(_pd)
             if schedule_minutes > 0:
                 op_id = await pool.fetchval(
                     "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "

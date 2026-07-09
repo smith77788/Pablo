@@ -2967,6 +2967,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="1440">Через 24 часа</option>
       </select>
     </div>
+    <div class="field">
+      <label style="font-size:13px;color:var(--hint)">Повтор (автопостинг)</label>
+      <select id="qpRepeat" class="sel">
+        <option value="0">Без повтора</option>
+        <option value="60">Каждый час</option>
+        <option value="360">Каждые 6 часов</option>
+        <option value="720">Каждые 12 часов</option>
+        <option value="1440">Каждый день</option>
+        <option value="10080">Каждую неделю</option>
+      </select>
+    </div>
     <div class="field-err" id="quickPostErr"></div>
     <button class="btn btn-p" id="quickPostBtn" onclick="submitQuickPost()" style="width:100%;margin-top:8px" disabled>📤 Опубликовать (выберите каналы)</button>
   </div>
@@ -8929,10 +8940,12 @@ async function submitQuickPost() {
   if (!text) { errEl.textContent='Введите текст публикации'; return; }
   if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
     const schedMin = parseInt(document.getElementById('qpSchedule')?.value||'0')||0;
+  const repMin = parseInt(document.getElementById('qpRepeat')?.value||'0')||0;
   const btn = document.getElementById('quickPostBtn');
   btn.disabled=true; btn.textContent='Публикую…';
   try {
     const payload={text,channel_ids:[...QUICK_POST_SELECTED]}; if(schedMin>0) payload.schedule_minutes=schedMin;
+    if(repMin>0) payload.repeat_interval_min=repMin;
     const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify(payload)});
     toast(schedMin>0 ? '⏰ Публикация запланирована' : `✍️ Публикация запущена (#${r.op_id})`);
     errEl.textContent='';
