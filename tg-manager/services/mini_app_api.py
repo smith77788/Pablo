@@ -3195,6 +3195,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "leave_all_chats", {"account_id": acc_id}, "Выход из всех чатов"
         elif act == "read_all":
             op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
+        elif act == "delete_pm":
+            op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
         else:
             return _err("Неизвестное действие", 400)
         try:
