@@ -1788,11 +1788,14 @@ async def auto_discover_members(pool: asyncpg.Pool, ecosystem_id: int, owner_id:
         )
         existing_ids = {r["object_id"] for r in existing}
         
-        # Find channels not yet in ecosystem
+        # Find channels not yet in ecosystem.
+        # managed_channels не имеет колонки is_active (есть channel_id/owner_id/
+        # title/username/... — см. schema) — прежнее AND is_active=TRUE валило
+        # запрос 500. Все управляемые каналы владельца считаются кандидатами.
         channels = await pool.fetch(
             """SELECT channel_id, title, username
                FROM managed_channels
-               WHERE owner_id=$1 AND is_active=TRUE""",
+               WHERE owner_id=$1""",
             owner_id,
         )
         
@@ -2117,17 +2120,24 @@ async def auto_remove_dead_channels(pool: asyncpg.Pool, ecosystem_id: int, inact
 
 
 async def auto_post_scheduling(pool: asyncpg.Pool, ecosystem_id: int) -> dict:
+    # ПРИМЕЧАНИЕ: функция сейчас не вызывается (dead code). Исправлены две ссылки
+    # на несуществующие колонки, из-за которых запросы падали бы 500 при подключении:
+    #  - tg_channels НЕ имеет is_active (убрано условие; каналы экосистемы = кандидаты);
+    #  - operation_queue НЕ имеет колонки target — mass_publish хранит цели в
+    #    params.channel_ids (jsonb-массив), проверяем через containment.
     channels = await pool.fetch(
         """SELECT ch.id, ch.username FROM tg_channels ch
            JOIN ecosystem_channels ec ON ec.channel_id = ch.id
-           WHERE ec.ecosystem_id=$1 AND ch.is_active=TRUE""",
+           WHERE ec.ecosystem_id=$1""",
         ecosystem_id,
     )
     scheduled = 0
     for ch in channels:
         existing = await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE target=$1 AND status IN ('pending','running') AND op_type='mass_publish'",
-            str(ch["id"]),
+            "SELECT COUNT(*) FROM operation_queue "
+            "WHERE op_type='mass_publish' AND status IN ('pending','running') "
+            "AND params->'channel_ids' @> to_jsonb($1::bigint)",
+            int(ch["id"]),
         )
         if existing == 0:
             scheduled += 1

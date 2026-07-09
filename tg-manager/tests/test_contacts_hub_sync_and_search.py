@@ -204,3 +204,34 @@ async def test_sync_all_accounts_includes_inactive_accounts():
         "деактивированного аккаунта всё ещё валидна для чтения контактов"
     )
     assert "session_str IS NOT NULL" in src
+
+
+@pytest.mark.asyncio
+async def test_get_contacts_failure_surfaces_as_error_not_empty():
+    """Регресс: сбой чтения контактов (мёртвая сессия/прокси/таймаут) НЕ должен
+    выглядеть как «у аккаунта 0 контактов». get_contacts пробрасывает исключение,
+    sync_account его ловит и репортит error — иначе UI показывал «нет контактов»
+    вместо реальной причины (главная жалоба пользователя)."""
+    pool = _FakePool()
+    fake_acc = {"id": 7, "session_str": "abc", "owner_id": 1}
+    boom = AsyncMock(side_effect=RuntimeError("аккаунт не ответил (таймаут коннекта)"))
+    with patch("database.db.get_account_for_telethon", new=AsyncMock(return_value=fake_acc)), \
+         patch("services.account_manager.get_contacts", new=boom), \
+         patch("services.contacts_hub.repository.log_sync", new=AsyncMock()):
+        result = await sync_service.sync_account(pool, owner_id=1, account_id=7)
+    assert result.get("synced") == 0
+    assert result.get("error"), "сбой get_contacts должен стать error, а не молчаливым нулём"
+    assert "таймаут" in result["error"]
+
+
+def test_get_contacts_does_not_swallow_failures_into_empty_list():
+    """get_contacts не должен возвращать [] в except (это маскировало сбой под
+    «нет контактов»). Он либо возвращает список на успехе, либо пробрасывает."""
+    import inspect as _inspect
+    from services import account_manager
+    src = _inspect.getsource(account_manager.get_contacts)
+    # в блоке обработки исключений — raise, а не return []
+    assert "raise" in src.split("except", 1)[1], "get_contacts глотает ошибку в except"
+    # единственный 'return []' (если и был) не должен стоять в except-ветке
+    tail = src.split("return contacts", 1)[1]
+    assert "return []" not in tail, "get_contacts всё ещё возвращает [] при сбое"

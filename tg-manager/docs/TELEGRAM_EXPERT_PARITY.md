@@ -22,6 +22,7 @@
 | Shadow Sessions | 12 Спец | НЕТ | |
 | AI Commenting | 12 Спец | НЕТ | GPT-комментинг в обсуждениях |
 | Global Search | 12 Спец | **WIRED** | `global_search_engine.search_public` (contacts.SearchRequest) + POST `/api/miniapp/global_search` + экран `s-gsearch`, тайл «Глобал. поиск» |
+| Story Manager | 12 Спец / 3 | **WIRED** | `story_manager.post_story` (stories.SendStoryRequest, фото/видео по URL, CanSendStory-проверка, период 6/12/24/48ч) + POST `/account/{id}/post_story` + кнопка «📸 История». Публикация ТОЛЬКО на свой аккаунт. Тест `test_story_manager.py` |
 | Flash Call / Voice reg | 4 Авто-рег | НЕТ | сейчас только SMS-коды |
 | Backup Proxy | 13 Прокси | **WIRED** | `proxy_selector.failover_dead_proxies` (пробит + переназначение на живой резерв с IP-изоляцией) + POST `/proxy/failover` + `/proxy/{id}/backup` + кнопка «🛟 Failover» и переключатель резерва в списке прокси; `is_backup` (schema_v150). Попутно: `probe_proxy`/`check_proxy_health` теперь расшифровывают proxy_url (был баг — прокси всегда «мёртв») |
 | Message Interceptor | 12 Спец | НЕТ | (auto_responder ≠ перехват входящих) |
@@ -35,8 +36,8 @@
   - **WIRED**: Создание чатов/ботов (op `create_channel`/`create_group`/`bot_factory` + исполнители), Экспорт аккаунта (`/accounts/export` CSV + `/export_json`).
   - Остальное (удаление истории диалогов, Story Manager) — добивается.
 - **4 Авто-регистрация**: генератор device-параметров, SMS-провайдеры (`sms_api_engine`), авто-рег — есть; Flash Call/Voice — НЕТ.
-- **5 Сбор аудитории**: parser (`/parser/*`) — WIRED.
-- **6 Инвайт**: mass_invite (op) — WIRED; Invite V2/через ботов/пакетами — проверять.
+- **5 Сбор аудитории**: parser (`/parser/*`) — WIRED. Источники: участники (GetParticipants), активные (senders), **комментаторы/обсуждения** (parse_commenters через linked_chat) — все три в движке, mini-app и теперь в БОТЕ (был пробел: parse_commenters существовал, но бот-меню его не предлагало → подключён start_comments + тест). Гео-парсинг (Nearby), фильтрация/сегментация/экспорт — WIRED.
+- **6 Инвайт**: WIRED end-to-end (menu → источник → аккаунты → confirm → op `mass_invite` → `_exec_mass_invite` → Telethon). Источники: база парсера, вручную @username/ID, по номерам (ImportContacts). Пакетами (batch_size=5). Ротация аккаунтов при PeerFlood. Очистка после инвайта: по номерам движок делает DeleteContacts. «Invite V2» — вагуе (не отдельная фича); «через ботов» — технически невозможно (боты не инвайтят юзеров в каналы), фейк не делаем.
 - **7 Отправка**: dm_campaign — WIRED; автопостинг v1/v2 — НЕТ; спинтакс/рандомайзер — есть.
 - **10 Накрутка**: boost_views/reactions/stories/subscribers — WIRED.
 - **12 Спец**: TDesktop конвертер (`session_converter`), Booster, Forwarder/Reporter (`strike_engine`/`content_cloner`), Channel Cloner — BACKEND; остальное см. пробелы.

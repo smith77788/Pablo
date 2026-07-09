@@ -28,6 +28,13 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
+# Процессная политика прокси по умолчанию (переопределяется per-owner через
+# device['proxy_policy']). 'allow_direct' сохраняет прежнее лояльное поведение;
+# оператор может выставить env PROXY_POLICY=strict для «только через прокси».
+import os as _os
+from services.proxy_policy import normalize_policy as _normalize_policy, DEFAULT_POLICY as _DEFAULT_POL
+_DEFAULT_PROXY_POLICY = _normalize_policy(_os.getenv("PROXY_POLICY", _DEFAULT_POL))
+
 # ── get_me() caching to reduce API calls ────────────────────────────────────
 _GET_ME_CACHE: dict[int, tuple[Any, float]] = {}
 _GET_ME_TTL = 300  # 5 minutes cache
@@ -560,25 +567,37 @@ async def pick_registration_proxy(
     return int(row["id"]), str(row["proxy_url"])
 
 
-def _resolve_client_proxy(device: dict[str, Any]) -> Any:
+def _resolve_client_proxy(device: dict[str, Any], low_risk: bool = False) -> Any:
+    """Выбрать прокси для клиента согласно политике изоляции.
+
+    low_risk=True — низкорисковая одиночная операция (напр. чтение контактов):
+    её не блокируем из-за отсутствия прокси. Глобальная политика владельца
+    берётся из device['proxy_policy'] ('strict'|'allow_direct'), по умолчанию —
+    процессная _DEFAULT_PROXY_POLICY.
+    """
+    from services.proxy_policy import proxy_decision
+
     acc_proxy_url = str(device.get("proxy_url") or "").strip()
-    strict_account_proxy = bool(device) and (
-        bool(acc_proxy_url) or bool(device.get("enforce_proxy"))
+    policy = device.get("proxy_policy") or _DEFAULT_PROXY_POLICY
+    enforce = bool(device.get("enforce_proxy"))
+    proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else None
+    decision = proxy_decision(
+        has_proxy_url=bool(acc_proxy_url),
+        proxy_parsed_ok=proxy is not None,
+        policy=policy,
+        enforce=enforce,
+        low_risk=low_risk,
     )
-    if strict_account_proxy:
-        if not acc_proxy_url:
-            raise ProxyIsolationError(
-                "Account proxy is required for this session, but proxy_url is missing."
-            )
-        proxy = _parse_proxy(acc_proxy_url)
-        if proxy is None:
-            raise ProxyIsolationError(
-                "Account proxy is configured, but its URL could not be parsed."
-            )
+    if decision == "use":
         return proxy
-    if TG_PROXY:
-        return _parse_proxy(TG_PROXY)
-    return None
+    if decision == "block":
+        raise ProxyIsolationError(
+            "Требуется прокси по политике изоляции, но у аккаунта его нет либо он недоступен."
+        )
+    # fallback: глобальный TG_PROXY или прямое соединение (риск блокировок)
+    if not acc_proxy_url and not TG_PROXY:
+        log.warning("account connects DIRECT (no proxy) — ban risk; policy=%s low_risk=%s", policy, low_risk)
+    return _parse_proxy(TG_PROXY) if TG_PROXY else None
 
 
 def device_manufacturers() -> list[str]:
@@ -623,7 +642,7 @@ def generate_device_fingerprint(
     }
 
 
-def _make_client(session_string: str = "", device: dict | None = None):
+def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False):
     """Создать TelegramClient с правильным fingerprint и транспортом.
 
     Приоритет транспорта (от высшего к низшему):
@@ -652,8 +671,9 @@ def _make_client(session_string: str = "", device: dict | None = None):
 
     d = _normalize_device_profile(device)
 
-    # Определяем прокси (может поднять ProxyIsolationError если обязательный прокси не задан)
-    proxy = _resolve_client_proxy(d)
+    # Определяем прокси (может поднять ProxyIsolationError если политика требует
+    # прокси, а его нет; low_risk-операции не блокируются)
+    proxy = _resolve_client_proxy(d, low_risk=low_risk)
 
     # Выбор транспорта: если нет аккаунт-bound/TG_PROXY И задан CF relay → используем relay
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
@@ -3046,18 +3066,44 @@ async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
             log.debug("get_own_user_id: disconnect error: %s", e)
 
 
-async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
-    """Fetch contacts list from a Telegram account.
+def _classify_last_seen(status) -> tuple[str, str | None]:
+    """Разложить User.status в (тип, was_online ISO|None).
+    Типы: online / recently / last_week / last_month / long_ago / offline / unknown."""
+    cls = type(status).__name__ if status is not None else ""
+    if cls == "UserStatusOnline":
+        return "online", None
+    if cls == "UserStatusRecently":
+        return "recently", None
+    if cls == "UserStatusLastWeek":
+        return "last_week", None
+    if cls == "UserStatusLastMonth":
+        return "last_month", None
+    if cls == "UserStatusOffline":
+        was = getattr(status, "was_online", None)
+        try:
+            return "offline", was.isoformat() if was is not None else None
+        except Exception:
+            return "offline", None
+    return "unknown", None
 
-    Returns list of {user_id, username, phone, first_name, last_name,
-    is_mutual, is_premium}. Bots and deleted accounts are excluded. is_mutual is
-    True when the contact has this account added back (from contacts.GetContacts'
-    Contact.mutual — previously discarded, only the flat user list was read).
-    is_premium отражает статус Telegram Premium контакта (User.premium).
+
+async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
+    """Fetch contacts list from a Telegram account with maximum available data.
+
+    Возвращает по каждому контакту всё, что реально отдаёт API: user_id,
+    access_hash, username, phone, имя/фамилия, флаги (mutual, premium, verified,
+    scam, fake, restricted), тип «был в сети» + время, и ОЦЕНОЧНУЮ дату
+    регистрации по user_id (Telegram точную не отдаёт — см. tg_userid_date).
+    Удалённые аккаунты и боты исключаются (это не адресная книга людей).
+    Пустой список = у аккаунта реально нет контактов; сбой чтения — исключение.
     """
     from telethon.tl.functions.contacts import GetContactsRequest
+    from services.tg_userid_date import estimate_registration_date
 
-    client = _make_client(session_string, _acc)
+    # Чтение контактов — низкорисковая одиночная операция: не блокируем из-за
+    # отсутствия/недоступности прокси (в permissive-политике уходит в прямое
+    # соединение, чтобы синхронизация не упиралась в «нужен прокси»).
+    client = _make_client(session_string, _acc, low_risk=True)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(GetContactsRequest(hash=0))
@@ -3066,21 +3112,38 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
         for user in result.users:
             if getattr(user, "deleted", False) or getattr(user, "bot", False):
                 continue
+            last_seen_type, last_seen_at = _classify_last_seen(getattr(user, "status", None))
             contacts.append(
                 {
                     "user_id": user.id,
+                    "access_hash": getattr(user, "access_hash", None),
                     "username": getattr(user, "username", "") or "",
                     "phone": getattr(user, "phone", "") or "",
                     "first_name": getattr(user, "first_name", "") or "",
                     "last_name": getattr(user, "last_name", "") or "",
                     "is_mutual": user.id in mutual_ids,
                     "is_premium": bool(getattr(user, "premium", False)),
+                    "is_verified": bool(getattr(user, "verified", False)),
+                    "is_scam": bool(getattr(user, "scam", False)),
+                    "is_fake": bool(getattr(user, "fake", False)),
+                    "is_restricted": bool(getattr(user, "restricted", False)),
+                    "last_seen_type": last_seen_type,
+                    "last_seen_at": last_seen_at,
+                    "registered_estimate": estimate_registration_date(user.id),
                 }
             )
         return contacts
+    except asyncio.TimeoutError:
+        # asyncio.TimeoutError несёт пустой str() → в UI была бы пустая причина.
+        log.warning("get_contacts timeout (connect)")
+        raise RuntimeError("аккаунт не ответил (таймаут коннекта — проверьте прокси/сессию)")
     except Exception as e:
+        # НЕ глотаем в []: пустой список = «у аккаунта реально нет контактов», а
+        # проглоченный сбой (мёртвая сессия/прокси) выглядел бы так же и маскировал
+        # причину — синхронизация показывала «нет контактов» вместо реальной ошибки.
+        # Пробрасываем; вызывающий (sync_account / инвайтер) либо репортит, либо ловит.
         log.warning("get_contacts error: %s", e)
-        return []
+        raise
     finally:
         try:
             await client.disconnect()

@@ -1136,26 +1136,74 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Accounts ─────────────────────────────────────────────────────────────
 
-    @_cached_user()
+    def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False) -> tuple[str, list]:
+        """Собрать WHERE + args для списка аккаунтов из фильтра здоровья, CRM-статуса
+        и поиска. Возвращает (sql_where, args). Серверная фильтрация снимает
+        100-лимит клиента: срез считается по ВСЕЙ таблице, не по загруженной странице.
+        admin=True — межтенантный просмотр (все аккаунты платформы, без owner-скоупа)."""
+        if admin:
+            clauses = ["TRUE"]
+            args: list = []
+        else:
+            clauses = ["owner_id=$1"]
+            args = [uid]
+        if flt == "active":
+            clauses.append("is_active AND COALESCE(acc_status,'ok') <> 'banned' "
+                           "AND (cooldown_until IS NULL OR cooldown_until <= now())")
+        elif flt == "cooldown":
+            clauses.append("cooldown_until IS NOT NULL AND cooldown_until > now()")
+        elif flt == "banned":
+            clauses.append("COALESCE(acc_status,'ok') = 'banned'")
+        if stage in ACCOUNT_STAGES:
+            args.append(stage)
+            clauses.append(f"stage = ${len(args)}")
+        if q:
+            args.append(f"%{q}%")
+            n = len(args)
+            clauses.append(f"(phone ILIKE ${n} OR first_name ILIKE ${n} OR username ILIKE ${n})")
+        return " AND ".join(clauses), args
+
     async def accounts(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         admin = _is_admin(uid)
-        # Админ видит ВСЕ аккаунты, обычный пользователь — только свои
-        if admin:
-            where_clause = "TRUE"
-            params = []
-        else:
-            where_clause = "owner_id=$1"
-            params = [uid]
+        # Параметры серверной пагинации/фильтрации
+        qs = request.rel_url.query
+        flt = qs.get("filter", "all")
+        if flt not in ("all", "active", "cooldown", "banned"):
+            flt = "all"
+        stage = (qs.get("stage") or "").strip().lower()
+        if stage and stage not in ACCOUNT_STAGES:
+            stage = ""
+        q = (qs.get("q") or "").strip()[:64]
+        try:
+            offset = max(0, int(qs.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
+            limit = min(200, max(1, int(qs.get("limit", 100))))
+        except (TypeError, ValueError):
+            limit = 100
+
+        # admin=True — межтенантный просмотр всех аккаунтов платформы (без owner-скоупа).
+        where, args = _accounts_where(uid, flt, stage, q, admin=admin)
+        page_args = args + [limit, offset]
         rows = await _safe_fetch(pool,
             f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
-                       COALESCE(trust_score, 100) AS trust_score,
-                       COALESCE(acc_status, 'ok') AS acc_status,
-                       cooldown_until, cluster, stage
-                FROM tg_accounts WHERE {where_clause}
-                ORDER BY is_active DESC, last_used DESC NULLS LAST LIMIT 100""", *params)
+                      COALESCE(trust_score, 100) AS trust_score,
+                      COALESCE(acc_status, 'ok') AS acc_status,
+                      cooldown_until, cluster, stage
+               FROM tg_accounts WHERE {where}
+               ORDER BY is_active DESC, last_used DESC NULLS LAST
+               LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)
+        # Сколько всего под текущим фильтром — для пагинации «Загрузить ещё».
+        filtered_total = await _safe_count(pool,
+            f"SELECT COUNT(*) FROM tg_accounts WHERE {where}", *args)
+        filtered_total = int(filtered_total or 0)
+
+        # Серверная агрегация KPI (глобальные счётчики, не срез). Админ — по всей
+        # платформе, обычный пользователь — по своим аккаунтам.
         if admin:
             st = await _safe_fetchrow(pool,
                 """SELECT COUNT(*) AS total,
@@ -1192,7 +1240,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         by_stage = {r["stage"]: int(r["c"] or 0) for r in (stage_rows or [])
                     if r.get("stage") in ACCOUNT_STAGES}
         stats["by_stage"] = by_stage
-        return _json_resp({"accounts": rows, "stats": stats, "admin_view": admin})
+        return _json_resp({
+            "accounts": rows,
+            "stats": stats,
+            "admin_view": admin,
+            "page": {
+                "offset": offset, "limit": limit,
+                "filtered_total": filtered_total,
+                "has_more": offset + len(rows) < filtered_total,
+                "filter": flt, "stage": stage, "q": q,
+            },
+        })
 
     async def account_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -2574,21 +2632,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid request", 400)
         op = body.get("op")
-        ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
-        if not ids_in:
-            return _err("Выберите аккаунты", 400)
         admin = _is_admin(uid)
-        if admin:
+        # Режим «применить ко всему срезу»: id берём не из загруженной страницы,
+        # а резолвим весь набор под текущим фильтром на сервере (тот же WHERE, что
+        # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
+        if body.get("select_all_filtered"):
+            flt = body.get("filter", "all")
+            if flt not in ("all", "active", "cooldown", "banned"):
+                flt = "all"
+            stage = (body.get("stage") or "").strip().lower()
+            if stage and stage not in ACCOUNT_STAGES:
+                stage = ""
+            qterm = (body.get("q") or "").strip()[:64]
+            where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin)
             owned = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[])",
-                ids_in)
+                f"SELECT id FROM tg_accounts WHERE {where} ORDER BY id LIMIT 5000", *wargs)
+            ids = [int(r["id"]) for r in (owned or [])]
+            if not ids:
+                return _err("Под фильтром нет аккаунтов", 404)
         else:
-            owned = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-                uid, ids_in)
-        ids = [int(r["id"]) for r in (owned or [])]
-        if not ids:
-            return _err("Аккаунты не найдены", 404)
+            ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
+            if not ids_in:
+                return _err("Выберите аккаунты", 400)
+            if admin:
+                owned = await _safe_fetch(pool,
+                    "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[])",
+                    ids_in)
+            else:
+                owned = await _safe_fetch(pool,
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                    uid, ids_in)
+            ids = [int(r["id"]) for r in (owned or [])]
+            if not ids:
+                return _err("Аккаунты не найдены", 404)
         n = len(ids)
         try:
             if op == "check":
@@ -3137,6 +3213,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "leave_all_chats", {"account_id": acc_id}, "Выход из всех чатов"
         elif act == "read_all":
             op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
+        elif act == "delete_pm":
+            op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
         else:
             return _err("Неизвестное действие", 400)
         try:
@@ -3148,6 +3226,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
             return _err(str(exc), 500)
+
+    async def account_post_story(request: web.Request) -> web.Response:
+        """Story Manager: опубликовать историю на СВОЙ аккаунт из media_url.
+        body: {media_url, caption?, period_hours?}. Инлайн, немедленный итог."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        media_url = (body.get("media_url") or "").strip()
+        if not media_url:
+            return _err("Укажите ссылку на медиа (фото/видео)", 400)
+        caption = (body.get("caption") or "").strip()
+        period_hours = body.get("period_hours", 24)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import story_manager
+            res = await asyncio.wait_for(
+                story_manager.post_story(acc["session_str"], media_url, caption, period_hours, dict(acc)),
+                timeout=180)
+        except asyncio.TimeoutError:
+            return _err("Публикация не завершилась за 180с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_post_story uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if res.get("ok"):
+            return _json_resp({"ok": True, "status": res.get("status"),
+                               "label": f"✅ История опубликована ({res.get('period_hours', 24)}ч)"})
+        return _err(res.get("error") or "Не удалось опубликовать историю", 400)
 
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
@@ -6133,11 +6249,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         })
 
     async def parsed_audience_export(request: web.Request) -> web.Response:
-        """CSV-экспорт аудитории с теми же фильтрами, что и просмотр."""
+        """Экспорт аудитории с теми же фильтрами, что и просмотр.
+        ?format=csv|txt|json (по умолчанию csv). TXT — @username/id построчно
+        (готово для инвайтера), JSON — полные объекты. Паритет Telegram Expert."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         q = request.rel_url.query
+        fmt = (q.get("format") or "csv").strip().lower()
+        if fmt not in ("csv", "txt", "json"):
+            fmt = "csv"
         filt_sql, filt_params = parsed_audience_filters(q, base_params_count=1)
         try:
             rows = await pool.fetch(
@@ -6150,15 +6271,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("parsed_audience_export uid=%d", uid)
             return _err(str(exc), 500)
-        header = ["tg_user_id", "username", "first_name", "last_name", "phone",
-                  "is_premium", "is_bot", "is_active", "source", "parsed_at"]
-        data = [
-            [r["tg_user_id"], r["username"] or "", r["first_name"] or "", r["last_name"] or "",
-             r["phone"] or "", r["is_premium"], r["is_bot"], r["is_active"],
-             r["source_title"] or "", r["parsed_at"].isoformat() if r["parsed_at"] else ""]
-            for r in rows
-        ]
-        return _csv_resp("parsed_audience.csv", header, data)
+        if fmt == "csv":
+            header = ["tg_user_id", "username", "first_name", "last_name", "phone",
+                      "is_premium", "is_bot", "is_active", "source", "parsed_at"]
+            data = [
+                [r["tg_user_id"], r["username"] or "", r["first_name"] or "", r["last_name"] or "",
+                 r["phone"] or "", r["is_premium"], r["is_bot"], r["is_active"],
+                 r["source_title"] or "", r["parsed_at"].isoformat() if r["parsed_at"] else ""]
+                for r in rows
+            ]
+            return _csv_resp("parsed_audience.csv", header, data)
+        # txt / json — через чистые хелперы parser
+        from services import parser as _parser
+        users = [{
+            "tg_user_id": r["tg_user_id"], "username": r["username"],
+            "first_name": r["first_name"], "last_name": r["last_name"],
+            "phone": r["phone"], "is_premium": r["is_premium"], "is_bot": r["is_bot"],
+            "is_active": r["is_active"], "source_title": r["source_title"],
+            "parsed_at": r["parsed_at"].isoformat() if r["parsed_at"] else "",
+        } for r in rows]
+        if fmt == "txt":
+            body, ctype, fname = _parser.audience_to_txt(users), "text/plain", "parsed_audience.txt"
+        else:
+            body, ctype, fname = _parser.audience_to_json(users), "application/json", "parsed_audience.json"
+        return web.Response(text=body, content_type=ctype, charset="utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"',
+                     "Access-Control-Allow-Origin": "*"})
 
     async def submit_parse_job(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6173,7 +6311,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if not source_ref:
             return _err("source_ref обязателен", 400)
-        if parse_type not in ("members", "active"):
+        if parse_type not in ("members", "active", "comments"):
             parse_type = "members"
         if limit < 1 or limit > 10000:
             limit = 500
@@ -6183,7 +6321,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (TypeError, ValueError):
             days_back = 30
         import json as _json
-        _win = f", {days_back}д" if parse_type == "active" else ""
+        _win = f", {days_back}д" if parse_type in ("active", "comments") else ""
         label = f"Парсинг {parse_type} из @{source_ref} (до {limit}{_win})"
         try:
             op_id = await pool.fetchval(
@@ -9598,15 +9736,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
+            # tg_channels не имеет колонки is_active (есть только id/owner_id/title/
+            # username/...) — раньше SELECT is_active валил эндпоинт 500. Каналы
+            # считаем активными по факту наличия.
             channels = await pool.fetch(
-                "SELECT id, username, title, is_active FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
+                "SELECT id, username, title FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
             )
+            # managed_bots скоупится по added_by, НЕ owner_id (такой колонки нет) —
+            # прежний owner_id=$1 валил эндпоинт 500.
             bots = await pool.fetch(
-                "SELECT bot_id, username, first_name, is_active FROM managed_bots WHERE owner_id=$1 LIMIT 50", uid
+                "SELECT bot_id, username, first_name, is_active FROM managed_bots WHERE added_by=$1 LIMIT 50", uid
             )
             nodes = []
             for ch in channels:
-                nodes.append({"id": f"ch_{ch['id']}", "type": "channel", "name": ch['username'] or ch['title'] or f"#{ch['id']}", "active": ch['is_active']})
+                nodes.append({"id": f"ch_{ch['id']}", "type": "channel", "name": ch['username'] or ch['title'] or f"#{ch['id']}", "active": True})
             for b in bots:
                 nodes.append({"id": f"bot_{b['bot_id']}", "type": "bot", "name": f"@{b['username']}" if b['username'] else b['first_name'] or f"#{b['bot_id']}", "active": b['is_active']})
             return _json_resp({"nodes": nodes})
@@ -9985,6 +10128,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
     app.router.add_post("/api/miniapp/account/{acc_id}/spamblock_appeal", account_spamblock_appeal)
+    app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
@@ -10237,9 +10381,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Только команда самого пользователя: он сам + участники рабочих
             # пространств, которыми он владеет или в которых состоит.
             # НЕЛЬЗЯ отдавать весь список platform_users — это утечка данных.
+            # platform_users не имеет created_at/last_active_at — реальные колонки
+            # registered_at/last_seen (schema_v39). Раньше этот запрос падал
+            # `column "created_at" does not exist` и экран «Команда» отдавал 500.
+            # Алиасим, чтобы фронт-контракт (created_at/last_active_at) не менялся.
             rows = await pool.fetch(
                 """SELECT DISTINCT pu.user_id, pu.username, pu.first_name,
-                          pu.current_plan, pu.created_at, pu.last_active_at
+                          pu.current_plan,
+                          pu.registered_at AS created_at,
+                          pu.last_seen AS last_active_at
                    FROM platform_users pu
                    WHERE pu.user_id = $1
                       OR pu.user_id IN (

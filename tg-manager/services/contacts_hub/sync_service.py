@@ -40,6 +40,17 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
             display_name = f"{first_name} {last_name}".strip()
             phones = [c['phone']] if c.get('phone') else []
             is_premium = bool(c.get('is_premium'))
+            is_verified = bool(c.get('is_verified'))
+            is_mutual = bool(c.get('is_mutual'))
+            reg_est = c.get('registered_estimate')  # 'YYYY-MM-DD' | None
+            last_seen_type = c.get('last_seen_type')
+            last_seen_at = c.get('last_seen_at')  # ISO str | None
+            # Полный сырой снимок всех полей — в digital_footprint (не теряем данные,
+            # даже если под них ещё нет отдельной колонки).
+            footprint = json.dumps({k: c.get(k) for k in (
+                'is_scam', 'is_fake', 'is_restricted', 'access_hash',
+                'last_seen_type', 'last_seen_at', 'registered_estimate',
+            )})
 
             existing = await pool.fetchrow(
                 'SELECT id FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2',
@@ -47,18 +58,24 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
             if existing:
                 await pool.execute(
                     'UPDATE unified_contacts SET username=$1, first_name=$2, last_name=$3, display_name=$4, '
-                    'phones=$5::jsonb, is_premium=$6, last_synced_at=NOW(), updated_at=NOW() WHERE id=$7',
+                    'phones=$5::jsonb, is_premium=$6, is_verified=$7, is_mutual=$8, '
+                    'registered_estimate=$9::date, last_seen_type=$10, '
+                    'last_seen_at=$11::timestamptz, digital_footprint=$12::jsonb, '
+                    'last_synced_at=NOW(), updated_at=NOW() WHERE id=$13',
                     username, first_name, last_name, display_name,
-                    json.dumps(phones), is_premium, existing['id'])
+                    json.dumps(phones), is_premium, is_verified, is_mutual,
+                    reg_est, last_seen_type, last_seen_at, footprint, existing['id'])
                 updated += 1
             else:
                 contact_id = str(__import__('uuid').uuid4())
                 await pool.execute(
                     'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, '
-                    'last_name, display_name, phones, is_premium, last_synced_at) '
-                    'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,NOW())',
+                    'last_name, display_name, phones, is_premium, is_verified, is_mutual, '
+                    'registered_estimate, last_seen_type, last_seen_at, digital_footprint, last_synced_at) '
+                    'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12::date,$13,$14::timestamptz,$15::jsonb,NOW())',
                     contact_id, owner_id, user_id, username, first_name,
-                    last_name, display_name, json.dumps(phones), is_premium)
+                    last_name, display_name, json.dumps(phones), is_premium,
+                    is_verified, is_mutual, reg_est, last_seen_type, last_seen_at, footprint)
                 await pool.execute(
                     'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) '
                     'VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING',

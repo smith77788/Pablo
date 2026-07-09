@@ -7,19 +7,26 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
-  --bg:var(--tg-theme-bg-color,#17212b);
-  --bg2:var(--tg-theme-secondary-bg-color,#242f3d);
-  --text:var(--tg-theme-text-color,#f5f5f5);
-  --hint:var(--tg-theme-hint-color,#6d7f8f);
-  --btn:var(--tg-theme-button-color,#2b5278);
-  --btn-text:var(--tg-theme-button-text-color,#fff);
-  --accent:var(--tg-theme-accent-text-color,#6ab2f2);
-  --sep:rgba(255,255,255,.08);
-  --bg-input:rgba(255,255,255,.06);--border-input:rgba(255,255,255,.12);--bg-select:rgba(30,30,40,.9);
+  --bg:var(--tg-theme-bg-color,#0e1621);
+  --bg2:var(--tg-theme-secondary-bg-color,#17212b);
+  --text:var(--tg-theme-text-color,#f5f7fa);
+  --hint:var(--tg-theme-hint-color,#7d8ea0);
+  /* Бренд-акцент Infragram — бирюза/изумруд (единый вид, как в топовых панелях) */
+  --accent:#2dd4bf;
+  --accent-2:#14b8a6;
+  --btn:linear-gradient(135deg,#2dd4bf,#0ea5a4);
+  --btn-solid:#14b8a6;
+  --btn-text:#04211d;
+  --sep:rgba(255,255,255,.09);
+  --border:rgba(255,255,255,.10);
+  --shadow:0 2px 10px rgba(0,0,0,.28);
+  --shadow-lg:0 10px 34px rgba(0,0,0,.42);
+  --glow:0 4px 18px rgba(45,212,191,.28);
+  --bg-input:rgba(255,255,255,.06);--border-input:rgba(255,255,255,.12);--bg-select:rgba(20,26,34,.94);
   --bg-blue-16:rgba(59,130,246,.16);--bg-green-16:rgba(34,197,94,.16);--bg-purple-16:rgba(168,85,247,.16);--bg-yellow-16:rgba(245,158,11,.16);--bg-red-16:rgba(239,68,68,.16);--bg-violet-16:rgba(139,92,246,.16);--bg-red-18:rgba(239,68,68,.18);
-  --green:#4fae4e;--orange:#e8a73a;--purple:#b07be8;--red:#e53935;--blue:#5b8def;--teal:#2bbbad;--purple-light:#a78bfa;
-  --tab-h:56px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
-  --radius:12px;--radius-lg:16px;
+  --green:#34d399;--orange:#fbbf24;--purple:#c084fc;--red:#f87171;--blue:#60a5fa;--teal:#2dd4bf;--purple-light:#a78bfa;
+  --tab-h:58px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
+  --radius:14px;--radius-lg:18px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI','Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.35}
@@ -212,10 +219,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .act-ico-yellow{background:var(--bg-yellow-16)}
 .act-ico-red{background:var(--bg-red-16)}
 .note-bg{background:var(--bg);border-radius:12px;padding:14px;min-height:60px}
-.input-bc{width:100%;padding:10px;border-radius:12px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical}
-.input-bc-l{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical}
-.input-l{width:100%;padding:11px 12px;border-radius:12px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
-.input-flex{flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+/* Рамка/радиус выровнены с каноническим стилем полей (.field input, стр. ~196:
+   1px / var(--radius)) — раньше эти классы имели 1.5px и 12/10px, из-за чего
+   ~8 полей выглядели иначе остальных ~278. Фон --bg-input оставлен намеренно
+   (полупрозрачный слой для контраста в этих контекстах). */
+.input-bc{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical}
+.input-bc-l{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical}
+.input-l{width:100%;padding:11px 12px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+.input-flex{flex:1;padding:10px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
 
 /* ─── Activity feed ──────────────────────────────────────────── */
 .act{padding:9px 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--sep)}
@@ -329,6 +340,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .kpi-col{background:var(--bg2);padding:9px 5px;text-align:center}
 .kpi-val{font-size:18px;font-weight:700;letter-spacing:-.3px}
 .kpi-lbl{font-size:10px;color:var(--hint);margin-top:1px;line-height:1.2}
+/* .kpi-card — standalone stat-карточка (в *Stats-контейнерах модулей). Раньше
+   класс использовался ~77 раз, но НЕ был определён → статы на ~15 экранах
+   рендерились без фона/паддинга/радиуса, тогда как на экране аккаунтов
+   (.acc-kpi-card) и в .kpi-bar (.kpi-col) карточки были оформлены. Единый вид. */
+.kpi-card{background:var(--bg2);border-radius:var(--radius);padding:9px 12px;text-align:center;flex-shrink:0;min-width:70px}
+/* .op-progress-* — живой прогресс операций (SSE) на дашборде. Классы
+   использовались, но не были определены → лейбл и % слипались, элементы не
+   разделялись. Приводим к единому виду. */
+.op-progress-item{padding:6px 0;border-bottom:1px solid var(--sep)}
+.op-progress-item:last-child{border-bottom:none}
+.op-progress-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.op-progress-label{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op-progress-pct{font-size:13px;font-weight:700;color:var(--accent);flex-shrink:0}
+.op-progress-bar{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--hint);margin-top:3px;letter-spacing:-.5px}
+/* .hint — приглушённый текст подсказок/empty-state (использовался без определения) */
+.hint{color:var(--hint);font-size:13px}
 
 /* ─── Bot cards grid ─────────────────────────────────────── */
 .bot-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 16px 0}
@@ -421,6 +448,42 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .qa-tile-ico svg{width:22px;height:22px;display:block}
 .qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2}
 .qa-tile-val{font-size:16px;font-weight:700;margin-top:1px}
+
+/* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
+/* Тонкий фирменный фон-глоу только для тёмной темы — не портит светлую */
+@media (prefers-color-scheme: dark){
+  body{background:
+     radial-gradient(1200px 380px at 50% -140px, rgba(45,212,191,.10), transparent 70%),
+     var(--bg);}
+  .screen{background:transparent}
+}
+/* Первичная кнопка — бирюзовый градиент + мягкое свечение */
+.btn-p{background:var(--btn);color:var(--btn-text);font-weight:700;box-shadow:var(--glow);border:none}
+.btn-p:active{transform:translateY(1px) scale(.99);box-shadow:0 2px 8px rgba(45,212,191,.24)}
+.btn-s{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
+.btn-s:active{background:rgba(255,255,255,.05)}
+/* Карточки/списки/плитки — глубина: тонкая рамка + мягкая тень + лифт при тапе */
+.card,.lst,.mgmt-tile,.qa-tile{border-color:var(--border);box-shadow:var(--shadow)}
+.card{transition:transform .14s ease,box-shadow .14s ease}
+.card:active{transform:translateY(1px) scale(.98);box-shadow:var(--shadow-lg)}
+.mgmt-tile:active,.qa-tile:active{box-shadow:var(--shadow-lg)}
+.mgmt-tile-ico,.qa-tile-ico{background:linear-gradient(145deg,rgba(45,212,191,.16),rgba(14,165,164,.06));box-shadow:inset 0 0 0 1px rgba(45,212,191,.10)}
+.mgmt-tile-val{color:var(--accent)}
+/* Иконки-аватары — насыщеннее */
+.ava-teal{background:rgba(45,212,191,.16);color:var(--teal)}
+.ava-green{background:rgba(52,211,153,.16);color:var(--green)}
+/* Заголовки секций — uppercase с трекингом (как в продвинутых панелях) */
+.sec{text-transform:uppercase;letter-spacing:.08em;font-size:11.5px;color:var(--hint);opacity:.9}
+/* Заголовок экрана — полупрозрачный с размытием (стеклянный) */
+.hdr{background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:saturate(140%) blur(12px);-webkit-backdrop-filter:saturate(140%) blur(12px);border-bottom:1px solid var(--border)}
+.back{border-color:var(--border)}
+.back:active{background:var(--sep);transform:scale(.92)}
+/* Прогресс-бар — градиент акцента */
+.prog-fill{background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+/* Поля ввода в фокусе — бирюзовая обводка + мягкое кольцо */
+.field textarea:focus,.field input:focus,.field select:focus,.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.16)}
+/* Нижняя навигация — активный таб бирюзовый */
+.nav-item.on{background:rgba(45,212,191,.12);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -648,9 +711,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
+    <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
+    <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="accLoadMore" style="padding:6px 0 0"></div>
     <div class="sec-row" style="margin-top:12px">
       <div class="sec">📡 Каналы и чаты</div>
       <span class="sec-btn" onclick="openChannels()">Открыть →</span>
@@ -663,6 +729,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="sel-bar-top">
         <span id="accSelCount">Выбрано: 0</span>
         <span class="sel-bar-link" onclick="accSelAll()">Все</span>
+        <span class="sel-bar-link" id="accSelWholeLink" onclick="accSelWholeFilter()">Весь срез</span>
         <span class="sel-bar-link" onclick="accSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
@@ -3733,6 +3800,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
     <div class="sec" style="margin-top:16px">Безопасность</div>
     <div class="card" style="padding:14px 16px">
+      <div style="padding:8px 0;border-bottom:1px solid var(--sep)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:14px">🛡 Политика прокси</span>
+          <select id="set-proxy-policy" style="background:var(--bg2);border:1px solid var(--sep);border-radius:8px;color:var(--text);padding:6px 10px;font-size:13px">
+            <option value="allow_direct">Можно без прокси (риск)</option>
+            <option value="strict">Только через прокси</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:var(--hint);margin-top:6px">«Только через прокси» — массовые действия без прокси блокируются (защита от банов). «Можно без прокси» — работают и без прокси, но с риском блокировок. Одиночные чтения (напр. контакты) прокси не требуют в любом режиме.</div>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">🔐 Webhook Secret</span>
         <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">Изменить</button>
@@ -4225,6 +4302,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <select id="parserType" onchange="parserTypeToggle()" style="width:100%;background:var(--bg);border:1px solid var(--sep);border-radius:8px;padding:10px;color:var(--text);font-size:15px">
         <option value="members">👥 Все участники</option>
         <option value="active">🔥 Активные (писали недавно)</option>
+        <option value="comments">💬 Комментаторы канала</option>
       </select>
     </div>
     <div class="field" id="parserDaysField" style="display:none">
@@ -5516,20 +5594,19 @@ async function submitAccMeta() {
 }
 // Массовое перемещение в статус
 function openMassStage() {
-  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }
   const e=document.getElementById('msErr'); if(e) e.textContent='';
   showModal('mo-acc-stage');
 }
 async function submitMassStage() {
   const err=document.getElementById('msErr'); err.textContent='';
   const stage=document.getElementById('msStage').value;
-  const ids=[...ACC_SEL];
-  if(!ids.length){ err.textContent='Не выбраны аккаунты'; return; }
+  if(!_massSelCount()){ err.textContent='Не выбраны аккаунты'; return; }
   const btn=document.getElementById('msBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
-    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', account_ids:ids, stage})});
+    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', stage, ..._massSel()})});
     const nm = stage ? (ACC_STAGES[stage]?ACC_STAGES[stage].label:stage) : 'без статуса';
-    toast(`✅ Перемещено в «${nm}»: ${r.count||ids.length}`);
+    toast(`✅ Перемещено в «${nm}»: ${r.count||_massSelCount()}`);
     closeModal('mo-acc-stage'); toggleAccSelMode(); loadAccounts();
   } catch(e){ err.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Применить'; }
@@ -5592,9 +5669,9 @@ async function submitAccProfile() {
   try {
     let r;
     if (AP_MASS) {
-      payload.account_ids = [...ACC_SEL];
+      Object.assign(payload, _massSel());
       r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify(payload)});
-      toast(`✅ Поставлено в очередь для ${r.count||payload.account_ids.length} аккаунтов`);
+      toast(`✅ Поставлено в очередь для ${r.count||_massSelCount()} аккаунтов`);
       closeModal('mo-acc-profile');
       toggleAccSelMode();
     } else {
@@ -5667,6 +5744,16 @@ async function checkAccount(id) {
     if(r.op_id) pollOpResult(r.op_id, 'Проверка аккаунта');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
+async function postStory(id) {
+  const media_url = ((await askPrompt('Фото/видео для истории', {placeholder:'http/https ссылка'}))||'').trim();
+  if(!media_url) return;
+  const caption = ((await askPrompt('Подпись к истории', {placeholder:'необязательно', multiline:true}))||'').trim();
+  toast('📸 Публикую историю…');
+  try {
+    const r = await api(`/api/miniapp/account/${id}/post_story`,{method:'POST',body:JSON.stringify({media_url,caption,period_hours:24})});
+    toast(r.label || '✅ История опубликована');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,90)); }
+}
 async function appealSpamblock(id) {
   if(!await askConfirm('Запросить снятие спамблока через @SpamBot для этого аккаунта?')) return;
   toast('🛡 Обращаюсь к @SpamBot…');
@@ -5699,15 +5786,19 @@ async function massCheckAccounts() {
 }
 async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
-  api('/api/miniapp/accounts').then(ad => {
+  api(_accQuery(0)).then(ad => {
     CUR_ACCS = ad.accounts||[];
-    // Истинное число из серверной агрегации (список ограничен LIMIT 100)
+    ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
+    ACC_OFFSET = CUR_ACCS.length;
+    // Истинное число из серверной агрегации (страница ограничена LIMIT)
     const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
     document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
     txt('m-acc-cnt', cnt+' аккаунтов');
     updateAccKpi(CUR_ACCS, ad.stats);
     renderStageChips(ad.stats && ad.stats.by_stage);
-    renderAccounts(_accFiltered());
+    renderAccounts(CUR_ACCS);
+    renderLoadMore(ad.page);
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
@@ -5773,20 +5864,82 @@ function phoneFlag(phone) {
 
 let ACC_FILTER = 'all';
 let ACC_STAGE_FILTER = '';   // '' = все статусы
+let ACC_SEARCH = '';
+let ACC_OFFSET = 0;
+let ACC_HAS_MORE = false;
+let ACC_FILTERED_TOTAL = 0;   // всего под текущим срезом (page.filtered_total)
+let ACC_LOADING = false;
+let _accSearchT = null;
+
+function _accQuery(offset) {
+  const p = new URLSearchParams();
+  if (ACC_FILTER && ACC_FILTER!=='all') p.set('filter', ACC_FILTER);
+  if (ACC_STAGE_FILTER) p.set('stage', ACC_STAGE_FILTER);
+  if (ACC_SEARCH) p.set('q', ACC_SEARCH);
+  p.set('offset', offset); p.set('limit', 100);
+  return '/api/miniapp/accounts?'+p.toString();
+}
+// Перезагрузить срез с сервера (offset=0). Серверная фильтрация — срез считается
+// по ВСЕЙ таблице, не по загруженным 100.
+async function reloadAccounts() {
+  try {
+    const ad = await api(_accQuery(0));
+    CUR_ACCS = ad.accounts||[];
+    ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
+    ACC_OFFSET = CUR_ACCS.length;
+    updateAccKpi(CUR_ACCS, ad.stats);
+    renderStageChips(ad.stats && ad.stats.by_stage);
+    renderAccounts(CUR_ACCS);
+    renderLoadMore(ad.page);
+    if (ACC_SEL_MODE) updateAccSelBar();
+  } catch(e) {
+    document.getElementById('accList').innerHTML=errHtml(e.message,'reloadAccounts()');
+  }
+}
+async function loadMoreAccounts() {
+  if (ACC_LOADING || !ACC_HAS_MORE) return;
+  ACC_LOADING = true;
+  const box=document.getElementById('accLoadMore');
+  if(box) box.innerHTML='<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  try {
+    const ad = await api(_accQuery(ACC_OFFSET));
+    const more = ad.accounts||[];
+    CUR_ACCS = CUR_ACCS.concat(more);
+    ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
+    ACC_OFFSET += more.length;
+    renderAccounts(CUR_ACCS);
+    renderLoadMore(ad.page);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+  finally { ACC_LOADING=false; }
+}
+function renderLoadMore(page) {
+  const box=document.getElementById('accLoadMore'); if(!box) return;
+  if (page && page.has_more) {
+    const shown = ACC_OFFSET, tot = page.filtered_total||0;
+    box.innerHTML = `<button class="btn btn-s" onclick="loadMoreAccounts()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${shown} из ${tot}</button>`;
+  } else { box.innerHTML=''; }
+}
+function onAccSearch(v) {
+  ACC_SEARCH = (v||'').trim();
+  clearTimeout(_accSearchT);
+  _accSearchT = setTimeout(reloadAccounts, 350);
+}
 
 function filterAcc(mode, btn) {
   ACC_FILTER = mode;
   document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x=>x.classList.remove('on'));
   btn.classList.add('on');
-  renderAccounts(_accFiltered());
+  reloadAccounts();
 }
-// Срез по CRM-статусу (комбинируется с фильтром здоровья)
+// Срез по CRM-статусу (комбинируется с фильтром здоровья, серверно)
 function filterStage(stage) {
   ACC_STAGE_FILTER = (ACC_STAGE_FILTER===stage) ? '' : stage;  // повторный клик снимает
   document.querySelectorAll('#stageChips .st-chip').forEach(x=>{
     x.classList.toggle('on', x.getAttribute('data-stage')===ACC_STAGE_FILTER);
   });
-  renderAccounts(_accFiltered());
+  reloadAccounts();
 }
 function renderStageChips(byStage) {
   const box = document.getElementById('stageChips');
@@ -5812,7 +5965,12 @@ function updateAccKpi(list, stats) {
 
 function renderAccounts(list) {
   const el = document.getElementById('accList');
-  if (!list.length) { el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram'); return; }
+  if (!list.length) {
+    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
+    else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram');
+    return;
+  }
   el.innerHTML = list.map(a=>{
     const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
     const phone = a.phone || '';
@@ -5852,6 +6010,7 @@ let ACC_SEL = new Set();
 function toggleAccSelMode() {
   ACC_SEL_MODE = !ACC_SEL_MODE;
   ACC_SEL.clear();
+  ACC_SEL_ALL_FILTERED = false;
   const btn = document.getElementById('accSelToggle');
   if (btn) btn.textContent = ACC_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
   document.getElementById('accSelBar').style.display = ACC_SEL_MODE ? '' : 'none';
@@ -5859,53 +6018,69 @@ function toggleAccSelMode() {
   updateAccSelBar();
 }
 function _accFiltered() {
-  // текущий активный фильтр KPI (здоровье)
-  const active = document.querySelector('.acc-kpi-card.on');
-  const f = active ? active.getAttribute('data-filter') : 'all';
-  let list = CUR_ACCS;
-  if (f==='active') list = list.filter(a=>a.is_active && a.acc_status!=='banned' && !isOnCooldown(a));
-  else if (f==='cooldown') list = list.filter(a=>isOnCooldown(a));
-  else if (f==='banned') list = list.filter(a=>a.acc_status==='banned');
-  // срез по CRM-статусу (комбинируется с фильтром здоровья)
-  if (ACC_STAGE_FILTER) list = list.filter(a=>a.stage===ACC_STAGE_FILTER);
-  return list;
+  // Фильтрация теперь серверная (reloadAccounts) — CUR_ACCS уже содержит только
+  // аккаунты текущего среза (фильтр здоровья + CRM-статус + поиск), поэтому
+  // клиентского дофильтра нет. Функция сохранена: её зовёт режим выбора.
+  return CUR_ACCS;
 }
 function toggleAccSel(id) {
   if (ACC_SEL.has(id)) ACC_SEL.delete(id); else ACC_SEL.add(id);
   renderAccounts(_accFiltered());
   updateAccSelBar();
 }
+let ACC_SEL_ALL_FILTERED = false;  // применять масс-действие ко всему срезу (не только к загруженным)
 function accSelAll() {
+  ACC_SEL_ALL_FILTERED = false;
   _accFiltered().forEach(a=>ACC_SEL.add(a.id));
   renderAccounts(_accFiltered());
   updateAccSelBar();
 }
 function accSelClear() {
   ACC_SEL.clear();
+  ACC_SEL_ALL_FILTERED = false;
   renderAccounts(_accFiltered());
+  updateAccSelBar();
+}
+// Выбрать ВЕСЬ срез под фильтром (серверно, снимает 100-лимит выделения)
+function accSelWholeFilter() {
+  ACC_SEL_ALL_FILTERED = !ACC_SEL_ALL_FILTERED;
   updateAccSelBar();
 }
 function updateAccSelBar() {
   const el = document.getElementById('accSelCount');
-  if (el) el.textContent = 'Выбрано: '+ACC_SEL.size;
+  if (el) el.textContent = ACC_SEL_ALL_FILTERED
+    ? 'Весь срез: '+(ACC_FILTERED_TOTAL||0)
+    : 'Выбрано: '+ACC_SEL.size;
+  const w = document.getElementById('accSelWholeLink');
+  if (w) { w.textContent = ACC_SEL_ALL_FILTERED ? '✓ Весь срез' : 'Весь срез'; w.classList.toggle('on', ACC_SEL_ALL_FILTERED); }
+}
+// Селектор для масс-действия: либо конкретные id, либо весь серверный срез.
+function _massSel() {
+  if (ACC_SEL_ALL_FILTERED) {
+    return {select_all_filtered: true, filter: ACC_FILTER, stage: ACC_STAGE_FILTER, q: ACC_SEARCH};
+  }
+  return {account_ids: [...ACC_SEL]};
+}
+function _massSelCount() {
+  return ACC_SEL_ALL_FILTERED ? (ACC_FILTERED_TOTAL||0) : ACC_SEL.size;
 }
 async function runAccMass(op) {
-  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
-  const ids = [...ACC_SEL];
+  const n = _massSelCount();
+  if (!n) { toast('Выберите хотя бы один аккаунт'); return; }
   const confirmMsg = op==='leave_all'
-    ? `Выйти из всех чатов на ${ids.length} аккаунтах? Действие необратимо.`
-    : op==='scan' ? `Сканировать ресурсы на ${ids.length} аккаунтах?`
-    : op==='check' ? `Проверить ${ids.length} аккаунтов?` : null;
+    ? `Выйти из всех чатов на ${n} аккаунтах? Действие необратимо.`
+    : op==='scan' ? `Сканировать ресурсы на ${n} аккаунтах?`
+    : op==='check' ? `Проверить ${n} аккаунтов?` : null;
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
-    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, account_ids:ids})});
-    const cnt = r.count||ids.length;
+    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
+    const cnt = r.count||n;
     toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
     toggleAccSelMode();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 function openMassProfile() {
-  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }
   AP_MASS = true;
   const e=document.getElementById('apErr'); if(e) e.textContent='';
   document.getElementById('apOp').value='name';
@@ -6042,6 +6217,8 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
       <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
+      <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
+      <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
       <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
       <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
       <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
@@ -8783,6 +8960,10 @@ async function openSeo() {
 let CONTACT_FILTER = null;
 function openContacts() { push('s-contacts'); txt('contactsList','<div class="spin-wrap"><div class="spin"></div></div>'); loadContacts(); loadContactStats(); }
 
+function lastSeenLabel(t) {
+  return ({online:'🟢 в сети', recently:'недавно', last_week:'на этой неделе',
+    last_month:'в этом месяце', offline:'был давно'})[t] || '';
+}
 async function loadContacts() {
   const q = (document.getElementById('contactSearch')?.value||'').trim();
   let url;
@@ -8803,12 +8984,19 @@ async function loadContacts() {
     txt('contactsList', contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
       const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
+      const meta = [
+        c.registered_estimate ? '📅 ≈'+String(c.registered_estimate).slice(0,7) : '',
+        c.is_verified ? '✅ verified' : '',
+        c.is_mutual ? '↔ взаимный' : '',
+        lastSeenLabel(c.last_seen_type),
+      ].filter(Boolean).join(' · ');
       const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${esc(c.id)}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
       return `<div class="li tap" ${sel} onclick="${CONTACT_SELECT_MODE?'':'openContactDetail(\''+esc(c.id)+'\')'}">
         <div class="ava" style="background:${c.color_label||'rgba(59,130,246,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
         <div class="li-body">
           <div class="li-name">${esc(name)} ${c.is_favorite?'⭐':''}</div>
           <div class="li-sub">${esc(sub)}</div>
+          ${meta?`<div class="li-sub" style="opacity:.7;font-size:11px">${esc(meta)}</div>`:''}
         </div>
         ${CONTACT_SELECT_MODE?'':`<div class="li-right"><span class="chev">›</span></div>`}
       </div>`;
@@ -8844,7 +9032,7 @@ function toggleContactCheck(id, el) {
 }
 
 async function bulkTagSelected() {
-  const tag = prompt('Тег:');
+  const tag = await askPrompt('Тег', {placeholder:'название тега'});
   if (!tag) return;
   try {
     await api('/api/miniapp/uch/bulk/tag', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], tag})});
@@ -8866,7 +9054,7 @@ async function bulkFavSelected() {
 }
 
 async function bulkDeleteSelected() {
-  if (!confirm('Удалить '+CONTACT_SELECTED.size+' контактов?')) return;
+  if (!await askConfirm('Удалить '+CONTACT_SELECTED.size+' контактов?')) return;
   try {
     await api('/api/miniapp/uch/bulk/delete', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED]})});
     toast('🗑 Удалено');
@@ -8907,6 +9095,10 @@ async function openContactDetail(id) {
       ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
       ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
+      ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(String(c.registered_estimate))}</div></div></div>`:''}
+      ${lastSeenLabel(c.last_seen_type)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
+      ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Verified</div></div></div>`:''}
+      ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${c.phones&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
       ${c.emails&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Email</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
@@ -9011,7 +9203,7 @@ async function saveContactEdit(id) {
 }
 
 async function deleteContact(id) {
-  if (!confirm('Удалить контакт?')) return;
+  if (!await askConfirm('Удалить контакт?')) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id, {method:'DELETE'});
     toast('🗑 Контакт удалён');
@@ -9072,7 +9264,7 @@ async function openContactVersions(id) {
 }
 
 async function rollbackVersion(id, vnum) {
-  if (!confirm('Откатить к версии '+vnum+'?')) return;
+  if (!await askConfirm('Откатить к версии '+vnum+'?')) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum, {method:'POST'});
     toast('✅ Контакт откачен к v'+vnum);
@@ -9185,8 +9377,9 @@ async function syncContacts() {
       toast('⚠️ '+d.message);
       const det = (d.details||[]).filter(x=>!x.ok);
       if (det.length) {
-        const lines = det.slice(0,6).map(x=>`• ${esc(x.account)}: ${esc(x.reason||'ошибка')}`).join('\n');
-        alert('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
+        // showInfo — plain text (Telegram showAlert), без HTML-экранирования
+        const lines = det.slice(0,6).map(x=>`• ${x.account}: ${x.reason||'ошибка'}`).join('\n');
+        showInfo('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
           + (det.length>6?`\n… ещё ${det.length-6}`:''));
       }
     } else {
@@ -9213,7 +9406,7 @@ async function detectDuplicates() {
 }
 
 async function mergeContacts(primary, secondary) {
-  if (!confirm('Объединить контакты?')) return;
+  if (!await askConfirm('Объединить контакты?')) return;
   try {
     await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
     toast('✅ Контакты объединены');
@@ -11032,8 +11225,9 @@ function audFilterQS() {
   return qs;
 }
 function toggleAudFilter(k) { AUD_FILTERS[k] = !AUD_FILTERS[k]; loadParsedAudience(AUD_SOURCE); }
-function exportAudience() {
-  const url = '/api/miniapp/parser/audience/export?token='+encodeURIComponent(TK)+audFilterQS();
+function exportAudience(fmt) {
+  const f = (fmt==='txt'||fmt==='json') ? fmt : 'csv';
+  const url = '/api/miniapp/parser/audience/export?format='+f+'&token='+encodeURIComponent(TK)+audFilterQS();
   if (tg?.openLink) tg.openLink(location.origin+url); else window.open(url,'_blank');
 }
 async function loadParsedAudience(source) {
@@ -11050,7 +11244,9 @@ async function loadParsedAudience(source) {
       ${chip('with_phone','📱 С телефоном'+(sl.with_phone!=null?' '+num(sl.with_phone):''))}
       ${chip('active','🔥 Активные'+(sl.active!=null?' '+num(sl.active):''))}
       ${chip('not_bot','🚫🤖 Не боты')}
-      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience()">📥 CSV</button>
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('csv')">📥 CSV</button>
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('txt')" title="@username/id построчно — для инвайтера">📄 TXT</button>
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('json')">🗂 JSON</button>
     </div>`;
     const header = `<div class="sec" style="margin-bottom:4px">Найдено: ${num(d.total)}</div>`;
     if (!users.length) { txt('parserAudList', filterBar+header+empty('👥','Пусто','Нет пользователей под фильтр')); return; }
@@ -11074,8 +11270,10 @@ function openParserModal() {
   document.getElementById('parserMbg').classList.add('show');
 }
 function parserTypeToggle() {
-  const active = document.getElementById('parserType').value==='active';
-  document.getElementById('parserDaysField').style.display = active?'block':'none';
+  // окно активности нужно и для «Активные», и для «Комментаторы»
+  const t = document.getElementById('parserType').value;
+  const windowed = (t==='active' || t==='comments');
+  document.getElementById('parserDaysField').style.display = windowed?'block':'none';
 }
 function closeParserModal() { document.getElementById('parserMbg').classList.remove('show'); }
 async function submitParser() {
@@ -13198,6 +13396,49 @@ function askConfirm(msg) {
     res(window.confirm(msg));
   });
 }
+// showInfo — стилизованное информ-сообщение (замена нативного alert). Использует
+// Telegram showAlert (нативный стиль платформы), fallback на window.alert.
+function showInfo(msg) {
+  return new Promise(res => {
+    try {
+      if (tg && tg.showAlert) { tg.showAlert(String(msg), () => res()); return; }
+    } catch(_) {}
+    window.alert(msg); res();
+  });
+}
+// askPrompt — промис-модалка ввода текста (замена нативного prompt). Строится на
+// тех же классах .mbg/.modal, что и остальные модалки → единый вид. Значения
+// задаём через свойства (без экранирования атрибутов). Возвращает строку или null.
+function askPrompt(title, opts) {
+  opts = opts || {};
+  return new Promise(res => {
+    const bg = document.createElement('div');
+    bg.className = 'mbg show';
+    bg.style.zIndex = '9999';
+    const fieldTag = opts.multiline
+      ? '<textarea id="_apf" class="input-bc" rows="3"></textarea>'
+      : '<input id="_apf" class="input-l" type="text">';
+    bg.innerHTML = '<div class="modal"><div class="modal-title">' + esc(title || 'Ввод') + '</div>'
+      + fieldTag
+      + '<div style="display:flex;gap:8px;margin-top:12px">'
+      + '<button class="btn btn-d" id="_apc" style="flex:1">Отмена</button>'
+      + '<button class="btn btn-p" id="_apo" style="flex:1">OK</button>'
+      + '</div></div>';
+    document.body.appendChild(bg);
+    const inp = bg.querySelector('#_apf');
+    inp.value = opts.value || '';
+    inp.placeholder = opts.placeholder || '';
+    const done = v => { try { document.body.removeChild(bg); } catch(_) {} res(v); };
+    bg.querySelector('#_apo').onclick = () => done(inp.value);
+    bg.querySelector('#_apc').onclick = () => done(null);
+    bg.onclick = e => { if (e.target === bg) done(null); };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !opts.multiline) { e.preventDefault(); done(inp.value); }
+      if (e.key === 'Escape') done(null);
+    });
+    setTimeout(() => { try { inp.focus(); } catch(_) {} }, 50);
+  });
+}
 function showModal(id) {
   const el=document.getElementById(id);
   if(el) el.classList.add('show');
@@ -13231,11 +13472,16 @@ async function openSettings() {
   setChk('set-utc-logs', s.utc_logs, false);
   const langEl = document.getElementById('set-lang');
   if (langEl) langEl.value = s.lang || 'ru';
+  const ppEl = document.getElementById('set-proxy-policy');
+  if (ppEl) ppEl.value = s.proxy_policy || 'allow_direct';
   txt('set-save-msg','');
   txt('set-err','');
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
-    await api('/api/miniapp/settings');
+    // Политика прокси действует на бэке (get_proxy_policy) — берём её значение
+    // из серверных настроек, чтобы тумблер отражал реально применяемый режим.
+    const backend = await api('/api/miniapp/settings');
+    if (backend && ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
   } catch(e) {/* ok, settings from local */}
 }
 async function saveSettings() {
@@ -13246,6 +13492,7 @@ async function saveSettings() {
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
     utc_logs: document.getElementById('set-utc-logs')?.checked ?? false,
     lang: document.getElementById('set-lang')?.value || 'ru',
+    proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };
   _saveLocalSettings(s);
   try {

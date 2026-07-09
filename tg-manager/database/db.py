@@ -2732,11 +2732,35 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
     )
 
 
+async def get_proxy_policy(pool, owner_id: int | None) -> str:
+    """Политика прокси владельца: 'strict' (все соединения только через прокси)
+    | 'allow_direct' (можно без прокси, риск блокировок). Хранится в
+    platform_users.settings_json.proxy_policy; по умолчанию 'allow_direct'."""
+    from services.proxy_policy import normalize_policy
+    if not owner_id:
+        return normalize_policy(None)
+    try:
+        raw = await pool.fetchval(
+            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    except Exception:
+        return normalize_policy(None)
+    if not raw:
+        return normalize_policy(None)
+    try:
+        import json as _json
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        return normalize_policy((data or {}).get("proxy_policy"))
+    except Exception:
+        return normalize_policy(None)
+
+
 async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = None):
-    """Fetch account dict with device fingerprint + proxy_url for _make_client."""
+    """Fetch account dict with device fingerprint + proxy_url + owner proxy_policy
+    for _make_client. Возвращает dict (не Record), чтобы можно было доложить
+    proxy_policy — вычисляемое поле, которого нет в таблице."""
     if owner_id is not None:
-        return await pool.fetchrow(
-            """SELECT a.id, a.session_str, a.phone, a.first_name,
+        row = await pool.fetchrow(
+            """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
                       a.lang_code, a.system_lang_code,
                       a.proxy_id, p.proxy_url, p.geo_country
@@ -2746,16 +2770,22 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
             acc_id,
             owner_id,
         )
-    return await pool.fetchrow(
-        """SELECT a.id, a.session_str, a.phone, a.first_name,
-                  a.device_model, a.system_version, a.app_version,
-                  a.lang_code, a.system_lang_code,
-                  a.proxy_id, p.proxy_url, p.geo_country
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.id=$1""",
-        acc_id,
-    )
+    else:
+        row = await pool.fetchrow(
+            """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
+                      a.device_model, a.system_version, a.app_version,
+                      a.lang_code, a.system_lang_code,
+                      a.proxy_id, p.proxy_url, p.geo_country
+               FROM tg_accounts a
+               LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+               WHERE a.id=$1""",
+            acc_id,
+        )
+    if row is None:
+        return None
+    d = dict(row)
+    d["proxy_policy"] = await get_proxy_policy(pool, d.get("owner_id"))
+    return d
 
 
 async def add_tg_account(
@@ -6511,3 +6541,41 @@ async def set_autoreg_device_profile(
              SET manufacturer=$2, app_version=$3, updated_at=NOW()""",
         owner_id, manufacturer, app_version,
     )
+
+
+async def apply_account_stage_event(pool: asyncpg.Pool, account_id: int, event: str) -> int:
+    """Авто-переход CRM-стадии аккаунта на событии жизненного цикла.
+
+    Идемпотентно и БЕЗ пред-чтения строки: из stage_flow берём (целевая стадия,
+    список исходных стадий) и делаем ОДИН UPDATE ... WHERE stage IN (<sources>).
+    Так авто-переход НЕ перетирает вручную выставленные стадии (frozen/reserve/…)
+    — они просто не попадают в набор исходных. Возвращает число обновлённых строк.
+
+    Не переживает отсутствие колонки stage (лаг миграции schema_v147) — тогда
+    тихий no-op (как defensive-фолбэки proxy_fp)."""
+    from services.stage_flow import stage_sources_for_event
+
+    target, sources = stage_sources_for_event(event)
+    if not target or not sources:
+        return 0
+    real = [s for s in sources if s]
+    include_empty = "" in sources
+    conds: list[str] = []
+    args: list = [account_id, target]
+    if real:
+        args.append(real)
+        conds.append(f"stage = ANY(${len(args)}::text[])")
+    if include_empty:
+        conds.append("(stage IS NULL OR stage = '')")
+    where_stage = " OR ".join(conds) if conds else "FALSE"
+    try:
+        res = await pool.execute(
+            f"UPDATE tg_accounts SET stage=$2 WHERE id=$1 AND ({where_stage})",
+            *args,
+        )
+    except asyncpg.UndefinedColumnError:
+        return 0
+    try:
+        return int(str(res).split()[-1])
+    except (ValueError, IndexError):
+        return 0
