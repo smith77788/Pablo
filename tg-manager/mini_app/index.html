@@ -336,6 +336,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .kpi-col{background:var(--bg2);padding:9px 5px;text-align:center}
 .kpi-val{font-size:18px;font-weight:700;letter-spacing:-.3px}
 .kpi-lbl{font-size:10px;color:var(--hint);margin-top:1px;line-height:1.2}
+/* .kpi-card — standalone stat-карточка (в *Stats-контейнерах модулей). Раньше
+   класс использовался ~77 раз, но НЕ был определён → статы на ~15 экранах
+   рендерились без фона/паддинга/радиуса, тогда как на экране аккаунтов
+   (.acc-kpi-card) и в .kpi-bar (.kpi-col) карточки были оформлены. Единый вид. */
+.kpi-card{background:var(--bg2);border-radius:var(--radius);padding:9px 12px;text-align:center;flex-shrink:0;min-width:70px}
+/* .op-progress-* — живой прогресс операций (SSE) на дашборде. Классы
+   использовались, но не были определены → лейбл и % слипались, элементы не
+   разделялись. Приводим к единому виду. */
+.op-progress-item{padding:6px 0;border-bottom:1px solid var(--sep)}
+.op-progress-item:last-child{border-bottom:none}
+.op-progress-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.op-progress-label{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op-progress-pct{font-size:13px;font-weight:700;color:var(--accent);flex-shrink:0}
+.op-progress-bar{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--hint);margin-top:3px;letter-spacing:-.5px}
+/* .hint — приглушённый текст подсказок/empty-state (использовался без определения) */
+.hint{color:var(--hint);font-size:13px}
 
 /* ─── Bot cards grid ─────────────────────────────────────── */
 .bot-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 16px 0}
