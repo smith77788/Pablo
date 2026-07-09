@@ -775,18 +775,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        JOIN workspace_members wm ON wm.workspace_id=w.id
                        WHERE wm.user_id=$2
                    )
-               )""", bot_id, uid)
+                )""", bot_id, uid)
         if not owns:
             return _err("Bot not found", 404)
-        rows = await _safe_fetch(pool,
-            """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, f.created_at,
-                      COUNT(fs.id) AS total_subs,
-                      COUNT(fs.id) FILTER (WHERE fs.completed=false) AS active_subs
-                FROM funnels f
-                LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
-                WHERE f.bot_id=$1
-                GROUP BY f.id ORDER BY f.created_at DESC""", bot_id)
-        return _json_resp({"funnels": rows})
+        trigger_type = body.get("trigger_type", "keyword")
+        keyword = body.get("keyword", "").strip()
+        response_text = body.get("response_text", "").strip()
+        if not response_text:
+            return _err("response_text required", 400)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text, is_active)
+                   VALUES ($1,$2,$3,$4,TRUE) RETURNING id""",
+                bot_id, trigger_type, keyword or None, response_text)
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception as e:
+            log.warning("create_auto_reply bot=%d: %s", bot_id, e)
+            return _err("Failed to create auto reply", 500)
 
     async def toggle_auto_reply(request: web.Request) -> web.Response:
         uid = _get_uid(request)
