@@ -767,11 +767,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, f.created_at,
                       COUNT(fs.id) AS total_subs,
                       COUNT(fs.id) FILTER (WHERE fs.completed=false) AS active_subs
-               FROM funnels f
-               LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
-               WHERE f.bot_id=$1
-               GROUP BY f.id ORDER BY f.created_at DESC""", bot_id)
+                FROM funnels f
+                LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
+                WHERE f.bot_id=$1
+                GROUP BY f.id ORDER BY f.created_at DESC""", bot_id)
         return _json_resp({"funnels": rows})
+
+    async def toggle_auto_reply(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            reply_id = int(request.match_info["reply_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid reply_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE auto_replies SET is_active = NOT is_active
+                   WHERE id=$1 AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)
+                   RETURNING id, is_active""",
+                reply_id, uid)
+            if not row:
+                return _err("Not found", 404)
+            return _json_resp({"ok": True, "is_active": row["is_active"]})
+        except Exception:
+            return _err("Failed to toggle", 500)
+
+    async def delete_auto_reply(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            reply_id = int(request.match_info["reply_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid reply_id", 400)
+        try:
+            await pool.execute(
+                """DELETE FROM auto_replies WHERE id=$1
+                   AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)""",
+                reply_id, uid)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to delete", 500)
 
     async def toggle_funnel(request: web.Request) -> web.Response:
         uid = _get_uid(request)
