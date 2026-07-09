@@ -6229,11 +6229,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         })
 
     async def parsed_audience_export(request: web.Request) -> web.Response:
-        """CSV-экспорт аудитории с теми же фильтрами, что и просмотр."""
+        """Экспорт аудитории с теми же фильтрами, что и просмотр.
+        ?format=csv|txt|json (по умолчанию csv). TXT — @username/id построчно
+        (готово для инвайтера), JSON — полные объекты. Паритет Telegram Expert."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         q = request.rel_url.query
+        fmt = (q.get("format") or "csv").strip().lower()
+        if fmt not in ("csv", "txt", "json"):
+            fmt = "csv"
         filt_sql, filt_params = parsed_audience_filters(q, base_params_count=1)
         try:
             rows = await pool.fetch(
@@ -6246,15 +6251,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("parsed_audience_export uid=%d", uid)
             return _err(str(exc), 500)
-        header = ["tg_user_id", "username", "first_name", "last_name", "phone",
-                  "is_premium", "is_bot", "is_active", "source", "parsed_at"]
-        data = [
-            [r["tg_user_id"], r["username"] or "", r["first_name"] or "", r["last_name"] or "",
-             r["phone"] or "", r["is_premium"], r["is_bot"], r["is_active"],
-             r["source_title"] or "", r["parsed_at"].isoformat() if r["parsed_at"] else ""]
-            for r in rows
-        ]
-        return _csv_resp("parsed_audience.csv", header, data)
+        if fmt == "csv":
+            header = ["tg_user_id", "username", "first_name", "last_name", "phone",
+                      "is_premium", "is_bot", "is_active", "source", "parsed_at"]
+            data = [
+                [r["tg_user_id"], r["username"] or "", r["first_name"] or "", r["last_name"] or "",
+                 r["phone"] or "", r["is_premium"], r["is_bot"], r["is_active"],
+                 r["source_title"] or "", r["parsed_at"].isoformat() if r["parsed_at"] else ""]
+                for r in rows
+            ]
+            return _csv_resp("parsed_audience.csv", header, data)
+        # txt / json — через чистые хелперы parser
+        from services import parser as _parser
+        users = [{
+            "tg_user_id": r["tg_user_id"], "username": r["username"],
+            "first_name": r["first_name"], "last_name": r["last_name"],
+            "phone": r["phone"], "is_premium": r["is_premium"], "is_bot": r["is_bot"],
+            "is_active": r["is_active"], "source_title": r["source_title"],
+            "parsed_at": r["parsed_at"].isoformat() if r["parsed_at"] else "",
+        } for r in rows]
+        if fmt == "txt":
+            body, ctype, fname = _parser.audience_to_txt(users), "text/plain", "parsed_audience.txt"
+        else:
+            body, ctype, fname = _parser.audience_to_json(users), "application/json", "parsed_audience.json"
+        return web.Response(text=body, content_type=ctype, charset="utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"',
+                     "Access-Control-Allow-Origin": "*"})
 
     async def submit_parse_job(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -6269,7 +6291,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if not source_ref:
             return _err("source_ref обязателен", 400)
-        if parse_type not in ("members", "active"):
+        if parse_type not in ("members", "active", "comments"):
             parse_type = "members"
         if limit < 1 or limit > 10000:
             limit = 500
@@ -6279,7 +6301,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (TypeError, ValueError):
             days_back = 30
         import json as _json
-        _win = f", {days_back}д" if parse_type == "active" else ""
+        _win = f", {days_back}д" if parse_type in ("active", "comments") else ""
         label = f"Парсинг {parse_type} из @{source_ref} (до {limit}{_win})"
         try:
             op_id = await pool.fetchval(

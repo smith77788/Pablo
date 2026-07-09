@@ -7902,6 +7902,10 @@ async def _exec_parse_audience(
             result = await _parser.parse_active_users(
                 pool, owner_id, source_ref, days_back=days_back, limit=limit
             )
+        elif parse_type == "comments":
+            result = await _parser.parse_commenters(
+                pool, owner_id, source_ref, days_back=days_back, limit=limit
+            )
         else:
             result = await _parser.parse_members(pool, owner_id, source_ref, limit=limit)
 

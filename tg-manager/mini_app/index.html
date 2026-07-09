@@ -4287,6 +4287,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <select id="parserType" onchange="parserTypeToggle()" style="width:100%;background:var(--bg);border:1px solid var(--sep);border-radius:8px;padding:10px;color:var(--text);font-size:15px">
         <option value="members">👥 Все участники</option>
         <option value="active">🔥 Активные (писали недавно)</option>
+        <option value="comments">💬 Комментаторы канала</option>
       </select>
     </div>
     <div class="field" id="parserDaysField" style="display:none">
@@ -11166,8 +11167,9 @@ function audFilterQS() {
   return qs;
 }
 function toggleAudFilter(k) { AUD_FILTERS[k] = !AUD_FILTERS[k]; loadParsedAudience(AUD_SOURCE); }
-function exportAudience() {
-  const url = '/api/miniapp/parser/audience/export?token='+encodeURIComponent(TK)+audFilterQS();
+function exportAudience(fmt) {
+  const f = (fmt==='txt'||fmt==='json') ? fmt : 'csv';
+  const url = '/api/miniapp/parser/audience/export?format='+f+'&token='+encodeURIComponent(TK)+audFilterQS();
   if (tg?.openLink) tg.openLink(location.origin+url); else window.open(url,'_blank');
 }
 async function loadParsedAudience(source) {
@@ -11184,7 +11186,9 @@ async function loadParsedAudience(source) {
       ${chip('with_phone','📱 С телефоном'+(sl.with_phone!=null?' '+num(sl.with_phone):''))}
       ${chip('active','🔥 Активные'+(sl.active!=null?' '+num(sl.active):''))}
       ${chip('not_bot','🚫🤖 Не боты')}
-      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience()">📥 CSV</button>
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('csv')">📥 CSV</button>
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('txt')" title="@username/id построчно — для инвайтера">📄 TXT</button>
+      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('json')">🗂 JSON</button>
     </div>`;
     const header = `<div class="sec" style="margin-bottom:4px">Найдено: ${num(d.total)}</div>`;
     if (!users.length) { txt('parserAudList', filterBar+header+empty('👥','Пусто','Нет пользователей под фильтр')); return; }
@@ -11208,8 +11212,10 @@ function openParserModal() {
   document.getElementById('parserMbg').classList.add('show');
 }
 function parserTypeToggle() {
-  const active = document.getElementById('parserType').value==='active';
-  document.getElementById('parserDaysField').style.display = active?'block':'none';
+  // окно активности нужно и для «Активные», и для «Комментаторы»
+  const t = document.getElementById('parserType').value;
+  const windowed = (t==='active' || t==='comments');
+  document.getElementById('parserDaysField').style.display = windowed?'block':'none';
 }
 function closeParserModal() { document.getElementById('parserMbg').classList.remove('show'); }
 async function submitParser() {
