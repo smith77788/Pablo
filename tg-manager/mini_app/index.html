@@ -5735,9 +5735,9 @@ async function checkAccount(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function postStory(id) {
-  const media_url = (prompt('Ссылка на фото/видео для истории (http/https):')||'').trim();
+  const media_url = ((await askPrompt('Фото/видео для истории', {placeholder:'http/https ссылка'}))||'').trim();
   if(!media_url) return;
-  const caption = (prompt('Подпись к истории (необязательно):')||'').trim();
+  const caption = ((await askPrompt('Подпись к истории', {placeholder:'необязательно', multiline:true}))||'').trim();
   toast('📸 Публикую историю…');
   try {
     const r = await api(`/api/miniapp/account/${id}/post_story`,{method:'POST',body:JSON.stringify({media_url,caption,period_hours:24})});
@@ -8984,7 +8984,7 @@ function toggleContactCheck(id, el) {
 }
 
 async function bulkTagSelected() {
-  const tag = prompt('Тег:');
+  const tag = await askPrompt('Тег', {placeholder:'название тега'});
   if (!tag) return;
   try {
     await api('/api/miniapp/uch/bulk/tag', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], tag})});
@@ -9006,7 +9006,7 @@ async function bulkFavSelected() {
 }
 
 async function bulkDeleteSelected() {
-  if (!confirm('Удалить '+CONTACT_SELECTED.size+' контактов?')) return;
+  if (!await askConfirm('Удалить '+CONTACT_SELECTED.size+' контактов?')) return;
   try {
     await api('/api/miniapp/uch/bulk/delete', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED]})});
     toast('🗑 Удалено');
@@ -9151,7 +9151,7 @@ async function saveContactEdit(id) {
 }
 
 async function deleteContact(id) {
-  if (!confirm('Удалить контакт?')) return;
+  if (!await askConfirm('Удалить контакт?')) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id, {method:'DELETE'});
     toast('🗑 Контакт удалён');
@@ -9212,7 +9212,7 @@ async function openContactVersions(id) {
 }
 
 async function rollbackVersion(id, vnum) {
-  if (!confirm('Откатить к версии '+vnum+'?')) return;
+  if (!await askConfirm('Откатить к версии '+vnum+'?')) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum, {method:'POST'});
     toast('✅ Контакт откачен к v'+vnum);
@@ -9325,8 +9325,9 @@ async function syncContacts() {
       toast('⚠️ '+d.message);
       const det = (d.details||[]).filter(x=>!x.ok);
       if (det.length) {
-        const lines = det.slice(0,6).map(x=>`• ${esc(x.account)}: ${esc(x.reason||'ошибка')}`).join('\n');
-        alert('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
+        // showInfo — plain text (Telegram showAlert), без HTML-экранирования
+        const lines = det.slice(0,6).map(x=>`• ${x.account}: ${x.reason||'ошибка'}`).join('\n');
+        showInfo('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
           + (det.length>6?`\n… ещё ${det.length-6}`:''));
       }
     } else {
@@ -9353,7 +9354,7 @@ async function detectDuplicates() {
 }
 
 async function mergeContacts(primary, secondary) {
-  if (!confirm('Объединить контакты?')) return;
+  if (!await askConfirm('Объединить контакты?')) return;
   try {
     await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
     toast('✅ Контакты объединены');
@@ -13341,6 +13342,49 @@ function askConfirm(msg) {
       if (tg && tg.showConfirm) { tg.showConfirm(msg, ok => res(!!ok)); return; }
     } catch(_) {}
     res(window.confirm(msg));
+  });
+}
+// showInfo — стилизованное информ-сообщение (замена нативного alert). Использует
+// Telegram showAlert (нативный стиль платформы), fallback на window.alert.
+function showInfo(msg) {
+  return new Promise(res => {
+    try {
+      if (tg && tg.showAlert) { tg.showAlert(String(msg), () => res()); return; }
+    } catch(_) {}
+    window.alert(msg); res();
+  });
+}
+// askPrompt — промис-модалка ввода текста (замена нативного prompt). Строится на
+// тех же классах .mbg/.modal, что и остальные модалки → единый вид. Значения
+// задаём через свойства (без экранирования атрибутов). Возвращает строку или null.
+function askPrompt(title, opts) {
+  opts = opts || {};
+  return new Promise(res => {
+    const bg = document.createElement('div');
+    bg.className = 'mbg show';
+    bg.style.zIndex = '9999';
+    const fieldTag = opts.multiline
+      ? '<textarea id="_apf" class="input-bc" rows="3"></textarea>'
+      : '<input id="_apf" class="input-l" type="text">';
+    bg.innerHTML = '<div class="modal"><div class="modal-title">' + esc(title || 'Ввод') + '</div>'
+      + fieldTag
+      + '<div style="display:flex;gap:8px;margin-top:12px">'
+      + '<button class="btn btn-d" id="_apc" style="flex:1">Отмена</button>'
+      + '<button class="btn btn-p" id="_apo" style="flex:1">OK</button>'
+      + '</div></div>';
+    document.body.appendChild(bg);
+    const inp = bg.querySelector('#_apf');
+    inp.value = opts.value || '';
+    inp.placeholder = opts.placeholder || '';
+    const done = v => { try { document.body.removeChild(bg); } catch(_) {} res(v); };
+    bg.querySelector('#_apo').onclick = () => done(inp.value);
+    bg.querySelector('#_apc').onclick = () => done(null);
+    bg.onclick = e => { if (e.target === bg) done(null); };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !opts.multiline) { e.preventDefault(); done(inp.value); }
+      if (e.key === 'Escape') done(null);
+    });
+    setTimeout(() => { try { inp.focus(); } catch(_) {} }, 50);
   });
 }
 function showModal(id) {
