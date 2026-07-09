@@ -5667,6 +5667,16 @@ async function checkAccount(id) {
     if(r.op_id) pollOpResult(r.op_id, 'Проверка аккаунта');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
+async function postStory(id) {
+  const media_url = (prompt('Ссылка на фото/видео для истории (http/https):')||'').trim();
+  if(!media_url) return;
+  const caption = (prompt('Подпись к истории (необязательно):')||'').trim();
+  toast('📸 Публикую историю…');
+  try {
+    const r = await api(`/api/miniapp/account/${id}/post_story`,{method:'POST',body:JSON.stringify({media_url,caption,period_hours:24})});
+    toast(r.label || '✅ История опубликована');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,90)); }
+}
 async function appealSpamblock(id) {
   if(!await askConfirm('Запросить снятие спамблока через @SpamBot для этого аккаунта?')) return;
   toast('🛡 Обращаюсь к @SpamBot…');
@@ -6042,6 +6052,7 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
       <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
+      <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
       <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
       <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
       <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>

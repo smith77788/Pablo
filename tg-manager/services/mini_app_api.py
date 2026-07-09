@@ -3149,6 +3149,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
             return _err(str(exc), 500)
 
+    async def account_post_story(request: web.Request) -> web.Response:
+        """Story Manager: опубликовать историю на СВОЙ аккаунт из media_url.
+        body: {media_url, caption?, period_hours?}. Инлайн, немедленный итог."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        media_url = (body.get("media_url") or "").strip()
+        if not media_url:
+            return _err("Укажите ссылку на медиа (фото/видео)", 400)
+        caption = (body.get("caption") or "").strip()
+        period_hours = body.get("period_hours", 24)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import story_manager
+            res = await asyncio.wait_for(
+                story_manager.post_story(acc["session_str"], media_url, caption, period_hours, dict(acc)),
+                timeout=180)
+        except asyncio.TimeoutError:
+            return _err("Публикация не завершилась за 180с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_post_story uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if res.get("ok"):
+            return _json_resp({"ok": True, "status": res.get("status"),
+                               "label": f"✅ История опубликована ({res.get('period_hours', 24)}ч)"})
+        return _err(res.get("error") or "Не удалось опубликовать историю", 400)
+
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
         Инлайн, немедленный результат (реабилитация своего аккаунта)."""
@@ -9985,6 +10023,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
     app.router.add_post("/api/miniapp/account/{acc_id}/spamblock_appeal", account_spamblock_appeal)
+    app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
