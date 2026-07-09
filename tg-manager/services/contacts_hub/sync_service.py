@@ -76,13 +76,25 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
 
 
 async def sync_all_accounts(pool, owner_id: int) -> dict:
+    # НЕ фильтруем по is_active: аккаунт мог быть деактивирован health-проверкой,
+    # но его сессия всё ещё валидна для ЧТЕНИЯ контактов (безопасная операция).
+    # Раньше is_active=TRUE отсекал такие аккаунты → пользователь видел их в
+    # разделе «Аккаунты», а контакты показывали «0» → «модуль не работает».
     accounts = await pool.fetch(
-        'SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE '
-        'AND session_str IS NOT NULL', owner_id)
+        "SELECT id, phone, first_name, is_active FROM tg_accounts "
+        "WHERE owner_id=$1 AND session_str IS NOT NULL AND session_str <> ''",
+        owner_id)
     accounts_found = len(accounts)
     if not accounts_found:
-        # Явная диагностика вместо немого «0» — самая частая причина «модуль не
-        # работает»: нет ни одного активного аккаунта с сессией для чтения контактов.
+        # Отдельно считаем аккаунты вообще (в т.ч. без сессии), чтобы отличить
+        # «нет аккаунтов» от «есть, но без сохранённой сессии».
+        any_acc = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", owner_id) or 0
+        msg = ('Нет аккаунтов с сохранённой сессией. Подключите аккаунт в разделе '
+               '«Аккаунты» (вход по номеру телефона), затем синхронизируйте контакты.'
+               if any_acc == 0 else
+               f'Найдено аккаунтов: {any_acc}, но ни у одного нет сохранённой сессии '
+               '— переавторизуйте их в разделе «Аккаунты».')
         return {
             'accounts_found': 0,
             'accounts_synced': 0,
@@ -90,11 +102,12 @@ async def sync_all_accounts(pool, owner_id: int) -> dict:
             'total_created': 0,
             'total_updated': 0,
             'errors': [],
-            'message': 'Нет активных аккаунтов с сессией. Подключите аккаунт '
-                       'в разделе «Аккаунты», затем синхронизируйте контакты.',
+            'details': [],
+            'message': msg,
         }
 
     sem = asyncio.Semaphore(_SYNC_CONCURRENCY)
+    by_id = {a['id']: a for a in accounts}
 
     async def _one(acc_id: int) -> dict:
         async with sem:
@@ -106,17 +119,25 @@ async def sync_all_accounts(pool, owner_id: int) -> dict:
 
     results = await asyncio.gather(*[_one(a['id']) for a in accounts])
 
+    # Пер-аккаунт детализация — чтобы пользователь (и мы) видели, ЧТО именно
+    # произошло с каждым аккаунтом, а не только агрегат.
+    details = []
+    for acc, res in zip(accounts, results):
+        label = acc['first_name'] or acc['phone'] or f"#{acc['id']}"
+        if res.get('error'):
+            details.append({'account': label, 'ok': False, 'reason': res['error']})
+        else:
+            details.append({'account': label, 'ok': True, 'synced': res.get('synced', 0)})
+
     total_synced = sum(r.get('synced', 0) for r in results)
     total_created = sum(r.get('created', 0) for r in results)
     total_updated = sum(r.get('updated', 0) for r in results)
     errors = [r.get('error') for r in results if r.get('error')]
-    # Понятное сообщение, когда аккаунты есть, но контактов не получено (мёртвые
-    # сессии / недоступные прокси) — чтобы «0» не выглядел как молчаливая поломка.
     message = None
     if total_synced == 0:
         if errors:
             message = ('Аккаунты найдены, но контакты не получены. Вероятно, '
-                       'сессии устарели или прокси недоступны — проверьте аккаунты.')
+                       'сессии устарели или прокси недоступны — проверьте детали ниже.')
         else:
             message = 'Синхронизация прошла: у аккаунтов нет контактов для импорта.'
     return {
@@ -126,5 +147,6 @@ async def sync_all_accounts(pool, owner_id: int) -> dict:
         'total_created': total_created,
         'total_updated': total_updated,
         'errors': errors,
+        'details': details,
         'message': message,
     }

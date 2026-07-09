@@ -1292,6 +1292,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_auto_register(pool, bot, op_id, owner_id, params)
             elif op_type == "leave_all_chats":
                 result = await _exec_leave_all_chats(pool, bot, op_id, owner_id, params)
+            elif op_type == "read_all_dialogs":
+                result = await _exec_read_all_dialogs(pool, bot, op_id, owner_id, params)
             elif op_type == "delete_contacts":
                 result = await _exec_delete_contacts(pool, bot, op_id, owner_id, params)
             elif op_type == "run_broadcast":
@@ -8421,6 +8423,67 @@ async def _exec_leave_all_chats(
         "left": left,
         "failed": failed,
         "summary": f"🚪 Выход из чатов: ✅ {left} успешно" + (f" ❌ {failed}" if failed else ""),
+    }
+
+
+async def _exec_read_all_dialogs(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Пометить все диалоги аккаунта прочитанными (send_read_acknowledge).
+    Естественное «дочитывание» непрочитанного — снижает риск-сигналы у аккаунта.
+    params: {account_id: int}
+    """
+    from services import account_manager
+
+    account_id = params.get("account_id")
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            int(account_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+
+    client = account_manager._make_client(acc["session_str"], dict(acc))
+    read = 0
+    failed = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+        # wait_for: мёртвый прокси/half-open сокет иначе подвешивает операцию навсегда.
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=300), timeout=60)
+        # Только непрочитанные — не трогаем то, что уже прочитано.
+        unread = [d for d in dialogs if getattr(d, "unread_count", 0)]
+        total = len(unread)
+        await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+        for d in unread:
+            if await _is_cancelled(pool, op_id):
+                break
+            try:
+                await asyncio.wait_for(client.send_read_acknowledge(d.entity), timeout=30)
+                read += 1
+            except Exception as exc:
+                log.debug("read_all_dialogs: skip %s: %s", getattr(d, "id", "?"), exc)
+                failed += 1
+            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await asyncio.sleep(0.8)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception as e:
+            log_exc_swallow(log, f"read_all_dialogs: client disconnect failed for acc {account_id}: {e}")
+
+    return {
+        "status": "done",
+        "read": read,
+        "failed": failed,
+        "summary": f"📖 Прочитано диалогов: ✅ {read}" + (f" ❌ {failed}" if failed else ""),
     }
 
 

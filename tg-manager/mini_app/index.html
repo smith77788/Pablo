@@ -6008,6 +6008,7 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
       <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
+      <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
       <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
       <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
       <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
@@ -9147,8 +9148,14 @@ async function syncContacts() {
     if ((d.total_synced||0) > 0) {
       toast(`✅ Синхронизировано: ${d.total_synced} контактов, создано: ${d.total_created||0}`);
     } else if (d.message) {
-      // Явная причина нулевого результата (нет аккаунтов / мёртвые сессии / нет контактов)
+      // Явная причина нулевого результата + детализация по аккаунтам (если есть)
       toast('⚠️ '+d.message);
+      const det = (d.details||[]).filter(x=>!x.ok);
+      if (det.length) {
+        const lines = det.slice(0,6).map(x=>`• ${esc(x.account)}: ${esc(x.reason||'ошибка')}`).join('\n');
+        alert('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
+          + (det.length>6?`\n… ещё ${det.length-6}`:''));
+      }
     } else {
       toast('✅ Синхронизация завершена: новых контактов нет');
     }
@@ -10818,16 +10825,18 @@ async function openStrike() {
       </div>`);
     }
 
-    // Stats
+    // Stats — реальные метрики эффективности из завершённых страйков
     const ops = hist.operations||[];
-    const done = ops.filter(o=>o.status==='done').length;
-    const running = ops.filter(o=>['running','pending'].includes(o.status)).length;
-    const processed = ops.reduce((s,o)=>s+(o.processed||0),0);
+    const doneOps = ops.filter(o=>o.status==='done');
+    const running = ops.filter(o=>o.in_progress).length;
+    const totalReports = doneOps.reduce((s,o)=>s+((o.metrics&&o.metrics.reports_total)||0),0);
+    const downCount = doneOps.filter(o=>o.metrics&&o.metrics.verified_down).length;
     document.getElementById('strikeStats').innerHTML=`
       <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${done}</div><div class="kpi-lbl">Завершено</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${doneOps.length}</div><div class="kpi-lbl">Завершено</div></div>
       <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#f59e0b">${running}</div><div class="kpi-lbl">В работе</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${num(processed)}</div><div class="kpi-lbl">Репортов</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:var(--red)">${num(totalReports)}</div><div class="kpi-lbl">Жалоб</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${downCount}</div><div class="kpi-lbl">Целей снято</div></div>
     `;
 
     if (!ops.length) {
@@ -10836,14 +10845,28 @@ async function openStrike() {
     }
     txt('strikeList', ops.map(op=>{
       const [cls,lbl]=stb(op.status);
-      const pct = op.total ? Math.round(op.processed/op.total*100) : 0;
-      const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
-      return `<div class="row">
+      if (op.in_progress) {
+        const pct = op.total ? Math.round(op.processed/op.total*100) : 0;
+        const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
+        return `<div class="row">
+          <div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div>
+          <div class="row-body">
+            <div class="row-name">${esc(op.label)}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} акк. · ${ago(op.created_at)}</div>
+            ${bar}
+          </div>
+        </div>`;
+      }
+      // Завершённый страйк — показываем РЕАЛЬНУЮ эффективность
+      const m = op.metrics||{};
+      const downBadge = m.verified_down ? '<span class="badge b-gr">🎯 цель снята</span>'
+        : (m.blocked ? '<span class="badge b-gy">заблокирован</span>' : '');
+      const escBadge = m.spambot_escalation ? ' · 🤖 SpamBot-эскалация' : '';
+      return `<div class="row" style="cursor:default">
         <div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div>
         <div class="row-body">
-          <div class="row-name">${esc(op.label)}</div>
-          <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} репортов · ${ago(op.created_at)}</div>
-          ${bar}
+          <div class="row-name">${esc(op.label)} ${downBadge}</div>
+          <div class="row-val">💥 ${num(m.reports_total||0)} жалоб · ${num(m.accounts_used||0)} акк.${m.admins_reported?` · 👤 админов: ${num(m.admins_reported)}`:''}${m.network_reports?` · 🕸 сеть: ${num(m.network_reports)}`:''}${escBadge} · ${ago(op.created_at)}</div>
         </div>
       </div>`;
     }).join(''));
