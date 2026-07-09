@@ -810,6 +810,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Failed to delete", 500)
 
+    async def bot_funnels(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        rows = await _safe_fetch(pool,
+            """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, f.created_at,
+                      COUNT(fs.id) AS total_subs,
+                      COUNT(fs.id) FILTER (WHERE fs.completed=false) AS active_subs
+               FROM funnels f
+               LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
+               WHERE f.bot_id=$1
+               GROUP BY f.id ORDER BY f.created_at DESC""", bot_id)
+        return _json_resp({"funnels": rows})
+
     async def toggle_funnel(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
