@@ -21,6 +21,13 @@ from services.pacing_engine import get_pacing_engine
 
 log = logging.getLogger(__name__)
 
+# Autopost v2: op_type'ы, которым разрешена рекуррентная переочередь (постинг в
+# СВОИ каналы/ботов). Аккаунт-действия сюда НЕ входят — чтобы не зациклить.
+_RECURRING_OK_OPS = frozenset({
+    "quick_post", "mass_publish", "bulk_post_chans", "bulk_post_to_channel",
+    "network_broadcast", "run_broadcast", "group_announce", "pin_last_post",
+})
+
 
 # ── Safe DB helpers ──────────────────────────────────────────────────────────
 # All DB calls in the worker must be wrapped to prevent a single query failure
@@ -1167,6 +1174,15 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     log, f"Сбой отправки уведомления о запуске операции #{op_id}"
                 )
 
+            # Праймим per-owner политику прокси в кэш account_manager, чтобы
+            # массовые исполнители (словари аккаунтов несут owner_id) применяли
+            # выбор владельца strict/allow_direct, а не только процессный дефолт.
+            try:
+                from services import account_manager as _am
+                _am.set_owner_proxy_policy(owner_id, await db.get_proxy_policy(pool, owner_id))
+            except Exception:
+                log_exc_swallow(log, f"prime proxy_policy op#{op_id}")
+
             # Запустить фоновый монитор прогресса для длинных операций
             progress_task = asyncio.create_task(
                 _progress_monitor(pool, bot, op_id, owner_id, op_type)
@@ -1409,6 +1425,41 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _final_status,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
+            # Autopost v2: рекуррентная переочередь постинг-операций в СВОИ каналы.
+            # repeat_interval_min>0 → после успешного прогона ставим следующий с
+            # scheduled_for=now()+interval. Только постинг-op'ы (allowlist) — чтобы
+            # аккаунт-действия не зациклились. repeat_count (если задан) декрементим.
+            if _final_status == "done" and op_type in _RECURRING_OK_OPS:
+                try:
+                    _rmin = int(params.get("repeat_interval_min") or 0)
+                except (TypeError, ValueError):
+                    _rmin = 0
+                if _rmin > 0:
+                    _rcount = params.get("repeat_count")
+                    _go = True
+                    _next_params = dict(params)
+                    if _rcount is not None:
+                        try:
+                            _rc = int(_rcount) - 1
+                        except (TypeError, ValueError):
+                            _rc = 0
+                        _next_params["repeat_count"] = _rc
+                        _go = _rc > 0
+                    if _go:
+                        try:
+                            _row = await pool.fetchrow(
+                                "SELECT label, total_items FROM operation_queue WHERE id=$1", op_id)
+                            await pool.execute(
+                                "INSERT INTO operation_queue(owner_id, op_type, status, params, "
+                                "total_items, label, scheduled_for) "
+                                "VALUES($1,$2,'pending',$3::jsonb,$4,$5, now() + make_interval(mins => $6))",
+                                owner_id, op_type, json.dumps(_next_params, ensure_ascii=False),
+                                (_row["total_items"] if _row else 0),
+                                (_row["label"] if _row else op_type) + " ↻",
+                                _rmin,
+                            )
+                        except Exception as _e:
+                            log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
             # Audit trail: write operation completion to operation_audit.
             # Outcome согласован с финальным статусом — провал не пишется как success.
             _audit_outcome = "success" if _final_status == "done" else "failed"

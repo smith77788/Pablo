@@ -737,6 +737,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <button class="mini-btn" onclick="runAccMass('scan')">🔎 Скан</button>
         <button class="mini-btn" onclick="openMassProfile()">🎨 Профиль</button>
         <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
+        <button class="mini-btn" onclick="runAccMass('detach_proxy')" title="Снять прокси — работать напрямую">🔌 Снять прокси</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
       </div>
     </div>
@@ -1504,6 +1505,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div id="gpCustomCitiesWrap" style="display:none;margin-top:8px">
         <textarea id="gpCustomCities" rows="4" placeholder="Москва&#10;Санкт-Петербург&#10;Київ" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:11px;color:var(--hint);margin-top:4px">По одному городу на строку. Нативные названия подтянутся автоматически</div>
+      </div>
+      <div id="gpPresetCitiesWrap" style="display:none;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:12px;color:var(--hint)">Города пресета (<span id="gpCitiesCount">0</span> выбрано)</span>
+          <span class="sel-bar-link" style="font-size:12px" onclick="gpToggleAllCities()">Все / никого</span>
+        </div>
+        <div id="gpPresetCities" style="max-height:180px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:6px;-webkit-overflow-scrolling:touch"></div>
       </div>
       
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Аккаунты (выберите для создания)</label>
@@ -2353,6 +2361,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterContacts('favorite',this)">⭐ Избранные</div>
       <div class="seg-opt" onclick="filterContacts('premium',this)">💎 Premium</div>
       <div class="seg-opt" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
+      <div class="seg-opt" onclick="filterContacts('mutual',this)">↔ Взаимные</div>
     </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
@@ -2956,6 +2965,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="360">Через 6 часов</option>
         <option value="720">Через 12 часов</option>
         <option value="1440">Через 24 часа</option>
+      </select>
+    </div>
+    <div class="field">
+      <label style="font-size:13px;color:var(--hint)">Повтор (автопостинг)</label>
+      <select id="qpRepeat" class="sel">
+        <option value="0">Без повтора</option>
+        <option value="60">Каждый час</option>
+        <option value="360">Каждые 6 часов</option>
+        <option value="720">Каждые 12 часов</option>
+        <option value="1440">Каждый день</option>
+        <option value="10080">Каждую неделю</option>
       </select>
     </div>
     <div class="field-err" id="quickPostErr"></div>
@@ -5979,7 +5999,8 @@ function renderAccounts(list) {
     const trust = a.trust_score!=null?Math.round(a.trust_score):100;
     const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
     let status, cls, ava_cls;
-    if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
+    if (a.acc_status==='session_expired') { status='🔑 Релог'; cls='b-or'; ava_cls='ava-orange'; }
+    else if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
     else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
     else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
     else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
@@ -6070,13 +6091,17 @@ async function runAccMass(op) {
   const confirmMsg = op==='leave_all'
     ? `Выйти из всех чатов на ${n} аккаунтах? Действие необратимо.`
     : op==='scan' ? `Сканировать ресурсы на ${n} аккаунтах?`
-    : op==='check' ? `Проверить ${n} аккаунтов?` : null;
+    : op==='check' ? `Проверить ${n} аккаунтов?`
+    : op==='detach_proxy' ? `Снять прокси с ${n} аккаунтов? Они будут работать напрямую (без прокси). Внимание: сессию, созданную через прокси, нельзя было использовать с двух IP одновременно.` : null;
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
     const cnt = r.count||n;
-    toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
+    // detach_proxy / set_stage — мгновенные DB-действия, не очередь
+    if (op==='detach_proxy') toast(`✅ Снят прокси с ${cnt} аккаунтов — работают напрямую`);
+    else toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
     toggleAccSelMode();
+    if (op==='detach_proxy') loadAccounts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 function openMassProfile() {
@@ -6133,7 +6158,8 @@ function buildAccDetail(d) {
   const cd = a.cooldown_until && new Date(a.cooldown_until) > new Date();
 
   let statusBadge = '';
-  if (!a.is_active) statusBadge = '<span class="badge b-gy">Выключен</span>';
+  if (a.acc_status==='session_expired') statusBadge = '<span class="badge b-or">🔑 Нужна переавторизация — в боте: Аккаунты → Переавторизатор</span>';
+  else if (!a.is_active) statusBadge = '<span class="badge b-gy">Выключен</span>';
   else if (a.acc_status==='banned') statusBadge = '<span class="badge b-rd">🚫 Заблокирован</span>';
   else if (cd) statusBadge = `<span class="badge b-or">⏳ Кулдаун до ${new Date(a.cooldown_until).toLocaleDateString('ru-RU')}</span>`;
   else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
@@ -8914,10 +8940,12 @@ async function submitQuickPost() {
   if (!text) { errEl.textContent='Введите текст публикации'; return; }
   if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
     const schedMin = parseInt(document.getElementById('qpSchedule')?.value||'0')||0;
+  const repMin = parseInt(document.getElementById('qpRepeat')?.value||'0')||0;
   const btn = document.getElementById('quickPostBtn');
   btn.disabled=true; btn.textContent='Публикую…';
   try {
     const payload={text,channel_ids:[...QUICK_POST_SELECTED]}; if(schedMin>0) payload.schedule_minutes=schedMin;
+    if(repMin>0) payload.repeat_interval_min=repMin;
     const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify(payload)});
     toast(schedMin>0 ? '⏰ Публикация запланирована' : `✍️ Публикация запущена (#${r.op_id})`);
     errEl.textContent='';
@@ -8949,10 +8977,30 @@ async function openSeo() {
           <div class="row-name">${esc(s.channel_title||s.channel_username||s.chan_id)}</div>
           <div class="row-val">${s.title?'Название: '+esc(s.title.slice(0,40)):''} ${s.username?'@'+esc(s.username):''}</div>
         </div>
+        <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="applySeo(${s.chan_id}, this)">Применить</button>
       </div>
     `).join('') : empty('✨','Нет SEO-предложений','Запустите SEO-анализ в боте'));
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+// Применить SEO-предложение к каналу в один клик (замыкает петлю анализ→применение)
+async function applySeo(chanId, btn) {
+  if (!await askConfirm('Применить SEO-оптимизацию (название/описание/username) к каналу?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await api('/api/miniapp/seo/apply', {method:'POST', body:JSON.stringify({chan_id:chanId})});
+    const parts = Object.keys(r.applied||{});
+    if (r.partial) {
+      const errs = Object.entries(r.errors||{}).map(([k,v])=>`${k}: ${v}`).join('; ');
+      toast('⚠️ Частично применено ('+parts.join(', ')+'). Ошибки: '+errs);
+    } else {
+      toast('✅ SEO применено: '+(parts.join(', ')||'без изменений'));
+    }
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
   }
 }
 
@@ -8974,6 +9022,7 @@ async function loadContacts() {
     if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
     if (CONTACT_FILTER === 'premium') params.set('premium', '1');
     if (CONTACT_FILTER === 'multi') params.set('multi', '1');
+    if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
     const qs = params.toString();
     url = '/api/miniapp/uch/contacts' + (qs ? '?'+qs : '');
   }
@@ -11992,6 +12041,34 @@ async function openGpCreateModal() {
 function gpGeoToggle() {
   const v = document.getElementById('gpGeoPreset').value;
   document.getElementById('gpCustomCitiesWrap').style.display = (v==='__custom') ? 'block' : 'none';
+  const cityWrap = document.getElementById('gpPresetCitiesWrap');
+  if (v && v!=='__custom') { cityWrap.style.display='block'; gpLoadPresetCities(v); }
+  else { cityWrap.style.display='none'; document.getElementById('gpPresetCities').innerHTML=''; }
+}
+async function gpLoadPresetCities(key) {
+  const box = document.getElementById('gpPresetCities');
+  box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/geo_presets?cities='+encodeURIComponent(key));
+    const cities = d.cities||[];
+    box.innerHTML = cities.map(c=>{
+      const slug = esc(c.city_slug||c.city||'');
+      const lbl = esc(c.city_native||c.city||slug);
+      return `<label class="gp-city-chip" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:5px 9px;border-radius:16px;border:1px solid var(--sep);cursor:pointer">
+        <input type="checkbox" class="gp-city-cb" value="${slug}" checked onchange="gpUpdateCityCount()" style="width:14px;height:14px;accent-color:var(--accent)">${lbl}</label>`;
+    }).join('');
+    gpUpdateCityCount();
+  } catch(e) { box.innerHTML='<div style="font-size:12px;color:var(--red)">'+(e.message||'Ошибка загрузки городов')+'</div>'; }
+}
+function gpUpdateCityCount() {
+  const n = document.querySelectorAll('#gpPresetCities .gp-city-cb:checked').length;
+  const el = document.getElementById('gpCitiesCount'); if(el) el.textContent = n;
+}
+function gpToggleAllCities() {
+  const cbs = [...document.querySelectorAll('#gpPresetCities .gp-city-cb')];
+  const allOn = cbs.every(c=>c.checked);
+  cbs.forEach(c=>c.checked = !allOn);
+  gpUpdateCityCount();
 }
 function gpApplyReference() {
   const refName = document.getElementById('gpRefName').value.trim();
@@ -12046,7 +12123,16 @@ async function submitGpCreate() {
     ecosystem_id: ecosystemId ? +ecosystemId : null,
   };
   if (geoPreset==='__custom') payload.custom_cities = customCities;
-  else payload.geo_preset = geoPreset;
+  else {
+    payload.geo_preset = geoPreset;
+    // выбранное подмножество городов пресета (если пусто — бэкенд берёт все)
+    const cbs = [...document.querySelectorAll('#gpPresetCities .gp-city-cb')];
+    if (cbs.length) {
+      const chosen = cbs.filter(c=>c.checked).map(c=>c.value);
+      if (!chosen.length) { errEl.textContent = 'Выберите хотя бы один город пресета'; return; }
+      if (chosen.length !== cbs.length) payload.preset_cities = chosen;  // не все → шлём подмножество
+    }
+  }
 
   try {
     const r = await api('/api/miniapp/global_presence', { method: 'POST', body: JSON.stringify(payload) });

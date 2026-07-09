@@ -685,7 +685,23 @@ class TestExportEngine:
     @pytest.mark.asyncio
     async def test_export_csv_streaming_with_data(self):
         from services.contacts_hub.export_engine import export_csv_streaming
-        pool = FakePool(fetch_rows=[
+
+        # export_csv_streaming использует keyset-пагинацию (while rows: ...).
+        # Обычный FakePool всегда возвращает те же строки → бесконечный цикл
+        # (и зависание всего набора тестов). Нужен мок, моделирующий исчерпание:
+        # строки на первом fetch, затем пусто.
+        class _ExhaustPool:
+            def __init__(self, rows):
+                self._rows = rows
+                self._served = False
+
+            async def fetch(self, query, *args):
+                if self._served:
+                    return []
+                self._served = True
+                return self._rows
+
+        pool = _ExhaustPool([
             {"id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
              "phones": '["+123"]', "emails": "[]", "websites": "[]", "tags": "{vip}"}
         ])

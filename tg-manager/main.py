@@ -426,6 +426,8 @@ async def main() -> None:
         "ON user_proxies(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL",
         # Backup Proxy (failover) — колонка нужна до первого запроса (schema_v150).
         "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS is_backup BOOLEAN DEFAULT FALSE",
+        # Mutual Contacts (взаимные) — колонка нужна до первого uch-запроса (schema_v152).
+        "ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS is_mutual BOOLEAN DEFAULT FALSE",
     ):
         try:
             await pool.execute(_ddl)

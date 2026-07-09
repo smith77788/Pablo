@@ -2408,6 +2408,43 @@ def parse_custom_geo_list(text: str) -> list[dict]:
     return enrich_geo_list(cities)
 
 
+def preset_city_options(preset_key: str) -> list[dict]:
+    """Компактный список городов пресета для выбора галочками в UI:
+    [{city, city_native, city_slug, country}]. Пустой список — неизвестный пресет."""
+    preset = GEO_PRESETS.get(preset_key)
+    if not preset:
+        return []
+    out = []
+    for c in preset.get("cities", []):
+        out.append({
+            "city": c.get("city", ""),
+            "city_native": c.get("city_native", "") or c.get("city", ""),
+            "city_slug": c.get("city_slug", ""),
+            "country": c.get("country", ""),
+        })
+    return out
+
+
+def filter_preset_cities(preset_key: str, selected) -> list[dict]:
+    """Отфильтровать города пресета до выбранных (совпадение по city_slug ИЛИ city,
+    регистронезависимо). Пустой/None selected → вернуть ВЕСЬ пресет (выбор = «все
+    города пресета»), чтобы поведение по умолчанию не менялось."""
+    preset = GEO_PRESETS.get(preset_key)
+    if not preset:
+        return []
+    cities = list(preset.get("cities", []))
+    if not selected:
+        return cities
+    sel = {str(s).strip().lower() for s in selected if str(s).strip()}
+    if not sel:
+        return cities
+    return [
+        c for c in cities
+        if str(c.get("city_slug", "")).lower() in sel
+        or str(c.get("city", "")).lower() in sel
+    ]
+
+
 def enrich_geo_with_native(geo: dict) -> dict:
     """Add city_native and other missing fields by looking up from master city lists.
 

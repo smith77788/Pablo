@@ -934,6 +934,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _op_params["silent"] = True
             if _seg_sql:
                 _op_params["segment"] = segment
+            # Autopost v2: рекуррентная рассылка (0 = разовая). Движок op_worker
+            # сам переочередит следующий запуск через repeat_interval_min минут.
+            try:
+                _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+            except (TypeError, ValueError):
+                _rmin = 0
+            if _rmin > 0:
+                _op_params["repeat_interval_min"] = _rmin
+                _rc = body.get("repeat_count")
+                if _rc is not None:
+                    try:
+                        _op_params["repeat_count"] = max(1, min(int(_rc), 1000))
+                    except (TypeError, ValueError):
+                        pass
 
             broadcast_id = None
             if schedule_minutes <= 0:
@@ -2691,6 +2705,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
                     stage, uid, ids)
                 return _json_resp({"ok": True, "count": n, "stage": stage})
+            if op == "detach_proxy":
+                # Снять прокси у выбранных аккаунтов — чтобы работать БЕЗ прокси
+                # (прямое соединение). Чистое DB-действие. После этого аккаунт
+                # не привязан к IP прокси и подключается напрямую.
+                await pool.execute(
+                    "UPDATE tg_accounts SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+                    uid, ids)
+                return _json_resp({"ok": True, "count": n})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []
@@ -2876,7 +2898,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services import profile_setter_engine as pse
             # Таймаут на инлайн-коннект — иначе зависание → edge 502/520.
             res = await asyncio.wait_for(
-                pse.get_login_code(acc["session_str"], dict(acc)), timeout=30
+                pse.get_login_code(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30
             )
             if res.get("ok"):
                 return _json_resp({"ok": True, "code": res["code"]})
@@ -2910,7 +2932,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # коннект (мёртвая сессия/плохой прокси) висит до edge-таймаута и
             # отдаёт 502/520 → фронт показывает «Сервис временно недоступен».
             res = await asyncio.wait_for(
-                pse.check_restriction(acc["session_str"], dict(acc)), timeout=30
+                pse.check_restriction(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30
             )
             if not res.get("ok"):
                 # Бизнес-ошибка (не смогли проверить), НЕ 502 — иначе фронт покажет
@@ -3725,9 +3747,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
         except (TypeError, ValueError):
             schedule_minutes = 0
+        # Autopost v2: рекуррентная публикация (0 = разовая).
+        try:
+            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            _rmin = 0
         try:
             label = f"Quick Post в {len(channel_ids)} каналов"
-            _params = _json.dumps({"text": text, "channel_ids": channel_ids})
+            _pd = {"text": text, "channel_ids": channel_ids}
+            if _rmin > 0:
+                _pd["repeat_interval_min"] = _rmin
+                _rc = body.get("repeat_count")
+                if _rc is not None:
+                    try:
+                        _pd["repeat_count"] = max(1, min(int(_rc), 1000))
+                    except (TypeError, ValueError):
+                        pass
+            _params = _json.dumps(_pd)
             if schedule_minutes > 0:
                 op_id = await pool.fetchval(
                     "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
@@ -3774,6 +3810,86 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("seo_overview uid=%d", uid)
             return _err(str(exc), 500)
+
+    async def seo_apply(request: web.Request) -> web.Response:
+        """Применить AI SEO-предложение к каналу в один клик (замыкает петлю
+        анализ→рекомендация→ПРИМЕНЕНИЕ). Раньше предложения (title/about/username)
+        только показывались — оптимизацию приходилось вбивать вручную.
+
+        Переиспользует существующее: seo_ai_suggestions (хранимая рекомендация),
+        managed_channels.acc_id → управляющий аккаунт, account_manager.edit_channel_*.
+        body: {chan_id, fields?: ["title","about","username"]} — по умолчанию все.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            chan_id = int(body.get("chan_id"))
+        except (TypeError, ValueError):
+            return _err("chan_id обязателен", 400)
+        want = body.get("fields") or ["title", "about", "username"]
+        want = [f for f in want if f in ("title", "about", "username")]
+        if not want:
+            return _err("Нечего применять", 400)
+
+        # Последнее предложение по каналу (скоуп по владельцу).
+        sug = await _safe_fetchrow(pool,
+            "SELECT title, about, username FROM seo_ai_suggestions "
+            "WHERE owner_id=$1 AND chan_id=$2 ORDER BY created_at DESC LIMIT 1",
+            uid, chan_id)
+        if not sug:
+            return _err("Нет SEO-предложения для этого канала", 404)
+
+        # Управляющий аккаунт канала (скоуп по владельцу).
+        ch = await _safe_fetchrow(pool,
+            "SELECT acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            uid, chan_id)
+        if not ch or not ch.get("acc_id"):
+            return _err("Канал не найден или у него нет управляющего аккаунта", 404)
+
+        from database import db as _db
+        from services import account_manager
+        acc = await _db.get_account_for_telethon(pool, int(ch["acc_id"]), uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Сессия управляющего аккаунта недоступна", 400)
+        session = acc["session_str"]
+        _acc = dict(acc)
+
+        applied, errors = {}, {}
+        try:
+            if "title" in want and (sug.get("title") or "").strip():
+                ok = await asyncio.wait_for(
+                    account_manager.edit_channel_title(session, chan_id, sug["title"].strip(), _acc=_acc),
+                    timeout=45)
+                (applied if ok else errors)["title"] = sug["title"].strip() if ok else "не удалось"
+            if "about" in want and (sug.get("about") or "").strip():
+                ok = await asyncio.wait_for(
+                    account_manager.edit_channel_about(session, chan_id, sug["about"].strip(), _acc=_acc),
+                    timeout=45)
+                (applied if ok else errors)["about"] = "ok" if ok else "не удалось"
+            if "username" in want and (sug.get("username") or "").strip():
+                err = await asyncio.wait_for(
+                    account_manager.set_channel_username(session, chan_id, sug["username"].strip(), _acc=_acc),
+                    timeout=45)
+                if err:
+                    errors["username"] = err
+                else:
+                    applied["username"] = sug["username"].strip()
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 45с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("seo_apply uid=%d chan=%d", uid, chan_id)
+            return _err(str(exc)[:200], 500)
+
+        if applied and not errors:
+            return _json_resp({"ok": True, "applied": applied})
+        if applied and errors:
+            return _json_resp({"ok": True, "applied": applied, "errors": errors, "partial": True})
+        return _err("Не удалось применить: " + "; ".join(f"{k}: {v}" for k, v in errors.items()), 400)
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
@@ -7883,6 +7999,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await pool.execute(
                 """UPDATE platform_users SET settings_json=$1 WHERE user_id=$2""",
                 settings_json, uid)
+            # Немедленно применяем выбор политики прокси (не ждём старта операции).
+            try:
+                from services import account_manager as _am
+                _am.set_owner_proxy_policy(uid, data.get("proxy_policy"))
+            except Exception:
+                pass
             return _json_resp({"ok": True})
         except Exception as e:
             log.warning("user_settings_save uid=%d: %s", uid, e)
@@ -8338,14 +8460,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите паттерн названия или референс", 400)
 
         # ── Гео: пресет (страны/города мира) ИЛИ свой список городов ИЛИ страны.
-        from services.geo_data import GEO_PRESETS, parse_custom_geo_list, enrich_geo_list
+        from services.geo_data import (
+            GEO_PRESETS, parse_custom_geo_list, enrich_geo_list, filter_preset_cities,
+        )
         geo_preset = (body.get("geo_preset") or "").strip()
         custom_cities = (body.get("custom_cities") or "").strip()
         countries = body.get("countries") or []
+        preset_cities = body.get("preset_cities") or []  # выбранное подмножество городов пресета
         geo_list: list = []
         geo_source = ""
         if geo_preset and geo_preset in GEO_PRESETS:
-            geo_list = list(GEO_PRESETS[geo_preset]["cities"])
+            # Пустой preset_cities → весь пресет; иначе — только отмеченные города.
+            geo_list = filter_preset_cities(geo_preset, preset_cities)
             geo_source = geo_preset
         elif custom_cities:
             geo_list = parse_custom_geo_list(custom_cities)
@@ -8418,11 +8544,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def geo_presets(request: web.Request) -> web.Response:
-        """Список гео-пресетов (страны/города мира) для Global Presence."""
+        """Список гео-пресетов (страны/города мира) для Global Presence.
+        ?cities=<key> — вернуть города конкретного пресета для выбора галочками."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        from services.geo_data import GEO_PRESETS
+        from services.geo_data import GEO_PRESETS, preset_city_options
+        want = (request.rel_url.query.get("cities") or "").strip()
+        if want:
+            if want not in GEO_PRESETS:
+                return _err("Неизвестный пресет", 404)
+            return _json_resp({"key": want, "cities": preset_city_options(want)})
         return _json_resp({"presets": [
             {"key": k, "label": v.get("label", k), "count": v.get("count", len(v.get("cities", [])))}
             for k, v in GEO_PRESETS.items()
@@ -10140,6 +10272,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
     app.router.add_get("/api/miniapp/seo", seo_overview)
+    app.router.add_post("/api/miniapp/seo/apply", seo_apply)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
@@ -10494,10 +10627,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         favorite = request.query.get('favorite') == '1'
         premium = request.query.get('premium') == '1'
         multi = request.query.get('multi') == '1'
+        mutual = request.query.get('mutual') == '1'
         try:
             from services.contacts_hub.repository import get_contacts
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
-                                        tag=tag, premium_only=premium, multi_only=multi)
+                                        tag=tag, premium_only=premium, multi_only=multi,
+                                        mutual_only=mutual)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)

@@ -42,13 +42,16 @@ def proxy_decision(
     """
     if has_proxy_url and proxy_parsed_ok:
         return "use"
-    if low_risk:
-        # низкорисковую операцию не блокируем никогда — даём работать без прокси
-        return "fallback"
     if has_proxy_url and not proxy_parsed_ok:
-        # аккаунту назначен прокси, но он битый/недоступен — не уводим в сеть
-        # напрямую втихую (сохранение изоляции для прокси-аккаунта)
+        # Аккаунту НАЗНАЧЕН прокси, но он битый/недоступен. НЕЛЬЗЯ подключаться с
+        # другого IP (прямого/иного) — сессия привязана к IP прокси, и её
+        # использование с другого адреса убивает сессию (Telegram
+        # AUTH_KEY_DUPLICATED: «used under two different IP addresses»). Поэтому
+        # блокируем В ЛЮБОМ режиме, включая low_risk. Пусть оператор починит прокси.
         return "block"
-    # у аккаунта нет назначенного прокси
+    # У аккаунта нет НАЗНАЧЕННОГО прокси — его каноничный транспорт и есть прямое
+    # соединение (сессия создавалась без прокси), сменой IP не рискуем.
+    if low_risk:
+        return "fallback"
     strict = bool(enforce) or normalize_policy(policy) == "strict"
     return "block" if strict else "fallback"
