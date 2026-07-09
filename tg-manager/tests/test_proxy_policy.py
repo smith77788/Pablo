@@ -24,17 +24,19 @@ def test_valid_proxy_always_used():
     assert _d(has_proxy_url=True, proxy_parsed_ok=True, policy="strict", enforce=True) == "use"
 
 
-def test_low_risk_never_blocks():
-    # даже strict + enforce + нет прокси — низкий риск идёт на fallback, не block
+def test_low_risk_direct_only_when_no_assigned_proxy():
+    # низкий риск + НЕТ назначенного прокси → прямое (каноничный транспорт сессии)
     assert _d(policy="strict", enforce=True, low_risk=True) == "fallback"
-    # битый назначенный прокси при низком риске — тоже fallback
-    assert _d(has_proxy_url=True, proxy_parsed_ok=False, policy="strict", low_risk=True) == "fallback"
+    assert _d(policy="allow_direct", low_risk=True) == "fallback"
 
 
-def test_broken_assigned_proxy_blocks_non_low_risk_any_policy():
-    # аккаунту назначен прокси, но он битый — не уводим в сеть напрямую втихую
-    assert _d(has_proxy_url=True, proxy_parsed_ok=False, policy="allow_direct") == "block"
-    assert _d(has_proxy_url=True, proxy_parsed_ok=False, policy="strict") == "block"
+def test_broken_assigned_proxy_blocks_ALWAYS_even_low_risk():
+    # КРИТИЧНО: аккаунту назначен прокси, но он битый/недоступен — НЕЛЬЗЯ
+    # подключаться с другого IP (убьёт сессию AUTH_KEY_DUPLICATED). Блок ВЕЗДЕ,
+    # включая low_risk и allow_direct.
+    for pol in ("allow_direct", "strict"):
+        for lr in (False, True):
+            assert _d(has_proxy_url=True, proxy_parsed_ok=False, policy=pol, low_risk=lr) == "block", (pol, lr)
 
 
 def test_no_proxy_strict_blocks_permissive_allows():

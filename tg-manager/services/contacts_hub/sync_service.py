@@ -87,9 +87,29 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
         return {'synced': len(contacts), 'created': created, 'updated': updated}
     except Exception as e:
         duration_ms = int((time.monotonic() - started) * 1000)
-        log.warning('contacts_hub sync_account failed acc=%s: %s', account_id, e)
-        await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, str(e)[:200])
-        return {'error': str(e)[:200], 'synced': 0}
+        emsg = str(e)
+        log.warning('contacts_hub sync_account failed acc=%s: %s', account_id, emsg)
+        # AUTH_KEY_DUPLICATED: сессия использовалась с двух IP одновременно и
+        # Telegram её НЕОБРАТИМО инвалидировал (напр. коннект не с того IP, что у
+        # прокси аккаунта). Помечаем аккаунт как требующий переавторизации, чтобы
+        # это было видно и он не участвовал дальше, и даём внятную причину.
+        low = emsg.lower()
+        if 'auth_key_duplicated' in low or 'two different ip' in low:
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired', "
+                    "status_reason=$2 WHERE id=$1",
+                    account_id,
+                    'AUTH_KEY_DUPLICATED: сессия использовалась с двух IP — нужна переавторизация')
+            except Exception:
+                pass
+            friendly = ('сессия инвалидирована Telegram (использовалась с двух IP) — '
+                        'переавторизуйте аккаунт; при работе через прокси не подключайте '
+                        'сессию с другого IP')
+            await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, friendly[:200])
+            return {'error': friendly, 'synced': 0}
+        await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, emsg[:200])
+        return {'error': emsg[:200], 'synced': 0}
 
 
 async def sync_all_accounts(pool, owner_id: int) -> dict:
