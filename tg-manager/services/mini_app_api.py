@@ -10237,9 +10237,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Только команда самого пользователя: он сам + участники рабочих
             # пространств, которыми он владеет или в которых состоит.
             # НЕЛЬЗЯ отдавать весь список platform_users — это утечка данных.
+            # platform_users не имеет created_at/last_active_at — реальные колонки
+            # registered_at/last_seen (schema_v39). Раньше этот запрос падал
+            # `column "created_at" does not exist` и экран «Команда» отдавал 500.
+            # Алиасим, чтобы фронт-контракт (created_at/last_active_at) не менялся.
             rows = await pool.fetch(
                 """SELECT DISTINCT pu.user_id, pu.username, pu.first_name,
-                          pu.current_plan, pu.created_at, pu.last_active_at
+                          pu.current_plan,
+                          pu.registered_at AS created_at,
+                          pu.last_seen AS last_active_at
                    FROM platform_users pu
                    WHERE pu.user_id = $1
                       OR pu.user_id IN (
