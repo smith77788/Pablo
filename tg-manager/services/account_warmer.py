@@ -432,6 +432,12 @@ async def create_warmup_plan(
     except Exception as _e:
         log.warning("warmup: could not set acc_status=warming for acc=%d: %s", account_id, _e)
 
+    # CRM-воронка: старт прогрева → авто-стадия «Прогрев» (только «сырой» аккаунт).
+    try:
+        await db.apply_account_stage_event(pool, account_id, "warmup_start")
+    except Exception:
+        log_exc_swallow(log, "warmup: stage(warmup_start) failed")
+
     # Update in-memory health cache warmup_state immediately
     try:
         from services import account_health as _ah
@@ -1363,6 +1369,11 @@ async def _run_daily_warmup_impl(
                                 log.warning("warmup: CRITICAL failed to deactivate banned acc=%d after 3 retries: %s", account_id, e)
                             else:
                                 await asyncio.sleep(1)
+                    # CRM-воронка: мёртвый аккаунт → авто-стадия «Заморожен».
+                    try:
+                        await db.apply_account_stage_event(pool, account_id, "banned")
+                    except Exception:
+                        log_exc_swallow(log, "warmup: stage(banned) failed")
                     try:
                         await pool.execute(
                             "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
@@ -1572,6 +1583,11 @@ async def _run_daily_warmup_impl(
                WHERE id = $1""",
             account_id,
         )
+        # CRM-воронка: прогрев завершён → авто-стадия «Готов» (не перетирая ручные).
+        try:
+            await db.apply_account_stage_event(pool, account_id, "warmup_done")
+        except Exception:
+            log_exc_swallow(log, "warmup: apply_account_stage_event(warmup_done) failed")
         # Update in-memory health cache: warmup_state → READY (graduated)
         try:
             from services import account_health as _ah
@@ -1852,6 +1868,11 @@ async def _run_warmup_session_impl(
                             )
                         except Exception:
                             log_exc_swallow(log, "warmup_session: deactivate failed")
+                        # CRM-воронка: мёртвый аккаунт → авто-стадия «Заморожен».
+                        try:
+                            await db.apply_account_stage_event(pool, acc_id, "banned")
+                        except Exception:
+                            log_exc_swallow(log, "warmup_session: stage(banned) failed")
                         total_fail += 1
                         break
                     # PEER_FLOOD / spam → стоп этого аккаунта (не добивать)
