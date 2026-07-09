@@ -1,11 +1,28 @@
+"""FSM state definitions for all bot flows.
+
+Each StatesGroup defines a sequence of states for a multi-step
+user interaction flow. States are used with aiogram's FSM context.
+
+Usage:
+    from bot.states import AddBot, Broadcast
+
+    @router.message(AddBot.waiting_token)
+    async def handle_token(message: Message, state: FSMContext) -> None:
+        token = message.text
+        # ... process token
+        await state.clear()
+"""
+
 from aiogram.fsm.state import State, StatesGroup
 
 
 class AddBot(StatesGroup):
+    """Flow for adding a new bot by token."""
     waiting_token = State()
 
 
 class EditProfile(StatesGroup):
+    """Flow for editing bot profile (name, description, photo)."""
     waiting_name = State()
     waiting_name_lang = State()
     waiting_localized_name = State()
@@ -19,6 +36,7 @@ class EditProfile(StatesGroup):
 
 
 class Broadcast(StatesGroup):
+    """Flow for sending broadcast messages."""
     waiting_message = State()
     confirming = State()
     waiting_button_text = State()

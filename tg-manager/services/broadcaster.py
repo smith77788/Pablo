@@ -1,4 +1,20 @@
-"""Background broadcast runner with rate-limiting and progress tracking."""
+"""Background broadcast runner with rate-limiting and progress tracking.
+
+Handles sending broadcast messages to multiple users with:
+  - Rate limiting (configurable delay between messages)
+  - Progress tracking and status updates
+  - Template placeholder rendering
+  - Content safety checks
+
+Usage:
+    from services.broadcaster import run, resume_interrupted
+
+    # Resume broadcasts interrupted by previous restart
+    await resume_interrupted(pool)
+
+    # Start the background broadcast runner
+    await run(pool, http, bot)
+"""
 
 from __future__ import annotations
 import asyncio

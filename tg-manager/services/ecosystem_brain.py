@@ -1,14 +1,19 @@
-"""Ecosystem Brain — центральный мозг экосистем Infragram.
+"""Ecosystem Brain — central intelligence for Infragram ecosystems.
 
-BOTMOTHER ЭПОХА III: Ecosystem Brain Contract
+Computes ecosystem-wide metrics:
+  - Health Score (account, proxy, operation health)
+  - Pressure Score (load, density, congestion)
+  - Risk Assessment (operational, infrastructure, account, proxy, recovery)
+  - Drift Detection (deviation from templates)
+  - Memory (operation history, changes, errors)
 
-Экосистема — живой объект с собственным состоянием, памятью, метриками и рисками.
-Ecosystem Brain вычисляет:
-  - Health Score (здоровье аккаунтов, прокси, операций)
-  - Pressure Score (нагрузка, плотность, перегруженность)
-  - Risk Assessment (operational / infrastructure / account / proxy / recovery)
-  - Drift Detection (отклонения от шаблонов)
-  - Memory (история операций, изменений, ошибок)
+Usage:
+    from services.ecosystem_brain import (
+        compute_ecosystem_health, compute_pressure, assess_risk
+    )
+
+    health = await compute_ecosystem_health(pool, owner_id)
+    print(f"Overall health: {health.overall}")
 """
 
 from __future__ import annotations

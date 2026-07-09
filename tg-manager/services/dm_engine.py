@@ -444,8 +444,8 @@ async def run_campaign(
         if _pace_mult:
             _delay_min *= _pace_mult
             _delay_max *= _pace_mult
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning('dm_engine: pace_multiplier load failed: %s', e)
 
     # Лимит отправок на аккаунт В ДЕНЬ (params.per_account_daily). Считаем честно:
     # префиллим уже отправленное сегодня по всем кампаниям владельца, дальше

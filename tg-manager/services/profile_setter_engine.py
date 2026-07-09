@@ -215,8 +215,8 @@ async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[s
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: close_other_sessions disconnect failed: %s', e)
 
 
 # ── Настройки приватности ─────────────────────────────────────────────────────
@@ -255,8 +255,8 @@ async def set_privacy(session_string: str, _acc: dict | None, key: str, allow: b
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: set_privacy disconnect failed: %s', e)
 
 
 # ── Получить код авторизации ──────────────────────────────────────────────────
@@ -290,8 +290,8 @@ async def get_login_code(session_string: str, _acc: dict | None) -> dict[str, An
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: get_login_code disconnect failed: %s', e)
 
 
 # ── Сброс/удаление полей профиля ──────────────────────────────────────────────
@@ -312,8 +312,8 @@ async def clear_bio(session_string: str, _acc: dict | None) -> dict[str, Any]:
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: clear_bio disconnect failed: %s', e)
 
 
 async def remove_username(session_string: str, _acc: dict | None) -> dict[str, Any]:
@@ -342,8 +342,8 @@ async def remove_avatar(session_string: str, _acc: dict | None) -> dict[str, Any
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: remove_avatar disconnect failed: %s', e)
 
 
 # ── Сброс 2FA (снять пароль) ──────────────────────────────────────────────────
@@ -367,8 +367,8 @@ async def reset_2fa(
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: reset_2fa disconnect failed: %s', e)
 
 
 # ── Держать онлайн (разовый пинг) ─────────────────────────────────────────────
@@ -390,8 +390,8 @@ async def set_online(session_string: str, _acc: dict | None) -> dict[str, Any]:
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: set_online disconnect failed: %s', e)
 
 
 # ── Проверка ограничений (бан / restricted / deleted) ─────────────────────────
@@ -427,8 +427,8 @@ async def check_restriction(session_string: str, _acc: dict | None) -> dict[str,
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('profile_setter: check_restriction disconnect failed: %s', e)
 
 
 def format_restriction_verdict(res: dict) -> str:

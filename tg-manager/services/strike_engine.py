@@ -57,7 +57,8 @@ def _telegram_target_display(target: str) -> str:
         from services.account_manager import format_telegram_join_ref_display
 
         return format_telegram_join_ref_display(str(target))
-    except Exception:
+    except Exception as e:
+        log.warning('format_target_display: normalize failed: %s', e)
         raw = str(target).strip()
         if not raw:
             return ""
@@ -500,21 +501,24 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
         from services import flood_engine as _fe
 
         fe_available = True
-    except Exception:
+    except Exception as e:
+        log.warning('check_services_available: fe module check failed: %s', e)
         fe_available = False
 
     try:
         from services.infra_memory import get_account_score as _mem_score
 
         mem_available = True
-    except Exception:
+    except Exception as e:
+        log.warning('check_services_available: mem module check failed: %s', e)
         mem_available = False
 
     try:
         from services import op_worker as _opw
 
         opw_available = True
-    except Exception:
+    except Exception as e:
+        log.warning('check_services_available: opw module check failed: %s', e)
         opw_available = False
 
     for acc in accounts:
@@ -1309,7 +1313,8 @@ async def staggered_strike(
                 "SELECT status FROM operation_queue WHERE id=$1", op_id
             )
             return bool(row and row["status"] == "cancelled")
-        except Exception:
+        except Exception as e:
+            log.warning('is_strike_cancelled query failed: %s', e)
             return False
 
     # Claim every account for the whole strike so warmup/op_worker won't drive

@@ -1,3 +1,16 @@
+"""Subscription and plan management utilities.
+
+Provides plan checking, caching, and upsell messaging for the
+Telegram bot's subscription system.
+
+Usage:
+    from bot.utils.subscription import get_plan, is_platform_admin
+
+    plan = await get_plan(pool, user_id)
+    if plan == "free":
+        # show upsell
+"""
+
 from __future__ import annotations
 import logging
 import os
@@ -16,10 +29,20 @@ _PLAN_CACHE_TTL = 60.0  # seconds
 
 
 def get_free_mode() -> bool:
+    """Check if free mode is currently enabled globally.
+
+    Returns:
+        True if free mode is active and allowed by environment.
+    """
     return _FREE_MODE
 
 
 def _global_free_mode_allowed() -> bool:
+    """Check if ALLOW_GLOBAL_FREE_MODE env var permits free mode.
+
+    Returns:
+        True if the env var is set to a truthy value.
+    """
     return os.getenv("ALLOW_GLOBAL_FREE_MODE", "").strip().lower() in {
         "1",
         "true",
@@ -29,6 +52,12 @@ def _global_free_mode_allowed() -> bool:
 
 
 def set_free_mode(enabled: bool) -> None:
+    """Enable or disable global free mode.
+
+    Args:
+        enabled: Whether to enable free mode. Ignored if env var
+                 ALLOW_GLOBAL_FREE_MODE is not set.
+    """
     global _FREE_MODE
     _FREE_MODE = bool(enabled and _global_free_mode_allowed())
     if enabled and not _FREE_MODE:
@@ -38,7 +67,11 @@ def set_free_mode(enabled: bool) -> None:
 
 
 def invalidate_plan_cache(user_id: int) -> None:
-    """Call after subscription purchase/change to force fresh DB lookup."""
+    """Invalidate cached plan for a user. Call after subscription changes.
+
+    Args:
+        user_id: Telegram user ID whose cache to clear.
+    """
     _plan_cache.pop(user_id, None)
 
 

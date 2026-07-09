@@ -11,6 +11,8 @@ import asyncpg
 from aiogram import Bot
 from database import db
 from services.logger import log_exc_swallow
+from services.error_codes import ErrorCode
+from services.error_reporting import report_error
 from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import infra_memory as _infra_mem
@@ -29,7 +31,8 @@ async def _safe_execute(pool: asyncpg.Pool, query: str, *args, log_ctx: str = ""
     try:
         return await pool.execute(query, *args)
     except Exception as e:
-        log.warning("op_worker DB execute failed%s: %s — query: %.80s", log_ctx, e, query)
+        report_error(e, extra={"context": f"op_worker_execute{log_ctx}", "query": query[:100]})
+        log.warning("op_worker DB execute failed%s: %s", log_ctx, e)
         return "ERROR"
 
 
@@ -38,6 +41,7 @@ async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "
     try:
         return await pool.fetchrow(query, *args)
     except Exception as e:
+        report_error(e, extra={"context": f"op_worker_fetchrow{log_ctx}"})
         log.warning("op_worker DB fetchrow failed%s: %s", log_ctx, e)
         return None
 
@@ -47,6 +51,7 @@ async def _safe_fetch(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") 
     try:
         return await pool.fetch(query, *args)
     except Exception as e:
+        report_error(e, extra={"context": f"op_worker_fetch{log_ctx}"})
         log.warning("op_worker DB fetch failed%s: %s", log_ctx, e)
         return []
 
@@ -56,6 +61,7 @@ async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "
     try:
         return await pool.fetchval(query, *args)
     except Exception as e:
+        report_error(e, extra={"context": f"op_worker_fetchval{log_ctx}"})
         log.warning("op_worker DB fetchval failed%s: %s", log_ctx, e)
         return None
 
@@ -201,7 +207,10 @@ def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int 
 
 
 async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
-    """Сбросить все зависшие in_operation=TRUE после рестарта бота."""
+    """Reset all stale in_operation=TRUE flags after bot restart.
+
+    Called once at startup to clear flags from the previous process.
+    """
     try:
         await pool.execute("UPDATE tg_accounts SET in_operation = FALSE WHERE in_operation = TRUE")
         log.info("op_worker: stale in_operation flags cleared")
@@ -235,7 +244,14 @@ async def _do_db_flag(acc_ids: list[int], value: bool) -> None:
 
 
 async def mark_accounts_in_use(acc_ids: list[int]) -> None:
-    """Пометить аккаунты как занятые op_worker-операцией."""
+    """Mark accounts as busy for op_worker operations.
+
+    Updates both in-memory registry and database in_operation flag.
+    Prevents account_warmer from using these accounts.
+
+    Args:
+        acc_ids: List of account IDs to mark as in use.
+    """
     async with _accounts_lock:
         _accounts_in_use.update(acc_ids)
     if _db_pool and acc_ids:
@@ -249,7 +265,13 @@ async def mark_accounts_in_use(acc_ids: list[int]) -> None:
 
 
 async def release_accounts(acc_ids: list[int]) -> None:
-    """Освободить аккаунты после завершения операции."""
+    """Release accounts after operation completes.
+
+    Updates both in-memory registry and database in_operation flag.
+
+    Args:
+        acc_ids: List of account IDs to release.
+    """
     async with _accounts_lock:
         for aid in acc_ids:
             _accounts_in_use.discard(aid)
@@ -266,7 +288,11 @@ async def release_accounts(acc_ids: list[int]) -> None:
 
 
 async def release_operation_accounts(op_id: int) -> None:
-    """Release every account claimed by an operation after executor errors."""
+    """Release every account claimed by an operation after executor errors.
+
+    Args:
+        op_id: Operation ID whose accounts to release.
+    """
     freed: list[int] = []
     async with _accounts_lock:
         acc_ids = _operation_account_locks.pop(op_id, set())
@@ -4628,7 +4654,8 @@ async def _exec_strike(
                 "SELECT mode FROM strike_access WHERE user_id=$1", owner_id
             )
             strike_mode = (_mode_row.get("mode") or "normal") if _mode_row else "normal"
-        except Exception:
+        except Exception as e:
+            log.warning('get_strike_plan_params: strike_mode lookup failed: %s', e)
             strike_mode = "normal"
 
     plan = StrikePlan(
@@ -4993,7 +5020,8 @@ async def _exec_seed_presence_pack(
             return []
         try:
             return _json.loads(val) or []
-        except Exception:
+        except Exception as e:
+            log.warning('pack channel_ids parse failed: %s', e)
             return []
 
     ch_ids: list[int] = _jlist(pack["channel_ids"])
@@ -6910,7 +6938,8 @@ async def _premium_filter_accounts(
             break
         try:
             is_prem = await account_manager.is_premium_account(acc["session_str"], dict(acc))
-        except Exception:
+        except Exception as e:
+            log.warning('is_premium_account check failed: %s', e)
             is_prem = False
         if is_prem:
             filtered.append(acc)
@@ -7608,7 +7637,8 @@ async def _exec_niche_growth_post(
             "SELECT group_id FROM niche_growth_targets WHERE owner_id=$1", owner_id
         )
         exclude_ids = {int(r["group_id"]) for r in prior_rows}
-    except Exception:
+    except Exception as e:
+        log.warning('prior groups query failed: %s', e)
         exclude_ids = set()
 
     # Ищем группы
@@ -7957,7 +7987,8 @@ async def _exec_ad_intel_scan(
             owner_id,
         )
         account_id = int(acc_row["id"]) if acc_row else 0
-    except Exception:
+    except Exception as e:
+        log.warning('resolve account_id failed: %s', e)
         account_id = 0
 
     if not account_id:
@@ -8271,7 +8302,8 @@ async def _exec_report_peer(
             "SELECT total_items FROM operation_queue WHERE id=$1", op_id
         )
         acc_count = int(total_items or 5)
-    except Exception:
+    except Exception as e:
+        log.warning('account count query failed: %s', e)
         acc_count = 5
 
     try:

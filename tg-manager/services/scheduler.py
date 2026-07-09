@@ -1,4 +1,14 @@
-"""Background scheduler: fires due scheduled broadcasts every 60 seconds."""
+"""Background scheduler: fires due scheduled broadcasts every 60 seconds.
+
+Checks for pending scheduled broadcasts and triggers them when their
+scheduled time arrives. Also handles A/B experiment winner selection.
+
+Usage:
+    from services.scheduler import run
+
+    # Starts the background scheduler loop
+    await run(pool, http)
+"""
 
 from __future__ import annotations
 import asyncio

@@ -1,10 +1,16 @@
 """Background service: compute and maintain account trust scores.
 
 Features:
-- Recalculates trust_score every 30 min
-- Auto-rotation: автоматически ставит кулдауны low-trust аккаунтам (каждые 6ч)
-- Expires cooldowns, decays flood counts
-- Writes trust_score history snapshots
+  - Recalculates trust_score every 30 min
+  - Auto-rotation: automatically sets cooldowns for low-trust accounts (every 6h)
+  - Expires cooldowns, decays flood counts
+  - Writes trust_score history snapshots
+
+Usage:
+    from services.trust_engine import run
+
+    # Starts the background trust calculation loop
+    await run(pool, bot)
 """
 
 from __future__ import annotations

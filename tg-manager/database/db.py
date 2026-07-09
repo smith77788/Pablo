@@ -1,3 +1,15 @@
+"""PostgreSQL database layer for Infragram.
+
+Provides connection pool management, schema migrations, and query helpers
+for all database operations.
+
+Usage:
+    from database.db import create_pool
+
+    pool = await create_pool()
+    user = await pool.fetchval("SELECT * FROM users WHERE id=$1", user_id)
+"""
+
 import asyncio
 import asyncpg
 import glob
@@ -9,6 +21,7 @@ import time
 from config import DATABASE_URL, PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
 from services.logger import log_exc_swallow, timed
+from database.pool_config import get_pool_config, log_pool_config
 
 log = logging.getLogger(__name__)
 
@@ -107,12 +120,22 @@ def _has_sql_content(stmt: str) -> bool:
 
 
 async def create_pool() -> asyncpg.Pool:
+    """Create asyncpg connection pool and apply all schema migrations.
+
+    Searches for schema*.sql files in project root and database/ subdirectory,
+    applies them in version order, and tracks migration status.
+
+    Returns:
+        Configured asyncpg connection pool.
+
+    Raises:
+        Exception: If pool creation or critical migration fails.
+    """
+    pool_config = get_pool_config()
+    log_pool_config(pool_config)
     pool = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=5,
-        max_size=20,
-        max_inactive_connection_lifetime=300,
-        command_timeout=30,
+        **pool_config,
     )
     async with pool.acquire() as conn:
         # Run all schema migration files in order — search both root and database/ subdir
@@ -232,11 +255,76 @@ async def create_pool() -> asyncpg.Pool:
     return pool
 
 
+# ── Performance Helpers ────────────────────────────────────────────────────
+
+
+async def run_concurrent_queries(pool: asyncpg.Pool, queries: list[tuple[str, tuple]]) -> list:
+    """Execute multiple independent queries concurrently using a single connection.
+
+    Each query is (sql, params) tuple. Returns list of results.
+    More efficient than multiple pool.acquire() calls.
+    If a query fails, returns empty list for that position.
+    """
+    async with pool.acquire() as conn:
+        async def _safe_fetch(sql, params):
+            try:
+                return await conn.fetch(sql, *params)
+            except Exception:
+                return []
+        return await asyncio.gather(
+            *(_safe_fetch(sql, params) for sql, params in queries)
+        )
+
+
+async def batch_upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> int:
+    """Batch upsert users using executemany for better performance.
+
+    Returns count of new rows inserted.
+    """
+    if not users:
+        return 0
+
+    rows = [
+        (
+            bot_id,
+            u["user_id"],
+            u.get("username"),
+            u.get("first_name"),
+            u.get("last_name"),
+            u.get("language_code"),
+            u.get("phone"),
+        )
+        for u in users
+    ]
+
+    async with pool.acquire() as conn:
+        result = await conn.executemany(
+            """INSERT INTO bot_users (bot_id, user_id, username, first_name, last_name, language_code, phone)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               ON CONFLICT (bot_id, user_id) DO UPDATE SET
+                   last_seen     = NOW(),
+                   username      = EXCLUDED.username,
+                   first_name    = EXCLUDED.first_name,
+                   last_name     = EXCLUDED.last_name,
+                   language_code = EXCLUDED.language_code,
+                   phone         = COALESCE(EXCLUDED.phone, bot_users.phone)""",
+            rows,
+        )
+    return len(rows)
+
+
 # ── Managed bots ───────────────────────────────────────────────────────────
 
 
-def _dec_bot_rows(rows) -> list[dict]:
-    """Post-process managed_bots query results: decrypt token field in every row."""
+def _dec_bot_rows(rows: list[asyncpg.Record]) -> list[dict]:
+    """Decrypt token field in managed_bots query results.
+
+    Args:
+        rows: List of database records from managed_bots table.
+
+    Returns:
+        List of dicts with decrypted token field.
+    """
     from services.token_vault import decrypt_token as _dt
     out = []
     for r in rows:
@@ -247,8 +335,17 @@ def _dec_bot_rows(rows) -> list[dict]:
     return out
 
 
-async def fetchrow_bot(pool: asyncpg.Pool, query: str, *args) -> dict | None:
-    """pool.fetchrow for managed_bots that auto-decrypts the token field."""
+async def fetchrow_bot(pool: asyncpg.Pool, query: str, *args: object) -> dict | None:
+    """Fetch single managed_bot row with auto-decrypted token.
+
+    Args:
+        pool: Database connection pool.
+        query: SQL query to execute.
+        *args: Query parameters.
+
+    Returns:
+        Dict with bot data and decrypted token, or None if not found.
+    """
     row = await pool.fetchrow(query, *args)
     if not row:
         return None
@@ -259,8 +356,17 @@ async def fetchrow_bot(pool: asyncpg.Pool, query: str, *args) -> dict | None:
     return d
 
 
-async def fetch_bots(pool: asyncpg.Pool, query: str, *args) -> list[dict]:
-    """pool.fetch for managed_bots that auto-decrypts the token field in each row."""
+async def fetch_bots(pool: asyncpg.Pool, query: str, *args: object) -> list[dict]:
+    """Fetch multiple managed_bot rows with auto-decrypted tokens.
+
+    Args:
+        pool: Database connection pool.
+        query: SQL query to execute.
+        *args: Query parameters.
+
+    Returns:
+        List of dicts with bot data and decrypted tokens.
+    """
     rows = await pool.fetch(query, *args)
     return _dec_bot_rows(rows)
 
@@ -272,9 +378,23 @@ async def add_bot(
     username: str,
     first_name: str,
     added_by: int,
-    bot=None,
+    bot: object = None,
 ) -> bool | str:
-    """Return True if inserted, False if already in this account, 'taken' if owned by another account."""
+    """Add a new bot to the managed_bots table.
+
+    Args:
+        pool: Database connection pool.
+        token: Bot token from BotFather.
+        bot_id: Bot numeric ID.
+        username: Bot username.
+        first_name: Bot display name.
+        added_by: User ID of the owner.
+        bot: Optional bot instance for referral rewards.
+
+    Returns:
+        True if inserted, False if already owned by this user,
+        'taken' if owned by another user.
+    """
     from services.token_vault import encrypt_token as _enc_tok
 
     existing = await pool.fetchrow(
@@ -294,7 +414,10 @@ async def add_bot(
             added_by,
         )
     except asyncpg.UniqueViolationError:
-        return False
+        owner = await pool.fetchval(
+            "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
+        )
+        return False if owner == added_by else "taken"
     # Referral activation: first bot creation counts as "active"
     existing_bots = (
         await pool.fetchval(
@@ -402,31 +525,8 @@ async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> in
     """Insert or refresh last_seen for each user. Returns count of new rows."""
     if not users:
         return 0
-    inserted = 0
     with timed(log, "upsert_users", extra={"bot_id": bot_id, "count": len(users)}):
-        async with pool.acquire() as conn:
-            for u in users:
-                result = await conn.execute(
-                    """INSERT INTO bot_users (bot_id, user_id, username, first_name, last_name, language_code, phone)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7)
-                       ON CONFLICT (bot_id, user_id) DO UPDATE SET
-                           last_seen     = NOW(),
-                           username      = EXCLUDED.username,
-                           first_name    = EXCLUDED.first_name,
-                           last_name     = EXCLUDED.last_name,
-                           language_code = EXCLUDED.language_code,
-                           phone         = COALESCE(EXCLUDED.phone, bot_users.phone)""",
-                    bot_id,
-                    u["user_id"],
-                    u.get("username"),
-                    u.get("first_name"),
-                    u.get("last_name"),
-                    u.get("language_code"),
-                    u.get("phone"),
-                )
-                if result == "INSERT 0 1":
-                    inserted += 1
-    return inserted
+        return await batch_upsert_users(pool, bot_id, users)
 
 
 async def get_audience_count(pool: asyncpg.Pool, bot_id: int) -> int:
@@ -509,6 +609,12 @@ async def create_broadcast(
     # рестарта, чтобы сегментная рассылка не ушла всей аудитории.
     # buttons/silent сохраняем, чтобы кнопки и тихий режим пережили рестарт.
     import json as _json
+
+    if total < 0:
+        raise ValueError("total must be non-negative")
+    if not message_text or not message_text.strip():
+        raise ValueError("message_text must not be empty")
+
     target_json = _json.dumps(target_user_ids) if target_user_ids else None
     buttons_json = _json.dumps(buttons) if buttons else None
     try:
@@ -656,36 +762,22 @@ async def get_broadcast_history(
 
 
 async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
-    )
-    inactive = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=FALSE", bot_id
-    )
-    joined_today = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '24 hours'",
-        bot_id,
-    )
-    joined_week = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '7 days'",
-        bot_id,
-    )
-    joined_month = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '30 days'",
-        bot_id,
-    )
-    langs = await pool.fetch(
-        """SELECT COALESCE(language_code, 'unknown') AS lang, COUNT(*) AS cnt
-           FROM bot_users WHERE bot_id=$1 AND is_active=TRUE
-           GROUP BY lang ORDER BY cnt DESC LIMIT 10""",
-        bot_id,
-    )
+    queries = [
+        ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", (bot_id,)),
+        ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=FALSE", (bot_id,)),
+        ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '24 hours'", (bot_id,)),
+        ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '7 days'", (bot_id,)),
+        ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '30 days'", (bot_id,)),
+        ("SELECT COALESCE(language_code, 'unknown') AS lang, COUNT(*) AS cnt FROM bot_users WHERE bot_id=$1 AND is_active=TRUE GROUP BY lang ORDER BY cnt DESC LIMIT 10", (bot_id,)),
+    ]
+    results = await run_concurrent_queries(pool, queries)
+    total, inactive, joined_today, joined_week, joined_month, langs = results
     return {
-        "total": total or 0,
-        "inactive": inactive or 0,
-        "joined_today": joined_today or 0,
-        "joined_week": joined_week or 0,
-        "joined_month": joined_month or 0,
+        "total": (total[0]["count"] if total else 0) or 0,
+        "inactive": (inactive[0]["count"] if inactive else 0) or 0,
+        "joined_today": (joined_today[0]["count"] if joined_today else 0) or 0,
+        "joined_week": (joined_week[0]["count"] if joined_week else 0) or 0,
+        "joined_month": (joined_month[0]["count"] if joined_month else 0) or 0,
         "languages": [{"lang": r["lang"], "count": r["cnt"]} for r in langs],
     }
 
@@ -1125,25 +1217,31 @@ async def copy_funnels(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> 
     funnels = await pool.fetch("SELECT * FROM funnels WHERE bot_id=$1", from_bot_id)
     count = 0
     for f in funnels:
-        new_funnel = await pool.fetchrow(
-            "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
-            to_bot_id,
-            f["name"],
-            f["trigger_type"],
-            f["keyword"],
-        )
-        steps = await pool.fetch(
-            "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order", f["id"]
-        )
-        for s in steps:
-            await pool.execute(
-                "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,$2,$3,$4)",
-                new_funnel["id"],
-                s["step_order"],
-                s["message_text"],
-                s["delay_minutes"],
+        try:
+            new_funnel = await pool.fetchrow(
+                "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
+                to_bot_id,
+                f["name"],
+                f["trigger_type"],
+                f["keyword"],
             )
-        count += 1
+            steps = await pool.fetch(
+                "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order", f["id"]
+            )
+            for s in steps:
+                try:
+                    await pool.execute(
+                        "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,$2,$3,$4)",
+                        new_funnel["id"],
+                        s["step_order"],
+                        s["message_text"],
+                        s["delay_minutes"],
+                    )
+                except Exception:
+                    log.debug("copy_funnels: skip step for funnel %s: %s", f["id"], s["step_order"])
+            count += 1
+        except Exception:
+            log.debug("copy_funnels: skip funnel %s", f["id"], exc_info=True)
     return count
 
 
@@ -1177,29 +1275,30 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
     first_delay = int(first_step["delay_minutes"]) if first_step else 0
     first_send_at = datetime.now(timezone.utc) + timedelta(minutes=first_delay)
 
-    result = await pool.execute(
-        """INSERT INTO funnel_subscriptions(funnel_id, user_id, next_send_at)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (funnel_id, user_id) DO UPDATE
-               SET current_step  = 0,
-                   completed      = false,
-                   dropped        = false,
-                   next_send_at   = $3
-               WHERE funnel_subscriptions.completed = true
-                  OR funnel_subscriptions.dropped = true""",
-        funnel_id,
-        user_id,
-        first_send_at,
-    )
-    # Increment entered_count when a new row was inserted (not an update)
-    if result == "INSERT 0 1":
-        try:
-            await pool.execute(
-                "UPDATE funnels SET entered_count = entered_count + 1 WHERE id=$1",
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            result = await conn.execute(
+                """INSERT INTO funnel_subscriptions(funnel_id, user_id, next_send_at)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (funnel_id, user_id) DO UPDATE
+                       SET current_step  = 0,
+                           completed      = false,
+                           dropped        = false,
+                           next_send_at   = $3
+                       WHERE funnel_subscriptions.completed = true
+                          OR funnel_subscriptions.dropped = true""",
                 funnel_id,
+                user_id,
+                first_send_at,
             )
-        except Exception:
-            pass  # column may not exist yet — schema migration will add it
+            if result == "INSERT 0 1":
+                try:
+                    await conn.execute(
+                        "UPDATE funnels SET entered_count = entered_count + 1 WHERE id=$1",
+                        funnel_id,
+                    )
+                except Exception:
+                    pass  # column may not exist yet — schema migration will add it
 
 
 async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[dict]:
@@ -1255,101 +1354,43 @@ async def advance_funnel_step(
 
 
 async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
-    """Get aggregated statistics for a bot."""
+    """Get aggregated statistics for a bot (concurrent queries)."""
     with timed(log, "get_bot_stats", extra={"bot_id": bot_id}):
-        # Count relay sessions (users who contacted bot via relay)
-        relay_sessions = await pool.fetchval(
-            "SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1", bot_id
-        )
-    # Count relay messages in/out
-    msg_in = await pool.fetchval(
-        """SELECT COUNT(*) FROM relay_messages rm
-           JOIN relay_sessions rs ON rs.id=rm.session_id
-           WHERE rs.bot_id=$1 AND rm.direction='in'""",
-        bot_id,
-    )
-    msg_out = await pool.fetchval(
-        """SELECT COUNT(*) FROM relay_messages rm
-           JOIN relay_sessions rs ON rs.id=rm.session_id
-           WHERE rs.bot_id=$1 AND rm.direction='out'""",
-        bot_id,
-    )
-    # Count active auto-replies
-    active_replies = await pool.fetchval(
-        "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=true", bot_id
-    )
-    # Count funnels
-    active_funnels = await pool.fetchval(
-        "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
-    )
-    # Count funnel subscriptions (unique users in funnel)
-    funnel_users = await pool.fetchval(
-        """SELECT COUNT(DISTINCT fs.user_id) FROM funnel_subscriptions fs
-           JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1""",
-        bot_id,
-    )
-    # Funnel completion rate
-    funnel_completed = await pool.fetchval(
-        """SELECT COUNT(*) FROM funnel_subscriptions fs
-           JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1 AND fs.completed=true""",
-        bot_id,
-    )
-    funnel_total_subs = await pool.fetchval(
-        """SELECT COUNT(*) FROM funnel_subscriptions fs
-           JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1""",
-        bot_id,
-    )
-    # Funnel dropped count (users who failed delivery — bot blocked etc.)
-    funnel_dropped = await pool.fetchval(
-        """SELECT COUNT(*) FROM funnel_subscriptions fs
-           JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1 AND COALESCE(fs.dropped, false) = true""",
-        bot_id,
-    )
-    # Relay sessions today (used last_activity since relay_sessions has no created_at)
-    relay_today = await pool.fetchval(
-        """SELECT COUNT(*) FROM relay_sessions
-           WHERE bot_id=$1 AND last_activity >= NOW() - INTERVAL '24 hours'""",
-        bot_id,
-    )
-    # Audience growth
-    aud_total = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
-    )
-    aud_today = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '24 hours'",
-        bot_id,
-    )
-    aud_week = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '7 days'",
-        bot_id,
-    )
-    # Broadcast count
-    broadcasts_total = await pool.fetchval(
-        "SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", bot_id
-    )
-    broadcasts_sent = await pool.fetchval(
-        "SELECT COALESCE(SUM(sent_count), 0) FROM broadcasts WHERE bot_id=$1", bot_id
-    )
+        queries = [
+            ("SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1", (bot_id,)),
+            ("SELECT COUNT(*) FROM relay_messages rm JOIN relay_sessions rs ON rs.id=rm.session_id WHERE rs.bot_id=$1 AND rm.direction='in'", (bot_id,)),
+            ("SELECT COUNT(*) FROM relay_messages rm JOIN relay_sessions rs ON rs.id=rm.session_id WHERE rs.bot_id=$1 AND rm.direction='out'", (bot_id,)),
+            ("SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=true", (bot_id,)),
+            ("SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", (bot_id,)),
+            ("SELECT COUNT(DISTINCT fs.user_id) FROM funnel_subscriptions fs JOIN funnels f ON f.id=fs.funnel_id WHERE f.bot_id=$1", (bot_id,)),
+            ("SELECT COUNT(*) FROM funnel_subscriptions fs JOIN funnels f ON f.id=fs.funnel_id WHERE f.bot_id=$1 AND fs.completed=true", (bot_id,)),
+            ("SELECT COUNT(*) FROM funnel_subscriptions fs JOIN funnels f ON f.id=fs.funnel_id WHERE f.bot_id=$1", (bot_id,)),
+            ("SELECT COUNT(*) FROM funnel_subscriptions fs JOIN funnels f ON f.id=fs.funnel_id WHERE f.bot_id=$1 AND COALESCE(fs.dropped, false) = true", (bot_id,)),
+            ("SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1 AND last_activity >= NOW() - INTERVAL '24 hours'", (bot_id,)),
+            ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", (bot_id,)),
+            ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '24 hours'", (bot_id,)),
+            ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '7 days'", (bot_id,)),
+            ("SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", (bot_id,)),
+            ("SELECT COALESCE(SUM(sent_count), 0) FROM broadcasts WHERE bot_id=$1", (bot_id,)),
+        ]
+        results = await run_concurrent_queries(pool, queries)
+        _v = lambda r: (r[0][0] if r else 0) or 0
     return {
-        "relay_sessions": relay_sessions or 0,
-        "msg_in": msg_in or 0,
-        "msg_out": msg_out or 0,
-        "active_replies": active_replies or 0,
-        "active_funnels": active_funnels or 0,
-        "funnel_users": funnel_users or 0,
-        "funnel_completed": funnel_completed or 0,
-        "funnel_total_subs": funnel_total_subs or 0,
-        "funnel_dropped": funnel_dropped or 0,
-        "relay_today": relay_today or 0,
-        "aud_total": aud_total or 0,
-        "aud_today": aud_today or 0,
-        "aud_week": aud_week or 0,
-        "broadcasts_total": broadcasts_total or 0,
-        "broadcasts_sent": broadcasts_sent or 0,
+        "relay_sessions": _v(results[0]),
+        "msg_in": _v(results[1]),
+        "msg_out": _v(results[2]),
+        "active_replies": _v(results[3]),
+        "active_funnels": _v(results[4]),
+        "funnel_users": _v(results[5]),
+        "funnel_completed": _v(results[6]),
+        "funnel_total_subs": _v(results[7]),
+        "funnel_dropped": _v(results[8]),
+        "relay_today": _v(results[9]),
+        "aud_total": _v(results[10]),
+        "aud_today": _v(results[11]),
+        "aud_week": _v(results[12]),
+        "broadcasts_total": _v(results[13]),
+        "broadcasts_sent": _v(results[14]),
     }
 
 
@@ -1470,6 +1511,9 @@ async def get_system_mode(pool: asyncpg.Pool) -> str:
 
 
 async def set_system_mode(pool: asyncpg.Pool, mode: str) -> None:
+    _valid_modes = {"manual", "assisted", "autopilot", "growth", "experiment", "stability"}
+    if mode not in _valid_modes:
+        raise ValueError(f"Invalid mode: {mode!r}. Must be one of: {', '.join(sorted(_valid_modes))}")
     await pool.execute(
         "UPDATE system_mode SET mode=$1, updated_at=now() WHERE id=1", mode
     )
@@ -1482,6 +1526,9 @@ async def set_bot_role(
     cluster: str = "default",
     added_by: int | None = None,
 ) -> None:
+    _valid_roles = {"conversion", "retention", "general"}
+    if role not in _valid_roles:
+        raise ValueError(f"Invalid role: {role!r}. Must be one of: {', '.join(sorted(_valid_roles))}")
     if added_by is not None:
         await pool.execute(
             "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1 AND added_by=$4",
@@ -1811,21 +1858,23 @@ async def assign_experiment_variant(
 async def record_experiment_conversion(
     pool, bot_id: int, user_id: int, exp_id: int
 ) -> None:
-    assignment = await pool.fetchrow(
-        "SELECT * FROM experiment_assignments WHERE bot_id=$1 AND user_id=$2 AND experiment_id=$3 AND converted=FALSE",
-        bot_id,
-        user_id,
-        exp_id,
-    )
-    if assignment:
-        await pool.execute(
-            "UPDATE experiment_assignments SET converted=TRUE, converted_at=NOW() WHERE id=$1",
-            assignment["id"],
-        )
-        await pool.execute(
-            "UPDATE experiment_variants SET conversions=conversions+1 WHERE id=$1",
-            assignment["variant_id"],
-        )
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            assignment = await conn.fetchrow(
+                "SELECT * FROM experiment_assignments WHERE bot_id=$1 AND user_id=$2 AND experiment_id=$3 AND converted=FALSE FOR UPDATE",
+                bot_id,
+                user_id,
+                exp_id,
+            )
+            if assignment:
+                await conn.execute(
+                    "UPDATE experiment_assignments SET converted=TRUE, converted_at=NOW() WHERE id=$1",
+                    assignment["id"],
+                )
+                await conn.execute(
+                    "UPDATE experiment_variants SET conversions=conversions+1 WHERE id=$1",
+                    assignment["variant_id"],
+                )
 
 
 async def check_experiment_winner(pool, exp_id: int) -> int | None:
@@ -1997,33 +2046,32 @@ async def record_deep_link_visit(
     pool, bot_id: int, param: str, user_id: int
 ) -> int | None:
     """Increments click_count, increments unique_users if first visit. Returns link_id or None."""
-    link = await pool.fetchrow(
-        "SELECT id FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2",
-        bot_id,
-        param,
-    )
-    if not link:
-        return None
-    link_id = link["id"]
-    # Always count the click
-    await pool.execute(
-        "UPDATE bot_deep_links SET click_count=click_count+1 WHERE id=$1", link_id
-    )
-    # Track unique: try inserting into visits table
-    try:
-        result = await pool.execute(
-            "INSERT INTO deep_link_visits(link_id, user_id) VALUES($1, $2)",
-            link_id,
-            user_id,
-        )
-        if result == "INSERT 0 1":
-            # New unique visit
-            await pool.execute(
-                "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1",
-                link_id,
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            link = await conn.fetchrow(
+                "SELECT id FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2",
+                bot_id,
+                param,
             )
-    except Exception as e:
-        log.debug("record_deep_link_visit: skip duplicate visit: %s", e)
+            if not link:
+                return None
+            link_id = link["id"]
+            await conn.execute(
+                "UPDATE bot_deep_links SET click_count=click_count+1 WHERE id=$1", link_id
+            )
+            try:
+                result = await conn.execute(
+                    "INSERT INTO deep_link_visits(link_id, user_id) VALUES($1, $2)",
+                    link_id,
+                    user_id,
+                )
+                if result == "INSERT 0 1":
+                    await conn.execute(
+                        "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1",
+                        link_id,
+                    )
+            except asyncpg.UniqueViolationError:
+                pass
     return link_id
 
 
@@ -3136,6 +3184,8 @@ async def get_or_create_referral_code(pool: asyncpg.Pool, user_id: int) -> str:
                 code,
             )
             return code
+        except asyncpg.UniqueViolationError:
+            continue
         except Exception:
             continue
     raise RuntimeError("Failed to generate unique referral code")
@@ -3458,6 +3508,17 @@ async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
 # Prevents notification spam when many events fire simultaneously.
 _notify_cooldown: dict[tuple[int, str, str | None], float] = {}
 _NOTIFY_COOLDOWN_SECONDS = 60  # minimum interval between same-type notifications per user
+_NOTIFY_CACHE_MAX = 10000  # prevent unbounded memory growth
+
+
+def _cleanup_notify_cooldown() -> None:
+    """Evict stale entries when cache grows too large."""
+    if len(_notify_cooldown) <= _NOTIFY_CACHE_MAX:
+        return
+    cutoff = time.monotonic() - _NOTIFY_COOLDOWN_SECONDS * 2
+    stale = [k for k, v in _notify_cooldown.items() if v < cutoff]
+    for k in stale[:len(stale) // 2]:
+        _notify_cooldown.pop(k, None)
 
 
 async def notify_if_enabled(
@@ -3482,6 +3543,7 @@ async def notify_if_enabled(
     """
     try:
         # Rate-limit check (in-memory, process-scoped)
+        _cleanup_notify_cooldown()
         now = time.monotonic()
         key = (user_id, pref, dedup_key)
         last_sent = _notify_cooldown.get(key, 0.0)
@@ -4190,7 +4252,7 @@ async def ban_user(
            VALUES ($1, 'ban_user', $2, $3)""",
         admin_id,
         user_id,
-        '{"reason":"' + (reason or "") + '"}',
+        json.dumps({"reason": reason or ""}),
     )
 
 
@@ -4505,29 +4567,31 @@ async def use_workspace_invite(
     pool: asyncpg.Pool, code: str, user_id: int
 ) -> int | None:
     """Use invite code. Returns workspace_id on success, None if invalid/expired."""
-    invite = await pool.fetchrow(
-        "SELECT * FROM workspace_invites WHERE invite_code=$1 AND uses_left>0",
-        code,
-    )
-    if not invite:
-        return None
-    ws_id = invite["workspace_id"]
-    existing = await pool.fetchval(
-        "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
-        ws_id,
-        user_id,
-    )
-    if not existing:
-        await pool.execute(
-            "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'member',$3)",
-            ws_id,
-            user_id,
-            invite["created_by"],
-        )
-        await pool.execute(
-            "UPDATE workspace_invites SET uses_left=uses_left-1 WHERE invite_code=$1",
-            code,
-        )
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            invite = await conn.fetchrow(
+                "SELECT * FROM workspace_invites WHERE invite_code=$1 AND uses_left>0 FOR UPDATE",
+                code,
+            )
+            if not invite:
+                return None
+            ws_id = invite["workspace_id"]
+            existing = await conn.fetchval(
+                "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+                ws_id,
+                user_id,
+            )
+            if not existing:
+                await conn.execute(
+                    "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'member',$3)",
+                    ws_id,
+                    user_id,
+                    invite["created_by"],
+                )
+                await conn.execute(
+                    "UPDATE workspace_invites SET uses_left=uses_left-1 WHERE invite_code=$1",
+                    code,
+                )
     return ws_id
 
 
@@ -6120,20 +6184,22 @@ async def record_commission(
     commission_usd = round(payment_amount * commission_pct / 100, 4)
     if commission_usd <= 0:
         return 0.0
-    await pool.execute(
-        """INSERT INTO commission_ledger(referrer_id, referred_id, payment_amount,
-               commission_pct, commission_usd)
-           VALUES($1,$2,$3,$4,$5)""",
-        referrer_id, referred_id, payment_amount, commission_pct, commission_usd,
-    )
-    await pool.execute(
-        """INSERT INTO ambassador_status(user_id, total_commission)
-           VALUES($1,$2)
-           ON CONFLICT(user_id) DO UPDATE
-           SET total_commission = ambassador_status.total_commission + $2,
-               updated_at = NOW()""",
-        referrer_id, commission_usd,
-    )
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO commission_ledger(referrer_id, referred_id, payment_amount,
+                       commission_pct, commission_usd)
+                   VALUES($1,$2,$3,$4,$5)""",
+                referrer_id, referred_id, payment_amount, commission_pct, commission_usd,
+            )
+            await conn.execute(
+                """INSERT INTO ambassador_status(user_id, total_commission)
+                   VALUES($1,$2)
+                   ON CONFLICT(user_id) DO UPDATE
+                   SET total_commission = ambassador_status.total_commission + $2,
+                       updated_at = NOW()""",
+                referrer_id, commission_usd,
+            )
     return commission_usd
 
 

@@ -16,12 +16,23 @@ from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
+from services.error_codes import ErrorCode, get_user_message
+from services.error_reporting import report_error, get_user_error_message
+from services.error_monitor import install_error_monitoring
 from bot.middlewares.user_activity import UserActivityLogMiddleware
 from bot.middlewares.subscription_gate import SubscriptionGateMiddleware, set_gate_enabled, set_gate_channels
 from bot.middlewares.latency import LatencyMiddleware
 from bot.utils.button_styles import install_button_style_patch
 
 install_button_style_patch()
+
+
+def _lazy_handler(module_path: str, attr: str = "router"):
+    """Lazy import handler router — defers module load until first access."""
+    import importlib as _il
+    _mod = _il.import_module(module_path)
+    return getattr(_mod, attr)
+
 
 from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
 from bot.handlers import commands as cmd_handler
@@ -162,13 +173,32 @@ async def _global_error_handler(event: ErrorEvent) -> None:
     if "query is too old" in exc_str or "query_id_invalid" in exc_str or "query id is invalid" in exc_str:
         return
 
-    log.exception("Unhandled error in update %s", event.update, exc_info=exc)
+    # Get error code and user message
+    error_code = ErrorCode.from_exception(exc)
+    user_msg = get_user_message(error_code)
+    
+    # Get user ID for context
+    user_id = None
     update = event.update
+    if update.callback_query and update.callback_query.from_user:
+        user_id = update.callback_query.from_user.id
+    elif update.message and update.message.from_user:
+        user_id = update.message.from_user.id
+    
+    # Report error with context
+    report_error(
+        exc,
+        user_id=user_id,
+        extra={"source": "global_error_handler"},
+    )
+    
+    log.exception("Unhandled error in update %s (code=%s)", event.update, error_code.value, exc_info=exc)
+    
     try:
         if update.callback_query:
             cb: CallbackQuery = update.callback_query
             try:
-                await cb.answer(f"⚠️ Ошибка: {type(exc).__name__}", show_alert=True)
+                await cb.answer(f"⚠️ {user_msg}", show_alert=True)
             except Exception:
                 log_exc_swallow(log, "Failed to answer callback_query on error handler")
             try:
@@ -179,7 +209,8 @@ async def _global_error_handler(event: ErrorEvent) -> None:
                     .replace(">", "&gt;")
                 )
                 await cb.message.answer(
-                    f"⚠️ <b>Внутренняя ошибка</b>\n\n"
+                    f"⚠️ <b>Ошибка [{error_code.value}]</b>\n\n"
+                    f"{user_msg}\n\n"
                     f"<code>{type(exc).__name__}: {exc_text}</code>",
                     parse_mode="HTML",
                 )
@@ -194,7 +225,8 @@ async def _global_error_handler(event: ErrorEvent) -> None:
                     .replace(">", "&gt;")
                 )
                 await update.message.answer(
-                    f"⚠️ <b>Внутренняя ошибка</b>\n\n"
+                    f"⚠️ <b>Ошибка [{error_code.value}]</b>\n\n"
+                    f"{user_msg}\n\n"
                     f"<code>{type(exc).__name__}: {exc_text}</code>",
                     parse_mode="HTML",
                 )
@@ -321,6 +353,7 @@ async def main() -> None:
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)
+    install_error_monitoring(dp)
 
     # Load persistent platform settings
     from database import db as _db

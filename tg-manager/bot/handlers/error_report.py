@@ -15,6 +15,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ErrorReportCb
 from bot.states import ErrorReportFSM
 from services.logger import log_exc_swallow
+from services.error_codes import ErrorCode
+from services.error_reporting import report_error
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
@@ -133,9 +135,15 @@ async def msg_error_screenshot(
                     f"error_report: failed to notify admin {admin_id} about report #{report_id}",
                 )
     except Exception as e:
+        report_error(
+            e,
+            user_id=message.from_user.id,
+            extra={"context": "error_report_save"},
+        )
         log_exc_swallow(log, f"Ошибка сохранения отчёта об ошибке: {e}")
         await message.answer(
-            "❌ Не удалось сохранить отчёт. Попробуйте позже или напишите в поддержку."
+            f"❌ Не удалось сохранить отчёт [{ErrorCode.DB_QUERY_TIMEOUT.value}]. "
+            "Попробуйте позже или напишите в поддержку."
         )
 
 

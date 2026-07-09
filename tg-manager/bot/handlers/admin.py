@@ -2960,8 +2960,8 @@ async def notify_new_platform_user(
                     "new_platform_user: ADMIN_IDS пуст — fallback на первого пользователя user_id=%s",
                     fallback,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("new_platform_user: fallback query error: %s", e)
     if not admin_ids:
         log.warning(
             "new_platform_user: нет получателей (ADMIN_IDS пуст и нет сессионных админов) — "

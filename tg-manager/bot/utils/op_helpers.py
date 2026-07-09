@@ -1,3 +1,9 @@
+"""Operation helper utilities for Telegram bot handlers.
+
+Provides retry logic, progress display, and safe message editing
+for bulk operations and callback query handling.
+"""
+
 from __future__ import annotations
 
 import random
@@ -11,7 +17,23 @@ _FLOOD_RE = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 def backoff(
     attempt: int, base: float = 2.0, cap: float = 120.0, *, jitter: bool = True
 ) -> float:
-    """Exponential backoff: base^attempt capped at cap, with optional +/-20% jitter."""
+    """Calculate exponential backoff delay with optional jitter.
+
+    Args:
+        attempt: Current retry attempt number (0-based).
+        base: Base multiplier for exponential growth.
+        cap: Maximum delay in seconds.
+        jitter: If True, adds +/-20% random variation.
+
+    Returns:
+        Delay in seconds.
+
+    Example:
+        >>> backoff(0)  # first retry: ~2s
+        2.0
+        >>> backoff(3)  # fourth retry: ~16s
+        16.0
+    """
     raw = min(base**attempt, cap)
     return raw * random.uniform(0.8, 1.2) if jitter else raw
 
@@ -21,6 +43,13 @@ def extract_flood_wait(exc: Exception, err_str: str) -> int:
 
     Returns 0 when the exception is not a flood wait.
     Supports Telethon FloodWaitError (.seconds) and string formats.
+
+    Args:
+        exc: The exception object (may have .seconds attribute).
+        err_str: String representation of the error.
+
+    Returns:
+        Number of seconds to wait, or 0 if not a flood wait.
     """
     if hasattr(exc, "seconds"):
         try:

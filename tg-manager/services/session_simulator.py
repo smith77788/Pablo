@@ -1,4 +1,22 @@
-"""Session Realism utilities — human-like delays and behavioral timing variation."""
+"""Session Realism utilities — human-like delays and behavioral timing variation.
+
+Provides timing functions that simulate realistic human behavior patterns
+to avoid bot detection during Telegram operations.
+
+Usage:
+    from services.session_simulator import human_delay, typing_delay, bulk_item_pause
+
+    # Between actions
+    await human_delay(min_s=1.5, max_s=8.0)
+
+    # Simulate typing
+    await typing_delay("Hello, world!")
+
+    # In bulk operations
+    for i, item in enumerate(items):
+        await bulk_item_pause(i, batch_size=10)
+        await process(item)
+"""
 
 from __future__ import annotations
 
@@ -17,13 +35,23 @@ log = logging.getLogger(__name__)
 
 
 async def human_delay(min_s: float = 1.5, max_s: float = 8.0) -> None:
-    """Pause with a human-like distribution (beta-skewed toward lower values)."""
+    """Pause with a human-like distribution (beta-skewed toward lower values).
+
+    Args:
+        min_s: Minimum delay in seconds.
+        max_s: Maximum delay in seconds.
+    """
     delay = random.betavariate(2, 5) * (max_s - min_s) + min_s
     await asyncio.sleep(delay)
 
 
 async def short_pause(min_s: float = 0.3, max_s: float = 1.5) -> None:
-    """Quick pause between lightweight actions."""
+    """Quick pause between lightweight actions.
+
+    Args:
+        min_s: Minimum pause in seconds.
+        max_s: Maximum pause in seconds.
+    """
     await asyncio.sleep(random.uniform(min_s, max_s))
 
 
@@ -33,13 +61,22 @@ async def micro_jitter() -> None:
 
 
 async def typing_delay(text: str) -> None:
-    """Simulate reading/composing: ~50-100 ms per character, capped at 8s."""
+    """Simulate reading/composing: ~50-100 ms per character, capped at 8s.
+
+    Args:
+        text: The text being "typed" (length determines delay).
+    """
     delay = min(8.0, len(text) * random.uniform(0.05, 0.1))
     await asyncio.sleep(delay)
 
 
 async def bulk_item_pause(index: int, batch_size: int = 10) -> None:
-    """Pause between bulk items; slightly longer every batch_size items."""
+    """Pause between bulk items; slightly longer every batch_size items.
+
+    Args:
+        index: Current item index (0-based).
+        batch_size: Number of items per batch (triggers longer pause).
+    """
     if index > 0 and index % batch_size == 0:
         await asyncio.sleep(random.uniform(3.0, 8.0))
     else:
@@ -50,15 +87,29 @@ async def bulk_item_pause(index: int, batch_size: int = 10) -> None:
 
 
 def chaos_factor(base: float = 1.0, spread: float = 0.3) -> float:
-    """Return a multiplier in [base-spread, base+spread] for timing variation."""
+    """Return a multiplier in [base-spread, base+spread] for timing variation.
+
+    Args:
+        base: Center multiplier value.
+        spread: Maximum deviation from base.
+
+    Returns:
+        Random multiplier for timing variation.
+    """
     return base + random.uniform(-spread, spread)
 
 
 def time_of_day_factor(hour: Optional[int] = None) -> float:
-    """
-    Returns a timing multiplier based on the current hour of day.
+    """Return a timing multiplier based on the current hour of day.
+
     Humans are slower at night and during early morning.
     1.0 = normal speed, >1.0 = slower/longer pauses, <1.0 = faster.
+
+    Args:
+        hour: Hour of day (0-23). If None, uses current time.
+
+    Returns:
+        Multiplier for timing adjustment.
     """
     if hour is None:
         hour = datetime.datetime.now().hour

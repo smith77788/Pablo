@@ -1,13 +1,18 @@
-"""
-Proxy Selector — унифицированный выбор и оценка прокси.
+"""Proxy Selector — unified proxy selection and evaluation.
 
-В системе Infragram прокси всегда привязаны к аккаунту (a.proxy_id).
-Этот модуль предоставляет:
-  - Получение score прокси из infra_memory
-  - Запись результатов работы прокси в infra_memory
-  - Ранжирование аккаунтов с учётом качества их прокси
-  - Быстрая проверка здоровья прокси из in-memory состояния
-  - IP diversity validation для предотвращения datacenter-банов
+In Infragram, proxies are always bound to an account (a.proxy_id).
+This module provides:
+  - Getting proxy scores from infra_memory
+  - Recording proxy work results to infra_memory
+  - Ranking accounts based on their proxy quality
+  - Quick proxy health checks from in-memory state
+  - IP diversity validation to prevent datacenter bans
+
+Usage:
+    from services.proxy_selector import extract_ip_from_proxy, is_datacenter_ip
+
+    ip = extract_ip_from_proxy("socks5://user:pass@1.2.3.4:1080")
+    is_dc, provider = is_datacenter_ip(ip)
 """
 
 from __future__ import annotations

@@ -1,4 +1,14 @@
-"""Telethon user account session management."""
+"""Telethon user account session management.
+
+Handles session creation, phone/QR login, proxy binding, and
+account lifecycle operations for Telegram user accounts.
+
+Usage:
+    from services.account_manager import create_client, run_session_health_monitor
+
+    client = await create_client(pool, account_id)
+    # ... use client for Telegram operations
+"""
 
 from __future__ import annotations
 import asyncio
@@ -8,6 +18,8 @@ import logging
 import random
 import re
 import time
+from services.error_codes import ErrorCode, AppError
+from services.error_reporting import report_error, get_user_error_message
 from typing import Any, Optional
 
 import asyncpg  # noqa: F401 — используется в аннотациях "asyncpg.Pool"
@@ -64,8 +76,12 @@ def _parse_proxy(proxy_url: str):
         host, port = hostpart.rsplit(":", 1)
         return (socks.SOCKS5, host, int(port), True, user, password)
     except Exception as e:
+        report_error(
+            e,
+            extra={"proxy_url": proxy_url[:20] + "...", "context": "proxy_parse"},
+        )
         log.warning(
-            "Failed to parse TG_PROXY %r: %s — running without proxy", proxy_url, e
+            "Failed to parse TG_PROXY: %s — running without proxy", e
         )
         return None
 
@@ -716,7 +732,8 @@ async def start_login(
         except Exception:
             log_exc_swallow(log, "Сбой в start_login")
         raise
-    except Exception:
+    except Exception as e:
+        log.warning("start_login failed: %s", e)
         try:
             await client.disconnect()
         except Exception:
@@ -898,7 +915,8 @@ async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
 
     try:
         data = _json.loads(json_str)
-    except Exception:
+    except Exception as e:
+        log.warning("import_from_pyrogram_json: json parse failed: %s", e)
         raise ValueError("Некорректный JSON. Проверьте формат.")
 
     dc_id = int(data.get("dc_id") or 2)
@@ -908,7 +926,8 @@ async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
 
     try:
         auth_key = base64.b64decode(auth_key_raw + "==")
-    except Exception:
+    except Exception as e:
+        log.warning("import_from_pyrogram_json: base64 decode failed: %s", e)
         raise ValueError("Не удалось декодировать auth_key (ожидается base64).")
 
     if len(auth_key) != 256:
@@ -1858,8 +1877,8 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
     finally:
         try:
             await client.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("appeal_spamblock: disconnect failed: %s", e)
 
 
 def is_verified_account_restriction(status: str, *, has_session: bool = True) -> bool:
@@ -2797,7 +2816,8 @@ async def invite_users_to_channel(
         # Resolve channel entity
         try:
             channel_peer = await _resolve_channel_peer(client, channel_id, access_hash)
-        except Exception:
+        except Exception as e:
+            log.warning("invite_users_to_channel: resolve channel peer failed: %s", e)
             return {
                 "invited": 0,
                 "failed": [],
@@ -4290,7 +4310,8 @@ async def report_peer_deep_v2(  # noqa: C901
                         entity = await _timed(client.get_entity(_ie_inv), 15.0)
                     except Exception as e:
                         log.debug("rpv2: entity refresh from join failed: %s", e)
-                except Exception:
+                except Exception as e:
+                    log.warning("rpv2: join invite failed (falling back to CheckChatInvite): %s", e)
                     # Already a member (or other join error) — use CheckChatInviteRequest
                     # to get entity. ImportChatInviteRequest fails for existing members,
                     # but get_entity("+hash") mis-parses the hash as a phone number.
@@ -4308,7 +4329,8 @@ async def report_peer_deep_v2(  # noqa: C901
                             entity = _check.chat
                         else:
                             raise ValueError("CheckChatInvite returned no chat")
-                    except Exception:
+                    except Exception as e:
+                        log.warning("rpv2: CheckChatInvite fallback failed: %s", e)
                         if peer.startswith("+"):
                             # peer is "+HASH" — get_entity mis-parses "+" as phone prefix
                             raise
@@ -5254,9 +5276,11 @@ async def check_username_available(
             return True  # username is available
         except UsernameInvalidError:
             return False  # invalid username format
-        except Exception:
+        except Exception as e:
+            log.warning("is_channel_available inner error: %s", e)
             return False  # unknown error → treat as unavailable to be safe
-    except Exception:
+    except Exception as e:
+        log.warning("is_channel_available error: %s", e)
         return False
     finally:
         try:

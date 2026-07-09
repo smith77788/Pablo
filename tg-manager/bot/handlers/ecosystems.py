@@ -71,8 +71,8 @@ async def _edit(cb: CallbackQuery, text: str, markup=None, **kw) -> None:
             try:
                 await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            except Exception:
-                pass
+            except Exception as caption_err:
+                log.warning("ecosystems _edit: edit_caption fallback error: %s", caption_err)
         if "message to edit not found" in err_str or "message can't be edited" in err_str:
             await cb.bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=markup, **kw)
         else:

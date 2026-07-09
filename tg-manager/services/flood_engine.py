@@ -1,9 +1,22 @@
-"""
-Flood Intelligence Engine — centralized FloodWait tracking, adaptive pacing,
+"""Flood Intelligence Engine — centralized FloodWait tracking, adaptive pacing,
 per-account cooldown management, and operation risk scoring.
 
-Integrates with account_flood_log table (existing) + new flood_intelligence table.
-Used by op_worker, account_manager, and any bulk operation handler.
+Integrates with ``account_flood_log`` and ``flood_intelligence`` tables.
+Used by ``op_worker``, ``account_manager``, and any bulk operation handler.
+
+Usage:
+    from services.flood_engine import (
+        recommended_delay, record_flood, is_account_cooling,
+        account_risk_score, action_allowed,
+    )
+
+    # Before executing an action
+    if is_account_cooling(account_id):
+        wait = seconds_until_ready(account_id)
+        await asyncio.sleep(wait)
+
+    delay = recommended_delay(account_id, "invite")
+    await asyncio.sleep(delay)
 """
 
 from __future__ import annotations
@@ -49,6 +62,18 @@ _ACTION_MIN_TRUST: dict[str, float] = {
 
 @dataclass
 class _AccountFloodState:
+    """In-memory flood state for a single account.
+
+    Attributes:
+        account_id: Telegram account numeric ID.
+        consecutive_floods: Number of consecutive FloodWait errors.
+        total_floods_24h: Flood events in the last 24 hours.
+        last_flood_at: Monotonic timestamp of the last flood.
+        cooldown_until: Monotonic timestamp when cooldown expires.
+        risk_score: Risk score from 0.0 (safe) to 1.0 (very risky).
+        action_delays: Per-action learned delays in seconds.
+    """
+
     account_id: int
     consecutive_floods: int = 0
     total_floods_24h: int = 0
@@ -61,19 +86,38 @@ class _AccountFloodState:
 
 
 def get_account_state(account_id: int) -> _AccountFloodState:
+    """Get or create in-memory flood state for an account.
+
+    Args:
+        account_id: Telegram account numeric ID.
+
+    Returns:
+        The account's flood state, creating a new one if needed.
+    """
     if account_id not in _flood_state:
         _flood_state[account_id] = _AccountFloodState(account_id=account_id)
     return _flood_state[account_id]
 
 
 def clear_account_cooldown(account_id: int) -> None:
-    """Clear in-memory cooldown for one account (call after DB reset)."""
+    """Clear in-memory cooldown for one account (call after DB reset).
+
+    Args:
+        account_id: Telegram account numeric ID.
+    """
     state = get_account_state(account_id)
     state.cooldown_until = 0.0
 
 
 def clear_all_cooldowns(account_ids: list[int]) -> int:
-    """Clear in-memory cooldowns for a list of accounts. Returns count cleared."""
+    """Clear in-memory cooldowns for a list of accounts.
+
+    Args:
+        account_ids: List of Telegram account IDs to reset.
+
+    Returns:
+        Number of accounts whose cooldowns were actually cleared.
+    """
     cleared = 0
     for aid in account_ids:
         if aid in _flood_state and _flood_state[aid].cooldown_until > time.monotonic():
@@ -83,18 +127,45 @@ def clear_all_cooldowns(account_ids: list[int]) -> int:
 
 
 def is_account_cooling(account_id: int) -> bool:
+    """Check if an account is currently in cooldown.
+
+    Args:
+        account_id: Telegram account numeric ID.
+
+    Returns:
+        True if the account is still cooling down from a flood.
+    """
     state = get_account_state(account_id)
     return state.cooldown_until > time.monotonic()
 
 
 def seconds_until_ready(account_id: int) -> float:
+    """Get seconds remaining until an account's cooldown expires.
+
+    Args:
+        account_id: Telegram account numeric ID.
+
+    Returns:
+        Seconds remaining (0.0 if already ready).
+    """
     state = get_account_state(account_id)
     remaining = state.cooldown_until - time.monotonic()
     return max(0.0, remaining)
 
 
 def recommended_delay(account_id: int, action_type: str = "default") -> float:
-    """Return recommended delay in seconds before next action for this account."""
+    """Return recommended delay in seconds before next action for this account.
+
+    Combines baseline delay for the action type with any learned adjustment
+    from previous flood events.
+
+    Args:
+        account_id: Telegram account numeric ID.
+        action_type: Type of action (e.g. 'join', 'invite', 'strike').
+
+    Returns:
+        Recommended delay in seconds.
+    """
     state = get_account_state(account_id)
     baseline = _ACTION_BASELINES.get(action_type, _ACTION_BASELINES["default"])
     learned = state.action_delays.get(

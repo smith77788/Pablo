@@ -1,9 +1,15 @@
 """Background service: detect Telegram shadowban and account restrictions.
 
 Checks:
-1. Search visibility drop — bot disappears from search rankings (was visible, now not)
-2. Account flood rate — accounts with high flood_count_7d flagged as risk
-3. Search position collapse — position drops > 10 places vs 7-day average
+  1. Search visibility drop — bot disappears from search rankings
+  2. Account flood rate — accounts with high flood_count_7d flagged as risk
+  3. Search position collapse — position drops > 10 places vs 7-day average
+
+Usage:
+    from services.shadowban_monitor import run
+
+    # Starts the background monitoring loop
+    await run(pool, bot)
 """
 
 from __future__ import annotations

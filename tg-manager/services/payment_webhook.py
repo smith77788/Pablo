@@ -29,6 +29,12 @@ from aiohttp import web
 from aiogram import Bot
 
 from services.logger import log_exc_swallow
+from services.security import (
+    check_rate_limit,
+    rate_limit_response,
+    validate_integer,
+    escape_html,
+)
 
 log = logging.getLogger(__name__)
 
@@ -167,6 +173,9 @@ async def _activate_subscription(
 
 def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app = web.Application()
+    # Apply security middleware (rate limiting + security headers)
+    from services.security import security_middleware
+    app.middlewares.append(security_middleware())
 
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="OK")
@@ -177,6 +186,10 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
 
     async def payment_webhook(request: web.Request) -> web.Response:
         """Универсальный webhook для платёжных систем."""
+        # Rate limit webhook requests per IP
+        if not await check_rate_limit(request, max_requests=60, window=60):
+            return rate_limit_response(request)
+
         body = await request.read()
         sig = request.headers.get("X-Webhook-Signature", "")
         if _WEBHOOK_SECRET and not _verify_signature(body, sig):
@@ -188,9 +201,13 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         except json.JSONDecodeError:
             return web.Response(status=400, text="Invalid JSON")
 
-        # Извлечь поля из webhook-тела
+        # Извлечь поля из webhook-тела с валидацией
         user_id = data.get("user_id") or data.get("payload", {}).get("user_id")
-        amount = float(data.get("amount", 0))
+        amount_raw = data.get("amount", 0)
+        try:
+            amount = float(amount_raw)
+        except (TypeError, ValueError):
+            return web.Response(status=400, text="Invalid amount")
         currency = (data.get("currency") or data.get("asset", "TON")).upper()
         tx_ref = (
             data.get("hash") or data.get("tx_hash") or data.get("invoice_id") or "wh"
@@ -200,7 +217,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         if not user_id:
             return web.Response(status=400, text="Missing user_id")
 
-        user_id = int(user_id)
+        user_id = validate_integer(user_id, min_val=1)
+        if user_id is None:
+            return web.Response(status=400, text="Invalid user_id")
 
         # Попытаться определить план из description/plan поля
         plan, months = None, None
@@ -233,6 +252,10 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
 
     async def cryptopay_webhook(request: web.Request) -> web.Response:
         """Специфический обработчик для CryptoPay/CryptoBotAPI."""
+        # Rate limit webhook requests per IP
+        if not await check_rate_limit(request, max_requests=60, window=60):
+            return rate_limit_response(request)
+
         body = await request.read()
         api_token = os.getenv("CRYPTOPAY_TOKEN", "")
         if api_token:
@@ -285,6 +308,10 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
 
     async def deploy_webhook(request: web.Request) -> web.Response:
         """Railway deployment webhook — уведомление админов о деплое."""
+        # Rate limit deploy webhook requests
+        if not await check_rate_limit(request, max_requests=20, window=60):
+            return rate_limit_response(request)
+
         body = await request.read()
         try:
             data = json.loads(body)
@@ -314,9 +341,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         status_emoji = {"SUCCESS": "✅", "FAILED": "❌", "CRASHED": "💥"}.get(
             status, "🔄"
         )
-        branch = commit.get("branch", "unknown")
-        sha = commit.get(
-            "message", ""
+        branch = escape_html(commit.get("branch", "unknown"))
+        sha = escape_html(
+            commit.get("message", "")
         )  # Railway puts commit message in 'message' field
         deployment.get("id", "")[:7]  # Short deployment ID as reference
 
@@ -327,24 +354,24 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
 
         created_at = deployment.get("createdAt", "")
 
-        # Build notification text
+        # Build notification text (HTML-escaped to prevent XSS via deployment data)
         lines = [
             f"<b>{status_emoji} Деплой {status}</b>",
             "",
-            f"🏷️ <b>Проект:</b> {project.get('name', 'Infragram')}",
-            f"🔧 <b>Сервис:</b> {service.get('name', 'tg-manager')}",
-            f"🌍 <b>Окружение:</b> {environment.get('name', 'production')}",
+            f"🏷️ <b>Проект:</b> {escape_html(project.get('name', 'Infragram'))}",
+            f"🔧 <b>Сервис:</b> {escape_html(service.get('name', 'tg-manager'))}",
+            f"🌍 <b>Окружение:</b> {escape_html(environment.get('name', 'production'))}",
             f"🌿 <b>Ветка:</b> <code>{branch}</code>",
         ]
 
         if commit_full:
-            lines.append(f"🔖 <b>Коммит:</b> <code>{commit_full[:12]}</code>")
+            lines.append(f"🔖 <b>Коммит:</b> <code>{escape_html(commit_full[:12])}</code>")
         if sha:
             lines.append(f"📝 <b>Изменения:</b>\n<code>{sha[:500]}</code>")
         if creator:
-            lines.append(f"👤 <b>Автор деплоя:</b> {creator.get('name', '—')}")
+            lines.append(f"👤 <b>Автор деплоя:</b> {escape_html(creator.get('name', '—'))}")
         if created_at:
-            lines.append(f"🕐 <b>Время:</b> {created_at}")
+            lines.append(f"🕐 <b>Время:</b> {escape_html(str(created_at))}")
 
         text = "\n".join(lines)
 

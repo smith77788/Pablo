@@ -1,12 +1,20 @@
-"""
-Resource Selector — единый механизм выбора аккаунтов и прокси.
+"""Resource Selector — unified account and proxy selection mechanism.
 
-Заменяет три конкурирующих паттерна:
-  1. _get_active_accounts() из op_helpers — возвращает всё без flood-интеллекта
-  2. flood_engine.get_best_account() — возвращает один лучший аккаунт
-  3. geo_router — изолированный гео-специфичный выбор
+Replaces three competing patterns:
+  1. _get_active_accounts() from op_helpers — returns all without flood intelligence
+  2. flood_engine.get_best_account() — returns single best account
+  3. geo_router — isolated geo-specific selection
 
-Все системы должны использовать этот модуль вместо прямых SQL-запросов на tg_accounts.
+All systems should use this module instead of direct SQL queries on tg_accounts.
+
+Usage:
+    from services.resource_selector import select_account, select_accounts
+
+    # Select single best account
+    account = await select_account(pool, owner_id, action_type="invite")
+
+    # Select multiple accounts for wave operations
+    accounts = await select_accounts(pool, owner_id, count=5, action_type="strike")
 """
 
 from __future__ import annotations

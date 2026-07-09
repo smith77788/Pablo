@@ -18,6 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import re
 
 import asyncpg
 from aiohttp import web
@@ -27,6 +28,15 @@ from config import ADMIN_SECRET
 from database import db
 from services import account_manager
 from services.logger import log_exc_swallow
+from services.security import (
+    check_rate_limit,
+    rate_limit_response,
+    validate_integer,
+    validate_string,
+    check_sql_suspicious,
+    escape_html,
+    require_rest_api_auth,
+)
 
 log = logging.getLogger(__name__)
 
@@ -166,10 +176,15 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
     async def api_accounts(request: web.Request) -> web.Response:
         if not _check_auth(request):
             return _unauth()
+        # Rate limit REST API requests
+        if not await check_rate_limit(request, max_requests=30, window=60):
+            return rate_limit_response(request)
         try:
             owner_id = int(request.query["owner_id"])
         except (KeyError, ValueError):
             return _bad("owner_id required")
+        if owner_id < 1:
+            return _bad("Invalid owner_id")
         try:
             rows = await db.get_tg_accounts(pool, owner_id)
             return web.json_response(
@@ -191,24 +206,30 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
     async def api_send_message(request: web.Request) -> web.Response:
         if not _check_auth(request):
             return _unauth()
+        # Rate limit REST API requests
+        if not await check_rate_limit(request, max_requests=10, window=60):
+            return rate_limit_response(request)
         try:
             data = await request.json()
         except Exception:
             return _bad("invalid JSON")
-        owner_id = data.get("owner_id")
-        account_id = data.get("account_id")
-        chat_id = data.get("chat_id")
-        text = data.get("text", "")
+        owner_id = validate_integer(data.get("owner_id"), min_val=1)
+        account_id = validate_integer(data.get("account_id"), min_val=1)
+        chat_id = validate_integer(data.get("chat_id"))
+        text = validate_string(data.get("text"), max_len=4096)
         if not all([owner_id, account_id, chat_id, text]):
             return _bad("owner_id, account_id, chat_id, text are required")
+        # SQL injection defense: check text for suspicious patterns
+        if check_sql_suspicious(text):
+            return _bad("Invalid characters in text")
         try:
             acc = await db.get_account_for_telethon(
-                pool, int(account_id), int(owner_id)
+                pool, account_id, owner_id
             )
             if not acc:
                 return web.json_response({"error": "account not found"}, status=404)
             ok = await account_manager.send_message_via_account(
-                acc["session_str"], int(chat_id), text, _acc=dict(acc)
+                acc["session_str"], chat_id, text, _acc=dict(acc)
             )
             return web.json_response({"ok": ok})
         except Exception:
@@ -218,29 +239,32 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
     async def api_click_button(request: web.Request) -> web.Response:
         if not _check_auth(request):
             return _unauth()
+        # Rate limit REST API requests
+        if not await check_rate_limit(request, max_requests=10, window=60):
+            return rate_limit_response(request)
         try:
             data = await request.json()
         except Exception:
             return _bad("invalid JSON")
-        owner_id = data.get("owner_id")
-        account_id = data.get("account_id")
-        chat_id = data.get("chat_id")
-        message_id = data.get("message_id")
-        button_data = data.get("button_data", "")
+        owner_id = validate_integer(data.get("owner_id"), min_val=1)
+        account_id = validate_integer(data.get("account_id"), min_val=1)
+        chat_id = validate_integer(data.get("chat_id"))
+        message_id = validate_integer(data.get("message_id"), min_val=1)
+        button_data = validate_string(data.get("button_data"), max_len=512)
         if not all([owner_id, account_id, chat_id, message_id, button_data]):
             return _bad(
                 "owner_id, account_id, chat_id, message_id, button_data are required"
             )
         try:
             acc = await db.get_account_for_telethon(
-                pool, int(account_id), int(owner_id)
+                pool, account_id, owner_id
             )
             if not acc:
                 return web.json_response({"error": "account not found"}, status=404)
             result = await _click_inline_button(
                 acc["session_str"],
-                int(chat_id),
-                int(message_id),
+                chat_id,
+                message_id,
                 button_data,
                 _acc=dict(acc),
             )
@@ -252,13 +276,18 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
     async def api_get_messages(request: web.Request) -> web.Response:
         if not _check_auth(request):
             return _unauth()
+        # Rate limit REST API requests
+        if not await check_rate_limit(request, max_requests=15, window=60):
+            return rate_limit_response(request)
         try:
-            owner_id = int(request.query["owner_id"])
-            account_id = int(request.query["account_id"])
-            chat_id = int(request.query["chat_id"])
+            owner_id = validate_integer(request.query.get("owner_id"), min_val=1)
+            account_id = validate_integer(request.query.get("account_id"), min_val=1)
+            chat_id = validate_integer(request.query.get("chat_id"))
         except (KeyError, ValueError):
             return _bad("owner_id, account_id, chat_id are required")
-        limit = min(int(request.query.get("limit", "20")), 100)
+        if not all([owner_id, account_id, chat_id]):
+            return _bad("owner_id, account_id, chat_id are required")
+        limit = min(validate_integer(request.query.get("limit", "20"), min_val=1, max_val=100) or 20, 100)
         try:
             acc = await db.get_account_for_telethon(pool, account_id, owner_id)
             if not acc:

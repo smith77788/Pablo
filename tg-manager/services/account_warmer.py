@@ -1,14 +1,19 @@
-"""
-Account Warming System — постепенный разогрев новых аккаунтов.
+"""Account Warming System — gradual warming of new accounts.
 
-Имитирует натуральное поведение:
-- День 1-3: чтение сообщений, просмотр профилей
-- День 4-7: лайки/реакции, вступление в каналы
-- День 8-14: комментарии, групповые сообщения
-- День 15+: полная активность
+Simulates natural behavior:
+  - Day 1-3: reading messages, viewing profiles
+  - Day 4-7: likes/reactions, joining channels
+  - Day 8-14: comments, group messages
+  - Day 15+: full activity
 
-Все действия логируются в account_warmup_log.
-Статус плана хранится в account_warmup_plans.
+All actions are logged to account_warmup_log.
+Plan status is stored in account_warmup_plans.
+
+Usage:
+    from services.account_warmer import run_warmup_loop
+
+    # Starts the background warming loop
+    await run_warmup_loop(pool)
 """
 
 from __future__ import annotations

@@ -1,3 +1,18 @@
+"""Inline keyboard builders for Telegram bot menus.
+
+Provides factory functions for creating inline keyboards used
+throughout the bot interface.
+
+Usage:
+    from bot.keyboards import main_menu, network_ops_menu
+
+    # Main menu
+    await message.answer("Choose:", reply_markup=main_menu(is_admin=True))
+
+    # Network operations
+    await callback.message.edit_text("Network:", reply_markup=network_ops_menu())
+"""
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
@@ -33,9 +48,9 @@ from bot.callbacks import (
     BotFactCb,
 )
 
-PAGE_SIZE = 5
+PAGE_SIZE: int = 5
 
-LANGUAGES = [
+LANGUAGES: list[tuple[str, str, str]] = [
     ("ru", "🇷🇺", "Русский"),
     ("en", "🇬🇧", "English"),
     ("uk", "🇺🇦", "Українська"),
@@ -50,6 +65,14 @@ LANGUAGES = [
 
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Build the main bot menu keyboard.
+
+    Args:
+        is_admin: If True, includes admin panel button.
+
+    Returns:
+        Inline keyboard markup with main menu buttons.
+    """
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
     kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
@@ -62,6 +85,11 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
 
 
 def network_ops_menu() -> InlineKeyboardMarkup:
+    """Build the network operations menu keyboard.
+
+    Returns:
+        Inline keyboard with network management options.
+    """
     kb = InlineKeyboardBuilder()
     # ── Управление сетью ──
     kb.button(text="📊 Аналитика сети", callback_data=NetworkCb(action="analytics"))

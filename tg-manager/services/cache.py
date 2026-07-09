@@ -90,6 +90,7 @@ default_cache = TTLCache(default_ttl=300.0, max_size=5000)
 account_cache = TTLCache(default_ttl=60.0, max_size=1000)
 proxy_cache = TTLCache(default_ttl=120.0, max_size=500)
 stats_cache = TTLCache(default_ttl=60.0, max_size=200)
+query_cache = TTLCache(default_ttl=30.0, max_size=2000)
 
 
 def cached(ttl: float = 300.0, cache_instance: TTLCache | None = None):
@@ -136,7 +137,7 @@ def invalidate_pattern(pattern: str) -> int:
         Number of invalidated entries
     """
     count = 0
-    for cache in [default_cache, account_cache, proxy_cache, stats_cache]:
+    for cache in [default_cache, account_cache, proxy_cache, stats_cache, query_cache]:
         keys_to_delete = [k for k in cache._cache if pattern in k]
         for key in keys_to_delete:
             cache.delete(key)

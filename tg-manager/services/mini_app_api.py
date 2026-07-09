@@ -13,6 +13,17 @@ import asyncpg
 from aiohttp import web
 
 from services.mini_app_auth import validate_init_data, make_token, parse_token
+from services.security import (
+    check_rate_limit,
+    rate_limit_response,
+    validate_integer,
+    validate_string,
+    sanitize_search_query,
+    check_sql_suspicious,
+    escape_html,
+    escape_json_value,
+    security_middleware,
+)
 
 log = logging.getLogger(__name__)
 
@@ -376,6 +387,8 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
 
 
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
+    # Apply security middleware (rate limiting + security headers)
+    app.middlewares.append(security_middleware())
 
     async def _apply_inline_migrations(application: web.Application) -> None:
         stmts = [
@@ -476,7 +489,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON")
-        init_data = body.get("initData", "")
+        init_data = validate_string(body.get("initData"), max_len=8192)
+        if not init_data:
+            return _err("Missing initData")
         bot_token = _bot_token()
         user = validate_init_data(init_data, bot_token)
         if not user:
@@ -579,7 +594,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            limit = min(int(request.rel_url.query.get("limit", "500")), 5000)
+            limit = min(validate_integer(request.rel_url.query.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
         except (ValueError, TypeError):
             limit = 500
         # Показываем ВСЕ боты доступные пользователю:
@@ -862,10 +877,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON")
-        bot_id = body.get("bot_id")
-        text = (body.get("text") or "").strip()
+        bot_id = validate_integer(body.get("bot_id"), min_val=1)
+        text = validate_string(body.get("text"), max_len=4096)
         if not bot_id or not text:
             return _err("bot_id and text required")
+        # SQL injection defense on text
+        if check_sql_suspicious(text):
+            return _err("Invalid characters in message text")
         if len(text) > 4096:
             return _err("Message too long (max 4096 chars)")
         try:
@@ -874,7 +892,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid bot_id")
         silent = bool(body.get("silent"))
         # Сегмент аудитории: all | active_7d | active_30d
-        segment = (body.get("segment") or "all").strip()
+        segment = validate_string(body.get("segment") or "all", max_len=20) or "all"
         _seg_sql = {
             "active_7d": " AND last_seen >= now() - interval '7 days'",
             "active_30d": " AND last_seen >= now() - interval '30 days'",
@@ -883,12 +901,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         buttons = []
         for b in (body.get("buttons") or [])[:10]:
             try:
-                bt = str(b.get("text") or "").strip()[:64]
-                bu = str(b.get("url") or "").strip()
+                bt = validate_string(b.get("text"), max_len=64) or ""
+                bu = validate_string(b.get("url"), max_len=2048) or ""
             except Exception:
                 continue
             if bt and bu.lower().startswith(("http://", "https://")):
-                buttons.append({"text": bt, "url": bu})
+                buttons.append({"text": escape_html(bt), "url": bu})
         bot_row = await _safe_fetchrow(pool,
             "SELECT bot_id, token, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id_int, uid)
@@ -1027,11 +1045,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            limit = min(int(request.rel_url.query.get("limit", "500")), 5000)
+            limit = min(validate_integer(request.rel_url.query.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
         except (ValueError, TypeError):
             limit = 500
         try:
-            offset = max(int(request.rel_url.query.get("offset", "0")), 0)
+            offset = max(validate_integer(request.rel_url.query.get("offset", "0"), min_val=0) or 0, 0)
         except (ValueError, TypeError):
             offset = 0
         # Показываем ВСЕ каналы доступные пользователю:
@@ -1309,14 +1327,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON")
-        name = (body.get("name") or "").strip()
-        text_template = (body.get("text_template") or "").strip()
-        target_type = body.get("target_type", "all_bots")
+        name = validate_string(body.get("name"), max_len=200)
+        text_template = validate_string(body.get("text_template"), max_len=4096)
+        target_type = validate_string(body.get("target_type"), max_len=30) or "all_bots"
         target_id = body.get("target_id")
         if not name:
             return _err("name required")
         if not text_template:
             return _err("text_template required")
+        if check_sql_suspicious(text_template):
+            return _err("Invalid characters in message text")
         if target_type not in ("bot_users", "all_bots", "crm", "parsed_audience"):
             return _err("Invalid target_type")
         if target_type == "bot_users" and not target_id:
@@ -1360,9 +1380,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid request", 400)
-        text = (body.get("text") or "").strip()
+        text = validate_string(body.get("text"), max_len=4096)
         if not text:
             return _err("text required")
+        if check_sql_suspicious(text):
+            return _err("Invalid characters in post text")
         if len(text) > 4096:
             return _err("Message too long (max 4096 chars)")
         ch = await _safe_fetchrow(pool,
@@ -1710,12 +1732,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
             return _err("Bot not found", 404)
-        name = (body.get("name") or "").strip()
-        start_param = (body.get("start_param") or "").strip().lower()
+        name = validate_string(body.get("name"), max_len=200)
+        start_param = validate_string(body.get("start_param"), max_len=64)
         if not name or not start_param:
             return _err("name and start_param required")
-        import re as _re
-        if not _re.match(r'^[a-zA-Z0-9_-]{1,64}$', start_param):
+        if not validate_start_param(start_param):
             return _err("start_param: only letters, digits, _ and - allowed (max 64 chars)")
         try:
             row = await pool.fetchrow(
@@ -1824,7 +1845,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad bot_id", 400)
         try:
             body = await request.json()
-            note = str(body.get("note", "")).strip()[:2000]
+            note = validate_string(body.get("note"), max_len=2000, required=False)
         except Exception:
             return _err("bad body", 400)
         try:
@@ -2079,8 +2100,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            op = str(body.get("op", "")).strip()
-            acc_count = int(body.get("acc_count", 0))
+            op = validate_string(body.get("op"), max_len=20)
+            acc_count = validate_integer(body.get("acc_count", 0), min_val=0) or 0
         except Exception:
             return _err("bad body", 400)
         if op not in ("name", "avatar", "2fa"):
@@ -2180,9 +2201,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            op = str(body.get("op", "")).strip()
-            account_id = int(body["account_id"])
+            op = validate_string(body.get("op"), max_len=30)
+            account_id = validate_integer(body.get("account_id"), min_val=1)
         except Exception:
+            return _err("bad body", 400)
+        if not op or not account_id:
             return _err("bad body", 400)
         if op not in ("leave_all_chats", "delete_contacts"):
             return _err("op must be leave_all_chats or delete_contacts", 400)
@@ -2715,11 +2738,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid request", 400)
-        query = (body.get("query") or "").strip()
+        query = sanitize_search_query(body.get("query") or "")
         if not query:
             return _err("Укажите поисковый запрос", 400)
         try:
-            limit = max(1, min(int(body.get("limit") or 20), 50))
+            limit = max(1, min(validate_integer(body.get("limit") or 20, min_val=1, max_val=50) or 20, 50))
         except (TypeError, ValueError):
             limit = 20
         # Аккаунт: указанный (если принадлежит владельцу и активен) либо первый активный.
@@ -3005,9 +3028,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("bad body", 400)
-        link = (body.get("channel_identifier") or "").strip()
+        link = validate_string(body.get("channel_identifier"), max_len=500)
         if not link:
             return _err("channel_identifier required")
+        # Validate URL format for channel identifier
+        if not link.startswith(("http", "@", "t.me")):
+            return _err("Invalid channel identifier format")
         try:
             from bot.utils.subscription import get_channel_limit, get_effective_channel_count
             _lim = await get_channel_limit(pool, uid)
@@ -3206,7 +3232,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("bad request", 400)
-        note = (body.get("note") or "").strip()[:500]
+        note = validate_string(body.get("note"), max_len=500, required=False)
         try:
             res = await pool.execute(
                 "UPDATE tg_accounts SET account_notes=$1 WHERE id=$2 AND owner_id=$3",
@@ -3219,8 +3245,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def account_set_meta(request: web.Request) -> web.Response:
-        """Привязка аккаунта к кластеру и/или переименование метки (first_name).
-        body: {cluster?: str|null, label?: str}. Пустой cluster снимает привязку."""
+        """Привязка аккаунта к кластеру и/или переименование метки (first_name)."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -3238,16 +3263,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         idx = 1
         if "cluster" in body:
             raw = body.get("cluster")
-            cluster = (str(raw).strip()[:64] or None) if raw is not None else None
+            cluster = validate_string(raw, max_len=64, required=False)
             sets.append(f"cluster=${idx}"); args.append(cluster); idx += 1
         if "label" in body:
-            label = (body.get("label") or "").strip()[:128]
+            label = validate_string(body.get("label"), max_len=128)
             if not label:
                 return _err("Метка не может быть пустой", 400)
             sets.append(f"first_name=${idx}"); args.append(label); idx += 1
         if "stage" in body:
             raw = body.get("stage")
-            stage = (str(raw).strip().lower() or None) if raw is not None else None
+            stage = validate_string(raw, max_len=20, required=False)
+            if stage:
+                stage = stage.lower()
             if stage is not None and stage not in ACCOUNT_STAGES:
                 return _err("Неизвестный статус", 400)
             sets.append(f"stage=${idx}"); args.append(stage); idx += 1
@@ -3355,10 +3382,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp(report)
 
     async def boost_submit(request: web.Request) -> web.Response:
-        """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах.
-        body: {type: views|reactions|stories|subscribers|bot_starts, channel|target,
-               msg_ids|msg_id, emoji, bot_username, payload, premium_only, acc_count}
-        """
+        """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -3366,11 +3390,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        btype = (body.get("type") or "").strip()
+        btype = validate_string(body.get("type"), max_len=20)
         if btype not in ("views", "reactions", "stories", "subscribers", "bot_starts"):
             return _err("Неверный тип накрутки", 400)
         try:
-            acc_count = int(body.get("acc_count") or 0)
+            acc_count = validate_integer(body.get("acc_count") or 0, min_val=0) or 0
         except (TypeError, ValueError):
             acc_count = 0
 
@@ -3482,9 +3506,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def growth_submit(request: web.Request) -> web.Response:
-        """Growth Agent: постинг промо-текста в нишевых группах.
-        body: {niche, promo_text, geo?, acc_count?}
-        """
+        """Growth Agent: постинг промо-текста в нишевых группах."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -3492,17 +3514,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        niche = (body.get("niche") or "").strip()
-        geo = (body.get("geo") or "").strip()[:60]
-        promo_text = (body.get("promo_text") or "").strip()
+        niche = validate_string(body.get("niche"), max_len=200)
+        geo = validate_string(body.get("geo"), max_len=60) or ""
+        promo_text = validate_string(body.get("promo_text"), max_len=4096)
         try:
-            acc_count = max(1, min(int(body.get("acc_count") or 3), 10))
+            acc_count = max(1, min(validate_integer(body.get("acc_count") or 3, min_val=1, max_val=10) or 3, 10))
         except (TypeError, ValueError):
             acc_count = 3
         if not niche:
             return _err("Укажите нишу", 400)
         if not promo_text:
             return _err("Укажите рекламный текст", 400)
+        if check_sql_suspicious(promo_text):
+            return _err("Invalid characters in promo text")
         from services import content_safety
 
         _v = await content_safety.enforce(pool, uid, niche, promo_text, surface="growth_agent")
@@ -3536,9 +3560,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        target = (body.get("target") or "").strip()
-        reason = body.get("reason", "spam")
-        acc_count = int(body.get("acc_count", 5))
+        target = validate_string(body.get("target"), max_len=200)
+        reason = validate_string(body.get("reason"), max_len=50) or "spam"
+        acc_count = validate_integer(body.get("acc_count", 5), min_val=1, max_val=100) or 5
         if not target:
             return _err("Укажите цель репортинга", 400)
         try:
@@ -3563,14 +3587,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        text = (body.get("text") or "").strip()
+        text = validate_string(body.get("text"), max_len=4096)
         channel_ids = body.get("channel_ids") or []
         if not text:
             return _err("Заполните текст поста", 400)
+        if check_sql_suspicious(text):
+            return _err("Invalid characters in post text")
         if not channel_ids:
             return _err("Выберите хотя бы один канал", 400)
+        # Validate channel IDs are integers
         try:
-            schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
+            channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
+        except (TypeError, ValueError):
+            return _err("Invalid channel IDs", 400)
+        try:
+            schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
         except (TypeError, ValueError):
             schedule_minutes = 0
         try:
@@ -3657,11 +3688,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("bad json", 400)
-        token = str(data.get("token", "")).strip()
+        token = validate_string(data.get("token"), max_len=200)
         if not token:
             return _err("token обязателен", 400)
-        import re as _re
-        if not _re.match(r'^\d+:[A-Za-z0-9_-]{30,}$', token):
+        if not validate_bot_token(token):
             return _err("Неверный формат токена. Пример: 1234567890:AAHxxxxxxxx...", 400)
         try:
             import aiohttp as _aio
@@ -3714,20 +3744,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("bad json", 400)
-        token = str(data.get("token", "")).strip()
-        name_template = str(data.get("name", "")).strip()
-        uname_template = str(data.get("username", "")).strip().lstrip("@").rstrip("_")
-        description = str(data.get("description", "")).strip()
-        short_desc = str(data.get("short_description", "")).strip()
+        token = validate_string(data.get("token"), max_len=200)
+        name_template = validate_string(data.get("name"), max_len=128)
+        uname_template = validate_string(data.get("username"), max_len=32)
+        description = validate_string(data.get("description"), max_len=512)
+        short_desc = validate_string(data.get("short_description"), max_len=120)
         account_id = data.get("account_id")
-        count = min(max(int(data.get("count", 1)), 1), 10)
+        count = min(max(validate_integer(data.get("count", 1), min_val=1, max_val=10) or 1, 1), 10)
         ecosystem_id = data.get("ecosystem_id")
         if not token:
             return _err("token обязателен", 400)
         if not name_template:
             return _err("имя бота обязательно", 400)
-        import re as _re
-        if not _re.match(r'^\d+:[A-Za-z0-9_-]{30,}$', token):
+        if not validate_bot_token(token):
             return _err("Неверный формат токена", 400)
         try:
             import aiohttp as _aio
@@ -3896,21 +3925,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        name = (body.get("persona_name") or "").strip()
+        name = validate_string(body.get("persona_name"), max_len=100)
         if not name:
             return _err("Имя персоны обязательно", 400)
         VALID_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
-        speech_style = body.get("speech_style", "casual")
+        speech_style = validate_string(body.get("speech_style"), max_len=20) or "casual"
         if speech_style not in VALID_STYLES:
             speech_style = "casual"
         try:
             interests_raw = body.get("interests", "")
             if isinstance(interests_raw, list):
-                interests = [str(i).strip() for i in interests_raw if str(i).strip()]
+                interests = [validate_string(i, max_len=50) or "" for i in interests_raw]
+                interests = [i for i in interests if i]
             else:
-                interests = [t.strip() for t in str(interests_raw).split(",") if t.strip()]
-            age = int(body.get("age") or 25)
-            age = max(18, min(80, age))
+                interests = [validate_string(t, max_len=50) or "" for t in str(interests_raw).split(",")]
+                interests = [i for i in interests if i]
+            age = validate_integer(body.get("age") or 25, min_val=18, max_val=80) or 25
             row = await pool.fetchrow(
                 """INSERT INTO persona_profiles
                    (owner_id, persona_name, bio, age, interests, speech_style, tone, niche, backstory, is_active)
@@ -3971,10 +4001,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         try:
-            count = max(1, min(50, int(body.get("count") or 1)))
+            count = max(1, min(50, validate_integer(body.get("count") or 1, min_val=1, max_val=50) or 1))
         except (TypeError, ValueError):
             return _err("Некорректное количество", 400)
-        country = str(body.get("country") or "RU").strip()[:4] or "RU"
+        country = validate_string(body.get("country"), max_len=4) or "RU"
         # Проверяем, что SMS-сервис настроен (иначе операция гарантированно упадёт)
         try:
             from bot.handlers.auto_registrar import _get_sms_client
@@ -4005,12 +4035,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        phones_raw = (body.get("phones") or "").strip()
+        phones_raw = validate_string(body.get("phones"), max_len=10000)
         if not phones_raw:
             return _err("Укажите номера телефонов", 400)
         phones = [p.strip() for p in phones_raw.replace(",", "\n").split("\n") if p.strip()]
+        # Validate phone format (digits, spaces, dashes, plus)
+        phones = [re.sub(r'[^\d+\-() ]', '', p) for p in phones]
+        phones = [p for p in phones if len(p) >= 5]
         if not phones:
             return _err("Нет валидных номеров", 400)
+        # Limit batch size
+        phones = phones[:500]
         try:
             label = f"Проверка {len(phones)} номеров"
             op_id = await pool.fetchval(
@@ -7320,15 +7355,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON")
-        text = (body.get("text") or "").strip()
-        delay = int(body.get("delay", 30))
+        text = validate_string(body.get("text"), max_len=4096)
+        delay = validate_integer(body.get("delay", 30), min_val=-1, max_val=300) or 30
         channel_ids = body.get("channel_ids")  # optional list; None = all channels
         if not text:
             return _err("text required")
-        if len(text) > 4096:
-            return _err("text too long (max 4096)")
+        if check_sql_suspicious(text):
+            return _err("Invalid characters in text")
         if delay not in (5, 30, 60, -1):
             delay = 30
+        # Validate channel IDs if provided
+        if channel_ids:
+            try:
+                channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Invalid channel IDs", 400)
         # Count target channels
         if channel_ids:
             total = len(channel_ids)
@@ -7546,11 +7587,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         import re as _re
-        raw = str(body.get("proxies") or "")
+        raw = validate_string(body.get("proxies"), max_len=50000) or ""
         added, skipped = 0, 0
         for line in _re.split(r"[\n,;]+", raw):
             purl = line.strip()
             if not purl:
+                continue
+            # Validate proxy URL format
+            if len(purl) > 500:
+                skipped += 1
+                continue
+            # Block internal/loopback addresses
+            if any(h in purl.lower() for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
+                skipped += 1
                 continue
             ptype = parse_proxy_type(purl)
             if not ptype:

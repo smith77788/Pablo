@@ -1,4 +1,14 @@
-"""Background loop: verify crypto payments on-chain and activate subscriptions."""
+"""Background loop: verify crypto payments on-chain and activate subscriptions.
+
+Supports TON and TRON (USDT) payments. Checks pending payments every 60 seconds
+and activates subscriptions upon successful verification.
+
+Usage:
+    from services.payment_checker import run
+
+    # Starts the background payment verification loop
+    await run(pool, http, bot)
+"""
 
 from __future__ import annotations
 import asyncio

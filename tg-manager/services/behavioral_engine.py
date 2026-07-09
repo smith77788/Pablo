@@ -1,8 +1,19 @@
 """Behavioral Intelligence Engine.
 
 Background service that:
-- Recomputes behavioral scores every 15 minutes
-- Provides collector functions called from existing handlers
+  - Recomputes behavioral scores every 15 minutes
+  - Provides collector functions called from existing handlers
+  - Detects anomalies in user behavior patterns
+  - Auto-concludes A/B experiments
+
+Usage:
+    from services.behavioral_engine import record_event, run
+
+    # Record a user event
+    await record_event(pool, user_id, "button_click", {"button": "menu"})
+
+    # Start background service
+    await run(pool, bot)
 """
 
 from __future__ import annotations

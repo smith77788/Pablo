@@ -69,7 +69,8 @@ def _rule_buttons(rule: dict) -> list | None:
         try:
             import json as _json
             raw = _json.loads(raw)
-        except Exception:
+        except Exception as e:
+            log.warning('auto_responder: trigger_words parse failed: %s', e)
             return None
     if isinstance(raw, list) and raw:
         out = [b for b in raw if isinstance(b, dict) and b.get("text") and b.get("url")]
@@ -209,7 +210,8 @@ async def _process_bot(
         # Brand injection: cache free-tier status once per polling cycle
         try:
             _is_free = await brand_injection.is_free_tier(pool, bot_id)
-        except Exception:
+        except Exception as e:
+            log.warning('auto_responder: is_free_tier check failed: %s', e)
             _is_free = False
 
         # Reset per-cycle rate-limit counters for this bot

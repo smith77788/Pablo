@@ -1,15 +1,26 @@
-"""
-Account Health Engine — комплексная оценка здоровья аккаунтов.
+"""Account Health Engine — comprehensive account health evaluation.
 
 Tracks:
-- health_score (0-100): общая оценка надёжности аккаунта
-- load_score (0-100): текущая нагрузка (чем выше, тем меньше использовать)
-- warmup_state: raw/warming/ready/veteran
-- restriction_history: история блокировок
-- operation success/fail rates
+  - health_score (0-100): overall account reliability
+  - load_score (0-100): current load (higher = use less)
+  - warmup_state: raw/warming/ready/veteran
+  - restriction_history: ban/block history
+  - operation success/fail rates
 
-Интегрируется с tg_accounts (trust_score, cooldown_until, acc_status),
+Integrates with tg_accounts (trust_score, cooldown_until, acc_status),
 account_flood_log, account_trust_history.
+
+Usage:
+    from services.account_health import get_health, compute_health_score
+
+    health = get_health(account_id)
+    score = compute_health_score(
+        trust_score=0.8,
+        flood_count_7d=0,
+        spamblock=False,
+        success_rate=0.95,
+        days_active=30,
+    )
 """
 
 from __future__ import annotations
