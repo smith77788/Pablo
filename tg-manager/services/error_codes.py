@@ -14,9 +14,9 @@ Usage:
 """
 
 from __future__ import annotations
-
 import logging
 from enum import Enum
+from json import JSONDecodeError
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
