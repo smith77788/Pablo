@@ -2360,6 +2360,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterContacts('favorite',this)">⭐ Избранные</div>
       <div class="seg-opt" onclick="filterContacts('premium',this)">💎 Premium</div>
       <div class="seg-opt" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
+      <div class="seg-opt" onclick="filterContacts('mutual',this)">↔ Взаимные</div>
     </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
@@ -8981,6 +8982,7 @@ async function loadContacts() {
     if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
     if (CONTACT_FILTER === 'premium') params.set('premium', '1');
     if (CONTACT_FILTER === 'multi') params.set('multi', '1');
+    if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
     const qs = params.toString();
     url = '/api/miniapp/uch/contacts' + (qs ? '?'+qs : '');
   }

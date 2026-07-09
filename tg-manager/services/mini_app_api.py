@@ -10510,10 +10510,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         favorite = request.query.get('favorite') == '1'
         premium = request.query.get('premium') == '1'
         multi = request.query.get('multi') == '1'
+        mutual = request.query.get('mutual') == '1'
         try:
             from services.contacts_hub.repository import get_contacts
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
-                                        tag=tag, premium_only=premium, multi_only=multi)
+                                        tag=tag, premium_only=premium, multi_only=multi,
+                                        mutual_only=mutual)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)
