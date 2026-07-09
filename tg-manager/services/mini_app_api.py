@@ -5774,28 +5774,71 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            rows = await pool.fetch(
-                """SELECT id, op_type, COALESCE(label, op_type) AS label, status,
-                          total_items, done_items, created_at, finished_at, params
+            # В работе: strike-операции из очереди (pending/running) — есть прогресс,
+            # но ещё нет итоговых метрик.
+            active = await _safe_fetch(pool,
+                """SELECT id, COALESCE(label, op_type) AS label, status,
+                          total_items, done_items, created_at
                    FROM operation_queue
                    WHERE owner_id=$1 AND op_type LIKE 'strike%'
+                     AND status IN ('pending','running')
+                   ORDER BY created_at DESC LIMIT 15""",
+                uid)
+            # Завершённые: из таблицы strike_history — с РЕАЛЬНЫМИ метриками
+            # эффективности (жалобы, забанен ли таргет). Раньше endpoint их не читал,
+            # поэтому UI показывал только «N/N» и Strike казался «неэффективным».
+            done = await _safe_fetch(pool,
+                """SELECT id, target, reason, accounts_used, peer_reported,
+                          msgs_reported, pinned_reported, admins_reported,
+                          network_reports, blocked, verified_down, spambot_escalation,
+                          duration_s, created_at
+                   FROM strike_history
+                   WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 30""",
-                uid,
-            )
+                uid)
         except Exception as exc:
             log.exception("strike_history uid=%d", uid)
             return _err(str(exc), 500)
-        return _json_resp({"operations": [
-            {
-                "id": r["id"], "label": r["label"] or r["op_type"],
+
+        operations = []
+        for r in (active or []):
+            operations.append({
+                "id": r["id"],
+                "label": r["label"] or "Strike",
                 "status": r["status"] or "pending",
                 "total": r["total_items"] or 0,
                 "processed": r["done_items"] or 0,
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "finished_at": r["finished_at"].isoformat() if r["finished_at"] else None,
-            }
-            for r in rows
-        ]})
+                "in_progress": True,
+            })
+        for r in (done or []):
+            # Суммарное число доставленных жалоб по всем векторам.
+            reports = (int(r["peer_reported"] or 0) + int(r["msgs_reported"] or 0)
+                       + int(r["pinned_reported"] or 0) + int(r["admins_reported"] or 0)
+                       + int(r["network_reports"] or 0))
+            operations.append({
+                "id": f"h{r['id']}",
+                "label": f"Strike: {r['target']}" + (f" [{r['reason']}]" if r["reason"] else ""),
+                "status": "done",
+                "target": r["target"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "in_progress": False,
+                "metrics": {
+                    "accounts_used": int(r["accounts_used"] or 0),
+                    "reports_total": reports,
+                    "peer_reported": int(r["peer_reported"] or 0),
+                    "msgs_reported": int(r["msgs_reported"] or 0),
+                    "admins_reported": int(r["admins_reported"] or 0),
+                    "network_reports": int(r["network_reports"] or 0),
+                    "blocked": bool(r["blocked"]),
+                    "verified_down": bool(r["verified_down"]),
+                    "spambot_escalation": bool(r["spambot_escalation"]),
+                    "duration_s": int(r["duration_s"] or 0),
+                },
+            })
+        # Сортируем объединённый список по времени (свежие сверху).
+        operations.sort(key=lambda o: o["created_at"] or "", reverse=True)
+        return _json_resp({"operations": operations[:40]})
 
     # ── Strike: status + launch ────────────────────────────────────────────────
 

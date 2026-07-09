@@ -10825,16 +10825,18 @@ async function openStrike() {
       </div>`);
     }
 
-    // Stats
+    // Stats — реальные метрики эффективности из завершённых страйков
     const ops = hist.operations||[];
-    const done = ops.filter(o=>o.status==='done').length;
-    const running = ops.filter(o=>['running','pending'].includes(o.status)).length;
-    const processed = ops.reduce((s,o)=>s+(o.processed||0),0);
+    const doneOps = ops.filter(o=>o.status==='done');
+    const running = ops.filter(o=>o.in_progress).length;
+    const totalReports = doneOps.reduce((s,o)=>s+((o.metrics&&o.metrics.reports_total)||0),0);
+    const downCount = doneOps.filter(o=>o.metrics&&o.metrics.verified_down).length;
     document.getElementById('strikeStats').innerHTML=`
       <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${done}</div><div class="kpi-lbl">Завершено</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${doneOps.length}</div><div class="kpi-lbl">Завершено</div></div>
       <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#f59e0b">${running}</div><div class="kpi-lbl">В работе</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${num(processed)}</div><div class="kpi-lbl">Репортов</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:var(--red)">${num(totalReports)}</div><div class="kpi-lbl">Жалоб</div></div>
+      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:#22c55e">${downCount}</div><div class="kpi-lbl">Целей снято</div></div>
     `;
 
     if (!ops.length) {
@@ -10843,14 +10845,28 @@ async function openStrike() {
     }
     txt('strikeList', ops.map(op=>{
       const [cls,lbl]=stb(op.status);
-      const pct = op.total ? Math.round(op.processed/op.total*100) : 0;
-      const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
-      return `<div class="row">
+      if (op.in_progress) {
+        const pct = op.total ? Math.round(op.processed/op.total*100) : 0;
+        const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
+        return `<div class="row">
+          <div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div>
+          <div class="row-body">
+            <div class="row-name">${esc(op.label)}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} акк. · ${ago(op.created_at)}</div>
+            ${bar}
+          </div>
+        </div>`;
+      }
+      // Завершённый страйк — показываем РЕАЛЬНУЮ эффективность
+      const m = op.metrics||{};
+      const downBadge = m.verified_down ? '<span class="badge b-gr">🎯 цель снята</span>'
+        : (m.blocked ? '<span class="badge b-gy">заблокирован</span>' : '');
+      const escBadge = m.spambot_escalation ? ' · 🤖 SpamBot-эскалация' : '';
+      return `<div class="row" style="cursor:default">
         <div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div>
         <div class="row-body">
-          <div class="row-name">${esc(op.label)}</div>
-          <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} репортов · ${ago(op.created_at)}</div>
-          ${bar}
+          <div class="row-name">${esc(op.label)} ${downBadge}</div>
+          <div class="row-val">💥 ${num(m.reports_total||0)} жалоб · ${num(m.accounts_used||0)} акк.${m.admins_reported?` · 👤 админов: ${num(m.admins_reported)}`:''}${m.network_reports?` · 🕸 сеть: ${num(m.network_reports)}`:''}${escBadge} · ${ago(op.created_at)}</div>
         </div>
       </div>`;
     }).join(''));
