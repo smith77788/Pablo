@@ -10813,6 +10813,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def uch_bulk_merge(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            pairs = data.get('pairs', [])
+            if not pairs: return _err("pairs required", 400)
+            from services.contacts_hub.bulk_ops_engine import bulk_merge
+            result = await bulk_merge(pool, uid, pairs)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_export(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            contact_ids = data.get('contact_ids', [])
+            fmt = data.get('format', 'json')
+            from services.contacts_hub.bulk_ops_engine import bulk_export
+            result = await bulk_export(pool, uid, contact_ids, fmt)
+            content_types = {'csv': 'text/csv', 'vcf': 'text/vcard', 'json': 'application/json'}
+            return web.Response(
+                body=result['data'], content_type=content_types.get(fmt, 'application/json'),
+                headers={'Content-Disposition': f'attachment; filename="contacts.{fmt}"'})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_importance(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            contact_ids = data.get('contact_ids', [])
+            level = data.get('level', 0)
+            from services.contacts_hub.bulk_ops_engine import bulk_set_importance
+            result = await bulk_set_importance(pool, uid, contact_ids, level)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_bulk_rating(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            contact_ids = data.get('contact_ids', [])
+            rating = data.get('rating', 0)
+            from services.contacts_hub.bulk_ops_engine import bulk_set_rating
+            result = await bulk_set_rating(pool, uid, contact_ids, rating)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
     async def uch_export_csv(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)

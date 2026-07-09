@@ -118,3 +118,66 @@ async def get_last_active(pool, contact_id: str) -> Optional[str]:
             years = delta.days // 365
             return f'Был {years} г. назад'
     return None
+
+
+async def add_identity(
+    pool, owner_id: int, contact_id: str,
+    identity_type: str, identity_value: str,
+    is_primary: bool = False, confidence: float = 1.0, source: str = 'manual',
+) -> dict:
+    row = await pool.fetchrow(
+        '''INSERT INTO contact_identity_graph
+            (owner_id, contact_id, identity_type, identity_value, is_primary, confidence, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           RETURNING id''',
+        owner_id, contact_id, identity_type, identity_value,
+        is_primary, confidence, source)
+    return {'id': row['id'], 'identity_type': identity_type, 'identity_value': identity_value}
+
+
+async def remove_identity(pool, owner_id: int, contact_id: str, identity_type: str, identity_value: str) -> bool:
+    result = await pool.execute(
+        '''DELETE FROM contact_identity_graph
+           WHERE owner_id=$1 AND contact_id=$2 AND identity_type=$3 AND identity_value=$4''',
+        owner_id, contact_id, identity_type, identity_value)
+    return result == 'DELETE 1'
+
+
+async def compute_digital_footprint(pool, owner_id: int, contact_id: str) -> dict:
+    contact = await pool.fetchrow(
+        'SELECT * FROM unified_contacts WHERE id=$1 AND owner_id=$2', contact_id, owner_id)
+    if not contact:
+        return {'score': 0, 'channels': [], 'sources_count': 0}
+    c = dict(contact)
+    channels = []
+    if c.get('telegram_user_id'):
+        channels.append('telegram')
+    phones = c.get('phones', [])
+    if isinstance(phones, str):
+        try:
+            phones = json.loads(phones)
+        except (json.JSONDecodeError, TypeError):
+            phones = []
+    if phones:
+        channels.append('phone')
+    emails = c.get('emails', [])
+    if isinstance(emails, str):
+        try:
+            emails = json.loads(emails)
+        except (json.JSONDecodeError, TypeError):
+            emails = []
+    if emails:
+        channels.append('email')
+    websites = c.get('websites', [])
+    if isinstance(websites, str):
+        try:
+            websites = json.loads(websites)
+        except (json.JSONDecodeError, TypeError):
+            websites = []
+    if websites:
+        channels.append('website')
+    sources = await pool.fetch(
+        'SELECT COUNT(*) as cnt FROM contact_sources WHERE contact_id=$1', contact_id)
+    sources_count = sources[0]['cnt'] if sources else 0
+    score = min(1.0, len(channels) * 0.25 + sources_count * 0.1)
+    return {'score': round(score, 2), 'channels': channels, 'sources_count': sources_count}

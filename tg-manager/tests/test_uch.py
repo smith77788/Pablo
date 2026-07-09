@@ -200,6 +200,88 @@ class TestTrustEngine:
         result = compute_merge_confidence(a, b)
         assert result["confidence"] < 0.5
 
+    @pytest.mark.asyncio
+    async def test_compute_merge_confidence_improved_high(self):
+        from services.contacts_hub.trust_engine import compute_merge_confidence_improved
+        pool = FakePool(
+            fetch_row={"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
+            fetch_rows=[{"source_type": "telegram"}, {"source_type": "phone"}],
+            fetch_val=None
+        )
+        result = await compute_merge_confidence_improved(pool, 123, 1, 2)
+        assert result["confidence"] >= 0.5
+        assert "same_telegram_id" in result["reasons"]
+
+    @pytest.mark.asyncio
+    async def test_compute_merge_confidence_improved_low(self):
+        from services.contacts_hub.trust_engine import compute_merge_confidence_improved
+        pool = FakePool(
+            fetch_row={"id": 1, "telegram_user_id": 1, "username": "a", "first_name": "A", "last_name": "X", "phones": ["+111"], "company": "C1"},
+            fetch_rows=[{"source_type": "telegram"}],
+            fetch_val=None
+        )
+        result = await compute_merge_confidence_improved(pool, 123, 1, 2)
+        assert result["confidence"] < 0.5
+
+    @pytest.mark.asyncio
+    async def test_detect_smart_duplicates_improved_empty(self):
+        from services.contacts_hub.trust_engine import detect_smart_duplicates_improved
+        pool = FakePool(fetch_rows=[])
+        result = await detect_smart_duplicates_improved(pool, 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_detect_smart_duplicates_improved_with_duplicates(self):
+        from services.contacts_hub.trust_engine import detect_smart_duplicates_improved
+        contacts = [
+            {"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
+            {"id": 2, "telegram_user_id": 123, "username": "ivan2", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
+        ]
+        sources_map = {
+            1: [{"source_type": "telegram"}, {"source_type": "phone"}],
+            2: [{"source_type": "telegram"}, {"source_type": "phone"}],
+        }
+        class SmartPool(FakePool):
+            def __init__(self, contacts, sources_map):
+                super().__init__(fetch_rows=contacts)
+                self._contacts = contacts
+                self._sources_map = sources_map
+
+            async def fetch(self, query, *args):
+                if "contact_sources" in query and args:
+                    contact_id = args[0]
+                    return self._sources_map.get(contact_id, [])
+                else:
+                    return self._contacts
+
+        pool = SmartPool(contacts, sources_map)
+        result = await detect_smart_duplicates_improved(pool, 123)
+        assert len(result) >= 1
+        assert result[0]["confidence"] >= 0.45
+
+    @pytest.mark.asyncio
+    async def test_get_conflict_resolution_suggestions(self):
+        from services.contacts_hub.trust_engine import get_conflict_resolution_suggestions
+        conflict_row = {
+            "id": 1,
+            "conflict_field": "phones",
+            "phones": ["+123", "+456"],
+            "first_name": "Ivan",
+            "last_name": "Ivanov",
+            "username": "ivan",
+            "company": "TestCo",
+            "telegram_user_id": 123,
+            "resolution": "pending",
+            "confidence": 0.9,
+        }
+        pool = FakePool(fetch_row=conflict_row)
+        result = await get_conflict_resolution_suggestions(pool, 1)
+        assert result["conflict_id"] == 1
+        assert result["field"] == "phones"
+        assert result["priority"] == "high"
+        assert len(result["suggestions"]) == 1
+        assert result["suggestions"][0]["action"] == "merge_phones"
+
 
 # ── Search Engine tests ───────────────────────────────────────────────────────
 
@@ -300,6 +382,117 @@ class TestCRMEngine:
         pool = FakePool(fetch_val=5, fetch_rows=[{"stage": "lead", "cnt": 3, "total_value": 100}])
         result = await get_crm_stats(pool, 123)
         assert result["total_crm_contacts"] == 5
+
+    @pytest.mark.asyncio
+    async def test_get_crm_pipeline_empty(self):
+        from services.contacts_hub.crm_engine import get_crm_pipeline
+        pool = FakePool(fetch_rows=[])
+        result = await get_crm_pipeline(pool, 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_crm_pipeline_with_deals(self):
+        from services.contacts_hub.crm_engine import get_crm_pipeline
+        rows = [
+            {"stage": "lead", "deal_count": 5, "total_value": 1000, "avg_value": 200},
+            {"stage": "proposal", "deal_count": 3, "total_value": 5000, "avg_value": 1666.67},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_crm_pipeline(pool, 123)
+        assert len(result) == 2
+        assert result[0]["stage"] == "lead"
+        assert result[0]["deal_count"] == 5
+        assert result[1]["stage"] == "proposal"
+
+    @pytest.mark.asyncio
+    async def test_get_crm_stats_empty(self):
+        from services.contacts_hub.crm_engine import get_crm_stats
+        pool = FakePool(fetch_val=0, fetch_rows=[], execute_val=0)
+        result = await get_crm_stats(pool, 123)
+        assert result["total_crm_contacts"] == 0
+        assert result["by_stage"] == []
+        assert result["upcoming_reminders_7d"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_crm_stats_with_data(self):
+        from services.contacts_hub.crm_engine import get_crm_stats
+        rows = [
+            {"stage": "lead", "cnt": 10, "total_value": 5000},
+            {"stage": "proposal", "cnt": 5, "total_value": 15000},
+        ]
+        pool = FakePool(fetch_val=15, fetch_rows=rows, execute_val=3)
+        result = await get_crm_stats(pool, 123)
+        assert result["total_crm_contacts"] == 15
+        assert len(result["by_stage"]) == 2
+        assert result["upcoming_reminders_7d"] == 3
+
+    @pytest.mark.asyncio
+    async def test_get_crm_activities_empty(self):
+        from services.contacts_hub.crm_engine import get_crm_activities
+        pool = FakePool(fetch_rows=[])
+        result = await get_crm_activities(pool, 123, "uuid-1")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_crm_activities_with_data(self):
+        from services.contacts_hub.crm_engine import get_crm_activities
+        rows = [
+            {"id": 1, "activity_type": "call", "description": "Discovery call", "created_at": "2024-01-15"},
+            {"id": 2, "activity_type": "email", "description": "Follow up", "created_at": "2024-01-16"},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_crm_activities(pool, 123, "uuid-1")
+        assert len(result) == 2
+        assert result[0]["activity_type"] == "call"
+        assert result[1]["description"] == "Follow up"
+
+    @pytest.mark.asyncio
+    async def test_create_crm_activity(self):
+        from services.contacts_hub.crm_engine import create_crm_activity
+        pool = FakePool(fetch_val=42)
+        result = await create_crm_activity(pool, 123, "uuid-1", "meeting", "Initial meeting")
+        assert result == 42
+        call = pool._calls[0]
+        assert "INSERT INTO contact_crm_activity" in call[1]
+
+    @pytest.mark.asyncio
+    async def test_update_crm_stage(self):
+        from services.contacts_hub.crm_engine import update_crm_stage
+        pool = FakePool(execute_val="UPDATE 1")
+        result = await update_crm_stage(pool, 123, "uuid-1", "proposal")
+        assert result is True
+        call = pool._calls[0]
+        assert "UPDATE contact_crm" in call[1]
+        assert call[2][0] == "proposal"
+
+    @pytest.mark.asyncio
+    async def test_update_crm_stage_not_found(self):
+        from services.contacts_hub.crm_engine import update_crm_stage
+        pool = FakePool(execute_val="UPDATE 0")
+        result = await update_crm_stage(pool, 123, "uuid-1", "proposal")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_crm_reminders_empty(self):
+        from services.contacts_hub.crm_engine import get_crm_reminders
+        pool = FakePool(fetch_rows=[])
+        result = await get_crm_reminders(pool, 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_crm_reminders_with_data(self):
+        from services.contacts_hub.crm_engine import get_crm_reminders
+        rows = [
+            {"first_name": "Ivan", "last_name": "Ivanov", "username": "ivan",
+             "stage": "lead", "next_reminder_at": "2024-01-20", "next_reminder_text": "Follow up"},
+            {"first_name": "", "last_name": "", "username": "petr",
+             "stage": "proposal", "next_reminder_at": "2024-01-22", "next_reminder_text": "Send proposal"},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_crm_reminders(pool, 123)
+        assert len(result) == 2
+        assert result[0]["contact_name"] == "Ivan Ivanov"
+        assert result[1]["contact_name"] == "petr"
 
 
 # ── Smart Tags Engine tests ───────────────────────────────────────────────────
@@ -439,6 +632,81 @@ class TestExportEngine:
         data = json.loads(result)
         assert len(data) == 1
         assert data[0]["first_name"] == "Ivan"
+
+    @pytest.mark.asyncio
+    async def test_export_vcard_single_contact(self):
+        from services.contacts_hub.export_engine import export_vcard
+        pool = FakePool(fetch_row={
+            "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
+            "company": "TestCo", "position": "Dev", "phones": '["+123"]',
+            "emails": '["ivan@test.com"]', "websites": "[]", "username": "ivan",
+            "telegram_user_id": 123, "birthday": "1990-01-01", "notes": "test"
+        })
+        result = await export_vcard(pool, 123, "uuid-1")
+        assert "BEGIN:VCARD" in result
+        assert "Ivan" in result
+        assert "Ivanov" in result
+        assert "TestCo" in result
+        assert "Dev" in result
+        assert "+123" in result
+        assert "ivan@test.com" in result
+        assert "@ivan" in result
+        assert "1990-01-01" in result
+        assert "test" in result
+
+    @pytest.mark.asyncio
+    async def test_export_vcard_with_all_fields(self):
+        from services.contacts_hub.export_engine import export_vcard
+        pool = FakePool(fetch_row={
+            "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
+            "company": "TestCo", "position": "Dev", "phones": '["+123", "+456"]',
+            "emails": '["ivan@test.com", "ivan2@test.com"]', "websites": '["https://ivan.com"]',
+            "username": "ivan", "telegram_user_id": 123, "birthday": "1990-01-01", "notes": "test"
+        })
+        result = await export_vcard(pool, 123, "uuid-1")
+        assert "BEGIN:VCARD" in result
+        assert "END:VCARD" in result
+        assert "+123" in result
+        assert "+456" in result
+        assert "ivan@test.com" in result
+        assert "ivan2@test.com" in result
+        assert "https://ivan.com" in result
+
+    @pytest.mark.asyncio
+    async def test_export_csv_streaming_empty(self):
+        from services.contacts_hub.export_engine import export_csv_streaming
+        pool = FakePool(fetch_rows=[])
+        results = []
+        async for chunk in export_csv_streaming(pool, 123):
+            results.append(chunk)
+        assert len(results) == 1
+        assert results[0][0] == "ID"
+
+    @pytest.mark.asyncio
+    async def test_export_csv_streaming_with_data(self):
+        from services.contacts_hub.export_engine import export_csv_streaming
+        pool = FakePool(fetch_rows=[
+            {"id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
+             "phones": '["+123"]', "emails": "[]", "websites": "[]", "tags": "{vip}"}
+        ])
+        results = []
+        async for chunk in export_csv_streaming(pool, 123):
+            results.append(chunk)
+        assert len(results) == 2
+        assert results[0][0] == "ID"
+        assert "Ivan" in results[1]
+        assert "Ivanov" in results[1]
+
+    @pytest.mark.asyncio
+    async def test_get_export_stats(self):
+        from services.contacts_hub.export_engine import get_export_stats
+        pool = FakePool(fetch_val=10)
+        result = await get_export_stats(pool, 123)
+        assert result["total_contacts"] == 10
+        assert result["with_phone"] == 10
+        assert result["with_email"] == 10
+        assert result["favorites"] == 10
+        assert result["premium"] == 10
 
 
 # ── Identity Engine tests ─────────────────────────────────────────────────────

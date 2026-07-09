@@ -129,3 +129,72 @@ async def get_crm_overdue(pool, owner_id: int) -> list:
         d['contact_name'] = f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip() or d.pop('username', '?')
         result.append(d)
     return result
+
+
+async def get_crm_pipeline(pool, owner_id: int) -> list:
+    rows = await pool.fetch(
+        '''SELECT stage, COUNT(*) as deal_count,
+                  COALESCE(SUM(deal_value), 0) as total_value,
+                  COALESCE(AVG(deal_value), 0) as avg_value
+           FROM contact_crm
+           WHERE owner_id=$1
+           GROUP BY stage
+           ORDER BY
+             CASE stage
+               WHEN 'lead' THEN 1
+               WHEN 'prospect' THEN 2
+               WHEN 'proposal' THEN 3
+               WHEN 'negotiation' THEN 4
+               WHEN 'closed_won' THEN 5
+               WHEN 'closed_lost' THEN 6
+               ELSE 7
+             END''',
+        owner_id)
+    return [dict(r) for r in rows]
+
+
+async def get_crm_activities(pool, owner_id: int, contact_id: str, limit: int = 30) -> list:
+    rows = await pool.fetch(
+        '''SELECT * FROM contact_crm_activity
+           WHERE owner_id=$1 AND contact_id=$2
+           ORDER BY created_at DESC LIMIT $3''',
+        owner_id, contact_id, limit)
+    return [dict(r) for r in rows]
+
+
+async def create_crm_activity(pool, owner_id: int, contact_id: str,
+                               activity_type: str, description: str = None,
+                               metadata: dict = None) -> int:
+    activity_id = await pool.fetchval(
+        '''INSERT INTO contact_crm_activity (owner_id, contact_id, activity_type, description, metadata)
+           VALUES ($1,$2,$3,$4,$5::jsonb)
+           RETURNING id''',
+        owner_id, contact_id, activity_type, description,
+        json.dumps(metadata or {}))
+    return activity_id
+
+
+async def update_crm_stage(pool, owner_id: int, contact_id: str, new_stage: str) -> bool:
+    result = await pool.execute(
+        '''UPDATE contact_crm
+           SET stage = $1, updated_at = NOW()
+           WHERE owner_id = $2 AND contact_id = $3''',
+        new_stage, owner_id, contact_id)
+    return result == 'UPDATE 1'
+
+
+async def get_crm_reminders(pool, owner_id: int, limit: int = 20) -> list:
+    rows = await pool.fetch(
+        '''SELECT crm.*, uc.first_name, uc.last_name, uc.username
+           FROM contact_crm crm
+           JOIN unified_contacts uc ON uc.id = crm.contact_id
+           WHERE crm.owner_id=$1 AND crm.next_reminder_at IS NOT NULL
+           AND crm.next_reminder_at >= NOW()
+           ORDER BY crm.next_reminder_at ASC LIMIT $2''',
+        owner_id, limit)
+    result = []
+    for r in rows:
+        d = dict(r)
+        d['contact_name'] = f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip() or d.pop('username', '?')
+        result.append(d)
+    return result

@@ -27,6 +27,8 @@ from .bulk_ops_engine import (
     bulk_tag, bulk_untag, bulk_set_favorite, bulk_delete,
     bulk_add_to_group, bulk_remove_from_group,
     create_group, update_group, delete_group,
+    bulk_merge, bulk_export, bulk_add_tags, bulk_remove_tags,
+    bulk_set_importance, bulk_set_rating,
 )
 from .export_engine import export_csv, export_vcf, export_json
 from .identity_engine import build_identity_graph, get_identity_graph, get_last_active

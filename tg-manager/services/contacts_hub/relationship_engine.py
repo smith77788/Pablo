@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import logging
 from typing import Optional
 
@@ -141,6 +142,31 @@ async def get_relationships(pool, owner_id: int, contact_id: str) -> list:
         d['related_is_premium'] = d.pop('is_premium', False)
         result.append(d)
     return result
+
+
+async def add_relationship(pool, contact_a_id: str, contact_b_id: str,
+                           relationship_type: str, strength: float = 0.5,
+                           metadata: dict = None) -> dict:
+    owner_row = await pool.fetchrow(
+        'SELECT owner_id FROM unified_contacts WHERE id=$1', contact_a_id)
+    if not owner_row:
+        return {'error': 'contact_not_found'}
+    owner_id = owner_row['owner_id']
+    await pool.execute(
+        '''INSERT INTO contact_relationships
+           (owner_id, contact_a_id, contact_b_id, relationship_type, strength, metadata)
+           VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+           ON CONFLICT (owner_id, contact_a_id, contact_b_id, relationship_type)
+           DO UPDATE SET strength=EXCLUDED.strength, metadata=EXCLUDED.metadata, updated_at=NOW()''',
+        owner_id, contact_a_id, contact_b_id, relationship_type, strength,
+        json.dumps(metadata or {}))
+    return {'ok': True, 'relationship_type': relationship_type, 'strength': strength}
+
+
+async def remove_relationship(pool, relationship_id: int) -> bool:
+    result = await pool.execute(
+        'DELETE FROM contact_relationships WHERE id=$1', relationship_id)
+    return result != 'DELETE 0'
 
 
 async def get_graph_stats(pool, owner_id: int) -> dict:
