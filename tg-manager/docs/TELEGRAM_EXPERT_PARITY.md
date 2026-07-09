@@ -36,7 +36,7 @@
   - **WIRED**: Создание чатов/ботов (op `create_channel`/`create_group`/`bot_factory` + исполнители), Экспорт аккаунта (`/accounts/export` CSV + `/export_json`).
   - Остальное (удаление истории диалогов, Story Manager) — добивается.
 - **4 Авто-регистрация**: генератор device-параметров, SMS-провайдеры (`sms_api_engine`), авто-рег — есть; Flash Call/Voice — НЕТ.
-- **5 Сбор аудитории**: parser (`/parser/*`) — WIRED.
+- **5 Сбор аудитории**: parser (`/parser/*`) — WIRED. Источники: участники (GetParticipants), активные (senders), **комментаторы/обсуждения** (parse_commenters через linked_chat) — все три в движке, mini-app и теперь в БОТЕ (был пробел: parse_commenters существовал, но бот-меню его не предлагало → подключён start_comments + тест). Гео-парсинг (Nearby), фильтрация/сегментация/экспорт — WIRED.
 - **6 Инвайт**: mass_invite (op) — WIRED; Invite V2/через ботов/пакетами — проверять.
 - **7 Отправка**: dm_campaign — WIRED; автопостинг v1/v2 — НЕТ; спинтакс/рандомайзер — есть.
 - **10 Накрутка**: boost_views/reactions/stories/subscribers — WIRED.

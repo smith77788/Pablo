@@ -65,6 +65,10 @@ def _menu_kb() -> InlineKeyboardBuilder:
         callback_data=ParserCb(action="start_active"),
     )
     kb.button(
+        text="💬 Парсить комментаторов",
+        callback_data=ParserCb(action="start_comments"),
+    )
+    kb.button(
         text="📍 Гео-парсинг (Nearby)",
         callback_data=ParserCb(action="start_geo"),
     )
@@ -118,7 +122,8 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"Запусков парсера: <b>{runs}</b>\n\n"
         "Извлекайте аудиторию из каналов и групп для дальнейшей работы.\n"
         "• <b>Участники</b> — все подписчики канала/группы\n"
-        "• <b>Активные</b> — кто писал в группе за последние 30 дней",
+        "• <b>Активные</b> — кто писал в группе за последние 30 дней\n"
+        "• <b>Комментаторы</b> — авторы комментариев в обсуждениях канала",
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
     )
@@ -127,7 +132,7 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 # ── Начало парсинга ──────────────────────────────────────────────────────
 
 
-@router.callback_query(ParserCb.filter(F.action.in_({"start_members", "start_active"})))
+@router.callback_query(ParserCb.filter(F.action.in_({"start_members", "start_active", "start_comments"})))
 async def cb_parser_start(
     callback: CallbackQuery,
     callback_data: ParserCb,
@@ -139,18 +144,28 @@ async def cb_parser_start(
         return
     await safe_answer(callback)
 
-    parse_type = "members" if callback_data.action == "start_members" else "active"
+    parse_type = {
+        "start_members": "members",
+        "start_active": "active",
+        "start_comments": "comments",
+    }.get(callback_data.action, "members")
     await state.update_data(parse_type=parse_type)
     await state.set_state(ParserFSM.waiting_source)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
 
-    type_label = "участников" if parse_type == "members" else "активных пользователей"
+    type_label = {
+        "members": "участников",
+        "active": "активных пользователей",
+        "comments": "комментаторов",
+    }[parse_type]
     extra = (
         ""
         if parse_type == "members"
         else "\n\n⚠️ Работает только для <b>супергрупп</b> (не каналов)"
+        if parse_type == "active"
+        else "\n\n💬 Соберёт авторов комментариев в привязанной к каналу группе обсуждений"
     )
 
     await callback.message.edit_text(
@@ -249,7 +264,7 @@ def _friendly_parse_error(e: Exception) -> str:
 async def _start_parse(
     msg_target, state: FSMContext, pool: asyncpg.Pool, owner_id: int, limit: int
 ) -> None:
-    from services.parser import parse_members, parse_active_users
+    from services.parser import parse_members, parse_active_users, parse_commenters
     from services import infra_orchestrator
 
     data = await state.get_data()
@@ -266,7 +281,7 @@ async def _start_parse(
         await msg_target.answer(f"⚠️ {reason}", parse_mode="HTML")
         return
 
-    type_label = "участников" if parse_type == "members" else "активных"
+    type_label = {"members": "участников", "active": "активных", "comments": "комментаторов"}.get(parse_type, "участников")
     progress_msg = await msg_target.answer(
         f"⏳ <b>Парсинг {type_label}</b>\n\n"
         f"Источник: <code>{html.escape(source)}</code>\n"
@@ -296,6 +311,10 @@ async def _start_parse(
     try:
         if parse_type == "members":
             coro = parse_members(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
+        elif parse_type == "comments":
+            coro = parse_commenters(
                 pool, owner_id, source, limit=limit, progress_cb=progress_cb
             )
         else:
