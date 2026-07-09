@@ -3046,16 +3046,39 @@ async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
             log.debug("get_own_user_id: disconnect error: %s", e)
 
 
-async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
-    """Fetch contacts list from a Telegram account.
+def _classify_last_seen(status) -> tuple[str, str | None]:
+    """Разложить User.status в (тип, was_online ISO|None).
+    Типы: online / recently / last_week / last_month / long_ago / offline / unknown."""
+    cls = type(status).__name__ if status is not None else ""
+    if cls == "UserStatusOnline":
+        return "online", None
+    if cls == "UserStatusRecently":
+        return "recently", None
+    if cls == "UserStatusLastWeek":
+        return "last_week", None
+    if cls == "UserStatusLastMonth":
+        return "last_month", None
+    if cls == "UserStatusOffline":
+        was = getattr(status, "was_online", None)
+        try:
+            return "offline", was.isoformat() if was is not None else None
+        except Exception:
+            return "offline", None
+    return "unknown", None
 
-    Returns list of {user_id, username, phone, first_name, last_name,
-    is_mutual, is_premium}. Bots and deleted accounts are excluded. is_mutual is
-    True when the contact has this account added back (from contacts.GetContacts'
-    Contact.mutual — previously discarded, only the flat user list was read).
-    is_premium отражает статус Telegram Premium контакта (User.premium).
+
+async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
+    """Fetch contacts list from a Telegram account with maximum available data.
+
+    Возвращает по каждому контакту всё, что реально отдаёт API: user_id,
+    access_hash, username, phone, имя/фамилия, флаги (mutual, premium, verified,
+    scam, fake, restricted), тип «был в сети» + время, и ОЦЕНОЧНУЮ дату
+    регистрации по user_id (Telegram точную не отдаёт — см. tg_userid_date).
+    Удалённые аккаунты и боты исключаются (это не адресная книга людей).
+    Пустой список = у аккаунта реально нет контактов; сбой чтения — исключение.
     """
     from telethon.tl.functions.contacts import GetContactsRequest
+    from services.tg_userid_date import estimate_registration_date
 
     client = _make_client(session_string, _acc)
     try:
@@ -3066,15 +3089,24 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
         for user in result.users:
             if getattr(user, "deleted", False) or getattr(user, "bot", False):
                 continue
+            last_seen_type, last_seen_at = _classify_last_seen(getattr(user, "status", None))
             contacts.append(
                 {
                     "user_id": user.id,
+                    "access_hash": getattr(user, "access_hash", None),
                     "username": getattr(user, "username", "") or "",
                     "phone": getattr(user, "phone", "") or "",
                     "first_name": getattr(user, "first_name", "") or "",
                     "last_name": getattr(user, "last_name", "") or "",
                     "is_mutual": user.id in mutual_ids,
                     "is_premium": bool(getattr(user, "premium", False)),
+                    "is_verified": bool(getattr(user, "verified", False)),
+                    "is_scam": bool(getattr(user, "scam", False)),
+                    "is_fake": bool(getattr(user, "fake", False)),
+                    "is_restricted": bool(getattr(user, "restricted", False)),
+                    "last_seen_type": last_seen_type,
+                    "last_seen_at": last_seen_at,
+                    "registered_estimate": estimate_registration_date(user.id),
                 }
             )
         return contacts

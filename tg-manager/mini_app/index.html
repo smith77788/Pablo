@@ -8950,6 +8950,10 @@ async function openSeo() {
 let CONTACT_FILTER = null;
 function openContacts() { push('s-contacts'); txt('contactsList','<div class="spin-wrap"><div class="spin"></div></div>'); loadContacts(); loadContactStats(); }
 
+function lastSeenLabel(t) {
+  return ({online:'🟢 в сети', recently:'недавно', last_week:'на этой неделе',
+    last_month:'в этом месяце', offline:'был давно'})[t] || '';
+}
 async function loadContacts() {
   const q = (document.getElementById('contactSearch')?.value||'').trim();
   let url;
@@ -8970,12 +8974,19 @@ async function loadContacts() {
     txt('contactsList', contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
       const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
+      const meta = [
+        c.registered_estimate ? '📅 ≈'+String(c.registered_estimate).slice(0,7) : '',
+        c.is_verified ? '✅ verified' : '',
+        c.is_mutual ? '↔ взаимный' : '',
+        lastSeenLabel(c.last_seen_type),
+      ].filter(Boolean).join(' · ');
       const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${esc(c.id)}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
       return `<div class="li tap" ${sel} onclick="${CONTACT_SELECT_MODE?'':'openContactDetail(\''+esc(c.id)+'\')'}">
         <div class="ava" style="background:${c.color_label||'rgba(59,130,246,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
         <div class="li-body">
           <div class="li-name">${esc(name)} ${c.is_favorite?'⭐':''}</div>
           <div class="li-sub">${esc(sub)}</div>
+          ${meta?`<div class="li-sub" style="opacity:.7;font-size:11px">${esc(meta)}</div>`:''}
         </div>
         ${CONTACT_SELECT_MODE?'':`<div class="li-right"><span class="chev">›</span></div>`}
       </div>`;
@@ -9074,6 +9085,10 @@ async function openContactDetail(id) {
       ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
       ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
+      ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(String(c.registered_estimate))}</div></div></div>`:''}
+      ${lastSeenLabel(c.last_seen_type)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
+      ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Verified</div></div></div>`:''}
+      ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${c.phones&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
       ${c.emails&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Email</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
