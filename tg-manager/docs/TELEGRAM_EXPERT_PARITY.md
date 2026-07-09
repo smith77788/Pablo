@@ -37,7 +37,7 @@
   - Остальное (удаление истории диалогов, Story Manager) — добивается.
 - **4 Авто-регистрация**: генератор device-параметров, SMS-провайдеры (`sms_api_engine`), авто-рег — есть; Flash Call/Voice — НЕТ.
 - **5 Сбор аудитории**: parser (`/parser/*`) — WIRED. Источники: участники (GetParticipants), активные (senders), **комментаторы/обсуждения** (parse_commenters через linked_chat) — все три в движке, mini-app и теперь в БОТЕ (был пробел: parse_commenters существовал, но бот-меню его не предлагало → подключён start_comments + тест). Гео-парсинг (Nearby), фильтрация/сегментация/экспорт — WIRED.
-- **6 Инвайт**: mass_invite (op) — WIRED; Invite V2/через ботов/пакетами — проверять.
+- **6 Инвайт**: WIRED end-to-end (menu → источник → аккаунты → confirm → op `mass_invite` → `_exec_mass_invite` → Telethon). Источники: база парсера, вручную @username/ID, по номерам (ImportContacts). Пакетами (batch_size=5). Ротация аккаунтов при PeerFlood. Очистка после инвайта: по номерам движок делает DeleteContacts. «Invite V2» — вагуе (не отдельная фича); «через ботов» — технически невозможно (боты не инвайтят юзеров в каналы), фейк не делаем.
 - **7 Отправка**: dm_campaign — WIRED; автопостинг v1/v2 — НЕТ; спинтакс/рандомайзер — есть.
 - **10 Накрутка**: boost_views/reactions/stories/subscribers — WIRED.
 - **12 Спец**: TDesktop конвертер (`session_converter`), Booster, Forwarder/Reporter (`strike_engine`/`content_cloner`), Channel Cloner — BACKEND; остальное см. пробелы.
