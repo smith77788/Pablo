@@ -219,10 +219,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .act-ico-yellow{background:var(--bg-yellow-16)}
 .act-ico-red{background:var(--bg-red-16)}
 .note-bg{background:var(--bg);border-radius:12px;padding:14px;min-height:60px}
-.input-bc{width:100%;padding:10px;border-radius:12px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical}
-.input-bc-l{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical}
-.input-l{width:100%;padding:11px 12px;border-radius:12px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
-.input-flex{flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+/* Рамка/радиус выровнены с каноническим стилем полей (.field input, стр. ~196:
+   1px / var(--radius)) — раньше эти классы имели 1.5px и 12/10px, из-за чего
+   ~8 полей выглядели иначе остальных ~278. Фон --bg-input оставлен намеренно
+   (полупрозрачный слой для контраста в этих контекстах). */
+.input-bc{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical}
+.input-bc-l{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical}
+.input-l{width:100%;padding:11px 12px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+.input-flex{flex:1;padding:10px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
 
 /* ─── Activity feed ──────────────────────────────────────────── */
 .act{padding:9px 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--sep)}
