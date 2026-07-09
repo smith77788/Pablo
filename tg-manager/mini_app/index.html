@@ -7,19 +7,26 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
-  --bg:var(--tg-theme-bg-color,#17212b);
-  --bg2:var(--tg-theme-secondary-bg-color,#242f3d);
-  --text:var(--tg-theme-text-color,#f5f5f5);
-  --hint:var(--tg-theme-hint-color,#6d7f8f);
-  --btn:var(--tg-theme-button-color,#2b5278);
-  --btn-text:var(--tg-theme-button-text-color,#fff);
-  --accent:var(--tg-theme-accent-text-color,#6ab2f2);
-  --sep:rgba(255,255,255,.08);
-  --bg-input:rgba(255,255,255,.06);--border-input:rgba(255,255,255,.12);--bg-select:rgba(30,30,40,.9);
+  --bg:var(--tg-theme-bg-color,#0e1621);
+  --bg2:var(--tg-theme-secondary-bg-color,#17212b);
+  --text:var(--tg-theme-text-color,#f5f7fa);
+  --hint:var(--tg-theme-hint-color,#7d8ea0);
+  /* Бренд-акцент Infragram — бирюза/изумруд (единый вид, как в топовых панелях) */
+  --accent:#2dd4bf;
+  --accent-2:#14b8a6;
+  --btn:linear-gradient(135deg,#2dd4bf,#0ea5a4);
+  --btn-solid:#14b8a6;
+  --btn-text:#04211d;
+  --sep:rgba(255,255,255,.09);
+  --border:rgba(255,255,255,.10);
+  --shadow:0 2px 10px rgba(0,0,0,.28);
+  --shadow-lg:0 10px 34px rgba(0,0,0,.42);
+  --glow:0 4px 18px rgba(45,212,191,.28);
+  --bg-input:rgba(255,255,255,.06);--border-input:rgba(255,255,255,.12);--bg-select:rgba(20,26,34,.94);
   --bg-blue-16:rgba(59,130,246,.16);--bg-green-16:rgba(34,197,94,.16);--bg-purple-16:rgba(168,85,247,.16);--bg-yellow-16:rgba(245,158,11,.16);--bg-red-16:rgba(239,68,68,.16);--bg-violet-16:rgba(139,92,246,.16);--bg-red-18:rgba(239,68,68,.18);
-  --green:#4fae4e;--orange:#e8a73a;--purple:#b07be8;--red:#e53935;--blue:#5b8def;--teal:#2bbbad;--purple-light:#a78bfa;
-  --tab-h:56px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
-  --radius:12px;--radius-lg:16px;
+  --green:#34d399;--orange:#fbbf24;--purple:#c084fc;--red:#f87171;--blue:#60a5fa;--teal:#2dd4bf;--purple-light:#a78bfa;
+  --tab-h:58px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
+  --radius:14px;--radius-lg:18px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI','Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.35}
@@ -421,6 +428,42 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .qa-tile-ico svg{width:22px;height:22px;display:block}
 .qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2}
 .qa-tile-val{font-size:16px;font-weight:700;margin-top:1px}
+
+/* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
+/* Тонкий фирменный фон-глоу только для тёмной темы — не портит светлую */
+@media (prefers-color-scheme: dark){
+  body{background:
+     radial-gradient(1200px 380px at 50% -140px, rgba(45,212,191,.10), transparent 70%),
+     var(--bg);}
+  .screen{background:transparent}
+}
+/* Первичная кнопка — бирюзовый градиент + мягкое свечение */
+.btn-p{background:var(--btn);color:var(--btn-text);font-weight:700;box-shadow:var(--glow);border:none}
+.btn-p:active{transform:translateY(1px) scale(.99);box-shadow:0 2px 8px rgba(45,212,191,.24)}
+.btn-s{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
+.btn-s:active{background:rgba(255,255,255,.05)}
+/* Карточки/списки/плитки — глубина: тонкая рамка + мягкая тень + лифт при тапе */
+.card,.lst,.mgmt-tile,.qa-tile{border-color:var(--border);box-shadow:var(--shadow)}
+.card{transition:transform .14s ease,box-shadow .14s ease}
+.card:active{transform:translateY(1px) scale(.98);box-shadow:var(--shadow-lg)}
+.mgmt-tile:active,.qa-tile:active{box-shadow:var(--shadow-lg)}
+.mgmt-tile-ico,.qa-tile-ico{background:linear-gradient(145deg,rgba(45,212,191,.16),rgba(14,165,164,.06));box-shadow:inset 0 0 0 1px rgba(45,212,191,.10)}
+.mgmt-tile-val{color:var(--accent)}
+/* Иконки-аватары — насыщеннее */
+.ava-teal{background:rgba(45,212,191,.16);color:var(--teal)}
+.ava-green{background:rgba(52,211,153,.16);color:var(--green)}
+/* Заголовки секций — uppercase с трекингом (как в продвинутых панелях) */
+.sec{text-transform:uppercase;letter-spacing:.08em;font-size:11.5px;color:var(--hint);opacity:.9}
+/* Заголовок экрана — полупрозрачный с размытием (стеклянный) */
+.hdr{background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:saturate(140%) blur(12px);-webkit-backdrop-filter:saturate(140%) blur(12px);border-bottom:1px solid var(--border)}
+.back{border-color:var(--border)}
+.back:active{background:var(--sep);transform:scale(.92)}
+/* Прогресс-бар — градиент акцента */
+.prog-fill{background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+/* Поля ввода в фокусе — бирюзовая обводка + мягкое кольцо */
+.field textarea:focus,.field input:focus,.field select:focus,.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.16)}
+/* Нижняя навигация — активный таб бирюзовый */
+.nav-item.on{background:rgba(45,212,191,.12);color:var(--accent)}
 </style>
 </head>
 <body>
