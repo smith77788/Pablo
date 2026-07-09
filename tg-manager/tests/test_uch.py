@@ -24,13 +24,27 @@ class FakePool:
         self._fetch_rows = fetch_rows or []
         self._execute_val = execute_val
         self._calls = []
+        # Sequential режим: если fetch_val/fetch_row — СПИСОК, значения отдаются по
+        # очереди (для функций с несколькими fetchval/fetchrow подряд, например
+        # get_crm_stats: total→reminders, compute_merge: row_a→row_b). Скаляр/dict —
+        # прежнее поведение (одно значение на все вызовы). Backward-совместимо.
+        self._fv_i = 0
+        self._fr_i = 0
 
     async def fetchval(self, query, *args):
         self._calls.append(("fetchval", query, args))
+        if isinstance(self._fetch_val, list):
+            v = self._fetch_val[min(self._fv_i, len(self._fetch_val) - 1)] if self._fetch_val else None
+            self._fv_i += 1
+            return v
         return self._fetch_val
 
     async def fetchrow(self, query, *args):
         self._calls.append(("fetchrow", query, args))
+        if isinstance(self._fetch_row, list):
+            r = self._fetch_row[min(self._fr_i, len(self._fetch_row) - 1)] if self._fetch_row else None
+            self._fr_i += 1
+            return r
         return self._fetch_row
 
     async def fetch(self, query, *args):
@@ -215,14 +229,18 @@ class TestTrustEngine:
     @pytest.mark.asyncio
     async def test_compute_merge_confidence_improved_low(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence_improved
+        # row_a и row_b — РАЗНЫЕ контакты (fetchrow отдаёт их по очереди): разные
+        # username/имя/телефон/компания → низкая уверенность в слиянии.
         pool = FakePool(
-            fetch_row={"id": 1, "telegram_user_id": 1, "username": "a", "first_name": "A", "last_name": "X", "phones": ["+111"], "company": "C1"},
+            fetch_row=[
+                {"id": 1, "telegram_user_id": 1, "username": "alice", "first_name": "Alice", "last_name": "Smith", "phones": ["+111"], "company": "C1"},
+                {"id": 2, "telegram_user_id": 2, "username": "bob", "first_name": "Bob", "last_name": "Jones", "phones": ["+999"], "company": "C2"},
+            ],
             fetch_rows=[{"source_type": "telegram"}],
             fetch_val=None
         )
         result = await compute_merge_confidence_improved(pool, 123, 1, 2)
-        # With same phone and company, confidence should be high
-        assert result["confidence"] >= 0.5
+        assert result["confidence"] < 0.5
 
     @pytest.mark.asyncio
     async def test_detect_smart_duplicates_improved_empty(self):
@@ -421,12 +439,12 @@ class TestCRMEngine:
             {"stage": "lead", "cnt": 10, "total_value": 5000},
             {"stage": "proposal", "cnt": 5, "total_value": 15000},
         ]
-        pool = FakePool(fetch_val=15, fetch_rows=rows)
+        # get_crm_stats зовёт fetchval дважды: total(15) → reminders(3).
+        pool = FakePool(fetch_val=[15, 3], fetch_rows=rows, execute_val=3)
         result = await get_crm_stats(pool, 123)
         assert result["total_crm_contacts"] == 15
         assert len(result["by_stage"]) == 2
-        # fetch_val returns 15 for both total and reminders
-        assert result["upcoming_reminders_7d"] == 15
+        assert result["upcoming_reminders_7d"] == 3
 
     @pytest.mark.asyncio
     async def test_get_crm_activities_empty(self):
