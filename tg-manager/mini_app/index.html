@@ -8977,10 +8977,30 @@ async function openSeo() {
           <div class="row-name">${esc(s.channel_title||s.channel_username||s.chan_id)}</div>
           <div class="row-val">${s.title?'Название: '+esc(s.title.slice(0,40)):''} ${s.username?'@'+esc(s.username):''}</div>
         </div>
+        <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="applySeo(${s.chan_id}, this)">Применить</button>
       </div>
     `).join('') : empty('✨','Нет SEO-предложений','Запустите SEO-анализ в боте'));
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+// Применить SEO-предложение к каналу в один клик (замыкает петлю анализ→применение)
+async function applySeo(chanId, btn) {
+  if (!await askConfirm('Применить SEO-оптимизацию (название/описание/username) к каналу?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await api('/api/miniapp/seo/apply', {method:'POST', body:JSON.stringify({chan_id:chanId})});
+    const parts = Object.keys(r.applied||{});
+    if (r.partial) {
+      const errs = Object.entries(r.errors||{}).map(([k,v])=>`${k}: ${v}`).join('; ');
+      toast('⚠️ Частично применено ('+parts.join(', ')+'). Ошибки: '+errs);
+    } else {
+      toast('✅ SEO применено: '+(parts.join(', ')||'без изменений'));
+    }
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
   }
 }
 

@@ -3811,6 +3811,86 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("seo_overview uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def seo_apply(request: web.Request) -> web.Response:
+        """Применить AI SEO-предложение к каналу в один клик (замыкает петлю
+        анализ→рекомендация→ПРИМЕНЕНИЕ). Раньше предложения (title/about/username)
+        только показывались — оптимизацию приходилось вбивать вручную.
+
+        Переиспользует существующее: seo_ai_suggestions (хранимая рекомендация),
+        managed_channels.acc_id → управляющий аккаунт, account_manager.edit_channel_*.
+        body: {chan_id, fields?: ["title","about","username"]} — по умолчанию все.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            chan_id = int(body.get("chan_id"))
+        except (TypeError, ValueError):
+            return _err("chan_id обязателен", 400)
+        want = body.get("fields") or ["title", "about", "username"]
+        want = [f for f in want if f in ("title", "about", "username")]
+        if not want:
+            return _err("Нечего применять", 400)
+
+        # Последнее предложение по каналу (скоуп по владельцу).
+        sug = await _safe_fetchrow(pool,
+            "SELECT title, about, username FROM seo_ai_suggestions "
+            "WHERE owner_id=$1 AND chan_id=$2 ORDER BY created_at DESC LIMIT 1",
+            uid, chan_id)
+        if not sug:
+            return _err("Нет SEO-предложения для этого канала", 404)
+
+        # Управляющий аккаунт канала (скоуп по владельцу).
+        ch = await _safe_fetchrow(pool,
+            "SELECT acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            uid, chan_id)
+        if not ch or not ch.get("acc_id"):
+            return _err("Канал не найден или у него нет управляющего аккаунта", 404)
+
+        from database import db as _db
+        from services import account_manager
+        acc = await _db.get_account_for_telethon(pool, int(ch["acc_id"]), uid)
+        if not acc or not acc.get("session_str"):
+            return _err("Сессия управляющего аккаунта недоступна", 400)
+        session = acc["session_str"]
+        _acc = dict(acc)
+
+        applied, errors = {}, {}
+        try:
+            if "title" in want and (sug.get("title") or "").strip():
+                ok = await asyncio.wait_for(
+                    account_manager.edit_channel_title(session, chan_id, sug["title"].strip(), _acc=_acc),
+                    timeout=45)
+                (applied if ok else errors)["title"] = sug["title"].strip() if ok else "не удалось"
+            if "about" in want and (sug.get("about") or "").strip():
+                ok = await asyncio.wait_for(
+                    account_manager.edit_channel_about(session, chan_id, sug["about"].strip(), _acc=_acc),
+                    timeout=45)
+                (applied if ok else errors)["about"] = "ok" if ok else "не удалось"
+            if "username" in want and (sug.get("username") or "").strip():
+                err = await asyncio.wait_for(
+                    account_manager.set_channel_username(session, chan_id, sug["username"].strip(), _acc=_acc),
+                    timeout=45)
+                if err:
+                    errors["username"] = err
+                else:
+                    applied["username"] = sug["username"].strip()
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 45с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("seo_apply uid=%d chan=%d", uid, chan_id)
+            return _err(str(exc)[:200], 500)
+
+        if applied and not errors:
+            return _json_resp({"ok": True, "applied": applied})
+        if applied and errors:
+            return _json_resp({"ok": True, "applied": applied, "errors": errors, "partial": True})
+        return _err("Не удалось применить: " + "; ".join(f"{k}: {v}" for k, v in errors.items()), 400)
+
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
     async def bot_factory_status(request: web.Request) -> web.Response:
@@ -10192,6 +10272,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
     app.router.add_get("/api/miniapp/seo", seo_overview)
+    app.router.add_post("/api/miniapp/seo/apply", seo_apply)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
