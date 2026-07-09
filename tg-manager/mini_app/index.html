@@ -3800,6 +3800,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
     <div class="sec" style="margin-top:16px">Безопасность</div>
     <div class="card" style="padding:14px 16px">
+      <div style="padding:8px 0;border-bottom:1px solid var(--sep)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:14px">🛡 Политика прокси</span>
+          <select id="set-proxy-policy" style="background:var(--bg2);border:1px solid var(--sep);border-radius:8px;color:var(--text);padding:6px 10px;font-size:13px">
+            <option value="allow_direct">Можно без прокси (риск)</option>
+            <option value="strict">Только через прокси</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:var(--hint);margin-top:6px">«Только через прокси» — массовые действия без прокси блокируются (защита от банов). «Можно без прокси» — работают и без прокси, но с риском блокировок. Одиночные чтения (напр. контакты) прокси не требуют в любом режиме.</div>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">🔐 Webhook Secret</span>
         <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">Изменить</button>
@@ -13462,11 +13472,16 @@ async function openSettings() {
   setChk('set-utc-logs', s.utc_logs, false);
   const langEl = document.getElementById('set-lang');
   if (langEl) langEl.value = s.lang || 'ru';
+  const ppEl = document.getElementById('set-proxy-policy');
+  if (ppEl) ppEl.value = s.proxy_policy || 'allow_direct';
   txt('set-save-msg','');
   txt('set-err','');
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
-    await api('/api/miniapp/settings');
+    // Политика прокси действует на бэке (get_proxy_policy) — берём её значение
+    // из серверных настроек, чтобы тумблер отражал реально применяемый режим.
+    const backend = await api('/api/miniapp/settings');
+    if (backend && ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
   } catch(e) {/* ok, settings from local */}
 }
 async function saveSettings() {
@@ -13477,6 +13492,7 @@ async function saveSettings() {
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
     utc_logs: document.getElementById('set-utc-logs')?.checked ?? false,
     lang: document.getElementById('set-lang')?.value || 'ru',
+    proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };
   _saveLocalSettings(s);
   try {

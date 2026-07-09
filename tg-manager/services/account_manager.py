@@ -28,6 +28,13 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
+# Процессная политика прокси по умолчанию (переопределяется per-owner через
+# device['proxy_policy']). 'allow_direct' сохраняет прежнее лояльное поведение;
+# оператор может выставить env PROXY_POLICY=strict для «только через прокси».
+import os as _os
+from services.proxy_policy import normalize_policy as _normalize_policy, DEFAULT_POLICY as _DEFAULT_POL
+_DEFAULT_PROXY_POLICY = _normalize_policy(_os.getenv("PROXY_POLICY", _DEFAULT_POL))
+
 # ── get_me() caching to reduce API calls ────────────────────────────────────
 _GET_ME_CACHE: dict[int, tuple[Any, float]] = {}
 _GET_ME_TTL = 300  # 5 minutes cache
@@ -560,25 +567,37 @@ async def pick_registration_proxy(
     return int(row["id"]), str(row["proxy_url"])
 
 
-def _resolve_client_proxy(device: dict[str, Any]) -> Any:
+def _resolve_client_proxy(device: dict[str, Any], low_risk: bool = False) -> Any:
+    """Выбрать прокси для клиента согласно политике изоляции.
+
+    low_risk=True — низкорисковая одиночная операция (напр. чтение контактов):
+    её не блокируем из-за отсутствия прокси. Глобальная политика владельца
+    берётся из device['proxy_policy'] ('strict'|'allow_direct'), по умолчанию —
+    процессная _DEFAULT_PROXY_POLICY.
+    """
+    from services.proxy_policy import proxy_decision
+
     acc_proxy_url = str(device.get("proxy_url") or "").strip()
-    strict_account_proxy = bool(device) and (
-        bool(acc_proxy_url) or bool(device.get("enforce_proxy"))
+    policy = device.get("proxy_policy") or _DEFAULT_PROXY_POLICY
+    enforce = bool(device.get("enforce_proxy"))
+    proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else None
+    decision = proxy_decision(
+        has_proxy_url=bool(acc_proxy_url),
+        proxy_parsed_ok=proxy is not None,
+        policy=policy,
+        enforce=enforce,
+        low_risk=low_risk,
     )
-    if strict_account_proxy:
-        if not acc_proxy_url:
-            raise ProxyIsolationError(
-                "Account proxy is required for this session, but proxy_url is missing."
-            )
-        proxy = _parse_proxy(acc_proxy_url)
-        if proxy is None:
-            raise ProxyIsolationError(
-                "Account proxy is configured, but its URL could not be parsed."
-            )
+    if decision == "use":
         return proxy
-    if TG_PROXY:
-        return _parse_proxy(TG_PROXY)
-    return None
+    if decision == "block":
+        raise ProxyIsolationError(
+            "Требуется прокси по политике изоляции, но у аккаунта его нет либо он недоступен."
+        )
+    # fallback: глобальный TG_PROXY или прямое соединение (риск блокировок)
+    if not acc_proxy_url and not TG_PROXY:
+        log.warning("account connects DIRECT (no proxy) — ban risk; policy=%s low_risk=%s", policy, low_risk)
+    return _parse_proxy(TG_PROXY) if TG_PROXY else None
 
 
 def device_manufacturers() -> list[str]:
@@ -623,7 +642,7 @@ def generate_device_fingerprint(
     }
 
 
-def _make_client(session_string: str = "", device: dict | None = None):
+def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False):
     """Создать TelegramClient с правильным fingerprint и транспортом.
 
     Приоритет транспорта (от высшего к низшему):
@@ -652,8 +671,9 @@ def _make_client(session_string: str = "", device: dict | None = None):
 
     d = _normalize_device_profile(device)
 
-    # Определяем прокси (может поднять ProxyIsolationError если обязательный прокси не задан)
-    proxy = _resolve_client_proxy(d)
+    # Определяем прокси (может поднять ProxyIsolationError если политика требует
+    # прокси, а его нет; low_risk-операции не блокируются)
+    proxy = _resolve_client_proxy(d, low_risk=low_risk)
 
     # Выбор транспорта: если нет аккаунт-bound/TG_PROXY И задан CF relay → используем relay
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
@@ -3080,7 +3100,10 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
     from telethon.tl.functions.contacts import GetContactsRequest
     from services.tg_userid_date import estimate_registration_date
 
-    client = _make_client(session_string, _acc)
+    # Чтение контактов — низкорисковая одиночная операция: не блокируем из-за
+    # отсутствия/недоступности прокси (в permissive-политике уходит в прямое
+    # соединение, чтобы синхронизация не упиралась в «нужен прокси»).
+    client = _make_client(session_string, _acc, low_risk=True)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(GetContactsRequest(hash=0))

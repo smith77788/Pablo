@@ -65,7 +65,7 @@ def test_make_client_decrypts_session(monkeypatch):
             return lambda *a, **k: None
 
     monkeypatch.setattr(ts, "StringSession", _CapSession, raising=False)
-    monkeypatch.setattr(account_manager, "_resolve_client_proxy", lambda d: None)
+    monkeypatch.setattr(account_manager, "_resolve_client_proxy", lambda d, low_risk=False: None)
     monkeypatch.setattr(account_manager, "_get_pool_proxy_url", lambda: None, raising=False)
     monkeypatch.setattr(account_manager, "CF_RELAY_URL", "", raising=False)
     monkeypatch.setattr(

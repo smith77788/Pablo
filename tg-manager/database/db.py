@@ -2732,11 +2732,35 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
     )
 
 
+async def get_proxy_policy(pool, owner_id: int | None) -> str:
+    """Политика прокси владельца: 'strict' (все соединения только через прокси)
+    | 'allow_direct' (можно без прокси, риск блокировок). Хранится в
+    platform_users.settings_json.proxy_policy; по умолчанию 'allow_direct'."""
+    from services.proxy_policy import normalize_policy
+    if not owner_id:
+        return normalize_policy(None)
+    try:
+        raw = await pool.fetchval(
+            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    except Exception:
+        return normalize_policy(None)
+    if not raw:
+        return normalize_policy(None)
+    try:
+        import json as _json
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        return normalize_policy((data or {}).get("proxy_policy"))
+    except Exception:
+        return normalize_policy(None)
+
+
 async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = None):
-    """Fetch account dict with device fingerprint + proxy_url for _make_client."""
+    """Fetch account dict with device fingerprint + proxy_url + owner proxy_policy
+    for _make_client. Возвращает dict (не Record), чтобы можно было доложить
+    proxy_policy — вычисляемое поле, которого нет в таблице."""
     if owner_id is not None:
-        return await pool.fetchrow(
-            """SELECT a.id, a.session_str, a.phone, a.first_name,
+        row = await pool.fetchrow(
+            """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
                       a.lang_code, a.system_lang_code,
                       a.proxy_id, p.proxy_url, p.geo_country
@@ -2746,16 +2770,22 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
             acc_id,
             owner_id,
         )
-    return await pool.fetchrow(
-        """SELECT a.id, a.session_str, a.phone, a.first_name,
-                  a.device_model, a.system_version, a.app_version,
-                  a.lang_code, a.system_lang_code,
-                  a.proxy_id, p.proxy_url, p.geo_country
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.id=$1""",
-        acc_id,
-    )
+    else:
+        row = await pool.fetchrow(
+            """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
+                      a.device_model, a.system_version, a.app_version,
+                      a.lang_code, a.system_lang_code,
+                      a.proxy_id, p.proxy_url, p.geo_country
+               FROM tg_accounts a
+               LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+               WHERE a.id=$1""",
+            acc_id,
+        )
+    if row is None:
+        return None
+    d = dict(row)
+    d["proxy_policy"] = await get_proxy_policy(pool, d.get("owner_id"))
+    return d
 
 
 async def add_tg_account(
