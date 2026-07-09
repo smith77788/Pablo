@@ -9736,15 +9736,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
+            # tg_channels не имеет колонки is_active (есть только id/owner_id/title/
+            # username/...) — раньше SELECT is_active валил эндпоинт 500. Каналы
+            # считаем активными по факту наличия.
             channels = await pool.fetch(
-                "SELECT id, username, title, is_active FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
+                "SELECT id, username, title FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
             )
+            # managed_bots скоупится по added_by, НЕ owner_id (такой колонки нет) —
+            # прежний owner_id=$1 валил эндпоинт 500.
             bots = await pool.fetch(
-                "SELECT bot_id, username, first_name, is_active FROM managed_bots WHERE owner_id=$1 LIMIT 50", uid
+                "SELECT bot_id, username, first_name, is_active FROM managed_bots WHERE added_by=$1 LIMIT 50", uid
             )
             nodes = []
             for ch in channels:
-                nodes.append({"id": f"ch_{ch['id']}", "type": "channel", "name": ch['username'] or ch['title'] or f"#{ch['id']}", "active": ch['is_active']})
+                nodes.append({"id": f"ch_{ch['id']}", "type": "channel", "name": ch['username'] or ch['title'] or f"#{ch['id']}", "active": True})
             for b in bots:
                 nodes.append({"id": f"bot_{b['bot_id']}", "type": "bot", "name": f"@{b['username']}" if b['username'] else b['first_name'] or f"#{b['bot_id']}", "active": b['is_active']})
             return _json_resp({"nodes": nodes})

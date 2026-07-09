@@ -2156,13 +2156,17 @@ async def generate_strike_report(pool, operation_id: int) -> dict:
     return report
 
 
-async def is_strike_allowed(pool, target_id: int, min_interval_hours: int = 4) -> bool:
+async def is_strike_allowed(pool, target_id, min_interval_hours: int = 4) -> bool:
+    # ПРИМЕЧАНИЕ: функция сейчас не вызывается (dead code). strike_history хранит
+    # цель в колонке `target` (TEXT), а НЕ `target_id` — прежний запрос падал
+    # `column "target_id" does not exist` (маскировалось except→return True, т.е.
+    # ограничение интервала молча не работало бы при подключении). Исправлено.
     try:
         row = await pool.fetchrow(
             """SELECT 1 FROM strike_history
-               WHERE target_id=$1 AND created_at > NOW() - INTERVAL '1 hour' * $2
+               WHERE target=$1 AND created_at > NOW() - INTERVAL '1 hour' * $2
                LIMIT 1""",
-            target_id,
+            str(target_id),
             min_interval_hours,
         )
         return row is None
