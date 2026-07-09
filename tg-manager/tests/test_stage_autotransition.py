@@ -75,6 +75,15 @@ def test_events_are_wired_into_warmup():
         )
 
 
+def test_banned_wired_in_session_pool():
+    # session_pool помечает banned/deactivated → тоже должен эмитить авто-стадию
+    with open(os.path.join(ROOT, "services/session_pool.py"), encoding="utf-8") as f:
+        src = f.read()
+    assert 'apply_account_stage_event(pool, account_id, "banned")' in src, (
+        "session_pool не эмитит авто-стадию при banned/deactivated"
+    )
+
+
 def test_db_helper_idempotent_scoped_update():
     with open(os.path.join(ROOT, "database/db.py"), encoding="utf-8") as f:
         src = f.read()

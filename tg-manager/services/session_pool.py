@@ -124,6 +124,12 @@ async def warm_session(account_id: int, pool: asyncpg.Pool) -> SessionState:
                     result.get("reason", ""),
                     account_id,
                 )
+                # CRM-воронка: мёртвый аккаунт → авто-стадия «Заморожен».
+                try:
+                    from database import db as _db
+                    await _db.apply_account_stage_event(pool, account_id, "banned")
+                except Exception:
+                    pass
             elif status == "session_expired" and result.get("auth_error"):
                 entry.state = SessionState.EXPIRED
                 await pool.execute(

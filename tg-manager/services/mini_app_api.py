@@ -2632,21 +2632,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid request", 400)
         op = body.get("op")
-        ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
-        if not ids_in:
-            return _err("Выберите аккаунты", 400)
         admin = _is_admin(uid)
-        if admin:
+        # Режим «применить ко всему срезу»: id берём не из загруженной страницы,
+        # а резолвим весь набор под текущим фильтром на сервере (тот же WHERE, что
+        # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
+        if body.get("select_all_filtered"):
+            flt = body.get("filter", "all")
+            if flt not in ("all", "active", "cooldown", "banned"):
+                flt = "all"
+            stage = (body.get("stage") or "").strip().lower()
+            if stage and stage not in ACCOUNT_STAGES:
+                stage = ""
+            qterm = (body.get("q") or "").strip()[:64]
+            where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin)
             owned = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[])",
-                ids_in)
+                f"SELECT id FROM tg_accounts WHERE {where} ORDER BY id LIMIT 5000", *wargs)
+            ids = [int(r["id"]) for r in (owned or [])]
+            if not ids:
+                return _err("Под фильтром нет аккаунтов", 404)
         else:
-            owned = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-                uid, ids_in)
-        ids = [int(r["id"]) for r in (owned or [])]
-        if not ids:
-            return _err("Аккаунты не найдены", 404)
+            ids_in = [int(x) for x in (body.get("account_ids") or []) if str(x).lstrip("-").isdigit()]
+            if not ids_in:
+                return _err("Выберите аккаунты", 400)
+            if admin:
+                owned = await _safe_fetch(pool,
+                    "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[])",
+                    ids_in)
+            else:
+                owned = await _safe_fetch(pool,
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+                    uid, ids_in)
+            ids = [int(r["id"]) for r in (owned or [])]
+            if not ids:
+                return _err("Аккаунты не найдены", 404)
         n = len(ids)
         try:
             if op == "check":

@@ -729,6 +729,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="sel-bar-top">
         <span id="accSelCount">Выбрано: 0</span>
         <span class="sel-bar-link" onclick="accSelAll()">Все</span>
+        <span class="sel-bar-link" id="accSelWholeLink" onclick="accSelWholeFilter()">Весь срез</span>
         <span class="sel-bar-link" onclick="accSelClear()">Сброс</span>
       </div>
       <div class="sel-bar-acts">
@@ -5583,20 +5584,19 @@ async function submitAccMeta() {
 }
 // Массовое перемещение в статус
 function openMassStage() {
-  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }
   const e=document.getElementById('msErr'); if(e) e.textContent='';
   showModal('mo-acc-stage');
 }
 async function submitMassStage() {
   const err=document.getElementById('msErr'); err.textContent='';
   const stage=document.getElementById('msStage').value;
-  const ids=[...ACC_SEL];
-  if(!ids.length){ err.textContent='Не выбраны аккаунты'; return; }
+  if(!_massSelCount()){ err.textContent='Не выбраны аккаунты'; return; }
   const btn=document.getElementById('msBtn'); btn.disabled=true; btn.textContent='Применяю…';
   try {
-    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', account_ids:ids, stage})});
+    const r=await api('/api/miniapp/accounts/mass',{method:'POST',body:JSON.stringify({op:'set_stage', stage, ..._massSel()})});
     const nm = stage ? (ACC_STAGES[stage]?ACC_STAGES[stage].label:stage) : 'без статуса';
-    toast(`✅ Перемещено в «${nm}»: ${r.count||ids.length}`);
+    toast(`✅ Перемещено в «${nm}»: ${r.count||_massSelCount()}`);
     closeModal('mo-acc-stage'); toggleAccSelMode(); loadAccounts();
   } catch(e){ err.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='Применить'; }
@@ -5659,9 +5659,9 @@ async function submitAccProfile() {
   try {
     let r;
     if (AP_MASS) {
-      payload.account_ids = [...ACC_SEL];
+      Object.assign(payload, _massSel());
       r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify(payload)});
-      toast(`✅ Поставлено в очередь для ${r.count||payload.account_ids.length} аккаунтов`);
+      toast(`✅ Поставлено в очередь для ${r.count||_massSelCount()} аккаунтов`);
       closeModal('mo-acc-profile');
       toggleAccSelMode();
     } else {
@@ -5779,6 +5779,7 @@ async function loadAccounts() {
   api(_accQuery(0)).then(ad => {
     CUR_ACCS = ad.accounts||[];
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
     ACC_OFFSET = CUR_ACCS.length;
     // Истинное число из серверной агрегации (страница ограничена LIMIT)
     const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
@@ -5856,6 +5857,7 @@ let ACC_STAGE_FILTER = '';   // '' = все статусы
 let ACC_SEARCH = '';
 let ACC_OFFSET = 0;
 let ACC_HAS_MORE = false;
+let ACC_FILTERED_TOTAL = 0;   // всего под текущим срезом (page.filtered_total)
 let ACC_LOADING = false;
 let _accSearchT = null;
 
@@ -5874,6 +5876,7 @@ async function reloadAccounts() {
     const ad = await api(_accQuery(0));
     CUR_ACCS = ad.accounts||[];
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
     ACC_OFFSET = CUR_ACCS.length;
     updateAccKpi(CUR_ACCS, ad.stats);
     renderStageChips(ad.stats && ad.stats.by_stage);
@@ -5894,6 +5897,7 @@ async function loadMoreAccounts() {
     const more = ad.accounts||[];
     CUR_ACCS = CUR_ACCS.concat(more);
     ACC_HAS_MORE = !!(ad.page && ad.page.has_more);
+    if (ad.page && ad.page.filtered_total!=null) ACC_FILTERED_TOTAL = ad.page.filtered_total;
     ACC_OFFSET += more.length;
     renderAccounts(CUR_ACCS);
     renderLoadMore(ad.page);
@@ -5996,6 +6000,7 @@ let ACC_SEL = new Set();
 function toggleAccSelMode() {
   ACC_SEL_MODE = !ACC_SEL_MODE;
   ACC_SEL.clear();
+  ACC_SEL_ALL_FILTERED = false;
   const btn = document.getElementById('accSelToggle');
   if (btn) btn.textContent = ACC_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
   document.getElementById('accSelBar').style.display = ACC_SEL_MODE ? '' : 'none';
@@ -6013,37 +6018,59 @@ function toggleAccSel(id) {
   renderAccounts(_accFiltered());
   updateAccSelBar();
 }
+let ACC_SEL_ALL_FILTERED = false;  // применять масс-действие ко всему срезу (не только к загруженным)
 function accSelAll() {
+  ACC_SEL_ALL_FILTERED = false;
   _accFiltered().forEach(a=>ACC_SEL.add(a.id));
   renderAccounts(_accFiltered());
   updateAccSelBar();
 }
 function accSelClear() {
   ACC_SEL.clear();
+  ACC_SEL_ALL_FILTERED = false;
   renderAccounts(_accFiltered());
+  updateAccSelBar();
+}
+// Выбрать ВЕСЬ срез под фильтром (серверно, снимает 100-лимит выделения)
+function accSelWholeFilter() {
+  ACC_SEL_ALL_FILTERED = !ACC_SEL_ALL_FILTERED;
   updateAccSelBar();
 }
 function updateAccSelBar() {
   const el = document.getElementById('accSelCount');
-  if (el) el.textContent = 'Выбрано: '+ACC_SEL.size;
+  if (el) el.textContent = ACC_SEL_ALL_FILTERED
+    ? 'Весь срез: '+(ACC_FILTERED_TOTAL||0)
+    : 'Выбрано: '+ACC_SEL.size;
+  const w = document.getElementById('accSelWholeLink');
+  if (w) { w.textContent = ACC_SEL_ALL_FILTERED ? '✓ Весь срез' : 'Весь срез'; w.classList.toggle('on', ACC_SEL_ALL_FILTERED); }
+}
+// Селектор для масс-действия: либо конкретные id, либо весь серверный срез.
+function _massSel() {
+  if (ACC_SEL_ALL_FILTERED) {
+    return {select_all_filtered: true, filter: ACC_FILTER, stage: ACC_STAGE_FILTER, q: ACC_SEARCH};
+  }
+  return {account_ids: [...ACC_SEL]};
+}
+function _massSelCount() {
+  return ACC_SEL_ALL_FILTERED ? (ACC_FILTERED_TOTAL||0) : ACC_SEL.size;
 }
 async function runAccMass(op) {
-  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
-  const ids = [...ACC_SEL];
+  const n = _massSelCount();
+  if (!n) { toast('Выберите хотя бы один аккаунт'); return; }
   const confirmMsg = op==='leave_all'
-    ? `Выйти из всех чатов на ${ids.length} аккаунтах? Действие необратимо.`
-    : op==='scan' ? `Сканировать ресурсы на ${ids.length} аккаунтах?`
-    : op==='check' ? `Проверить ${ids.length} аккаунтов?` : null;
+    ? `Выйти из всех чатов на ${n} аккаунтах? Действие необратимо.`
+    : op==='scan' ? `Сканировать ресурсы на ${n} аккаунтах?`
+    : op==='check' ? `Проверить ${n} аккаунтов?` : null;
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
-    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, account_ids:ids})});
-    const cnt = r.count||ids.length;
+    const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
+    const cnt = r.count||n;
     toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
     toggleAccSelMode();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 function openMassProfile() {
-  if (!ACC_SEL.size) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }
   AP_MASS = true;
   const e=document.getElementById('apErr'); if(e) e.textContent='';
   document.getElementById('apOp').value='name';
