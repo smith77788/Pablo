@@ -1,19 +1,34 @@
 """Tests for Unified Contacts Hub (UCH) module.
 
 Covers: repository, merge, search, trust, versioning, relationships,
-CRM, smart tags, bulk ops, export, identity, AI assistant.
+CRM, smart tags, bulk ops, export, identity, AI assistant, ranking_engine,
+network_builder, audience_analytics, analytics_dashboard.
 """
 from __future__ import annotations
 
 import json
 import types
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 
 # ── FakePool helper ───────────────────────────────────────────────────────────
+
+class _AcquireContext:
+    """Async context manager for FakePool.acquire()."""
+
+    def __init__(self, pool):
+        self._pool = pool
+
+    async def __aenter__(self):
+        return self._pool
+
+    async def __aexit__(self, *args):
+        pass
+
 
 class FakePool:
     """Minimal asyncpg pool mock for UCH tests."""
@@ -24,13 +39,27 @@ class FakePool:
         self._fetch_rows = fetch_rows or []
         self._execute_val = execute_val
         self._calls = []
+        # Sequential режим: если fetch_val/fetch_row — СПИСОК, значения отдаются по
+        # очереди (для функций с несколькими fetchval/fetchrow подряд, например
+        # get_crm_stats: total→reminders, compute_merge: row_a→row_b). Скаляр/dict —
+        # прежнее поведение (одно значение на все вызовы). Backward-совместимо.
+        self._fv_i = 0
+        self._fr_i = 0
 
     async def fetchval(self, query, *args):
         self._calls.append(("fetchval", query, args))
+        if isinstance(self._fetch_val, list):
+            v = self._fetch_val[min(self._fv_i, len(self._fetch_val) - 1)] if self._fetch_val else None
+            self._fv_i += 1
+            return v
         return self._fetch_val
 
     async def fetchrow(self, query, *args):
         self._calls.append(("fetchrow", query, args))
+        if isinstance(self._fetch_row, list):
+            r = self._fetch_row[min(self._fr_i, len(self._fetch_row) - 1)] if self._fetch_row else None
+            self._fr_i += 1
+            return r
         return self._fetch_row
 
     async def fetch(self, query, *args):
@@ -41,11 +70,28 @@ class FakePool:
         self._calls.append(("execute", query, args))
         return self._execute_val
 
-    async def acquire(self):
-        return self
+    def acquire(self):
+        return _AcquireContext(self)
 
     async def release(self, conn):
         pass
+
+
+class SequentialFetchPool(FakePool):
+    """FakePool для analytics_dashboard: fetch отдаёт результаты по очереди."""
+
+    def __init__(self, fetch_results):
+        super().__init__()
+        self._fetch_results = fetch_results
+        self._fetch_idx = 0
+
+    async def fetch(self, query, *args):
+        self._calls.append(("fetch", query, args))
+        if self._fetch_idx < len(self._fetch_results):
+            result = self._fetch_results[self._fetch_idx]
+            self._fetch_idx += 1
+            return result
+        return []
 
 
 # ── Repository tests ─────────────────────────────────────────────────────────
@@ -215,8 +261,13 @@ class TestTrustEngine:
     @pytest.mark.asyncio
     async def test_compute_merge_confidence_improved_low(self):
         from services.contacts_hub.trust_engine import compute_merge_confidence_improved
+        # row_a и row_b — РАЗНЫЕ контакты (fetchrow отдаёт их по очереди): разные
+        # username/имя/телефон/компания → низкая уверенность в слиянии.
         pool = FakePool(
-            fetch_row={"id": 1, "telegram_user_id": 1, "username": "a", "first_name": "A", "last_name": "X", "phones": ["+111"], "company": "C1"},
+            fetch_row=[
+                {"id": 1, "telegram_user_id": 1, "username": "alice", "first_name": "Alice", "last_name": "Smith", "phones": ["+111"], "company": "C1"},
+                {"id": 2, "telegram_user_id": 2, "username": "bob", "first_name": "Bob", "last_name": "Jones", "phones": ["+999"], "company": "C2"},
+            ],
             fetch_rows=[{"source_type": "telegram"}],
             fetch_val=None
         )
@@ -420,7 +471,8 @@ class TestCRMEngine:
             {"stage": "lead", "cnt": 10, "total_value": 5000},
             {"stage": "proposal", "cnt": 5, "total_value": 15000},
         ]
-        pool = FakePool(fetch_val=15, fetch_rows=rows, execute_val=3)
+        # get_crm_stats зовёт fetchval дважды: total(15) → reminders(3).
+        pool = FakePool(fetch_val=[15, 3], fetch_rows=rows, execute_val=3)
         result = await get_crm_stats(pool, 123)
         assert result["total_crm_contacts"] == 15
         assert len(result["by_stage"]) == 2
@@ -685,7 +737,23 @@ class TestExportEngine:
     @pytest.mark.asyncio
     async def test_export_csv_streaming_with_data(self):
         from services.contacts_hub.export_engine import export_csv_streaming
-        pool = FakePool(fetch_rows=[
+
+        # export_csv_streaming использует keyset-пагинацию (while rows: ...).
+        # Обычный FakePool всегда возвращает те же строки → бесконечный цикл
+        # (и зависание всего набора тестов). Нужен мок, моделирующий исчерпание:
+        # строки на первом fetch, затем пусто.
+        class _ExhaustPool:
+            def __init__(self, rows):
+                self._rows = rows
+                self._served = False
+
+            async def fetch(self, query, *args):
+                if self._served:
+                    return []
+                self._served = True
+                return self._rows
+
+        pool = _ExhaustPool([
             {"id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
              "phones": '["+123"]', "emails": "[]", "websites": "[]", "tags": "{vip}"}
         ])
@@ -823,3 +891,426 @@ class TestMergeEngine:
         pool = FakePool(fetch_rows=[])
         result = await find_duplicates(pool, 123)
         assert result == []
+
+
+# ── Ranking Engine tests ──────────────────────────────────────────────────────
+
+class TestRankingEngine:
+    """Tests for ranking_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_track_keyword(self):
+        from services.ranking_engine import track_keyword
+        pool = FakePool(fetch_row={"id": 1})
+        result = await track_keyword(pool, 123, "telegram channels")
+        assert result["ok"] is True
+        assert result["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_record_position(self):
+        from services.ranking_engine import record_position
+        pool = FakePool(fetch_val=None, execute_val="INSERT 0 1")
+        result = await record_position(pool, 123, -100, "telegram channels", 5)
+        assert result["ok"] is True
+        assert result["current"] == 5
+        assert result["previous"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_position_history(self):
+        from services.ranking_engine import get_position_history
+        rows = [
+            {"position": 1, "previous_position": None, "checked_at": "2024-01-01", "metadata": "{}"},
+            {"position": 3, "previous_position": 1, "checked_at": "2024-01-02", "metadata": "{}"},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_position_history(pool, 123, -100, "telegram channels")
+        assert len(result) == 2
+        assert result[0]["position"] == 1
+        assert result[1]["position"] == 3
+
+    @pytest.mark.asyncio
+    async def test_get_ranking_stats(self):
+        from services.ranking_engine import get_ranking_stats
+        pool = FakePool(fetch_val=[5, 42, 3.5, 2])
+        result = await get_ranking_stats(pool, 123)
+        assert result["total_tracked"] == 5
+        assert result["total_checks"] == 42
+        assert result["avg_position_7d"] == 3.5
+        assert result["alerts_pending"] == 2
+
+
+# ── Network Builder tests ─────────────────────────────────────────────────────
+
+class TestNetworkBuilder:
+    """Tests for network_builder.py"""
+
+    @pytest.mark.asyncio
+    async def test_create_template(self):
+        from services.network_builder import create_template
+        pool = FakePool(fetch_row={"id": 1})
+        result = await create_template(pool, 123, "My Template", "Description")
+        assert result["ok"] is True
+        assert result["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_templates(self):
+        from services.network_builder import get_templates
+        rows = [
+            {"id": 1, "name": "Template 1", "owner_id": 123},
+            {"id": 2, "name": "Template 2", "owner_id": 123},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_templates(pool, 123)
+        assert len(result) == 2
+        assert result[0]["name"] == "Template 1"
+
+    @pytest.mark.asyncio
+    async def test_create_instance(self):
+        from services.network_builder import create_instance
+        pool = FakePool(fetch_row=[
+            {"id": 1, "nodes": "[]", "edges": "[]", "owner_id": 123},
+            {"id": 10},
+        ])
+        result = await create_instance(pool, 123, 1, "My Instance")
+        assert result["ok"] is True
+        assert result["id"] == 10
+
+    @pytest.mark.asyncio
+    async def test_add_node(self):
+        from services.network_builder import add_node
+        pool = FakePool(fetch_row={"id": 5})
+        result = await add_node(pool, 1, "channel", "My Channel")
+        assert result["ok"] is True
+        assert result["id"] == 5
+
+    @pytest.mark.asyncio
+    async def test_add_edge(self):
+        from services.network_builder import add_edge
+        pool = FakePool(fetch_row={"id": 3})
+        result = await add_edge(pool, 1, 1, 2, "admin")
+        assert result["ok"] is True
+        assert result["id"] == 3
+
+    @pytest.mark.asyncio
+    async def test_get_network_stats(self):
+        from services.network_builder import get_network_stats
+        pool = FakePool(fetch_val=[3, 5, 12, 8])
+        result = await get_network_stats(pool, 123)
+        assert result["templates"] == 3
+        assert result["instances"] == 5
+        assert result["total_nodes"] == 12
+        assert result["total_edges"] == 8
+
+
+# ── Audience Analytics tests ──────────────────────────────────────────────────
+
+class TestAudienceAnalytics:
+    """Tests for audience_analytics.py"""
+
+    @pytest.mark.asyncio
+    async def test_analyze_audience(self):
+        from services.audience_analytics import analyze_audience
+        pool = FakePool(
+            fetch_row=[
+                {"cnt": 1000},
+                {"cnt": 500},
+                {"total_users": 1000, "retained_users": 400},
+                {"total_users": 1000, "retained_users": 300},
+                {"avg_duration": 15.5},
+            ],
+            fetch_rows=[{"hour": 14, "dow": 3, "cnt": 100}],
+        )
+        result = await analyze_audience(pool, 123, -100)
+        assert result is not None
+        assert result.total_subscribers == 1000
+        assert result.active_users == 500
+        assert result.active_rate == 50.0
+        assert result.avg_session_duration_min == 15.5
+
+    @pytest.mark.asyncio
+    async def test_segment_audience(self):
+        from services.audience_analytics import segment_audience
+        now = datetime.now(timezone.utc)
+        user_rows = [
+            {
+                "user_id": 1,
+                "last_seen": now,
+                "first_seen": now,
+                "days_since_last": 1,
+                "days_since_first": 60,
+            },
+            {
+                "user_id": 2,
+                "last_seen": now,
+                "first_seen": now,
+                "days_since_last": 20,
+                "days_since_first": 30,
+            },
+        ]
+        pool = FakePool(
+            fetch_rows=user_rows,
+            fetch_row=[
+                {"cnt": 60},
+                {"cnt": 5},
+            ],
+        )
+        result = await segment_audience(pool, 123, -100)
+        assert isinstance(result, list)
+        segment_names = [s.name for s in result]
+        assert "Champions" in segment_names
+        assert "Dormant" in segment_names
+
+
+# ── Analytics Dashboard tests ─────────────────────────────────────────────────
+
+class TestAnalyticsDashboard:
+    """Tests for analytics_dashboard.py"""
+
+    @pytest.mark.asyncio
+    async def test_get_dashboard_stats(self):
+        from services.analytics_dashboard import get_dashboard_stats
+        now = datetime.now(timezone.utc)
+        pool = SequentialFetchPool([
+            [{"total": 5, "active": 3, "banned": 1, "spamblock": 1}],
+            [{"total": 10, "success": 8, "failed": 2}],
+            [{"running": 1}],
+            [{"total_users": 500, "new_24h": 10, "new_7d": 50}],
+            [{"avg_trust": 0.75, "at_risk": 1}],
+            [{"total_usd": 150.0}],
+        ])
+        result = await get_dashboard_stats(pool, 123)
+        assert result["accounts"]["total"] == 5
+        assert result["accounts"]["active"] == 3
+        assert result["operations_24h"]["total"] == 10
+        assert result["operations_24h"]["success"] == 8
+        assert result["operations_24h"]["running"] == 1
+        assert result["audience"]["total_users"] == 500
+        assert result["health"]["avg_trust"] == 0.75
+        assert result["revenue_30d_usd"] == 150.0
+
+    @pytest.mark.asyncio
+    async def test_get_realtime_metrics(self):
+        from services.analytics_dashboard import get_realtime_metrics
+        now = datetime.now(timezone.utc)
+        pool = SequentialFetchPool([
+            [{"id": 1, "op_type": "mass_send", "status": "running", "started_at": now, "params": "{}"}],
+            [{"id": 1, "action": "send", "result": "success", "target": "chat_1", "occurred_at": now}],
+            [{"status": "active", "cnt": 3}, {"status": "banned", "cnt": 1}],
+            [{"op_type": "mass_send", "cnt": 2}],
+        ])
+        result = await get_realtime_metrics(pool, 123)
+        assert len(result["active_operations"]) == 1
+        assert result["active_operations"][0]["type"] == "mass_send"
+        assert len(result["recent_events"]) == 1
+        assert result["recent_events"][0]["action"] == "send"
+        assert result["account_status"]["active"] == 3
+        assert result["queue_depth"]["mass_send"] == 2
+
+
+# ── Performance Engine tests ─────────────────────────────────────────────────
+
+class TestPerformanceCache:
+    """Tests for contacts_hub/performance.py cache functionality."""
+
+    @pytest.mark.asyncio
+    async def test_cache_decorator(self):
+        from services.contacts_hub.performance import cache_decorator, invalidate_cache, get_cache_stats
+
+        @cache_decorator(ttl=60, key_prefix="test_func")
+        async def my_func(x: int) -> int:
+            return x * 2
+
+        result = await my_func(5)
+        assert result == 10
+
+        stats = get_cache_stats()
+        assert stats["hits"] >= 1 or stats["sets"] >= 1
+
+        invalidate_cache("test_func")
+
+    def test_invalidate_cache(self):
+        from services.contacts_hub.performance import invalidate_cache, get_cache_stats, _cache
+
+        _cache.set("test_key_1", "value1")
+        _cache.set("test_key_2", "value2")
+        _cache.set("other_key", "value3")
+
+        removed = invalidate_cache("test_key")
+        assert removed == 2
+
+        assert _cache.get("test_key_1") is None
+        assert _cache.get("test_key_2") is None
+        assert _cache.get("other_key") == "value3"
+
+    def test_get_cache_stats(self):
+        from services.contacts_hub.performance import get_cache_stats, _cache
+
+        _cache.clear()
+        _cache.set("stat_test_1", "data")
+        _cache.set("stat_test_2", "data")
+        _ = _cache.get("stat_test_1")
+        _ = _cache.get("stat_test_1")
+        _ = _cache.get("nonexistent")
+
+        stats = get_cache_stats()
+        assert stats["size"] >= 2
+        assert stats["hits"] >= 2
+        assert stats["misses"] >= 1
+        assert stats["sets"] >= 2
+
+
+class TestPerformanceBatchOps:
+    """Tests for contacts_hub/performance.py batch operations."""
+
+    @pytest.mark.asyncio
+    async def test_batch_insert(self):
+        from services.contacts_hub.performance import batch_insert
+
+        class BatchPool:
+            def __init__(self):
+                self._calls = []
+
+            def acquire(self):
+                return self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def executemany(self, query, values):
+                self._calls.append((query, values))
+
+        pool = BatchPool()
+        rows = [{"id": i, "name": f"contact_{i}"} for i in range(3)]
+        result = await batch_insert(pool, "unified_contacts", ["id", "name"], rows, batch_size=2)
+        assert result == 3
+        assert len(pool._calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_batch_update(self):
+        from services.contacts_hub.performance import batch_update
+
+        class SeqPool:
+            def __init__(self, responses):
+                self._responses = iter(responses)
+                self._calls = []
+
+            async def execute(self, query, *args):
+                self._calls.append(query)
+                return next(self._responses)
+
+        pool = SeqPool(["UPDATE 3", "UPDATE 2"])
+        result = await batch_update(
+            pool, "unified_contacts",
+            {"is_favorite": True},
+            "id", ["id1", "id2", "id3", "id4", "id5"],
+            batch_size=3
+        )
+        assert result == 5
+        assert len(pool._calls) == 2
+
+
+class TestPerformanceQueryStats:
+    """Tests for contacts_hub/performance.py query stats."""
+
+    def test_get_query_stats(self):
+        from services.contacts_hub.performance import get_query_stats, record_query, _query_stats
+
+        _query_stats.clear()
+        record_query("SELECT * FROM contacts", 15.5, 10)
+        record_query("INSERT INTO contacts VALUES (...)", 2.3, 0)
+
+        stats = get_query_stats()
+        assert stats["total_queries"] == 2
+        assert stats["avg_time_ms"] > 0
+        assert len(stats["slowest"]) == 2
+        assert stats["slowest"][0]["duration_ms"] >= stats["slowest"][1]["duration_ms"]
+
+
+# ── Security tests ────────────────────────────────────────────────────────────
+
+class TestSecurity:
+    """Tests for services/security.py"""
+
+    # ── sanitize_input ─────────────────────────────────────────────────────
+
+    def test_sanitize_input_normal(self):
+        from services.security import sanitize_input
+        result = sanitize_input("Hello World")
+        assert result == "Hello World"
+
+    def test_sanitize_input_xss(self):
+        from services.security import sanitize_input
+        result = sanitize_input('<script>alert("xss")</script>')
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+
+    def test_sanitize_input_sql(self):
+        from services.security import sanitize_input
+        result = sanitize_input("'; DROP TABLE users; --")
+        assert "DROP TABLE" in result
+
+    # ── validate_email ─────────────────────────────────────────────────────
+
+    def test_validate_email_valid(self):
+        from services.security import validate_email
+        assert validate_email("user@example.com") is True
+        assert validate_email("test.user+tag@domain.co") is True
+
+    def test_validate_email_invalid(self):
+        from services.security import validate_email
+        assert validate_email("not-an-email") is False
+        assert validate_email("@domain.com") is False
+        assert validate_email("user@") is False
+        assert validate_email("") is False
+
+    # ── validate_phone ─────────────────────────────────────────────────────
+
+    def test_validate_phone_valid(self):
+        from services.security import validate_phone
+        assert validate_phone("+14155552671") is True
+        assert validate_phone("+79161234567") is True
+        assert validate_phone("+1 415-555-2671") is True
+
+    def test_validate_phone_invalid(self):
+        from services.security import validate_phone
+        assert validate_phone("12345") is False
+        assert validate_phone("not-a-phone") is False
+        assert validate_phone("14155552671") is False
+        assert validate_phone("") is False
+
+    # ── validate_url ───────────────────────────────────────────────────────
+
+    def test_validate_url_valid(self):
+        from services.security import validate_url
+        assert validate_url("https://example.com") is True
+        assert validate_url("https://sub.domain.org/path?q=1") is True
+
+    def test_validate_url_invalid(self):
+        from services.security import validate_url
+        assert validate_url("http://example.com") is False
+        assert validate_url("ftp://example.com") is False
+        assert validate_url("not-a-url") is False
+        assert validate_url("https://localhost") is False
+        assert validate_url("") is False
+
+    # ── CSRF ───────────────────────────────────────────────────────────────
+
+    def test_generate_csrf_token(self):
+        import services.security as sec
+        with patch.object(sec, "_CSRF_SECRET", "test_secret_for_csrf"):
+            from services.security import generate_csrf_token
+            token = generate_csrf_token(123)
+            assert isinstance(token, str)
+            assert ":" in token
+
+    def test_verify_csrf_token(self):
+        import services.security as sec
+        with patch.object(sec, "_CSRF_SECRET", "test_secret_for_csrf"):
+            from services.security import generate_csrf_token, verify_csrf_token
+            token = generate_csrf_token(123)
+            assert verify_csrf_token(token, 123) is True
+            assert verify_csrf_token(token, 456) is False
+            assert verify_csrf_token("invalid_token", 123) is False

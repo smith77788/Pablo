@@ -165,6 +165,33 @@ def validate_email(email: str) -> bool:
     return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email.strip()))
 
 
+def sanitize_input(value: Any, max_len: int = 1000) -> str:
+    """General-purpose input sanitizer.
+
+    Strips control characters, normalizes whitespace, escapes HTML,
+    and limits length. Returns empty string for None/empty input.
+    """
+    if value is None:
+        return ""
+    s = str(value).strip()
+    s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', s)
+    s = re.sub(r'\s+', ' ', s)
+    s = html.escape(s)
+    return s[:max_len]
+
+
+def validate_phone(phone: str) -> bool:
+    """Validate international phone number format.
+
+    Accepts +<country><number> with 10-15 digits total.
+    Example: +14155552671, +79161234567
+    """
+    if not phone or not isinstance(phone, str):
+        return False
+    cleaned = phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    return bool(re.match(r'^\+\d{10,15}$', cleaned))
+
+
 def sanitize_search_query(query: str, max_len: int = 200) -> str:
     """Sanitize a search query by stripping dangerous chars and limiting length."""
     s = str(query or "").strip()[:max_len]

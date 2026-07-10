@@ -250,15 +250,20 @@ async def export_csv_streaming(pool, owner_id: int, contact_ids: list = None):
             for r in rows:
                 yield _contact_to_csv_row(r)
     else:
+        # Keyset-пагинация ДОЛЖНА сортировать по той же колонке, что и фильтр
+        # курсора (id). Раньше было ORDER BY first_name при WHERE id > cursor —
+        # колонки не совпадали: курсор-id не монотонен в порядке first_name,
+        # из-за чего пагинация могла пропускать строки или зацикливаться
+        # (last-row id не растёт → те же строки перечитываются бесконечно).
         cursor = None
         while True:
             if cursor:
                 rows = await pool.fetch(
-                    'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id > $2 ORDER BY first_name LIMIT 500',
+                    'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id > $2 ORDER BY id LIMIT 500',
                     owner_id, cursor)
             else:
                 rows = await pool.fetch(
-                    'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name LIMIT 500',
+                    'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY id LIMIT 500',
                     owner_id)
             if not rows:
                 break

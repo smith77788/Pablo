@@ -21,6 +21,13 @@ from services.pacing_engine import get_pacing_engine
 
 log = logging.getLogger(__name__)
 
+# Autopost v2: op_type'ы, которым разрешена рекуррентная переочередь (постинг в
+# СВОИ каналы/ботов). Аккаунт-действия сюда НЕ входят — чтобы не зациклить.
+_RECURRING_OK_OPS = frozenset({
+    "quick_post", "mass_publish", "bulk_post_chans", "bulk_post_to_channel",
+    "network_broadcast", "run_broadcast", "group_announce", "pin_last_post",
+})
+
 
 # ── Safe DB helpers ──────────────────────────────────────────────────────────
 # All DB calls in the worker must be wrapped to prevent a single query failure
@@ -1231,6 +1238,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_promote_presence_pack(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_edit_channels":
                 result = await _exec_bulk_edit_channels(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_seo_apply":
+                result = await _exec_bulk_seo_apply(pool, bot, op_id, owner_id, params)
             elif op_type == "group_import_all":
                 result = await _exec_group_import_all(pool, bot, op_id, owner_id, params)
             elif op_type == "group_announce":
@@ -1269,6 +1278,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_boost_bot_starts(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_invite":
                 result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
+            elif op_type == "ai_comment":
+                result = await _exec_ai_comment(pool, bot, op_id, owner_id, params)
+            elif op_type == "compliance_scan":
+                result = await _exec_compliance_scan(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_set_profile":
                 result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_report":
@@ -1418,6 +1431,41 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _final_status,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
+            # Autopost v2: рекуррентная переочередь постинг-операций в СВОИ каналы.
+            # repeat_interval_min>0 → после успешного прогона ставим следующий с
+            # scheduled_for=now()+interval. Только постинг-op'ы (allowlist) — чтобы
+            # аккаунт-действия не зациклились. repeat_count (если задан) декрементим.
+            if _final_status == "done" and op_type in _RECURRING_OK_OPS:
+                try:
+                    _rmin = int(params.get("repeat_interval_min") or 0)
+                except (TypeError, ValueError):
+                    _rmin = 0
+                if _rmin > 0:
+                    _rcount = params.get("repeat_count")
+                    _go = True
+                    _next_params = dict(params)
+                    if _rcount is not None:
+                        try:
+                            _rc = int(_rcount) - 1
+                        except (TypeError, ValueError):
+                            _rc = 0
+                        _next_params["repeat_count"] = _rc
+                        _go = _rc > 0
+                    if _go:
+                        try:
+                            _row = await pool.fetchrow(
+                                "SELECT label, total_items FROM operation_queue WHERE id=$1", op_id)
+                            await pool.execute(
+                                "INSERT INTO operation_queue(owner_id, op_type, status, params, "
+                                "total_items, label, scheduled_for) "
+                                "VALUES($1,$2,'pending',$3::jsonb,$4,$5, now() + make_interval(mins => $6))",
+                                owner_id, op_type, json.dumps(_next_params, ensure_ascii=False),
+                                (_row["total_items"] if _row else 0),
+                                (_row["label"] if _row else op_type) + " ↻",
+                                _rmin,
+                            )
+                        except Exception as _e:
+                            log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
             # Audit trail: write operation completion to operation_audit.
             # Outcome согласован с финальным статусом — провал не пишется как success.
             _audit_outcome = "success" if _final_status == "done" else "failed"
@@ -5240,6 +5288,57 @@ async def _exec_promote_presence_pack(
     }
 
 
+async def _exec_bulk_seo_apply(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовое применение AI SEO-предложений по всей сетке каналов.
+
+    Переиспользует ЕДИНУЮ реализацию services.seo_apply.apply_seo_to_channel (та
+    же, что инлайн-эндпоинт) — без дублирования. Изоляция сбоев по каналу,
+    per-channel лог в operation_log, поддержка отмены.
+    """
+    from services.seo_apply import apply_seo_to_channel
+
+    channel_ids = [int(x) for x in (params.get("channel_ids") or [])]
+    if not channel_ids:
+        return {"status": "failed", "summary": "⚠️ Нет каналов для применения SEO"}
+
+    total = len(channel_ids)
+    await _safe_execute(pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count, fail_count = 0, 0
+    for idx, chan_id in enumerate(channel_ids, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await apply_seo_to_channel(pool, owner_id, chan_id)
+        except Exception as exc:
+            log.warning("bulk_seo_apply op=%d chan=%s: %s", op_id, chan_id, exc)
+            res = {"ok": False, "error": str(exc)[:200]}
+        if res.get("ok"):
+            ok_count += 1
+            applied = ", ".join((res.get("applied") or {}).keys()) or "без изменений"
+            await _safe_execute(pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'ok',$4)",
+                op_id, idx, f"ch#{chan_id}", ("SEO: " + applied)[:200])
+        else:
+            fail_count += 1
+            await _safe_execute(pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id, idx, f"ch#{chan_id}", (res.get("error") or "не удалось")[:200])
+        await _safe_execute(pool,
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(2.0)
+
+    summary = (f"🔍 SEO по сетке: применено {ok_count}/{total}"
+               + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
 async def _exec_bulk_edit_channels(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -7590,6 +7689,144 @@ async def _exec_content_clone(
         "cloned_to": cloned_to[:50],
         "summary": summary,
     }
+
+
+async def _exec_ai_comment(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """AI Commenting: под каждым целевым каналом (его группой обсуждений) постит
+    контекстный AI-комментарий к недавнему посту. Round-robin по аккаунтам,
+    задержки, обработка FloodWait, content_safety-гард на нишу.
+    params: {channels: [ref...], niche, tone, acc_count, per_channel_delay}
+    """
+    from services import ai_comment_engine, resource_selector, account_manager, content_safety
+
+    channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
+    niche = (params.get("niche") or "").strip()
+    tone = (params.get("tone") or "neutral").strip()
+    acc_count = max(1, min(int(params.get("acc_count") or 3), 10))
+    if not channels:
+        return {"status": "failed", "summary": "⚠️ Не указаны каналы"}
+
+    # Гард безопасности контента (ниша — единственный пользовательский текст;
+    # сам коммент генерит LLM под постом, но нишу проверяем как контекст-инструкцию).
+    verdict = await content_safety.enforce(pool, owner_id, niche or "comment", "", surface="ai_comment")
+    if verdict.blocked:
+        return {"status": "failed", "summary": "⚠️ Контент заблокирован политикой платформы"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="comment", respect_cooldown=True)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    accounts = accounts[:acc_count]
+
+    channels = channels[:50]  # потолок против гигантских прогонов
+    ok_count, fail_count = 0, 0
+    total = len(channels)
+    for idx, ref in enumerate(channels, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        acc = accounts[idx % len(accounts)]
+        try:
+            res = await ai_comment_engine.post_ai_comment(
+                acc["session_str"], dict(acc), ref, niche=niche, tone=tone)
+            if res.get("ok"):
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)",
+                    op_id, idx, ref, (res.get("comment") or "")[:200])
+            else:
+                fail_count += 1
+                err = (res.get("error") or "")
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, err[:200])
+                if "FloodWait" in err or "flood" in err.lower():
+                    await asyncio.sleep(30)
+        except Exception as exc:
+            fail_count += 1
+            log.warning("ai_comment op=%d ref=%s: %s", op_id, ref, exc)
+        await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(random.uniform(20, 45))  # органическая пауза между каналами
+
+    summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
+               + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_compliance_scan(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Resource Compliance Scan: read-only проверка списка ресурсов на запрещённую
+    тематику (CSAM/террор) через content_safety. Собирает доказательное досье —
+    НЕ постит, НЕ жалуется, НЕ сносит (адресное действие оператор делает вручную,
+    в т.ч. через strike_engine). Round-robin по аккаунтам, паузы между ресурсами.
+    params: {resources: [ref...], per_resource_limit, acc_count}
+    """
+    from services import content_watch, resource_selector
+
+    resources = [str(c).strip() for c in (params.get("resources") or []) if str(c).strip()]
+    per_limit = max(1, min(int(params.get("per_resource_limit") or 50), 200))
+    acc_count = max(1, min(int(params.get("acc_count") or 2), 10))
+    if not resources:
+        return {"status": "failed", "summary": "⚠️ Не указаны ресурсы для проверки"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="parse", respect_cooldown=True)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    accounts = accounts[:acc_count]
+
+    resources = resources[:100]  # потолок против гигантских прогонов
+    total = len(resources)
+    await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    flagged, clean_count, err_count = 0, 0, 0
+    flagged_lines: list[str] = []
+    for idx, ref in enumerate(resources, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        acc = accounts[idx % len(accounts)]
+        try:
+            dossier = await content_watch.scan_resource(
+                acc["session_str"], dict(acc), ref, limit=per_limit, low_risk=True)
+            if not dossier.get("ok"):
+                err_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, (dossier.get("error") or "")[:200])
+            elif dossier.get("verdict") == "prohibited":
+                flagged += 1
+                cats = ", ".join(dossier.get("categories") or [])
+                first_hit = (dossier.get("hits") or [{}])[0]
+                evidence = f"{first_hit.get('category_label','')}: «{first_hit.get('excerpt','')}»"
+                flagged_lines.append(f"🚫 {dossier.get('resource', ref)} — {cats}")
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'flagged',$4)", op_id, idx, dossier.get("resource", ref),
+                    (f"[{cats}] {evidence}")[:200])
+            else:
+                clean_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx, dossier.get("resource", ref),
+                    f"чисто ({dossier.get('scanned',0)} текстов)")
+        except Exception as exc:
+            err_count += 1
+            log.warning("compliance_scan op=%d ref=%s: %s", op_id, ref, exc)
+        await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(random.uniform(3, 8))  # мягкая пауза между read-only проверками
+
+    head = (f"🛡️ Проверка на запрещёнку\n🚫 Найдено нарушений: {flagged}/{total}"
+            f"\n✅ Чисто: {clean_count}" + (f"\n⚠️ Ошибок: {err_count}" if err_count else ""))
+    if flagged_lines:
+        head += "\n\n" + "\n".join(flagged_lines[:20])
+        head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел Strike)."
+    return {"status": "done", "flagged": flagged, "clean": clean_count,
+            "failed": err_count, "summary": head}
 
 
 async def _exec_niche_growth_post(

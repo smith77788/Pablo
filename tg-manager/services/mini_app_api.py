@@ -466,6 +466,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
             "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
             "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
+            # Automation Workflows
+            """CREATE TABLE IF NOT EXISTS automation_workflows (
+                id BIGSERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                steps JSONB NOT NULL DEFAULT '[]',
+                status TEXT DEFAULT 'created',
+                created_at TIMESTAMPTZ DEFAULT now(),
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_wf_owner ON automation_workflows(owner_id, created_at DESC)",
+            """CREATE TABLE IF NOT EXISTS workflow_step_runs (
+                id BIGSERIAL PRIMARY KEY,
+                workflow_id BIGINT NOT NULL REFERENCES automation_workflows(id) ON DELETE CASCADE,
+                step_num INTEGER NOT NULL,
+                action TEXT NOT NULL DEFAULT '',
+                params JSONB DEFAULT '{}',
+                status TEXT DEFAULT 'pending',
+                label TEXT DEFAULT '',
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                result_data JSONB DEFAULT '{}'
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_wf_steps_wf ON workflow_step_runs(workflow_id, step_num)",
+            """CREATE TABLE IF NOT EXISTS workflow_step_logs (
+                id BIGSERIAL PRIMARY KEY,
+                workflow_id BIGINT NOT NULL,
+                step_num INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT '',
+                message TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
         ]
         for stmt in stmts:
             try:
@@ -934,6 +969,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _op_params["silent"] = True
             if _seg_sql:
                 _op_params["segment"] = segment
+            # Autopost v2: рекуррентная рассылка (0 = разовая). Движок op_worker
+            # сам переочередит следующий запуск через repeat_interval_min минут.
+            try:
+                _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+            except (TypeError, ValueError):
+                _rmin = 0
+            if _rmin > 0:
+                _op_params["repeat_interval_min"] = _rmin
+                _rc = body.get("repeat_count")
+                if _rc is not None:
+                    try:
+                        _op_params["repeat_count"] = max(1, min(int(_rc), 1000))
+                    except (TypeError, ValueError):
+                        pass
 
             broadcast_id = None
             if schedule_minutes <= 0:
@@ -2691,6 +2740,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "UPDATE tg_accounts SET stage=$1 WHERE owner_id=$2 AND id=ANY($3::bigint[])",
                     stage, uid, ids)
                 return _json_resp({"ok": True, "count": n, "stage": stage})
+            if op == "detach_proxy":
+                # Снять прокси у выбранных аккаунтов — чтобы работать БЕЗ прокси
+                # (прямое соединение). Чистое DB-действие. После этого аккаунт
+                # не привязан к IP прокси и подключается напрямую.
+                await pool.execute(
+                    "UPDATE tg_accounts SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+                    uid, ids)
+                return _json_resp({"ok": True, "count": n})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []
@@ -3215,6 +3272,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
         elif act == "delete_pm":
             op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
+        elif act == "reauth":
+            op_type, params, label = "reauth_account", {"account_id": acc_id}, "Переавторизация аккаунта"
+        elif act == "export_session":
+            op_type, params, label = "export_session", {"account_id": acc_id}, "Экспорт сессии"
+        elif act == "reset_cooldown":
+            op_type, params, label = "reset_cooldown", {"account_id": acc_id}, "Сброс кулдауна"
         else:
             return _err("Неизвестное действие", 400)
         try:
@@ -3673,6 +3736,96 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("growth_submit uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def ai_comment_submit(request: web.Request) -> web.Response:
+        """AI Commenting: контекстные LLM-комментарии под постами целевых каналов.
+        body: {channels: [ref...], niche?, tone?, acc_count?}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        raw_ch = body.get("channels") or []
+        if isinstance(raw_ch, str):
+            raw_ch = re.split(r"[\s,]+", raw_ch)
+        channels = [str(c).strip().lstrip("@") for c in raw_ch if str(c).strip()][:50]
+        niche = validate_string(body.get("niche"), max_len=200) or ""
+        from services.ai_comment_engine import COMMENT_TONES
+        tone = (body.get("tone") or "neutral").strip()
+        if tone not in COMMENT_TONES:
+            tone = "neutral"
+        try:
+            acc_count = max(1, min(validate_integer(body.get("acc_count") or 3, min_val=1, max_val=10) or 3, 10))
+        except (TypeError, ValueError):
+            acc_count = 3
+        if not channels:
+            return _err("Укажите хотя бы один канал", 400)
+        from services import content_safety
+        _v = await content_safety.enforce(pool, uid, niche or "comment", "", surface="ai_comment")
+        if _v.blocked:
+            return _err("Контент заблокирован политикой платформы", 403)
+        has_acc = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            uid)
+        if not has_acc:
+            return _err("Нет активных аккаунтов", 400)
+        try:
+            label = f"AI-комментинг: {len(channels)} каналов"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'ai_comment','pending',$2,$3,$4) RETURNING id",
+                uid,
+                _json.dumps({"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count}),
+                len(channels), label)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "channels": len(channels)})
+        except Exception as exc:
+            log.exception("ai_comment_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def compliance_scan_submit(request: web.Request) -> web.Response:
+        """Resource Compliance Scan: read-only проверка ресурсов на запрещённую
+        тематику (CSAM/террор). Собирает досье, ничего не постит/не сносит.
+        body: {resources: [ref...], per_resource_limit?, acc_count?}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        raw = body.get("resources") or []
+        if isinstance(raw, str):
+            raw = re.split(r"[\s,]+", raw)
+        resources = [str(c).strip().lstrip("@") for c in raw if str(c).strip()][:100]
+        if not resources:
+            return _err("Укажите хотя бы один ресурс для проверки", 400)
+        try:
+            per_limit = max(1, min(validate_integer(body.get("per_resource_limit") or 50, min_val=1, max_val=200) or 50, 200))
+        except (TypeError, ValueError):
+            per_limit = 50
+        try:
+            acc_count = max(1, min(validate_integer(body.get("acc_count") or 2, min_val=1, max_val=10) or 2, 10))
+        except (TypeError, ValueError):
+            acc_count = 2
+        has_acc = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            uid)
+        if not has_acc:
+            return _err("Нет активных аккаунтов", 400)
+        try:
+            label = f"Проверка на запрещёнку: {len(resources)} ресурсов"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'compliance_scan','pending',$2,$3,$4) RETURNING id",
+                uid,
+                _json.dumps({"resources": resources, "per_resource_limit": per_limit, "acc_count": acc_count}),
+                len(resources), label)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "resources": len(resources)})
+        except Exception as exc:
+            log.exception("compliance_scan_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -3725,9 +3878,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
         except (TypeError, ValueError):
             schedule_minutes = 0
+        # Autopost v2: рекуррентная публикация (0 = разовая).
+        try:
+            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            _rmin = 0
         try:
             label = f"Quick Post в {len(channel_ids)} каналов"
-            _params = _json.dumps({"text": text, "channel_ids": channel_ids})
+            _pd = {"text": text, "channel_ids": channel_ids}
+            if _rmin > 0:
+                _pd["repeat_interval_min"] = _rmin
+                _rc = body.get("repeat_count")
+                if _rc is not None:
+                    try:
+                        _pd["repeat_count"] = max(1, min(int(_rc), 1000))
+                    except (TypeError, ValueError):
+                        pass
+            _params = _json.dumps(_pd)
             if schedule_minutes > 0:
                 op_id = await pool.fetchval(
                     "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
@@ -3774,6 +3941,64 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("seo_overview uid=%d", uid)
             return _err(str(exc), 500)
+
+    async def seo_apply(request: web.Request) -> web.Response:
+        """Применить AI SEO-предложение к каналу в один клик (замыкает петлю
+        анализ→рекомендация→ПРИМЕНЕНИЕ). Раньше предложения (title/about/username)
+        только показывались — оптимизацию приходилось вбивать вручную.
+
+        Переиспользует существующее: seo_ai_suggestions (хранимая рекомендация),
+        managed_channels.acc_id → управляющий аккаунт, account_manager.edit_channel_*.
+        body: {chan_id, fields?: ["title","about","username"]} — по умолчанию все.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            chan_id = int(body.get("chan_id"))
+        except (TypeError, ValueError):
+            return _err("chan_id обязателен", 400)
+        fields = body.get("fields") or None
+
+        # Единая реализация применения (та же, что в bulk-исполнителе) — без дублей.
+        from services.seo_apply import apply_seo_to_channel
+        try:
+            res = await apply_seo_to_channel(pool, uid, chan_id, fields)
+        except Exception as exc:
+            log.exception("seo_apply uid=%d chan=%d", uid, chan_id)
+            return _err(str(exc)[:200], 500)
+
+        if res.get("ok"):
+            return _json_resp(res)
+        return _err(res.get("error") or "Не удалось применить", 400)
+
+    async def seo_apply_all(request: web.Request) -> web.Response:
+        """Массовое применение SEO-предложений по ВСЕЙ сетке — в очередь (op_worker),
+        т.к. правок много и инлайн упрётся в таймаут шлюза."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        # Каналы владельца, у которых есть хотя бы одно SEO-предложение и
+        # управляющий аккаунт.
+        rows = await _safe_fetch(pool,
+            "SELECT DISTINCT mc.channel_id FROM managed_channels mc "
+            "WHERE mc.owner_id=$1 AND mc.acc_id IS NOT NULL "
+            "AND EXISTS (SELECT 1 FROM seo_ai_suggestions s "
+            "            WHERE s.owner_id=$1 AND s.chan_id=mc.channel_id)",
+            uid)
+        chan_ids = [int(r["channel_id"]) for r in (rows or [])]
+        if not chan_ids:
+            return _err("Нет каналов с SEO-предложениями для применения", 400)
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,'bulk_seo_apply','pending',$2,$3,$4) RETURNING id",
+            uid, _json.dumps({"channel_ids": chan_ids}), len(chan_ids),
+            f"SEO по сетке: {len(chan_ids)} каналов")
+        return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
@@ -8344,14 +8569,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите паттерн названия или референс", 400)
 
         # ── Гео: пресет (страны/города мира) ИЛИ свой список городов ИЛИ страны.
-        from services.geo_data import GEO_PRESETS, parse_custom_geo_list, enrich_geo_list
+        from services.geo_data import (
+            GEO_PRESETS, parse_custom_geo_list, enrich_geo_list, filter_preset_cities,
+        )
         geo_preset = (body.get("geo_preset") or "").strip()
         custom_cities = (body.get("custom_cities") or "").strip()
         countries = body.get("countries") or []
+        preset_cities = body.get("preset_cities") or []  # выбранное подмножество городов пресета
         geo_list: list = []
         geo_source = ""
         if geo_preset and geo_preset in GEO_PRESETS:
-            geo_list = list(GEO_PRESETS[geo_preset]["cities"])
+            # Пустой preset_cities → весь пресет; иначе — только отмеченные города.
+            geo_list = filter_preset_cities(geo_preset, preset_cities)
             geo_source = geo_preset
         elif custom_cities:
             geo_list = parse_custom_geo_list(custom_cities)
@@ -8424,11 +8653,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     async def geo_presets(request: web.Request) -> web.Response:
-        """Список гео-пресетов (страны/города мира) для Global Presence."""
+        """Список гео-пресетов (страны/города мира) для Global Presence.
+        ?cities=<key> — вернуть города конкретного пресета для выбора галочками."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        from services.geo_data import GEO_PRESETS
+        from services.geo_data import GEO_PRESETS, preset_city_options
+        want = (request.rel_url.query.get("cities") or "").strip()
+        if want:
+            if want not in GEO_PRESETS:
+                return _err("Неизвестный пресет", 404)
+            return _json_resp({"key": want, "cities": preset_city_options(want)})
         return _json_resp({"presets": [
             {"key": k, "label": v.get("label", k), "count": v.get("count", len(v.get("cities", [])))}
             for k, v in GEO_PRESETS.items()
@@ -10141,11 +10376,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
+    app.router.add_post("/api/miniapp/ai_comment", ai_comment_submit)
+    app.router.add_post("/api/miniapp/compliance_scan", compliance_scan_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
     app.router.add_get("/api/miniapp/seo", seo_overview)
+    app.router.add_post("/api/miniapp/seo/apply", seo_apply)
+    app.router.add_post("/api/miniapp/seo/apply_all", seo_apply_all)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
@@ -10500,10 +10739,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         favorite = request.query.get('favorite') == '1'
         premium = request.query.get('premium') == '1'
         multi = request.query.get('multi') == '1'
+        mutual = request.query.get('mutual') == '1'
         try:
             from services.contacts_hub.repository import get_contacts
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
-                                        tag=tag, premium_only=premium, multi_only=multi)
+                                        tag=tag, premium_only=premium, multi_only=multi,
+                                        mutual_only=mutual)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)
@@ -11176,6 +11417,440 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
+
+    # ── Search Ranking Engine ──────────────────────────────────────────────────
+    async def ranking_track(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.ranking_engine import track_keyword
+            result = await track_keyword(pool, uid, data.get('keyword', ''),
+                                         data.get('channel_id'), data.get('check_interval', 3600))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_untrack(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.ranking_engine import untrack_keyword
+            result = await untrack_keyword(pool, uid, data.get('keyword', ''), data.get('channel_id'))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_record(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.ranking_engine import record_position
+            result = await record_position(pool, uid, data.get('channel_id', 0),
+                                           data.get('keyword', ''), data.get('position', 0))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channel_id = int(request.match_info.get('channel_id', 0))
+            keyword = request.query.get('keyword', '')
+            days = int(request.query.get('days', 30))
+            from services.ranking_engine import get_position_history
+            history = await get_position_history(pool, uid, channel_id, keyword, days)
+            return _json_resp({'history': history})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_positions(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_all_positions
+            positions = await get_all_positions(pool, uid)
+            return _json_resp({'positions': positions})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_keywords(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_tracked_keywords
+            keywords = await get_tracked_keywords(pool, uid)
+            return _json_resp({'keywords': keywords})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_alerts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_alerts
+            alerts = await get_alerts(pool, uid)
+            return _json_resp({'alerts': alerts})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def ranking_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import get_ranking_stats
+            stats = await get_ranking_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_post("/api/miniapp/ranking/track", ranking_track)
+    app.router.add_post("/api/miniapp/ranking/untrack", ranking_untrack)
+    app.router.add_post("/api/miniapp/ranking/record", ranking_record)
+    app.router.add_get("/api/miniapp/ranking/history/{channel_id}", ranking_history)
+    app.router.add_get("/api/miniapp/ranking/positions", ranking_positions)
+    app.router.add_get("/api/miniapp/ranking/keywords", ranking_keywords)
+    app.router.add_get("/api/miniapp/ranking/alerts", ranking_alerts)
+    app.router.add_get("/api/miniapp/ranking/stats", ranking_stats)
+
+    # ── Network Builder ──────────────────────────────────────────────────────
+    async def network_templates(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.network_builder import get_templates
+            templates = await get_templates(pool, uid)
+            return _json_resp({'templates': templates})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_template_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.network_builder import create_template
+            result = await create_template(pool, uid, data.get('name', ''),
+                                           data.get('description', ''),
+                                           data.get('template_type', 'channel_group'),
+                                           data.get('nodes'), data.get('edges'))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_template_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            template_id = int(request.match_info['template_id'])
+            from services.network_builder import delete_template
+            result = await delete_template(pool, uid, template_id)
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_instances(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.network_builder import get_instances
+            instances = await get_instances(pool, uid)
+            return _json_resp({'instances': instances})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_instance_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.network_builder import create_instance
+            result = await create_instance(pool, uid, data.get('template_id', 0),
+                                           data.get('name', ''))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_instance_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            instance_id = int(request.match_info['instance_id'])
+            from services.network_builder import get_instance_detail
+            detail = await get_instance_detail(pool, uid, instance_id)
+            if not detail:
+                return _err("Not found", 404)
+            return _json_resp(detail)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def network_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.network_builder import get_network_stats
+            stats = await get_network_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/network/templates", network_templates)
+    app.router.add_post("/api/miniapp/network/template", network_template_create)
+    app.router.add_delete("/api/miniapp/network/template/{template_id}", network_template_delete)
+    app.router.add_get("/api/miniapp/network/instances", network_instances)
+    app.router.add_post("/api/miniapp/network/instance", network_instance_create)
+    app.router.add_get("/api/miniapp/network/instance/{instance_id}", network_instance_detail)
+    app.router.add_get("/api/miniapp/network/stats", network_stats)
+
+    # ── Automation Workflows ─────────────────────────────────────────────────
+
+    async def workflow_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.workflow_engine import list_workflows
+            workflows = await list_workflows(pool, uid)
+            return _json_resp({"workflows": workflows})
+        except Exception as exc:
+            log.exception("workflow_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def workflow_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = (body.get("name") or "").strip()
+        steps = body.get("steps")
+        if not name:
+            return _err("name обязателен", 400)
+        if not isinstance(steps, list) or not steps:
+            return _err("steps обязателен и должен быть списком", 400)
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                return _err(f"Шаг {i+1} должен быть объектом", 400)
+            if not step.get("action"):
+                return _err(f"Шаг {i+1}: action обязателен", 400)
+        try:
+            from services.workflow_engine import create_workflow
+            wf_id = await create_workflow(pool, uid, name, steps)
+            return _json_resp({"ok": True, "workflow_id": wf_id})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def workflow_execute(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import execute_workflow
+            result = await execute_workflow(pool, uid, wf_id)
+            return _json_resp({"ok": True, **result})
+        except LookupError as e:
+            return _err(str(e), 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_execute uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import get_workflow_status
+            status = await get_workflow_status(pool, uid, wf_id)
+            return _json_resp(status)
+        except LookupError as e:
+            return _err(str(e), 404)
+        except Exception as exc:
+            log.exception("workflow_status uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_pause(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import pause_workflow
+            result = await pause_workflow(pool, uid, wf_id)
+            return _json_resp({"ok": True, **result})
+        except LookupError as e:
+            return _err(str(e), 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_pause uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_resume(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import resume_workflow
+            result = await resume_workflow(pool, uid, wf_id)
+            return _json_resp({"ok": True, **result})
+        except LookupError as e:
+            return _err(str(e), 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_resume uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import delete_workflow
+            ok = await delete_workflow(pool, uid, wf_id)
+            if not ok:
+                return _err("Workflow не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("workflow_delete uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    app.router.add_get("/api/miniapp/workflows", workflow_list)
+    app.router.add_post("/api/miniapp/workflow/create", workflow_create)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
+    app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/pause", workflow_pause)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/resume", workflow_resume)
+    app.router.add_delete("/api/miniapp/workflow/{wf_id}", workflow_delete)
+
+    # ── Audience Analytics ─────────────────────────────────────────────────
+
+    async def audience_analyze(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channel_id = int(request.match_info["channel_id"])
+        except (KeyError, ValueError):
+            return _err("bad channel_id", 400)
+        try:
+            from services.audience_analytics import analyze_audience
+            overview = await analyze_audience(pool, uid, channel_id)
+            if not overview:
+                return _err("Нет данных для анализа", 404)
+            return _json_resp({
+                "total_subscribers": overview.total_subscribers,
+                "active_users": overview.active_users,
+                "active_rate": overview.active_rate,
+                "peak_hour": overview.peak_hour,
+                "peak_day": overview.peak_day,
+                "retention_7d": overview.retention_7d,
+                "retention_30d": overview.retention_30d,
+                "avg_session_duration_min": overview.avg_session_duration_min,
+            })
+        except Exception as exc:
+            log.exception("audience_analyze uid=%d ch=%d", uid, channel_id)
+            return _err(str(exc), 500)
+
+    async def audience_segment(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channel_id = int(request.match_info["channel_id"])
+        except (KeyError, ValueError):
+            return _err("bad channel_id", 400)
+        try:
+            from services.audience_analytics import segment_audience
+            segments = await segment_audience(pool, uid, channel_id)
+            return _json_resp({"segments": [
+                {
+                    "name": s.name,
+                    "user_count": s.user_count,
+                    "percentage": s.percentage,
+                    "avg_engagement": s.avg_engagement,
+                    "description": s.description,
+                    "tags": s.tags,
+                }
+                for s in segments
+            ]})
+        except Exception as exc:
+            log.exception("audience_segment uid=%d ch=%d", uid, channel_id)
+            return _err(str(exc), 500)
+
+    app.router.add_get("/api/miniapp/audience/analyze/{channel_id}", audience_analyze)
+    app.router.add_get("/api/miniapp/audience/segment/{channel_id}", audience_segment)
+
+    # ── Analytics Dashboard ───────────────────────────────────────────────
+
+    async def analytics_dashboard(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.analytics_dashboard import get_dashboard_stats
+            stats = await get_dashboard_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as exc:
+            log.exception("analytics_dashboard uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def analytics_realtime(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.analytics_dashboard import get_realtime_metrics
+            metrics = await get_realtime_metrics(pool, uid)
+            return _json_resp(metrics)
+        except Exception as exc:
+            log.exception("analytics_realtime uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def analytics_historical(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        metric = request.query.get("metric", "operations")
+        try:
+            days = max(1, min(365, int(request.query.get("days", 30))))
+        except (TypeError, ValueError):
+            days = 30
+        try:
+            from services.analytics_dashboard import get_historical_data
+            data = await get_historical_data(pool, uid, metric, days)
+            return _json_resp({"metric": metric, "days": days, "data": data})
+        except Exception as exc:
+            log.exception("analytics_historical uid=%d", uid)
+            return _err(str(exc), 500)
+
+    app.router.add_get("/api/miniapp/analytics/dashboard", analytics_dashboard)
+    app.router.add_get("/api/miniapp/analytics/realtime", analytics_realtime)
+    app.router.add_get("/api/miniapp/analytics/historical", analytics_historical)
 
     # SSE
     app.router.add_get("/api/miniapp/events", events)

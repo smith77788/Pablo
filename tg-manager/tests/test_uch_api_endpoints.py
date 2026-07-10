@@ -48,8 +48,8 @@ class FakePool:
             raise self._error
         return self._execute_val
 
-    async def acquire(self):
-        return self
+    def acquire(self):
+        return _FakeAcquire(self)
 
     async def release(self, conn):
         pass
@@ -59,6 +59,24 @@ class FakePool:
 
     async def __aenter__(self):
         return self
+
+    async def __aexit__(self, *args):
+        pass
+
+
+class _FakeAcquire:
+    """Async context manager + awaitable for pool.acquire() patterns."""
+
+    def __init__(self, pool: FakePool):
+        self._pool = pool
+
+    def __await__(self):
+        async def _return_pool():
+            return self._pool
+        return _return_pool().__await__()
+
+    async def __aenter__(self):
+        return self._pool
 
     async def __aexit__(self, *args):
         pass
@@ -1697,3 +1715,250 @@ class TestMiniAppAPIPureFunctions:
     def test_jlist_invalid_json(self):
         from services.mini_app_api import _jlist
         assert _jlist("not json") == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ranking Engine Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRankingEngine:
+    """Tests for ranking_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_ranking_track(self):
+        from services.ranking_engine import track_keyword
+        pool = FakePool(fetch_row={"id": 42})
+        result = await track_keyword(pool, 123, "telegram bot", channel_id=100)
+        assert result["ok"] is True
+        assert result["id"] == 42
+        assert "INSERT" in pool._calls[0][1]
+
+    @pytest.mark.asyncio
+    async def test_ranking_record(self):
+        from services.ranking_engine import record_position
+        pool = FakePool(fetch_val=5, execute_val="INSERT 0 1")
+        result = await record_position(pool, 123, 100, "telegram bot", 3)
+        assert result["ok"] is True
+        assert result["current"] == 3
+        assert result["previous"] == 5
+
+    @pytest.mark.asyncio
+    async def test_ranking_history(self):
+        from services.ranking_engine import get_position_history
+        pool = FakePool(fetch_rows=[
+            {"position": 5, "previous_position": None, "checked_at": None, "metadata": "{}"},
+            {"position": 3, "previous_position": 5, "checked_at": None, "metadata": "{}"},
+        ])
+        result = await get_position_history(pool, 123, 100, "telegram bot")
+        assert len(result) == 2
+        assert result[1]["position"] == 3
+
+    @pytest.mark.asyncio
+    async def test_ranking_stats(self):
+        from services.ranking_engine import get_ranking_stats
+        pool = FakePool(fetch_val=10)
+        result = await get_ranking_stats(pool, 123)
+        assert "total_tracked" in result
+        assert "total_checks" in result
+        assert "avg_position_7d" in result
+        assert "alerts_pending" in result
+
+    @pytest.mark.asyncio
+    async def test_ranking_track_error(self):
+        from services.ranking_engine import track_keyword
+        pool = FakePool(error=Exception("DB error"))
+        result = await track_keyword(pool, 123, "test")
+        assert result["ok"] is False
+        assert "error" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Network Builder Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestNetworkBuilder:
+    """Tests for network_builder.py"""
+
+    @pytest.mark.asyncio
+    async def test_network_template_create(self):
+        from services.network_builder import create_template
+        pool = FakePool(fetch_row={"id": 1})
+        result = await create_template(
+            pool, 123, "My Network", "Test network",
+            template_type="channel_group",
+            nodes=[{"label": "Channel 1", "type": "channel"}],
+            edges=[],
+        )
+        assert result["ok"] is True
+        assert result["id"] == 1
+        assert "INSERT" in pool._calls[0][1]
+
+    @pytest.mark.asyncio
+    async def test_network_templates(self):
+        from services.network_builder import get_templates
+        pool = FakePool(fetch_rows=[
+            {"id": 1, "name": "Network A", "template_type": "channel_group"},
+            {"id": 2, "name": "Network B", "template_type": "bot_network"},
+        ])
+        result = await get_templates(pool, 123)
+        assert len(result) == 2
+        assert result[0]["name"] == "Network A"
+
+    @pytest.mark.asyncio
+    async def test_network_instance_create(self):
+        from services.network_builder import create_instance
+        pool = FakePool(
+            fetch_row={"id": 1, "nodes": "[]", "edges": "[]"},
+            fetch_rows=[{"id": 10, "nodes": "[]", "edges": "[]", "name": "Inst"}],
+        )
+        result = await create_instance(pool, 123, 1, "Instance 1")
+        assert result["ok"] is True
+        assert "id" in result
+
+    @pytest.mark.asyncio
+    async def test_network_instance_create_not_found(self):
+        from services.network_builder import create_instance
+        pool = FakePool(fetch_row=None)
+        result = await create_instance(pool, 123, 999, "Instance 1")
+        assert result["ok"] is False
+        assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_network_stats(self):
+        from services.network_builder import get_network_stats
+        pool = FakePool(fetch_val=5)
+        result = await get_network_stats(pool, 123)
+        assert "templates" in result
+        assert "instances" in result
+        assert "total_nodes" in result
+        assert "total_edges" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Workflow Engine Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestWorkflowEngine:
+    """Tests for workflow_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_workflow_create(self):
+        from services.workflow_engine import create_workflow
+        pool = FakePool(fetch_row={"id": 1})
+        result = await create_workflow(
+            pool, 123, "Publish Workflow",
+            steps=[{"action": "post", "target": "channel"}, {"action": "wait"}],
+        )
+        assert result["ok"] is True
+        assert result["id"] == 1
+        assert "INSERT" in pool._calls[0][1]
+
+    @pytest.mark.asyncio
+    async def test_workflow_execute(self):
+        from services.workflow_engine import execute_workflow
+        pool = FakePool(
+            fetch_row={"id": 1, "steps": '[{"action": "post"}]'},
+            fetch_rows=[{"id": 1, "steps": '[{"action": "post"}]'}],
+        )
+        result = await execute_workflow(pool, 123, 1, {"channel": "test"})
+        assert result["ok"] is True
+        assert "run_id" in result
+        assert "total_steps" in result
+
+    @pytest.mark.asyncio
+    async def test_workflow_execute_not_found(self):
+        from services.workflow_engine import execute_workflow
+        pool = FakePool(fetch_row=None)
+        result = await execute_workflow(pool, 123, 999)
+        assert result["ok"] is False
+        assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_workflow_status(self):
+        from services.workflow_engine import get_workflow_status
+        pool = FakePool(fetch_row={
+            "id": 1, "status": "running", "current_step": 0,
+            "total_steps": 2, "workflow_name": "Publish",
+        })
+        result = await get_workflow_status(pool, 123, 1)
+        assert result is not None
+        assert result["status"] == "running"
+        assert result["workflow_name"] == "Publish"
+
+    @pytest.mark.asyncio
+    async def test_workflow_status_not_found(self):
+        from services.workflow_engine import get_workflow_status
+        pool = FakePool(fetch_row=None)
+        result = await get_workflow_status(pool, 123, 999)
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Audience Analytics Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAudienceAnalytics:
+    """Tests for audience_analytics.py"""
+
+    @pytest.mark.asyncio
+    async def test_audience_analyze(self):
+        from services.audience_analytics import analyze_audience
+        pool = FakePool(fetch_val=1000)
+        result = await analyze_audience(pool, 123, 1001)
+        assert result is not None
+        assert result.channel_id == 1001
+        assert result.owner_id == 123
+        assert result.total_subscribers >= 0
+
+    @pytest.mark.asyncio
+    async def test_audience_segment(self):
+        from services.audience_analytics import segment_audience
+        pool = FakePool(fetch_rows=[])
+        result = await segment_audience(pool, 123, 1001)
+        assert isinstance(result, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Analytics Dashboard Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAnalyticsDashboard:
+    """Tests for analytics_dashboard.py"""
+
+    @pytest.mark.asyncio
+    async def test_analytics_dashboard(self):
+        from services.analytics_dashboard import get_dashboard_stats
+        pool = FakePool(fetch_rows=[
+            {"total": 10, "active": 8, "banned": 1, "spamblock": 1,
+             "success": 9, "failed": 1, "running": 2,
+             "total_users": 100, "new_24h": 5, "new_7d": 30,
+             "avg_trust": 0.85, "at_risk": 1, "total_usd": 50.0},
+        ])
+        result = await get_dashboard_stats(pool, 123)
+        assert "accounts" in result
+        assert "operations_24h" in result
+        assert "audience" in result
+
+    @pytest.mark.asyncio
+    async def test_analytics_realtime(self):
+        from services.analytics_dashboard import get_realtime_metrics
+        pool = FakePool(fetch_rows=[
+            {"id": 1, "op_type": "test", "status": "running", "started_at": None, "params": "{}",
+             "action": "post", "result": "success", "target": "channel",
+             "occurred_at": None, "cnt": 5},
+        ])
+        result = await get_realtime_metrics(pool, 123)
+        assert "active_operations" in result
+        assert "recent_events" in result
+        assert "account_status" in result
+        assert "queue_depth" in result
+
+    @pytest.mark.asyncio
+    async def test_analytics_historical(self):
+        from services.analytics_dashboard import get_historical_data
+        pool = FakePool(fetch_rows=[
+            {"day": None, "total": 10, "success": 8, "failed": 2,
+             "new_users": 5, "avg_health": 0.8, "avg_trust": 0.75},
+        ])
+        result = await get_historical_data(pool, 123, "operations", days=7)
+        assert isinstance(result, list)

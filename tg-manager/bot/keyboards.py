@@ -1077,6 +1077,10 @@ def automation_action_menu(bot_id: int) -> InlineKeyboardMarkup:
         callback_data=AutoCb(action="act_send", bot_id=bot_id),
     )
     kb.button(
+        text="🤖 AI-ответ (GPT)",
+        callback_data=AutoCb(action="act_ai_reply", bot_id=bot_id),
+    )
+    kb.button(
         text="🏷 Добавить тег", callback_data=AutoCb(action="act_add_tag", bot_id=bot_id)
     )
     kb.button(

@@ -3496,3 +3496,856 @@ def get_ab_test_results(test_name: str) -> dict:
 
 def get_active_ab_tests() -> list[dict]:
     return [{"test": name, **get_ab_test_results(name)} for name in _ab_tests]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI CONTENT DETECTION — определение запрещённого контента через LLM
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Категории запрещённого контента для AI-классификации
+_PROHIBITED_CATEGORIES = {
+    "drugs": "Наркотики / наркоторговля",
+    "terrorism": "Терроризм / экстремизм",
+    "childabuse": "Контент сексуальной эксплуатации детей (CSAM)",
+    "fraud": "Мошенничество / финансовые схемы",
+    "weapons": "Нелегальное оружие / взрывчатка",
+    "darknet": "Даркнет-сервисы / киберпреступность",
+    "escort": "Проституция / секс-трафик",
+    "pornography": "Незаконная порнография",
+    "violence": "Насилие / графический контент",
+    "spam": "Спам / нежелательная реклама",
+}
+
+_SYSTEM_PROMPT_CONTENT_DETECTION = (
+    "Ты — модератор контента Telegram. Определи, содержит ли текст запрещённый контент.\n"
+    "Отвечай СТРОГО в JSON-формате:\n"
+    '{"is_prohibited": true/false, "categories": ["drugs"], "confidence": 0.95, "reason": "краткое объяснение"}\n'
+    "Допустимые категории: drugs, terrorism, childabuse, fraud, weapons, darknet, "
+    "escort, pornography, violence, spam, other.\n"
+    "Конфиденциальность: 0.0-1.0. Если уверен > 0.7 — is_prohibited=true.\n"
+    "Отвечай ТОЛЬКО JSON, без Markdown и пояснений."
+)
+
+_SYSTEM_PROMPT_MEDIA_DETECTION = (
+    "Ты — модератор контента Telegram. Определи, содержит ли медиа-объект (URL/описание) "
+    "запрещённый контент.\n"
+    "Отвечай СТРОГО в JSON-формате:\n"
+    '{"is_prohibited": true/false, "categories": ["drugs"], "confidence": 0.85, "reason": "краткое объяснение"}\n'
+    "Допустимые категории: drugs, terrorism, childabuse, fraud, weapons, darknet, "
+    "escort, pornography, violence, spam, other.\n"
+    "Отвечай ТОЛЬКО JSON, без Markdown и пояснений."
+)
+
+_SYSTEM_PROMPT_CLASSIFY = (
+    "Ты — классификатор контента Telegram. Классифицируй текст по категориям.\n"
+    "Отвечай СТРОГО в JSON-формате:\n"
+    '{"categories": [{"name": "drugs", "confidence": 0.9, "label": "Наркотики"}], "summary": "краткое описание"}\n'
+    "Допустимые категории: drugs, terrorism, childabuse, fraud, weapons, darknet, "
+    "escort, pornography, violence, spam, other.\n"
+    "Возвращай ВСЕ релевантные категории (confidence > 0.3).\n"
+    "Отвечай ТОЛЬКО JSON, без Markdown и пояснений."
+)
+
+
+async def _ai_classify_with_providers(
+    system_prompt: str,
+    user_content: str,
+    temperature: float = 0.1,
+) -> dict | None:
+    """Общий вызов AI через провайдеры (failover OpenRouter → Groq → Gemini)."""
+    import json as _json
+
+    from services.ai_providers import configured_providers
+    from services.logger import log_exc_swallow
+
+    providers = configured_providers()
+    if not providers:
+        log.warning("ai_content_detection: no AI providers configured")
+        return None
+
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        log.warning("ai_content_detection: openai library not installed")
+        return None
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    for provider in providers:
+        for model in provider.models[:3]:
+            client = AsyncOpenAI(
+                api_key=provider.api_key,
+                base_url=provider.base_url,
+                timeout=30.0,
+            )
+            try:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=temperature,
+                )
+                text = (response.choices[0].message.content or "").strip()
+                if not text:
+                    continue
+                # Очистка от markdown-обёрток
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1]
+                    if text.endswith("```"):
+                        text = text[:-3]
+                    text = text.strip()
+                return _json.loads(text)
+            except _json.JSONDecodeError:
+                log_exc_swallow(
+                    log,
+                    f"ai_content_detection: JSON parse failed provider={provider.name}",
+                )
+                continue
+            except Exception as exc:
+                log_exc_swallow(
+                    log,
+                    f"ai_content_detection: provider={provider.name} model={model} failed: {exc}",
+                )
+                continue
+
+    return None
+
+
+async def detect_prohibited_content(text: str) -> dict:
+    """AI-определение запрещённого контента по тексту.
+
+    Returns:
+        {
+            "is_prohibited": bool,
+            "categories": list[str],
+            "confidence": float,
+            "reason": str,
+            "source": "ai"
+        }
+    """
+    if not text or not text.strip():
+        return {
+            "is_prohibited": False,
+            "categories": [],
+            "confidence": 0.0,
+            "reason": "empty text",
+            "source": "ai",
+        }
+
+    # Сначала быстрый regex-детект (без AI)
+    regex_result = smart_detect_preset(text)
+    if regex_result and regex_result in _PROHIBITED_CATEGORIES:
+        log.info("detect_prohibited_content: regex hit '%s'", regex_result)
+        return {
+            "is_prohibited": True,
+            "categories": [regex_result],
+            "confidence": 0.75,
+            "reason": f"regex pattern match: {regex_result}",
+            "source": "regex",
+        }
+
+    # AI-анализ
+    result = await _ai_classify_with_providers(
+        _SYSTEM_PROMPT_CONTENT_DETECTION,
+        f"Текст для анализа:\n\n{text[:2000]}",
+    )
+
+    if result is None:
+        return {
+            "is_prohibited": False,
+            "categories": [],
+            "confidence": 0.0,
+            "reason": "AI unavailable",
+            "source": "ai",
+        }
+
+    categories = result.get("categories", [])
+    confidence = float(result.get("confidence", 0.0))
+    is_prohibited = bool(result.get("is_prohibited", False))
+
+    log.info(
+        "detect_prohibited_content: prohibited=%s cats=%s conf=%.2f",
+        is_prohibited,
+        categories,
+        confidence,
+    )
+
+    return {
+        "is_prohibited": is_prohibited,
+        "categories": categories,
+        "confidence": confidence,
+        "reason": result.get("reason", ""),
+        "source": "ai",
+    }
+
+
+async def detect_prohibited_media(media_url: str) -> dict:
+    """AI-определение запрещённого контента по медиа URL/описанию.
+
+    Args:
+        media_url: URL изображения/видео или текстовое описание медиа.
+
+    Returns:
+        {
+            "is_prohibited": bool,
+            "categories": list[str],
+            "confidence": float,
+            "reason": str,
+            "source": "ai"
+        }
+    """
+    if not media_url or not media_url.strip():
+        return {
+            "is_prohibited": False,
+            "categories": [],
+            "confidence": 0.0,
+            "reason": "empty media URL",
+            "source": "ai",
+        }
+
+    result = await _ai_classify_with_providers(
+        _SYSTEM_PROMPT_MEDIA_DETECTION,
+        f"Media URL/описание для анализа:\n\n{media_url[:1500]}",
+    )
+
+    if result is None:
+        return {
+            "is_prohibited": False,
+            "categories": [],
+            "confidence": 0.0,
+            "reason": "AI unavailable",
+            "source": "ai",
+        }
+
+    categories = result.get("categories", [])
+    confidence = float(result.get("confidence", 0.0))
+    is_prohibited = bool(result.get("is_prohibited", False))
+
+    log.info(
+        "detect_prohibited_media: prohibited=%s cats=%s conf=%.2f",
+        is_prohibited,
+        categories,
+        confidence,
+    )
+
+    return {
+        "is_prohibited": is_prohibited,
+        "categories": categories,
+        "confidence": confidence,
+        "reason": result.get("reason", ""),
+        "source": "ai",
+    }
+
+
+async def classify_content(text: str) -> dict:
+    """Классификация контента по категориям через AI.
+
+    Returns:
+        {
+            "categories": [{"name": str, "confidence": float, "label": str}],
+            "summary": str,
+            "source": "ai"
+        }
+    """
+    if not text or not text.strip():
+        return {
+            "categories": [],
+            "summary": "empty text",
+            "source": "ai",
+        }
+
+    result = await _ai_classify_with_providers(
+        _SYSTEM_PROMPT_CLASSIFY,
+        f"Текст для классификации:\n\n{text[:2000]}",
+    )
+
+    if result is None:
+        # Fallback на regex-классификацию
+        regex_preset = smart_detect_preset(text)
+        if regex_preset:
+            label = _PROHIBITED_CATEGORIES.get(regex_preset, regex_preset)
+            return {
+                "categories": [{"name": regex_preset, "confidence": 0.7, "label": label}],
+                "summary": f"Regex fallback: {regex_preset}",
+                "source": "regex",
+            }
+        return {
+            "categories": [],
+            "summary": "AI unavailable, no regex match",
+            "source": "ai",
+        }
+
+    categories = result.get("categories", [])
+
+    log.info(
+        "classify_content: %d categories found: %s",
+        len(categories),
+        [c.get("name") for c in categories],
+    )
+
+    return {
+        "categories": categories,
+        "summary": result.get("summary", ""),
+        "source": "ai",
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MASS REPORTING — массовый репортинг целей
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+async def mass_report(
+    pool,
+    owner_id: int,
+    targets: list[str],
+    reason: str,
+    preset: str | None = None,
+    accounts: list[dict] | None = None,
+    progress_cb=None,
+) -> dict:
+    """Массовый репортинг нескольких целей одним пулом аккаунтов.
+
+    Args:
+        pool: asyncpg connection pool
+        owner_id: ID владельца (для загрузки аккаунтов если accounts=None)
+        targets: список целей (@username или ссылки)
+        reason: причина жалобы
+        preset: пресет (drugs, fraud, etc.)
+        accounts: готовый список аккаунтов (если None — загружается из БД)
+        progress_cb: async callback(phase, detail) для UI
+
+    Returns:
+        {"results": [StrikeResult], "summary": str, "total_reports": int}
+    """
+    from services import account_manager
+
+    if not targets:
+        return {"results": [], "summary": "Нет целей", "total_reports": 0}
+
+    # Загрузка аккаунтов если не переданы
+    if accounts is None:
+        try:
+            rows = await pool.fetch(
+                """SELECT id, phone, session_str, trust_score, is_active,
+                          acc_status, cooldown_until
+                   FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=TRUE
+                   ORDER BY trust_score DESC NULLS LAST""",
+                owner_id,
+            )
+            accounts = [dict(r) for r in rows]
+        except Exception as e:
+            log.warning("mass_report: failed to load accounts: %s", e)
+            return {"results": [], "summary": f"Ошибка загрузки аккаунтов: {e}", "total_reports": 0}
+
+    if not accounts:
+        return {"results": [], "summary": "Нет активных аккаунтов", "total_reports": 0}
+
+    # Pre-flight фильтрация
+    viable_accounts = preflight_accounts(accounts)
+    if not viable_accounts:
+        return {"results": [], "summary": "Все аккаунты в кулдауне/недоступны", "total_reports": 0}
+
+    # Разбивка аккаунтов по волнам
+    waves = plan_waves(viable_accounts, num_waves=2)
+
+    # Выбор пресета
+    selected_preset = smart_select_preset(
+        " ".join(targets), user_preset=preset
+    )
+
+    all_results: list[StrikeResult] = []
+    total_reports = 0
+
+    for t_idx, target in enumerate(targets):
+        if progress_cb:
+            await progress_cb(
+                "mass_report_target",
+                f"🎯 [{t_idx + 1}/{len(targets)}] {_telegram_target_display(target)}...",
+            )
+
+        # Recon для каждой цели (быстрый, одним аккаунтом)
+        intel: dict = {}
+        try:
+            from services import account_manager as _am
+
+            intel = await _am.get_channel_intel(
+                viable_accounts[0]["session_str"], target.lstrip("@")
+            )
+        except Exception:
+            log_exc_swallow(log, f"mass_report: intel failed target={target}")
+
+        # Параллельная атака по волнам
+        wave_results: list[dict] = []
+        for w_num, wave in enumerate(waves):
+            if progress_cb:
+                await progress_cb(
+                    "mass_report_wave",
+                    f"  ⚔️ Волна {w_num + 1}: {len(wave)} аккаунтов",
+                )
+
+            texts = assign_texts(selected_preset or reason, len(wave))
+            sem = asyncio.Semaphore(_CONCURRENCY)
+
+            async def _strike_one(
+                acc: dict, txt: str, wn: int
+            ) -> dict:
+                async with sem:
+                    try:
+                        return await account_manager.report_peer_deep_v2(
+                            acc["session_str"],
+                            target.lstrip("@"),
+                            reason,
+                            message=txt,
+                            msg_messages=assign_texts(selected_preset or reason, 8),
+                            max_msg_reports=30,
+                            multi_reason=True,
+                            join_first=True,
+                            negative_react=(wn == 0),
+                            report_admins=False,
+                            report_linked_bots=False,
+                            forward_to_bot=False,
+                            report_photo=True,
+                            report_pinned=True,
+                            block_after=False,
+                            wave_num=wn,
+                            _acc=acc,
+                        )
+                    except Exception as e:
+                        return {"peer_reported": False, "error": str(e)[:100]}
+
+            tasks = [
+                _strike_one(acc, txt, w_num) for acc, txt in zip(wave, texts)
+            ]
+            w_results = _safe_gather_results(
+                await asyncio.gather(*tasks, return_exceptions=True)
+            )
+            wave_results.extend(w_results)
+
+            # Пауза между волнами
+            if w_num < len(waves) - 1:
+                await asyncio.sleep(random.uniform(60, 120))
+
+        # Агрегация для цели
+        agg = aggregate_results(wave_results)
+        target_reports = agg.get("peer", 0) + agg.get("msgs", 0)
+        total_reports += target_reports
+
+        sr = StrikeResult(
+            target=target,
+            unique_accounts=len(viable_accounts),
+            peer_reported=agg.get("peer", 0),
+            msgs_reported=agg.get("msgs", 0),
+            msgs_fetched=agg.get("msgs_fetched", 0),
+            multi_reason=agg.get("multi", 0),
+            errors=[r.get("error") for r in wave_results if r.get("error")],
+        )
+        all_results.append(sr)
+
+    summary = format_strike_summary(all_results)
+
+    log.info(
+        "mass_report: owner=%d targets=%d total_reports=%d",
+        owner_id,
+        len(targets),
+        total_reports,
+    )
+
+    return {
+        "results": all_results,
+        "summary": summary,
+        "total_reports": total_reports,
+    }
+
+
+async def mass_report_with_evidence(
+    pool,
+    owner_id: int,
+    targets: list[str],
+    reason: str,
+    evidence: list[dict],
+    preset: str | None = None,
+    accounts: list[dict] | None = None,
+    progress_cb=None,
+) -> dict:
+    """Массовый репорт с доказательствами.
+
+    Args:
+        evidence: список доказательств [
+            {"target": str, "type": "text"|"photo"|"video"|"link", "content": str},
+            ...
+        ]
+
+    Returns:
+        {"results": [StrikeResult], "summary": str, "total_reports": int, "evidence_applied": int}
+    """
+    evidence_applied = 0
+
+    # Группировка доказательств по целям
+    evidence_by_target: dict[str, list[dict]] = {}
+    for ev in evidence:
+        t = ev.get("target", "")
+        if t:
+            evidence_by_target.setdefault(t, []).append(ev)
+
+    # AI-классификация доказательств
+    for ev in evidence:
+        content = ev.get("content", "")
+        if not content:
+            continue
+
+        ev_type = ev.get("type", "text")
+        if ev_type == "text":
+            detection = await detect_prohibited_content(content)
+        else:
+            detection = await detect_prohibited_media(content)
+
+        if detection.get("is_prohibited"):
+            ev["ai_detected"] = True
+            ev["ai_categories"] = detection.get("categories", [])
+            ev["ai_confidence"] = detection.get("confidence", 0.0)
+            evidence_applied += 1
+        else:
+            ev["ai_detected"] = False
+
+    # Выполнение массового репорта
+    report_result = await mass_report(
+        pool,
+        owner_id,
+        targets,
+        reason,
+        preset=preset,
+        accounts=accounts,
+        progress_cb=progress_cb,
+    )
+
+    report_result["evidence_applied"] = evidence_applied
+    report_result["evidence"] = evidence
+
+    # Email-эскалация с доказательствами если есть активные ящики
+    if evidence_applied > 0 and pool:
+        try:
+            for target in targets:
+                cat = _reason_to_email_cat(reason, preset)
+                target_clean = target.lstrip("@")
+                report_time = __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                # Формируем дополнительный блок с доказательствами
+                evidence_block = "\n\nEVIDENCE:\n"
+                for ev in evidence_by_target.get(target, evidence_by_target.get("", [])):
+                    if ev.get("ai_detected"):
+                        evidence_block += (
+                            f"  Type: {ev.get('type', 'text')}\n"
+                            f"  Content: {ev.get('content', '')[:200]}\n"
+                            f"  AI Detection: {', '.join(ev.get('ai_categories', []))} "
+                            f"(confidence: {ev.get('ai_confidence', 0):.2f})\n\n"
+                        )
+
+                body = _build_abuse_tg_email(target_clean, cat, report_time) + evidence_block
+                subject = f"{cat['email_subject']} — @{target_clean} [EVIDENCE]"
+
+                # Отправляем с первого доступного ящика
+                rows = await pool.fetch(
+                    """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                              COALESCE(auth_type, 'password') AS auth_type
+                       FROM strike_email_accounts
+                       WHERE owner_id=$1 AND is_active=TRUE
+                       ORDER BY last_used_at ASC NULLS FIRST
+                       LIMIT 1""",
+                    owner_id,
+                )
+                if rows:
+                    ea = dict(rows[0])
+                    from services.token_vault import decrypt_token as _dt
+
+                    smtp_pass = _dt(ea["smtp_pass"] or "")
+                    ok, err = await _send_email(
+                        ea["smtp_host"],
+                        ea["smtp_port"],
+                        ea["email"],
+                        smtp_pass,
+                        ea["email"],
+                        "abuse@telegram.org",
+                        subject,
+                        body,
+                        auth_type=ea.get("auth_type", "password"),
+                    )
+                    if ok:
+                        log.info(
+                            "mass_report_with_evidence: evidence email sent → %s",
+                            target_clean,
+                        )
+        except Exception:
+            log_exc_swallow(log, "mass_report_with_evidence: email escalation failed")
+
+    return report_result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# APPEAL MANAGEMENT — управление апелляциями
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Шаблоны апелляций по типу блокировки
+_APPEAL_TEMPLATES: dict[str, dict] = {
+    "spam": {
+        "subject": "Appeal: Unjustified Spam Block",
+        "body": (
+            "Dear Telegram Trust & Safety Team,\n\n"
+            "I am writing to appeal the recent restriction placed on my Telegram account. "
+            "I believe this action was taken in error.\n\n"
+            "My account has been used for legitimate purposes and I have not engaged in "
+            "any spam or abusive activity. The reports filed against this account may have "
+            "been submitted in error or as part of a coordinated abuse campaign.\n\n"
+            "I kindly request a thorough review of my account activity and the removal "
+            "of any unjustified restrictions.\n\n"
+            "Account details will be provided upon verification of identity.\n\n"
+            "Thank you for your time and consideration.\n\n"
+            "Best regards"
+        ),
+    },
+    "ban": {
+        "subject": "Appeal: Account Ban Review Request",
+        "body": (
+            "Dear Telegram Trust & Safety Team,\n\n"
+            "I am writing to formally appeal the ban placed on my Telegram account. "
+            "I believe this ban was imposed incorrectly.\n\n"
+            "I have always complied with Telegram's Terms of Service and Community "
+            "Guidelines. I have not distributed illegal content, engaged in spam, "
+            "or participated in any activity that would warrant account termination.\n\n"
+            "I respectfully request:\n"
+            "  1. A detailed review of the specific violation(s) cited\n"
+            "  2. Reversal of the ban if no valid violation is found\n"
+            "  3. Restoration of access to my account and associated data\n\n"
+            "I am willing to provide any additional information required for this review.\n\n"
+            "Thank you for your prompt attention to this matter.\n\n"
+            "Best regards"
+        ),
+    },
+    "flood": {
+        "subject": "Appeal: Flood Wait / Rate Limit Review",
+        "body": (
+            "Dear Telegram Trust & Safety Team,\n\n"
+            "I am writing regarding an extended restriction on my account that appears "
+            "to be related to rate limiting or flood protection measures.\n\n"
+            "I believe the restriction is disproportionate to my actual usage patterns. "
+            "My account activity has been within reasonable limits and I have not engaged "
+            "in any automated or bulk messaging.\n\n"
+            "Please review my account's actual message volume and activity patterns "
+            "to confirm that the restriction is justified.\n\n"
+            "Thank you for your assistance.\n\n"
+            "Best regards"
+        ),
+    },
+    "copyright": {
+        "subject": "Counter-Notice: Copyright Claim Appeal",
+        "body": (
+            "Dear Telegram DMCA Agent,\n\n"
+            "I am writing to file a counter-notice regarding the recent copyright "
+            "takedown action against my Telegram account/channel.\n\n"
+            "I believe the content in question was either:\n"
+            "  a) Licensed or authorized for use\n"
+            "  b) Fair use / fair dealing under applicable law\n"
+            "  c) Original content owned by me\n\n"
+            "I have a good faith belief that the material was removed as a result "
+            "of mistake or misidentification.\n\n"
+            "I consent to the jurisdiction of the appropriate court and will accept "
+            "service of process from the original complainant.\n\n"
+            "Please review this counter-notice and restore the content if appropriate.\n\n"
+            "Best regards"
+        ),
+    },
+}
+
+
+async def appeal_ban(
+    pool,
+    owner_id: int,
+    account_id: int,
+    reason: str = "spam",
+    custom_text: str | None = None,
+) -> dict:
+    """Апелляция бана через email Telegram.
+
+    Args:
+        pool: asyncpg connection pool
+        owner_id: ID владельца
+        account_id: ID аккаунта в tg_accounts
+        reason: тип апелляции (spam, ban, flood, copyright)
+        custom_text: кастомный текст апелляции (если None — используется шаблон)
+
+    Returns:
+        {
+            "success": bool,
+            "appeal_id": str,
+            "emails_sent": int,
+            "errors": list[str]
+        }
+    """
+    from datetime import datetime, timezone
+
+    import json as _json
+
+    appeal_id = f"APPEAL-{account_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    result: dict = {
+        "success": False,
+        "appeal_id": appeal_id,
+        "emails_sent": 0,
+        "errors": [],
+    }
+
+    template = _APPEAL_TEMPLATES.get(reason, _APPEAL_TEMPLATES["spam"])
+    body = custom_text or template["body"]
+    subject = template["subject"]
+
+    # Получаем информацию об аккаунте
+    try:
+        acc_row = await pool.fetchrow(
+            "SELECT phone, email FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            account_id,
+            owner_id,
+        )
+        if acc_row:
+            phone = acc_row["phone"] or "unknown"
+            subject = f"{subject} — Account {phone}"
+    except Exception:
+        phone = "unknown"
+
+    # Загружаем email-ящики для отправки
+    db_emails: list[dict] = []
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        from services.token_vault import decrypt_token as _dt
+
+        db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
+    except Exception as e:
+        result["errors"].append(f"Failed to load email accounts: {e}")
+        return result
+
+    if not db_emails:
+        result["errors"].append("No email accounts configured")
+        return result
+
+    # Отправляем апелляцию на все целевые адреса Telegram
+    targets = ["abuse@telegram.org", "dmca@telegram.org", "security@telegram.org"]
+    for ea in db_emails:
+        for tgt in targets:
+            smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
+            ok, err = await _send_email(
+                ea["smtp_host"],
+                ea["smtp_port"],
+                ea["email"],
+                smtp_secret,
+                ea["email"],
+                tgt,
+                subject,
+                body,
+                auth_type=auth_type,
+            )
+            if ok:
+                result["emails_sent"] += 1
+                log.info("appeal_ban: email sent %s → %s", ea["email"], tgt)
+            else:
+                result["errors"].append(f"Email to {tgt} failed: {err}")
+
+    result["success"] = result["emails_sent"] > 0
+
+    # Сохраняем в БД
+    try:
+        await pool.execute(
+            """INSERT INTO strike_appeals
+               (id, owner_id, account_id, reason, status, emails_sent, details)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+            appeal_id,
+            owner_id,
+            account_id,
+            reason,
+            "submitted",
+            result["emails_sent"],
+            _json.dumps(
+                {
+                    "subject": subject,
+                    "targets": targets,
+                    "errors": result["errors"],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    except Exception as e:
+        log.debug("appeal_ban: DB save skipped: %s", e)
+
+    log.info(
+        "appeal_ban: id=%s account=%d reason=%s sent=%d",
+        appeal_id,
+        account_id,
+        reason,
+        result["emails_sent"],
+    )
+
+    return result
+
+
+async def get_appeal_status(
+    pool,
+    owner_id: int,
+    appeal_id: str,
+) -> dict:
+    """Получение статуса апелляции.
+
+    Returns:
+        {
+            "appeal_id": str,
+            "status": str,  # submitted, pending, resolved, rejected
+            "account_id": int,
+            "reason": str,
+            "emails_sent": int,
+            "created_at": str,
+            "details": dict,
+        }
+    """
+    try:
+        row = await pool.fetchrow(
+            """SELECT id, owner_id, account_id, reason, status, emails_sent,
+                      created_at, details
+               FROM strike_appeals
+               WHERE id=$1 AND owner_id=$2""",
+            appeal_id,
+            owner_id,
+        )
+    except Exception as e:
+        log.warning("get_appeal_status: query failed: %s", e)
+        return {"error": str(e)[:100]}
+
+    if not row:
+        return {"error": "Appeal not found"}
+
+    import json as _json
+
+    details = {}
+    if row["details"]:
+        try:
+            details = _json.loads(row["details"])
+        except Exception:
+            details = {}
+
+    return {
+        "appeal_id": row["id"],
+        "status": row["status"],
+        "account_id": row["account_id"],
+        "reason": row["reason"],
+        "emails_sent": row["emails_sent"],
+        "created_at": str(row["created_at"]) if row["created_at"] else None,
+        "details": details,
+    }

@@ -32,6 +32,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📤",
     },
+    "bulk_seo_apply": {
+        "description": "Применение SEO по сетке",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔍",
+    },
     "bulk_join": {
         "description": "Массовое вступление в каналы",
         "min_plan": "starter",

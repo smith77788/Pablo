@@ -313,6 +313,131 @@ async def batch_upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict])
     return len(rows)
 
 
+async def batch_insert(
+    pool: asyncpg.Pool,
+    table: str,
+    rows: list[dict],
+    *,
+    on_conflict: str | None = None,
+    chunk_size: int = 500,
+) -> int:
+    """Generic batch insert using executemany with chunking.
+
+    Args:
+        pool: Database connection pool.
+        table: Target table name.
+        rows: List of dicts where keys are column names.
+        on_conflict: Optional ON CONFLICT clause (e.g. "DO NOTHING", "DO UPDATE SET ...").
+        chunk_size: Max rows per executemany call.
+
+    Returns:
+        Total number of rows inserted.
+    """
+    if not rows:
+        return 0
+
+    columns = list(rows[0].keys())
+    placeholders = ", ".join(f"${i + 1}" for i in range(len(columns)))
+    col_names = ", ".join(columns)
+    conflict = f" ON CONFLICT {on_conflict}" if on_conflict else ""
+    sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}){conflict}"
+
+    total = 0
+    async with pool.acquire() as conn:
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            tuples = [tuple(r.get(c) for c in columns) for r in chunk]
+            await conn.executemany(sql, tuples)
+            total += len(tuples)
+    return total
+
+
+async def batch_update(
+    pool: asyncpg.Pool,
+    table: str,
+    updates: list[dict],
+    *,
+    key_column: str = "id",
+    chunk_size: int = 500,
+) -> int:
+    """Generic batch update using executemany with chunking.
+
+    Each dict in updates must contain key_column plus the columns to update.
+
+    Args:
+        pool: Database connection pool.
+        table: Target table name.
+        updates: List of dicts with key_column and columns to update.
+        key_column: Column used to identify rows (default: 'id').
+        chunk_size: Max rows per executemany call.
+
+    Returns:
+        Total number of rows updated.
+    """
+    if not updates:
+        return 0
+
+    other_cols = [c for c in updates[0] if c != key_column]
+    set_clause = ", ".join(f"{c}=${i + 2}" for i, c in enumerate(other_cols))
+    sql = f"UPDATE {table} SET {set_clause} WHERE {key_column}=$1"
+
+    total = 0
+    async with pool.acquire() as conn:
+        for i in range(0, len(updates), chunk_size):
+            chunk = updates[i : i + chunk_size]
+            tuples = [
+                (r[key_column],) + tuple(r[c] for c in other_cols)
+                for r in chunk
+            ]
+            await conn.executemany(sql, tuples)
+            total += len(tuples)
+    return total
+
+
+async def get_query_stats(pool: asyncpg.Pool) -> dict:
+    """Get database connection pool and query statistics.
+
+    Returns pool utilization, pg_stat_statements top queries (if extension is loaded),
+    and general performance metrics.
+
+    Returns:
+        Dict with pool stats and top queries.
+    """
+    stats: dict = {
+        "pool": {
+            "size": pool.get_size(),
+            "idle": pool.get_idle_size(),
+            "active": pool.get_size() - pool.get_idle_size(),
+            "utilization": round(
+                (pool.get_size() - pool.get_idle_size())
+                / max(pool.get_size(), 1)
+                * 100,
+                1,
+            ),
+        },
+        "top_queries": [],
+    }
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT
+                       query,
+                       calls,
+                       total_exec_time::bigint AS total_ms,
+                       mean_exec_time::bigint AS mean_ms,
+                       rows::bigint
+                   FROM pg_stat_statements
+                   ORDER BY total_exec_time DESC
+                   LIMIT 10"""
+            )
+            stats["top_queries"] = [dict(r) for r in rows]
+    except Exception:
+        pass
+
+    return stats
+
+
 # ── Managed bots ───────────────────────────────────────────────────────────
 
 

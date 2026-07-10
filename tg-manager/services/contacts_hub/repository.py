@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
                        favorite_only=False, premium_only=False, multi_only=False,
+                       mutual_only=False,
                        account_id=None,
                        sort_by='first_name', limit=100, offset=0) -> dict:
     conditions = ['owner_id = $1']
@@ -30,6 +31,8 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
         conditions.append('is_favorite = TRUE')
     if premium_only:
         conditions.append('is_premium = TRUE')
+    if mutual_only:
+        conditions.append('is_mutual = TRUE')
     if multi_only:
         conditions.append(f'(SELECT COUNT(*) FROM contact_sources WHERE contact_id = unified_contacts.id) > 1')
     if account_id:
