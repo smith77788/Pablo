@@ -1091,6 +1091,92 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                ORDER BY b.created_at DESC LIMIT 30""", uid)
         return _json_resp({"broadcasts": rows})
 
+    async def broadcast_schedule(request: web.Request) -> web.Response:
+        """Рассылка с расписанием: POST /api/miniapp/broadcast/schedule"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        bot_id = validate_integer(body.get("bot_id"), min_val=1)
+        text = validate_string(body.get("text"), max_len=4096)
+        if not bot_id or not text:
+            return _err("bot_id and text required")
+        if check_sql_suspicious(text):
+            return _err("Invalid characters in message text")
+        try:
+            bot_id_int = int(bot_id)
+        except (TypeError, ValueError):
+            return _err("Invalid bot_id")
+        schedule = {
+            "schedule_minutes": body.get("schedule_minutes"),
+            "scheduled_for": body.get("scheduled_for"),
+            "segment": body.get("segment"),
+            "buttons": body.get("buttons"),
+        }
+        try:
+            from services.broadcaster import mass_broadcast_with_scheduling
+            result = await mass_broadcast_with_scheduling(pool, uid, bot_id_int, text, schedule)
+            if result.get("ok"):
+                return _json_resp(result)
+            return _err(result.get("error", "Failed"), 400)
+        except Exception:
+            log.exception("broadcast_schedule uid=%d bot=%d", uid, bot_id_int)
+            return _err("Failed to create scheduled broadcast", 500)
+
+    async def broadcast_ab_test(request: web.Request) -> web.Response:
+        """A/B тестирование рассылок: POST /api/miniapp/broadcast/ab_test"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        bot_id = validate_integer(body.get("bot_id"), min_val=1)
+        variants = body.get("variants")
+        if not bot_id or not variants:
+            return _err("bot_id and variants required")
+        try:
+            bot_id_int = int(bot_id)
+        except (TypeError, ValueError):
+            return _err("Invalid bot_id")
+        if not isinstance(variants, list) or len(variants) < 2:
+            return _err("variants must be a list with at least 2 items")
+        for v in variants:
+            if not isinstance(v, dict) or not v.get("text"):
+                return _err("Each variant must have 'text'")
+        try:
+            from services.broadcaster import ab_test_broadcast
+            result = await ab_test_broadcast(pool, uid, bot_id_int, variants)
+            if result.get("ok"):
+                return _json_resp(result)
+            return _err(result.get("error", "Failed"), 400)
+        except Exception:
+            log.exception("broadcast_ab_test uid=%d bot=%d", uid, bot_id_int)
+            return _err("Failed to create A/B test broadcast", 500)
+
+    async def broadcast_analytics(request: web.Request) -> web.Response:
+        """Аналитика рассылки: GET /api/miniapp/broadcast/{id}/analytics"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bc_id = int(request.match_info["bc_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid broadcast id", 400)
+        try:
+            from services.broadcaster import get_broadcast_analytics
+            result = await get_broadcast_analytics(pool, uid, bc_id)
+            if result.get("ok"):
+                return _json_resp(result)
+            return _err(result.get("error", "Not found"), 404)
+        except Exception:
+            log.exception("broadcast_analytics uid=%d bc=%d", uid, bc_id)
+            return _err("Failed to get analytics", 500)
+
     # ── Channels ─────────────────────────────────────────────────────────────
 
     @_cached_user()
@@ -10258,6 +10344,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/broadcast", create_broadcast)
     app.router.add_post("/api/miniapp/broadcast/{bc_id}/resend", broadcast_resend)
     app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)
+    app.router.add_post("/api/miniapp/broadcast/schedule", broadcast_schedule)
+    app.router.add_post("/api/miniapp/broadcast/ab_test", broadcast_ab_test)
+    app.router.add_get("/api/miniapp/broadcast/{bc_id}/analytics", broadcast_analytics)
     # Channels
     app.router.add_get("/api/miniapp/channels", channels)
     # Campaigns / Funnels

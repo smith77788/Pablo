@@ -1314,3 +1314,352 @@ class TestSecurity:
             assert verify_csrf_token(token, 123) is True
             assert verify_csrf_token(token, 456) is False
             assert verify_csrf_token("invalid_token", 123) is False
+
+
+# ── Broadcaster Optimization tests ────────────────────────────────────────────
+
+class TestBroadcasterOptimizations:
+    """Tests for broadcaster caching and async processing optimizations."""
+
+    def test_broadcaster_caching(self):
+        from services.cache import TTLCache
+
+        cache = TTLCache(default_ttl=60.0, max_size=100)
+        cache.set("broadcast:1", {"status": "done", "sent": 100})
+        cache.set("broadcast:2", {"status": "running", "sent": 50})
+
+        assert cache.get("broadcast:1") == {"status": "done", "sent": 100}
+        assert cache.get("broadcast:2") == {"status": "running", "sent": 50}
+        assert cache.get("broadcast:999") is None
+
+        stats = cache.stats()
+        assert stats["hits"] >= 2
+        assert stats["size"] == 2
+
+    def test_broadcaster_async_processing(self):
+        from services.broadcaster import cancel, is_running, _running
+
+        _running.clear()
+
+        assert is_running(999) is False
+        assert cancel(999) is False
+
+        async def _dummy():
+            import asyncio
+            await asyncio.sleep(10)
+
+        task = asyncio.create_task(_dummy())
+        _running[777] = task
+
+        assert is_running(777) is True
+        result = cancel(777)
+        assert result is True
+        assert not is_running(777) or task.cancelled()
+
+        _running.clear()
+
+    def test_broadcaster_caching_ttl_expiry(self):
+        import time
+        from services.cache import TTLCache
+
+        cache = TTLCache(default_ttl=0.05, max_size=100)
+        cache.set("bc:ttl", {"status": "done"})
+
+        assert cache.get("bc:ttl") == {"status": "done"}
+
+        time.sleep(0.1)
+        assert cache.get("bc:ttl") is None
+
+    def test_broadcaster_caching_eviction(self):
+        from services.cache import TTLCache
+
+        cache = TTLCache(default_ttl=300.0, max_size=3)
+        cache.set("k1", "v1")
+        cache.set("k2", "v2")
+        cache.set("k3", "v3")
+        cache.set("k4", "v4")
+
+        assert cache.get("k1") is None
+        assert cache.get("k4") == "v4"
+
+    def test_broadcaster_user_map_cache(self):
+        from services.broadcaster import _user_map_cache
+
+        _user_map_cache.clear()
+        _user_map_cache.set("um:123:1", {"username": "ivan", "first_name": "Ivan"})
+        result = _user_map_cache.get("um:123:1")
+        assert result is not None
+        assert result["username"] == "ivan"
+        _user_map_cache.clear()
+
+    def test_broadcaster_render_for_user(self):
+        from services.broadcaster import _render_for_user
+
+        text = "Привет, {{FIRST_NAME}}!"
+        user = {"first_name": "Иван", "last_name": "Иванов", "username": "ivan"}
+        result = _render_for_user(text, user)
+        assert "Иван" in result
+        assert "{{FIRST_NAME}}" not in result
+
+    def test_broadcaster_render_for_user_no_placeholders(self):
+        from services.broadcaster import _render_for_user
+
+        text = "Обычное сообщение без плейсхолдеров"
+        result = _render_for_user(text, {})
+        assert result == text
+
+    def test_broadcaster_render_for_user_empty(self):
+        from services.broadcaster import _render_for_user
+
+        assert _render_for_user("", {}) == ""
+        assert _render_for_user(None, {}) is None
+
+    def test_broadcaster_on_broadcast_done(self):
+        from services.broadcaster import _on_broadcast_done, _running
+
+        _running.clear()
+        task = MagicMock()
+        task.cancelled.return_value = False
+        task.exception.return_value = None
+
+        _on_broadcast_done(555, task)
+        assert 555 not in _running
+
+    def test_broadcaster_on_broadcast_done_with_exception(self):
+        from services.broadcaster import _on_broadcast_done, _running
+        import logging
+
+        _running.clear()
+        _running[666] = MagicMock()
+
+        task = MagicMock()
+        task.cancelled.return_value = False
+        task.exception.return_value = RuntimeError("boom")
+
+        with patch("services.broadcaster.logger") as mock_log:
+            _on_broadcast_done(666, task)
+            mock_log.error.assert_called_once()
+
+        assert 666 not in _running
+
+    def test_proxy_selector_caching(self):
+        from services.cache import proxy_cache
+
+        proxy_cache.clear()
+        proxy_cache.set("proxy:1.2.3.4", {"score": 0.85, "status": "good"})
+        result = proxy_cache.get("proxy:1.2.3.4")
+        assert result is not None
+        assert result["score"] == 0.85
+        assert result["status"] == "good"
+        proxy_cache.clear()
+
+    def test_proxy_selector_caching_miss(self):
+        from services.cache import proxy_cache
+
+        proxy_cache.clear()
+        assert proxy_cache.get("nonexistent_proxy_key") is None
+        proxy_cache.clear()
+
+
+# ── Broadcaster Security tests ────────────────────────────────────────────────
+
+class TestBroadcasterSecurity:
+    """Tests for broadcaster input validation and access checks."""
+
+    def test_broadcaster_input_validation_sql_suspicious(self):
+        from services.security import check_sql_suspicious
+
+        assert check_sql_suspicious("Hello World") is False
+        assert check_sql_suspicious("'; DROP TABLE users; --") is True
+        assert check_sql_suspicious("1' OR '1'='1") is True
+        assert check_sql_suspicious("UNION SELECT * FROM users") is True
+        assert check_sql_suspicious("") is False
+        assert check_sql_suspicious("Привет мир") is False
+
+    def test_broadcaster_input_validation_string(self):
+        from services.security import validate_string
+
+        assert validate_string("Hello") == "Hello"
+        assert validate_string(None) is None
+        assert validate_string("") is None
+        assert validate_string("  trimmed  ") == "trimmed"
+        assert validate_string("x" * 2000, max_len=100) == "x" * 100
+        assert validate_string("", required=False) == ""
+
+    def test_broadcaster_input_validation_sanitize(self):
+        from services.security import sanitize_input
+
+        assert "<script>" not in sanitize_input('<script>alert("xss")</script>')
+        assert sanitize_input(None) == ""
+        assert sanitize_input("hello   world") == "hello world"
+
+    def test_broadcaster_input_validation_escape_html(self):
+        from services.security import escape_html
+
+        result = escape_html('<b>bold</b>')
+        assert "&lt;b&gt;" in result
+        assert "&lt;/b&gt;" in result
+        assert escape_html("normal text") == "normal text"
+
+    def test_broadcaster_access_check_not_found(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(fetch_row=None, fetch_rows=[])
+        result = await get_broadcast_analytics(pool, 123, 999)
+        assert result["ok"] is False
+        assert "not found" in result["error"].lower()
+
+    def test_broadcaster_access_check_wrong_owner(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(fetch_row=None, fetch_rows=[])
+        result = await get_broadcast_analytics(pool, 999, 1)
+        assert result["ok"] is False
+
+    def test_broadcaster_access_check_authorized(self):
+        from services.broadcaster import get_broadcast_analytics
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        bc_row = {
+            "id": 1, "bot_id": 10, "message_text": "Test",
+            "status": "done", "sent_count": 100, "failed_count": 5,
+            "total_users": 105, "created_at": now, "buttons": None,
+            "silent": False, "bot_username": "testbot",
+        }
+        delivery_log = [{"user_id": 1, "sent_at": now}]
+        pool = FakePool(fetch_row=bc_row, fetch_rows=delivery_log)
+        result = await get_broadcast_analytics(pool, 123, 1)
+        assert result["ok"] is True
+        assert result["broadcast_id"] == 1
+        assert result["sent_count"] == 100
+        assert result["failed_count"] == 5
+        assert result["delivery_rate_pct"] == 95.2
+
+
+# ── Proxy Selector Security tests ─────────────────────────────────────────────
+
+class TestProxySelectorSecurity:
+    """Tests for proxy_selector URL validation and SSRF protection."""
+
+    def test_proxy_selector_url_validation_valid(self):
+        from services.security import validate_url
+
+        assert validate_url("https://proxy.example.com:1080") is True
+        assert validate_url("https://1.2.3.4:8080") is True
+
+    def test_proxy_selector_url_validation_http_rejected(self):
+        from services.security import validate_url
+
+        assert validate_url("http://proxy.example.com:1080") is False
+
+    def test_proxy_selector_url_validation_localhost_rejected(self):
+        from services.security import validate_url
+
+        assert validate_url("https://localhost:1080") is False
+        assert validate_url("https://0.0.0.0:1080") is False
+
+    def test_proxy_selector_url_validation_empty(self):
+        from services.security import validate_url
+
+        assert validate_url("") is False
+        assert validate_url(None) is False
+
+    def test_proxy_selector_ssrf_protection_valid(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://example.com/avatar.jpg") is True
+        assert is_safe_public_url("https://cdn.telegram.org/x.png") is True
+
+    def test_proxy_selector_ssrf_protection_http(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("http://example.com/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_localhost(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://localhost/a.jpg") is False
+        assert is_safe_public_url("https://127.0.0.1/a.jpg") is False
+        assert is_safe_public_url("https://0.0.0.0/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_private_ranges(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://10.0.0.5/a.jpg") is False
+        assert is_safe_public_url("https://192.168.1.1/a.jpg") is False
+        assert is_safe_public_url("https://172.16.0.1/a.jpg") is False
+        assert is_safe_public_url("https://172.31.255.1/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_internal_tlds(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://service.internal/a.jpg") is False
+        assert is_safe_public_url("https://box.local/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_garbage(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("") is False
+        assert is_safe_public_url(None) is False
+        assert is_safe_public_url("not a url") is False
+
+    def test_proxy_selector_ssrf_protection_public_172(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://172.15.0.1/a.jpg") is True
+        assert is_safe_public_url("https://172.32.0.1/a.jpg") is True
+
+    def test_proxy_selector_ip_diversity_valid(self):
+        from services.proxy_selector import validate_ip_diversity
+
+        with patch("services.proxy_selector.extract_ip_from_proxy", side_effect=lambda u: "1.2.3.4" if u else None):
+            accounts = [
+                {"id": 1, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 2, "proxy_url": "socks5://u:p@5.6.7.8:1080"},
+            ]
+            result = validate_ip_diversity(accounts, max_per_ip=1)
+            assert result["valid"] is True
+            assert len(result["warnings"]) == 0
+
+    def test_proxy_selector_ip_diversity_violation(self):
+        from services.proxy_selector import validate_ip_diversity
+
+        with patch("services.proxy_selector.extract_ip_from_proxy", side_effect=lambda u: "1.2.3.4"):
+            accounts = [
+                {"id": 1, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 2, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 3, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 4, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+            ]
+            result = validate_ip_diversity(accounts, max_per_ip=3)
+            assert result["valid"] is False
+            assert len(result["warnings"]) == 1
+
+    def test_proxy_selector_is_datacenter_ip(self):
+        from services.proxy_selector import is_datacenter_ip
+
+        is_dc, provider = is_datacenter_ip("52.10.0.1")
+        assert is_dc is True
+        assert provider == "AWS"
+
+        is_dc, _ = is_datacenter_ip("8.8.8.8")
+        assert is_dc is False
+
+    def test_proxy_selector_is_datacenter_ip_invalid(self):
+        from services.proxy_selector import is_datacenter_ip
+
+        is_dc, provider = is_datacenter_ip("not-an-ip")
+        assert is_dc is False
+        assert provider == ""
+
+    def test_proxy_selector_extract_ip_from_proxy(self):
+        from unittest.mock import patch
+        from services.proxy_selector import extract_ip_from_proxy
+
+        with patch("services.proxy_selector.decrypt_token", side_effect=lambda t: t):
+            result = extract_ip_from_proxy("socks5://user:pass@1.2.3.4:1080")
+            assert result == "1.2.3.4"
+
+    def test_proxy_selector_extract_ip_from_proxy_empty(self):
+        from services.proxy_selector import extract_ip_from_proxy
+
+        assert extract_ip_from_proxy("") is None
+        assert extract_ip_from_proxy(None) is None

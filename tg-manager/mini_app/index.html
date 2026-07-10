@@ -830,6 +830,158 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ BROADCAST SCHEDULE (Mass Messaging Pro) ══════════════════════ -->
+<div class="screen" id="s-broadcast-schedule">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📅 Расписание рассылок</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcScheduleModal()">+ Новая</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="cards" id="bcSchedKpi">
+      <div class="card"><div class="card-ico">📨</div><div class="card-val" id="bs-pending">—</div><div class="card-lbl">Ожидает</div></div>
+      <div class="card"><div class="card-ico">✅</div><div class="card-val" id="bs-done">—</div><div class="card-lbl">Выполнено</div></div>
+      <div class="card"><div class="card-ico">📊</div><div class="card-val" id="bs-delivery">—</div><div class="card-lbl">Доставка %</div></div>
+      <div class="card"><div class="card-ico">🧪</div><div class="card-val" id="bs-ab-active">—</div><div class="card-lbl">A/B активно</div></div>
+    </div>
+    <div class="sec">Запланированные рассылки</div>
+    <div class="lst" id="bcSchedList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">A/B Тесты</div>
+    <div class="lst" id="bcAbList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Аналитика рассылок</div>
+    <div id="bcAnalyticsChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <div style="display:flex;align-items:flex-end;gap:4px;height:60px" id="bcAnalyticsBars"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px" id="bcAnalyticsLabels"></div>
+    </div>
+    <div class="lst" id="bcAnalyticsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: New Broadcast Schedule -->
+<div class="mbg" id="mo-bc-schedule" onclick="if(event.target===this)closeModal('mo-bc-schedule')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bc-schedule')">✕</div>
+    <div class="modal-title">📅 Новая запланированная рассылка</div>
+    <div class="field"><label>Бот</label><select id="bs-bot" class="sel"></select></div>
+    <div class="field"><label>Текст сообщения</label><textarea id="bs-text" rows="4" maxlength="4096" class="input-bc" placeholder="Введите текст..."></textarea></div>
+    <div class="field"><label>Кому</label><select id="bs-segment" class="sel">
+      <option value="all">Всем подписчикам</option>
+      <option value="active_7d">Активным за 7 дней</option>
+      <option value="active_30d">Активным за 30 дней</option>
+    </select></div>
+    <div class="field"><label>Дата и время</label><input type="datetime-local" id="bs-datetime" class="inp"></div>
+    <div class="field"><label>Повтор</label><select id="bs-repeat" class="sel">
+      <option value="once">Однократно</option>
+      <option value="daily">Ежедневно</option>
+      <option value="weekly">Еженедельно</option>
+    </select></div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);padding:4px 0 10px;cursor:pointer">
+      <input type="checkbox" id="bs-ab-toggle" style="width:18px;height:18px" onchange="document.getElementById('bsAbWrap').style.display=this.checked?'block':'none'">
+      🧪 Включить A/B тестирование
+    </label>
+    <div id="bsAbWrap" style="display:none">
+      <div class="field"><label>Вариант Б (текст)</label><textarea id="bs-ab-text" rows="3" maxlength="4096" class="input-bc" placeholder="Альтернативный текст..."></textarea></div>
+      <div class="field"><label>Доля варианта А (%)</label><input type="number" id="bs-ab-split" value="50" min="10" max="90" class="inp"></div>
+    </div>
+    <div class="field-err" id="bs-err"></div>
+    <button class="btn btn-p" onclick="submitBcSchedule()" style="width:100%">📅 Запланировать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ PROXY POOL (Proxy Pool Manager) ══════════════════════ -->
+<div class="screen" id="s-proxy-pool">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌐 Пул прокси</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="cards" id="proxyPoolKpi">
+      <div class="card"><div class="card-ico">🌐</div><div class="card-val" id="pp-total">—</div><div class="card-lbl">Всего</div></div>
+      <div class="card"><div class="card-ico">🟢</div><div class="card-val" id="pp-alive" style="color:var(--green)">—</div><div class="card-lbl">Живых</div></div>
+      <div class="card"><div class="card-ico">🔴</div><div class="card-val" id="pp-dead" style="color:var(--red)">—</div><div class="card-lbl">Мёртвых</div></div>
+      <div class="card"><div class="card-ico">⏱</div><div class="card-val" id="pp-avg-latency">—</div><div class="card-lbl">Ср. задержка</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin:10px 0">
+      <button class="btn btn-p" onclick="proxyPoolCheckAll()" style="flex:1;font-size:13px;padding:9px 6px">🔄 Проверить все</button>
+      <button class="btn btn-r" onclick="proxyPoolCleanDead()" style="flex:1;font-size:13px;padding:9px 6px">🧹 Удалить мёртвые</button>
+    </div>
+    <div class="seg" id="proxyPoolSeg">
+      <div class="seg-opt on" onclick="proxyPoolFilter('all',this)">Все</div>
+      <div class="seg-opt" onclick="proxyPoolFilter('alive',this)">🟢 Живые</div>
+      <div class="seg-opt" onclick="proxyPoolFilter('dead',this)">🔴 Мёртвые</div>
+      <div class="seg-opt" onclick="proxyPoolFilter('backup',this)">🛟 Резерв</div>
+    </div>
+    <div class="sec">Статистика прокси</div>
+    <div id="proxyPoolChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Задержка по прокси (мс)</div>
+      <div style="display:flex;align-items:flex-end;gap:3px;height:50px" id="proxyPoolBars"></div>
+    </div>
+    <div class="sec">Пул прокси</div>
+    <div class="lst" id="proxyPoolList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ AUTOREG PRO (Auto-Registration Pro) ══════════════════════ -->
+<div class="screen" id="s-autoreg-pro">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📱 Авторег Pro</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openAutoregProModal()">+ Пакет</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="cards" id="autoregProKpi">
+      <div class="card"><div class="card-ico">📱</div><div class="card-val" id="arp-total">—</div><div class="card-lbl">Всего</div></div>
+      <div class="card"><div class="card-ico">✅</div><div class="card-val" id="arp-success" style="color:var(--green)">—</div><div class="card-lbl">Успешно</div></div>
+      <div class="card"><div class="card-ico">⏳</div><div class="card-val" id="arp-pending" style="color:var(--orange)">—</div><div class="card-lbl">В очереди</div></div>
+      <div class="card"><div class="card-ico">❌</div><div class="card-val" id="arp-failed" style="color:var(--red)">—</div><div class="card-lbl">Ошибка</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin:10px 0">
+      <button class="btn btn-p" onclick="openAutoregProModal()" style="flex:1;font-size:13px;padding:9px 6px">📱 Новый пакет</button>
+      <button class="btn btn-s" onclick="autoregProCheckAll()" style="flex:1;font-size:13px;padding:9px 6px">🔍 Проверить все</button>
+    </div>
+    <div class="seg" id="autoregProSeg">
+      <div class="seg-opt on" onclick="autoregProFilter('all',this)">Все</div>
+      <div class="seg-opt" onclick="autoregProFilter('active',this)">🟢 Активные</div>
+      <div class="seg-opt" onclick="autoregProFilter('pending',this)">⏳ Очередь</div>
+      <div class="seg-opt" onclick="autoregProFilter('failed',this)">❌ Ошибки</div>
+    </div>
+    <div class="sec">Статистика регистрации</div>
+    <div id="autoregProChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <div style="display:flex;align-items:flex-end;gap:3px;height:50px" id="autoregProBars"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px;color:var(--hint)" id="autoregProLabels"></div>
+    </div>
+    <div class="sec">Пакеты регистрации</div>
+    <div class="lst" id="autoregProList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">История регистрации</div>
+    <div class="lst" id="autoregProHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Modal: Autoreg Pro Batch -->
+<div class="mbg" id="mo-autoreg-pro" onclick="if(event.target===this)closeModal('mo-autoreg-pro')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-autoreg-pro')">✕</div>
+    <div class="modal-title">📱 Пакетная регистрация</div>
+    <div class="field"><label>Количество (1–100)</label><input type="number" id="arp-count" value="10" min="1" max="100" class="inp"></div>
+    <div class="field"><label>Страна</label><select id="arp-country" class="sel">
+      <option value="RU">🇷🇺 Россия</option>
+      <option value="UA">🇺🇦 Украина</option>
+      <option value="KZ">🇰🇿 Казахстан</option>
+      <option value="US">🇺🇸 США</option>
+      <option value="GB">🇬🇧 Великобритания</option>
+      <option value="DE">🇩🇪 Германия</option>
+    </select></div>
+    <div class="field"><label>SMS-сервис</label><select id="arp-service" class="sel">
+      <option value="smsactivate">SMS-Activate</option>
+      <option value="5sim">5sim.net</option>
+    </select></div>
+    <div class="field"><label>Прокси (необязательно)</label><select id="arp-proxy" class="sel"><option value="">Без прокси</option></select></div>
+    <div class="field-err" id="arp-err"></div>
+    <button class="btn btn-p" id="arp-btn" onclick="submitAutoregPro()" style="width:100%">📱 Запустить пакет</button>
+  </div>
+</div>
+
 <!-- ══════════════════════ MORE ══════════════════════ -->
 <div class="screen" id="s-more">
   <div class="hdr"><div class="hdr-burger" onclick="openDrawer()">☰</div><div class="hdr-title">⚙️ Ещё</div></div>

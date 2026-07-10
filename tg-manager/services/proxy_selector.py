@@ -7,6 +7,7 @@ This module provides:
   - Ranking accounts based on their proxy quality
   - Quick proxy health checks from in-memory state
   - IP diversity validation to prevent datacenter bans
+  - Proxy URL validation and SSRF protection
 
 Usage:
     from services.proxy_selector import extract_ip_from_proxy, is_datacenter_ip
@@ -17,16 +18,27 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import re
+import time
 from typing import Optional
 
 import asyncpg
 
 from services import infra_memory
+from services.cache import TTLCache
 
 log = logging.getLogger(__name__)
+
+# ── Кэш статистики прокси-пула (TTL 2 мин) ─────────────────────────────────────
+_proxy_pool_stats_cache = TTLCache(default_ttl=120.0, max_size=200)
+# Кэш результатов health-check прокси (TTL 3 мин) ────────────────────────────────
+_proxy_health_cache = TTLCache(default_ttl=180.0, max_size=500)
+# Кэш IP-проверок datacenter (TTL 30 мин — IP не меняются часто) ────────────────
+_datacenter_ip_cache: dict[str, tuple[bool, str, float]] = {}
+_DC_IP_TTL = 1800.0
 
 # Known datacenter IP ranges (Railway, Render, AWS, DigitalOcean, etc.)
 _DATACENTER_RANGES = [
@@ -55,10 +67,79 @@ _DATACENTER_RANGES = [
     (ipaddress.ip_network("51.0.0.0/8"), "OVH"),
 ]
 
+# Supported proxy schemes
+_PROXY_SCHEMES = {"socks4", "socks5", "http", "https"}
+
+# Private/internal IP patterns for SSRF protection
+_PRIVATE_IP_RE = re.compile(
+    r"^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|::1$)"
+)
+
+
+def validate_proxy_url(proxy_url: str) -> tuple[bool, str]:
+    """Validate proxy URL format and safety.
+
+    Returns (is_valid, error_message).
+    Checks: non-empty, valid URL scheme, valid host, no internal IPs.
+    """
+    if not proxy_url or not isinstance(proxy_url, str):
+        return False, "empty proxy URL"
+    url = proxy_url.strip()
+    if len(url) > 2048:
+        return False, "proxy URL too long"
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False, "invalid URL format"
+    if p.scheme.lower() not in _PROXY_SCHEMES:
+        return False, f"unsupported scheme: {p.scheme}"
+    if not p.hostname:
+        return False, "missing hostname"
+    return True, ""
+
+
+def is_safe_proxy_url(proxy_url: str) -> bool:
+    """SSRF protection: check if proxy URL points to a safe external address.
+
+    Blocks: localhost, private IPs, loopback, link-local, internal TLDs.
+    Best-effort (no DNS resolution) — blocks obvious internal addresses.
+    """
+    if not proxy_url or not isinstance(proxy_url, str):
+        return False
+    try:
+        p = urlparse(proxy_url.strip())
+    except Exception:
+        return False
+    if not p.hostname:
+        return False
+    host = p.hostname.lower()
+    if host in ("localhost", "0.0.0.0") or host.endswith(".local") or host.endswith(".internal"):
+        return False
+    if _PRIVATE_IP_RE.match(host):
+        return False
+    return True
+
+
+def validate_proxy_input(proxy_url: str, max_len: int = 2048) -> Optional[str]:
+    """Validate and sanitize proxy URL input. Returns cleaned URL or None if invalid."""
+    if not proxy_url or not isinstance(proxy_url, str):
+        return None
+    url = proxy_url.strip()[:max_len]
+    if not url:
+        return None
+    is_valid, _err = validate_proxy_url(url)
+    if not is_valid:
+        return None
+    if not is_safe_proxy_url(url):
+        return None
+    return url
+
 
 def extract_ip_from_proxy(proxy_url: str) -> Optional[str]:
     """Extract IP address from proxy URL."""
-    if not proxy_url:
+    if not proxy_url or not isinstance(proxy_url, str):
+        return None
+    if len(proxy_url) > 2048:
         return None
     # proxy_url хранится зашифрованным — расшифровываем, иначе изоляция по IP
     # сломается (regex не найдёт host в шифротексте). Passthrough для legacy.
@@ -74,13 +155,19 @@ def extract_ip_from_proxy(proxy_url: str) -> Optional[str]:
 
 def is_datacenter_ip(ip_str: str) -> tuple[bool, str]:
     """Check if IP is a known datacenter IP. Returns (is_datacenter, provider)."""
+    _now = time.monotonic()
+    _cached = _datacenter_ip_cache.get(ip_str)
+    if _cached and (_now - _cached[2]) < _DC_IP_TTL:
+        return _cached[0], _cached[1]
     try:
         ip = ipaddress.ip_address(ip_str)
         for network, provider in _DATACENTER_RANGES:
             if ip in network:
+                _datacenter_ip_cache[ip_str] = (True, provider, _now)
                 return True, provider
     except ValueError:
         pass
+    _datacenter_ip_cache[ip_str] = (False, "", _now)
     return False, ""
 
 
@@ -293,6 +380,10 @@ def get_proxy_score(proxy_url: str, action_type: str = "default") -> float:
       0.5    — нет данных, нейтральная оценка
       < 0.3  — проблемный прокси, высокий процент ошибок / высокая латентность
     """
+    if not proxy_url or not isinstance(proxy_url, str):
+        return 0.5
+    if len(proxy_url) > 2048:
+        return 0.5
     return infra_memory.get_proxy_score(proxy_url, action_type)
 
 
@@ -303,7 +394,9 @@ def record_proxy_result(
     latency_ms: float = 0.0,
 ) -> None:
     """Записать результат работы прокси в infra_memory (non-blocking, in-memory)."""
-    if not proxy_url:
+    if not proxy_url or not isinstance(proxy_url, str):
+        return
+    if len(proxy_url) > 2048:
         return
     infra_memory.record_proxy_op(proxy_url, action_type, success, latency_ms=latency_ms)
 
@@ -478,3 +571,201 @@ async def probe_proxy(proxy_url: str, timeout: float = 10.0) -> dict:
     except Exception as e:
         record_proxy_result(proxy_url, "default", False)
         return {"ok": False, "error": str(e)[:120]}
+
+
+async def get_proxy_pool_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Статистика прокси-пула владельца: общее число, активные, мёртвые, без назначения.
+
+    Возвращает:
+        {
+            total, active, inactive, dead (is_alive=FALSE),
+            unassigned (нет аккаунтов), assigned,
+            avg_score, geo_distribution: {country: count}
+        }
+    """
+    _cache_key = f"pps:{owner_id}"
+    _cached = _proxy_pool_stats_cache.get(_cache_key)
+    if _cached is not None:
+        return _cached
+
+    result = {
+        "total": 0,
+        "active": 0,
+        "inactive": 0,
+        "dead": 0,
+        "unassigned": 0,
+        "assigned": 0,
+        "avg_score": 0.0,
+        "geo_distribution": {},
+    }
+    try:
+        rows = await pool.fetch(
+            """SELECT p.id, p.is_active, p.is_alive, p.geo_country, p.proxy_url,
+                      (SELECT COUNT(*) FROM tg_accounts a
+                       WHERE a.proxy_id = p.id AND a.is_active = TRUE) AS assigned_count
+               FROM user_proxies p
+               WHERE p.owner_id = $1""",
+            owner_id,
+        )
+    except Exception as e:
+        log.warning("get_proxy_pool_stats failed owner=%d: %s", owner_id, e)
+        return result
+
+    if not rows:
+        return result
+
+    total_score = 0.0
+    scored_count = 0
+    for row in rows:
+        result["total"] += 1
+        if row["is_active"]:
+            result["active"] += 1
+        else:
+            result["inactive"] += 1
+        if row["is_alive"] is False:
+            result["dead"] += 1
+        assigned = row["assigned_count"] or 0
+        if assigned > 0:
+            result["assigned"] += 1
+        else:
+            result["unassigned"] += 1
+        country = row["geo_country"] or "unknown"
+        result["geo_distribution"][country] = result["geo_distribution"].get(country, 0) + 1
+        score = get_proxy_score(row["proxy_url"] or "", "default")
+        total_score += score
+        scored_count += 1
+
+    result["avg_score"] = round(total_score / scored_count, 3) if scored_count else 0.0
+    _proxy_pool_stats_cache.set(_cache_key, result)
+    return result
+
+
+async def auto_rotate_proxy(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    account_id: int,
+) -> dict:
+    """Авто-ротация прокси: назначить аккаунту лучший доступный прокси из пула.
+
+    Алгоритм: берём живые прокси, сортируем по score, исключаем уже занятые
+    (для изоляции), назначаем лучший. Если подходящих нет — пробим и назначаем
+    первый живой.
+
+    Возвращает {success, new_proxy_id?, old_proxy_id?, message?}
+    """
+    result = {"success": False, "new_proxy_id": None, "old_proxy_id": None, "message": ""}
+    try:
+        acc_row = await pool.fetchrow(
+            "SELECT id, proxy_id FROM tg_accounts WHERE id = $1 AND owner_id = $2",
+            account_id, owner_id,
+        )
+        if not acc_row:
+            result["message"] = "account not found"
+            return result
+
+        old_proxy_id = acc_row["proxy_id"]
+        result["old_proxy_id"] = old_proxy_id
+
+        proxies = await pool.fetch(
+            """SELECT p.id, p.proxy_url, p.is_alive, p.is_active
+               FROM user_proxies p
+               WHERE p.owner_id = $1 AND p.is_active = TRUE AND p.is_alive IS NOT FALSE
+               ORDER BY p.id""",
+            owner_id,
+        )
+        if not proxies:
+            result["message"] = "no active proxies available"
+            return result
+
+        used_ips: set[str] = set()
+        accounts = await pool.fetch(
+            "SELECT a.id, p.proxy_url FROM tg_accounts a "
+            "JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+            "WHERE a.owner_id = $1 AND a.is_active = TRUE AND a.id != $2",
+            owner_id, account_id,
+        )
+        for acc in accounts:
+            ip = extract_ip_from_proxy(acc["proxy_url"] or "")
+            if ip:
+                used_ips.add(ip)
+
+        def _score_key(p: dict) -> tuple[int, float]:
+            score = get_proxy_score(p["proxy_url"] or "", "default")
+            ip = extract_ip_from_proxy(p["proxy_url"] or "")
+            ip_used = 1 if ip and ip in used_ips else 0
+            return (ip_used, -score)
+
+        sorted_proxies = sorted(proxies, key=_score_key)
+        best = sorted_proxies[0]
+        new_proxy_id = best["id"]
+        await pool.execute(
+            "UPDATE tg_accounts SET proxy_id = $1 WHERE id = $2 AND owner_id = $3",
+            new_proxy_id, account_id, owner_id,
+        )
+        result["success"] = True
+        result["new_proxy_id"] = new_proxy_id
+        result["message"] = "rotated"
+    except Exception as e:
+        log.warning("auto_rotate_proxy failed acc=%d: %s", account_id, e)
+        result["message"] = str(e)[:120]
+    return result
+
+
+async def get_proxy_health(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    proxy_id: int,
+) -> dict:
+    """Здоровье конкретного прокси: score, assigned accounts, last probe, geo.
+
+    Возвращает:
+        {
+            proxy_id, score, status, assigned_accounts: [account_ids],
+            geo_country, is_active, is_alive
+        }
+    """
+    result: dict = {
+        "proxy_id": proxy_id,
+        "score": 0.5,
+        "status": "unknown",
+        "assigned_accounts": [],
+        "geo_country": "",
+        "is_active": False,
+        "is_alive": None,
+    }
+    try:
+        row = await pool.fetchrow(
+            """SELECT p.id, p.proxy_url, p.is_active, p.is_alive, p.geo_country
+               FROM user_proxies p
+               WHERE p.id = $1 AND p.owner_id = $2""",
+            proxy_id, owner_id,
+        )
+        if not row:
+            result["status"] = "not_found"
+            return result
+
+        result["is_active"] = row["is_active"]
+        result["is_alive"] = row["is_alive"]
+        result["geo_country"] = row["geo_country"] or ""
+
+        score = get_proxy_score(row["proxy_url"] or "", "default")
+        result["score"] = round(score, 3)
+
+        if score >= 0.65:
+            result["status"] = "good"
+        elif score >= 0.4:
+            result["status"] = "degraded"
+        elif score > 0:
+            result["status"] = "bad"
+        else:
+            result["status"] = "unknown"
+
+        assigned = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE proxy_id = $1 AND owner_id = $2 AND is_active = TRUE",
+            proxy_id, owner_id,
+        )
+        result["assigned_accounts"] = [r["id"] for r in assigned]
+    except Exception as e:
+        log.warning("get_proxy_health failed proxy=%d: %s", proxy_id, e)
+        result["status"] = "error"
+    return result

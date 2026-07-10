@@ -956,3 +956,125 @@ async def _do_batch_register(
         except Exception:
             log_exc_swallow(log, "_do_batch_register: report edit failed")
     return {"ok": ok_accs, "failed": failed}
+
+
+# ── Пакетная регистрация с расписанием ──────────────────────────────────────
+
+
+async def batch_register_with_scheduling(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    count: int,
+    schedule: dict | None = None,
+) -> dict:
+    """Пакетная регистрация аккаунтов с опциональным расписанием.
+
+    schedule — dict с ключами:
+      - execute_at (datetime): когда запустить (None = немедленно)
+      - interval_minutes (int): интервал повтора (0 = без повтора)
+      - country (str): код страны (по умолчанию 'russia')
+
+    Возвращает {'task_id': ..., 'status': 'queued'|'started', 'count': N}.
+    """
+    client, service = await _get_sms_client(pool)
+    if not client:
+        return {"task_id": None, "status": "no_api_key", "count": 0}
+
+    country = (schedule or {}).get("country", "russia")
+    execute_at = (schedule or {}).get("execute_at")
+
+    if execute_at is not None:
+        sched_id = await db.create_scheduled(
+            pool,
+            bot_id=0,
+            text=f"autoreg_batch:{owner_id}:{count}:{country}",
+            execute_at=execute_at,
+            created_by=owner_id,
+        )
+        interval = (schedule or {}).get("interval_minutes", 0)
+        if interval > 0:
+            await pool.execute(
+                "UPDATE scheduled_broadcasts SET repeat_interval_min=$1 WHERE id=$2",
+                interval,
+                sched_id,
+            )
+        return {"task_id": sched_id, "status": "queued", "count": count}
+
+    status_msg = None
+    task_result = await _do_batch_register(
+        pool=pool,
+        owner_id=owner_id,
+        country=country,
+        cnt=count,
+        sms_client=client,
+        status_msg=status_msg,
+    )
+    return {
+        "task_id": None,
+        "status": "completed",
+        "count": count,
+        "ok": len(task_result.get("ok", [])),
+        "failed": len(task_result.get("failed", [])),
+    }
+
+
+# ── Статистика регистрации ─────────────────────────────────────────────────
+
+
+async def get_registration_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Возвращает агрегированную статистику регистрации аккаунтов.
+
+    keys:
+      total, active, inactive, banned, added_today, added_this_week,
+      added_this_month, avg_trust_score, last_registration_at
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT
+            COUNT(*)                                              AS total,
+            COUNT(*) FILTER (WHERE is_active = TRUE)              AS active,
+            COUNT(*) FILTER (WHERE is_active = FALSE)             AS inactive,
+            COUNT(*) FILTER (WHERE acc_status = 'banned')         AS banned,
+            COUNT(*) FILTER (WHERE added_at >= CURRENT_DATE)      AS added_today,
+            COUNT(*) FILTER (WHERE added_at >= CURRENT_DATE - INTERVAL '7 days')
+                                                                    AS added_this_week,
+            COUNT(*) FILTER (WHERE added_at >= CURRENT_DATE - INTERVAL '30 days')
+                                                                    AS added_this_month,
+            ROUND(AVG(trust_score)::numeric, 2)                  AS avg_trust_score,
+            MAX(added_at)                                         AS last_registration_at
+        FROM tg_accounts
+        WHERE owner_id = $1
+        """,
+        owner_id,
+    )
+    return dict(row) if row else {}
+
+
+# ── История регистрации ─────────────────────────────────────────────────────
+
+
+async def get_registration_history(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Возвращает историю регистрации аккаунтов (новые первыми).
+
+    Каждая запись: id, phone, first_name, username, acc_status,
+    trust_score, added_at, proxy_id.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT id, phone, first_name, username, acc_status,
+               trust_score, added_at, proxy_id
+        FROM tg_accounts
+        WHERE owner_id = $1
+        ORDER BY added_at DESC
+        LIMIT $2 OFFSET $3
+        """,
+        owner_id,
+        limit,
+        offset,
+    )
+    return [dict(r) for r in rows]
