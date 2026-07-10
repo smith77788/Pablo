@@ -2649,8 +2649,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="exportProxies()">📤 Экспорт</button>
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="cleanupDeadProxies()">🧹 Очистить мёртвые</button>
     </div>
-    <div style="margin-bottom:8px">
-      <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px" onclick="toggleProxyStats()">📊 Аналитика прокси</button>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="toggleProxyStats()">📊 Аналитика прокси</button>
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="rotateProxies()">🔁 Ротация IP</button>
     </div>
     <div id="proxyStatsBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
@@ -8414,6 +8415,17 @@ async function toggleProxyStats() {
     }).join('');
     box.innerHTML = h;
   } catch(e) { box.innerHTML = errHtml(e.message,'toggleProxyStats()'); }
+}
+async function rotateProxies() {
+  if (!await askConfirm('Перемешать назначения прокси по всем активным аккаунтам? Изоляция (1 аккаунт = 1 прокси) сохраняется; занятые операцией аккаунты пропускаются.')) return;
+  try {
+    const r = await api('/api/miniapp/proxy/rotate', {method:'POST', body: JSON.stringify({})});
+    let msg = `🔁 Ротировано: ${r.rotated}`;
+    if (r.skipped_busy) msg += ` · занято: ${r.skipped_busy}`;
+    if (r.skipped_no_proxy) msg += ` · без прокси: ${r.skipped_no_proxy}`;
+    toast(msg);
+    loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 async function checkProxy(id, el) {
   if (el) { el.textContent='⏳'; el.style.pointerEvents='none'; }
