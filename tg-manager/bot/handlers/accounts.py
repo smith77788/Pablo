@@ -115,6 +115,7 @@ class AccountLogin(StatesGroup):
     waiting_phone = State()
     waiting_code = State()  # state data: phone, phone_code_hash
     waiting_2fa = State()  # state data: phone
+    waiting_relog_phone = State()  # релог аккаунта без сохранённого номера: ждём ввод номера
 
 
 class SessionImport(StatesGroup):
@@ -1426,50 +1427,58 @@ async def cb_relog_account(
 
     phone: str = acc.get("phone") or ""
     if not phone or not re.match(r"^\+\d{7,15}$", phone):
+        # Раньше здесь был тупик («Нет сохранённого номера» → только полный
+        # ре-добавление). Теперь предлагаем ВВЕСТИ номер вручную и релогнуть эту же
+        # строку аккаунта (частая ситуация: сессия импортирована без phone).
+        await state.update_data(relog_acc_id=callback_data.acc_id)
+        await state.set_state(AccountLogin.waiting_relog_phone)
         await callback.message.edit_text(
-            "❌ <b>Нет сохранённого номера</b>\n\n"
-            "Для этого аккаунта не сохранён номер телефона.\n"
-            "Используйте обычный вход: <b>Добавить → По номеру</b>.",
+            "📱 <b>Для этого аккаунта не сохранён номер</b>\n\n"
+            "Введите номер телефона <b>этого</b> аккаунта в международном формате "
+            "(например <code>+79161234567</code>) — вышлю код для входа и восстановлю сессию:",
             parse_mode="HTML",
             reply_markup=_cancel_markup(),
         )
         return
 
-    await callback.message.edit_text(
-        f"⏳ Отправляю SMS-код на <code>{escape(phone)}</code>…",
-        parse_mode="HTML",
-    )
+    await _send_relog_code(callback.message, pool, state, phone, callback_data.acc_id)
 
+
+async def _send_relog_code(
+    message: Message,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+    phone: str,
+    acc_id: int,
+) -> None:
+    """Отправить код для релога аккаунта acc_id на phone и перейти в waiting_code.
+    Общий путь для релога с сохранённым номером и с введённым вручную."""
+    await message.answer(
+        f"⏳ Отправляю код на <code>{escape(phone)}</code>…", parse_mode="HTML"
+    )
     try:
         phone_code_hash, delivery_hint = await start_login(phone)
     except Exception as exc:
         err = str(exc)
         kb = InlineKeyboardBuilder()
-        kb.button(
-            text="◀️ Назад",
-            callback_data=AccCb(action="view", acc_id=callback_data.acc_id),
-        )
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
         kb.adjust(1)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
             m = re.search(r"(\d+)", err)
             wait = m.group(1) if m else "?"
-            await callback.message.edit_text(
+            await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
+                parse_mode="HTML", reply_markup=kb.as_markup(),
             )
         else:
-            await callback.message.edit_text(
+            await message.answer(
                 f"❌ Ошибка отправки кода: <code>{escape(err[:200])}</code>",
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
+                parse_mode="HTML", reply_markup=kb.as_markup(),
             )
         return
 
     await state.update_data(
-        phone=phone,
-        phone_code_hash=phone_code_hash,
-        relog_acc_id=callback_data.acc_id,
+        phone=phone, phone_code_hash=phone_code_hash, relog_acc_id=acc_id,
     )
     await state.set_state(AccountLogin.waiting_code)
 
@@ -1478,7 +1487,7 @@ async def cb_relog_account(
     kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
     kb.adjust(1)
 
-    await callback.message.edit_text(
+    await message.answer(
         f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
         f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
         f"(не SMS) — проверьте на всех устройствах.\n\n"
@@ -1487,6 +1496,36 @@ async def cb_relog_account(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.message(AccountLogin.waiting_relog_phone)
+async def relog_phone_entered(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Пользователь ввёл номер для релога аккаунта без сохранённого phone.
+    Сохраняем номер в ЭТУ строку аккаунта (чтобы _finalize_login обновил её же по
+    ON CONFLICT phone) и запускаем обычную отправку кода."""
+    phone = (message.text or "").strip().replace(" ", "")
+    if not re.match(r"^\+\d{7,15}$", phone):
+        await message.answer(
+            "❌ Формат номера: <code>+79161234567</code> (плюс и 7–15 цифр). Попробуйте снова:",
+            parse_mode="HTML",
+        )
+        return
+    data = await state.get_data()
+    acc_id = data.get("relog_acc_id")
+    if not acc_id:
+        await state.clear()
+        await message.answer("❌ Сессия релога потеряна. Откройте аккаунт заново.")
+        return
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET phone=$1 WHERE id=$2 AND owner_id=$3",
+            phone, int(acc_id), message.from_user.id,
+        )
+    except Exception as e:
+        log.warning("relog_phone_entered save phone failed: %s", e)
+    await _send_relog_code(message, pool, state, phone, int(acc_id))
 
 
 # ── Proxy assignment ──────────────────────────────────────────────────────────
