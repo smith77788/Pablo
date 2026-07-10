@@ -193,7 +193,7 @@ async def cb_chanf_import_acc(
     await callback.answer("⏳ Загружаю каналы из Telegram...")
 
     from services import account_manager
-    from database.db import upsert_managed_channels
+    from database.db import add_managed_channels
 
     try:
         dialogs = (
@@ -223,7 +223,11 @@ async def cb_chanf_import_acc(
         )
         return
 
-    await upsert_managed_channels(pool, callback.from_user.id, acc["id"], channels)
+    # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
+    # возвращает максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
+    # срез, если у аккаунта суммарно больше 200 диалогов. upsert_managed_channels()
+    # удалила бы ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
+    await add_managed_channels(pool, callback.from_user.id, acc["id"], channels)
 
     acc_label = _acc_label(acc)
     lines = [f"📥 <b>Импортировано каналов: {len(channels)}</b>\n"]
@@ -689,9 +693,14 @@ async def cb_chanf_do_create(
     # Resolve the actual username after the set attempt.
     final_uname = uname if (uname and "не установлен" not in uname_result) else ""
     try:
-        from database.db import upsert_managed_channels
+        from database.db import add_managed_channels
 
-        await upsert_managed_channels(
+        # add_managed_channels — НЕ upsert_managed_channels(): ниже передаётся
+        # список из ОДНОГО только что созданного канала. upsert_managed_channels()
+        # сначала удаляет ВСЕ существующие каналы этого аккаунта, поэтому каждое
+        # создание нового канала стирало бы весь ранее импортированный список
+        # (severity: воспроизводится на каждом втором созданном канале).
+        await add_managed_channels(
             pool,
             callback.from_user.id,
             acc_id,
@@ -706,7 +715,7 @@ async def cb_chanf_do_create(
             ],
         )
     except Exception:
-        log_exc_swallow(log, "cb_chanf_do_create: upsert_managed_channels failed")
+        log_exc_swallow(log, "cb_chanf_do_create: add_managed_channels failed")
 
     # EPOCH III: auto-add channel to most recent active ecosystem
     try:

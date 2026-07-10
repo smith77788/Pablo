@@ -46,7 +46,17 @@ Top-1, с приоритетами. Обновлять по мере закры�
 4. **Bulk SEO по сетке** — применить SEO-оптимизацию к N каналам за раз (сейчас по-канально).
 5. **Per-account analytics view** — раздел 16 «По аккаунтам» отсутствует как вид (флаг аудита).
 6. **Rotating proxy** — ротация прокси по расписанию (сейчас только статическая привязка/failover).
-7. **Proxy export / cleanup dead** — экспорт списка и удаление мёртвых user-прокси (аудит р.13).
+7. **Proxy export / cleanup dead** [✅ СДЕЛАНО 2026-07-10]
+   `services/proxy_hygiene.py` (чистые: can_delete_safely / proxy_is_dead /
+   is_dead_removable / mask_proxy_url). Эндпоинты: `proxy_cleanup_dead` (удаляет
+   ТОЛЬКО НЕназначенные + подтверждённо-мёртвые `is_alive IS FALSE`, NOT EXISTS по
+   tg_accounts), `proxy_export` (CSV/JSON, креды замаскированы, показывает
+   назначение+здоровье). UI: кнопки «📤 Экспорт» / «🧹 Очистить мёртвые».
+   ⚠️ ЗАОДНО закрыт латентный footgun изоляции: старый `delete_proxy` делал сырой
+   DELETE, а FK `tg_accounts.proxy_id` = ON DELETE SET NULL → удаление назначенного
+   прокси молча обнуляло proxy_id → аккаунт уходил напрямую → AUTH_KEY_DUPLICATED.
+   Теперь delete_proxy отказывает (409), если прокси назначен — сначала detach.
+   Тест `test_proxy_hygiene.py`.
 8. ✅ **GPT авто-ответ** [СДЕЛАНО] — кнопка «🤖 AI-ответ (GPT)» в automation_action_menu; cb_act_ai_reply + auto_responder:659 были готовы. Тест test_ai_reply_wired.py.
 
 ### P2 — удобство/полнота

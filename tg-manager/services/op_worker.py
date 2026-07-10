@@ -5426,7 +5426,7 @@ async def _exec_group_import_all(
 ) -> dict:
     """Импорт групп со всех аккаунтов пользователя в managed_channels."""
     from services import account_manager
-    from database.db import upsert_managed_channels
+    from database.db import add_managed_channels
 
     account_ids = params.get("account_ids") or []
     if account_ids:
@@ -5473,7 +5473,11 @@ async def _exec_group_import_all(
                 if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
             ]
             if groups:
-                await upsert_managed_channels(pool, owner_id, acc["id"], groups)
+                # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
+                # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
+                # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
+                # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
+                await add_managed_channels(pool, owner_id, acc["id"], groups)
                 total_imported += len(groups)
         except asyncio.CancelledError:
             raise
@@ -6285,7 +6289,7 @@ async def _exec_channel_import_all(
 ) -> dict:
     """Импорт каналов со всех (или указанных) аккаунтов в managed_channels."""
     from services import account_manager, session_simulator
-    from database.db import upsert_managed_channels
+    from database.db import add_managed_channels
 
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
     _CHANNEL_TYPES = ("channel", "megagroup", "supergroup", "gigagroup")
@@ -6332,7 +6336,11 @@ async def _exec_channel_import_all(
             dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
             channels = [d for d in dialogs if d.get("type") in _CHANNEL_TYPES]
             if channels:
-                await upsert_managed_channels(pool, owner_id, acc["id"], channels)
+                # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
+                # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
+                # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
+                # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
+                await add_managed_channels(pool, owner_id, acc["id"], channels)
                 total_imported += len(channels)
         except asyncio.CancelledError:
             raise
@@ -6642,7 +6650,14 @@ async def _exec_scan_owned_resources(
                     acc_lines.append(f"⛔️ {label}: лимит каналов исчерпан")
                 else:
                     to_import = owned[:slots_remaining]
-                    imported = await _db.upsert_managed_channels(pool, owner_id, acc_id, to_import)
+                    # add_managed_channels — НЕ upsert_managed_channels(): to_import — срез
+                    # owned, обрезанный по остатку квоты подписки (slots_remaining), а не
+                    # полный список ресурсов аккаунта. upsert_managed_channels() удалила бы
+                    # ВСЕ ранее сохранённые каналы аккаунта, если квота урезала to_import
+                    # относительно того, что уже было импортировано раньше (например, при
+                    # повторном скане после понижения тарифа или когда квоту уже выбрали
+                    # другие аккаунты раньше в этом же цикле).
+                    imported = await _db.add_managed_channels(pool, owner_id, acc_id, to_import)
                     total_imported += imported
                     slots_remaining -= imported
                     skipped = len(owned) - len(to_import)

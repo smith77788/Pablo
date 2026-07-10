@@ -7836,11 +7836,97 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("Invalid proxy_id", 400)
         try:
+            from services import proxy_hygiene
+            # Гард изоляции: FK tg_accounts.proxy_id = ON DELETE SET NULL. Удалить
+            # назначенный прокси = молча обнулить proxy_id аккаунтов → они уйдут
+            # напрямую с домашнего IP → AUTH_KEY_DUPLICATED. Не даём — сначала detach.
+            assigned = await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND proxy_id=$2",
+                uid, proxy_id) or 0
+            if not proxy_hygiene.can_delete_safely(assigned):
+                return _err(
+                    f"Прокси назначен {assigned} аккаунт(ам). Сначала снимите назначение "
+                    f"(«Снять прокси»), иначе аккаунты уйдут напрямую и рискуют "
+                    f"AUTH_KEY_DUPLICATED.", 409)
             await pool.execute(
                 "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
             return _json_resp({"ok": True})
         except Exception:
             return _err("Failed to delete proxy", 500)
+
+    async def proxy_cleanup_dead(request: web.Request) -> web.Response:
+        """Массово удалить подтверждённо-мёртвые (is_alive IS FALSE) НЕназначенные
+        прокси. Назначенные и непроверенные не трогаем (изоляция). Read→delete."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            # Кандидаты: мёртвые пробой И не назначенные ни одному аккаунту.
+            removed = await pool.fetch(
+                """DELETE FROM user_proxies up
+                   WHERE up.owner_id=$1 AND up.is_alive IS FALSE
+                     AND NOT EXISTS (
+                         SELECT 1 FROM tg_accounts a
+                         WHERE a.owner_id=$1 AND a.proxy_id=up.id)
+                   RETURNING id""", uid)
+            # Пропущенные мёртвые (назначены) — для честного отчёта оператору.
+            skipped = await _safe_fetchval(pool,
+                """SELECT COUNT(*) FROM user_proxies up
+                   WHERE up.owner_id=$1 AND up.is_alive IS FALSE
+                     AND EXISTS (SELECT 1 FROM tg_accounts a
+                                 WHERE a.owner_id=$1 AND a.proxy_id=up.id)""", uid) or 0
+            return _json_resp({"ok": True, "removed": len(removed),
+                               "skipped_assigned": int(skipped)})
+        except Exception as e:
+            log.exception("proxy_cleanup_dead uid=%d", uid)
+            return _err(str(e)[:120], 500)
+
+    async def proxy_export(request: web.Request) -> web.Response:
+        """Выгрузить список прокси (CSV/JSON) для аудита. Креды замаскированы —
+        не выгружаем логин/пароль в файл. Показывает назначение и здоровье."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        fmt = request.query.get("format", "csv")
+        try:
+            from services import proxy_hygiene
+            from services.token_vault import decrypt_token
+            rows = await pool.fetch(
+                """SELECT up.id, up.label, up.proxy_url, up.proxy_type, up.geo_country,
+                          up.is_active, up.is_alive, up.last_check,
+                          COALESCE(up.is_backup, FALSE) AS is_backup,
+                          (SELECT COUNT(*) FROM tg_accounts a
+                           WHERE a.owner_id=$1 AND a.proxy_id=up.id) AS assigned
+                   FROM user_proxies up WHERE up.owner_id=$1 ORDER BY up.id""", uid)
+            def _masked(enc):
+                try:
+                    return proxy_hygiene.mask_proxy_url(decrypt_token(enc))
+                except Exception:
+                    return proxy_hygiene.mask_proxy_url(enc)
+            items = []
+            for r in rows:
+                items.append({
+                    "id": r["id"], "label": r["label"] or "",
+                    "url": _masked(r["proxy_url"]), "type": r["proxy_type"] or "",
+                    "geo": r["geo_country"] or "", "active": bool(r["is_active"]),
+                    "alive": (None if r["is_alive"] is None else bool(r["is_alive"])),
+                    "last_check": str(r["last_check"] or ""), "backup": bool(r["is_backup"]),
+                    "assigned": int(r["assigned"] or 0),
+                })
+            if fmt == "json":
+                return _json_resp({"proxies": items})
+            header = ["ID", "Метка", "URL (маска)", "Тип", "Гео", "Активен",
+                      "Живой", "Проверен", "Резерв", "Назначен аккаунтам"]
+            data = [[
+                it["id"], it["label"], it["url"], it["type"], it["geo"],
+                "да" if it["active"] else "нет",
+                ("?" if it["alive"] is None else ("да" if it["alive"] else "нет")),
+                it["last_check"], "да" if it["backup"] else "нет", it["assigned"],
+            ] for it in items]
+            return _csv_resp("proxies.csv", header, data)
+        except Exception as e:
+            log.exception("proxy_export uid=%d", uid)
+            return _err(str(e)[:120], 500)
 
     async def check_proxy(request: web.Request) -> web.Response:
         """Проверить живость прокси (probe → api.telegram.org), сохранить is_alive/last_check.
@@ -10236,6 +10322,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Proxies
     app.router.add_get("/api/miniapp/proxies", proxies)
     app.router.add_post("/api/miniapp/proxy", add_proxy)
+    app.router.add_post("/api/miniapp/proxy/cleanup_dead", proxy_cleanup_dead)
+    app.router.add_get("/api/miniapp/proxy/export", proxy_export)
     app.router.add_delete("/api/miniapp/proxy/{proxy_id}", delete_proxy)
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/check", check_proxy)
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/backup", proxy_toggle_backup)
@@ -11404,6 +11492,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/bulk/favorite", uch_bulk_favorite)
     app.router.add_post("/api/miniapp/uch/bulk/delete", uch_bulk_delete)
     app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
+    app.router.add_post("/api/miniapp/uch/bulk/merge", uch_bulk_merge)
+    app.router.add_post("/api/miniapp/uch/bulk/export", uch_bulk_export)
+    app.router.add_post("/api/miniapp/uch/bulk/importance", uch_bulk_importance)
+    app.router.add_post("/api/miniapp/uch/bulk/rating", uch_bulk_rating)
     app.router.add_get("/api/miniapp/uch/export/csv", uch_export_csv)
     app.router.add_get("/api/miniapp/uch/export/vcf", uch_export_vcf)
     app.router.add_get("/api/miniapp/uch/export/json", uch_export_json)

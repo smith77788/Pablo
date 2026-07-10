@@ -94,3 +94,66 @@ def test_db_maintenance_no_sql_equality_join_on_encrypted():
         "db_maintenance всё ещё сравнивает зашифрованный proxy_url через SQL-equality"
     )
     assert "decrypt_token" in src, "db_maintenance должен расшифровывать user-прокси перед сверкой"
+
+
+# ── 2026-07-09: доп. листья потребления, найденные при повторном аудите ──────
+# db.get_all_proxy_quality_stats / proxy_selector.get_healthy_proxies / check_proxy_health
+# на момент находки не имели ни одного вызывающего в коде (мёртвый слой — см.
+# docs/AUDIT_LEDGER.md, «dead-layer scan»), но были готовы вернуть шифротекст
+# первому, кто их подключит. Исправлено проактивно (defense-in-depth), без
+# ожидания, пока кто-то реально свяжет UI и наступит на грабли.
+
+class _FakeStatsPool:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def fetch(self, query, *args):
+        return self._rows
+
+
+def test_get_all_proxy_quality_stats_decrypts_proxy_url():
+    import asyncio
+
+    from database import db
+    from services.token_vault import encrypt_token
+
+    plain = "socks5://user:pass@203.0.113.9:1080"
+    row = {
+        "id": 1, "label": "test", "proxy_url": encrypt_token(plain),
+        "successes": 3, "failures": 1, "total": 4, "avg_latency": 120.0,
+    }
+    pool = _FakeStatsPool([row])
+    result = asyncio.run(db.get_all_proxy_quality_stats(pool, owner_id=1))
+    assert result[0]["proxy_url"] == plain
+
+
+def test_get_healthy_proxies_decrypts_proxy_url():
+    import asyncio
+
+    from services import proxy_selector
+    from services.token_vault import encrypt_token
+
+    plain = "socks5://user:pass@203.0.113.10:1080"
+    row = {"proxy_url": encrypt_token(plain), "geo_country": "DE", "is_active": True}
+    pool = _FakeStatsPool([row])
+    result = asyncio.run(proxy_selector.get_healthy_proxies(pool, owner_id=1))
+    assert result[0]["proxy_url"] == plain
+
+
+def test_check_proxy_health_echoes_decrypted_url():
+    import asyncio
+
+    from services import proxy_selector
+    from services.token_vault import encrypt_token
+
+    plain = "socks5://user:pass@203.0.113.11:1080"
+    # score != 0.5 нейтрального пути (пропускаем реальный network-запрос)
+    from services import infra_memory
+
+    infra_memory._proxy_memory.clear()
+    infra_memory.record_proxy_op(plain, "default", success=True)
+    infra_memory.record_proxy_op(plain, "default", success=True)
+
+    result = asyncio.run(proxy_selector.check_proxy_health(encrypt_token(plain), "default"))
+    assert result["proxy_url"] == plain
+    infra_memory._proxy_memory.clear()

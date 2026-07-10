@@ -1,7 +1,10 @@
 # Database — База данных
 
 ## Stack
-PostgreSQL · asyncpg pool (min=15, max=50) · schema_v1 — schema_v126
+PostgreSQL · asyncpg pool (min=15, max=50) · `schema.sql` + `schema_v2.sql` … `schema_v152.sql`
+(151 файлов на 2026-07-09, число растёт — см. «Миграции» ниже и
+`docs/SCHEMA_CONSOLIDATION_PLAN.md` про план консолидации без большого
+разового риска).
 
 ## Таблицы
 
@@ -52,6 +55,15 @@ CREATE INDEX idx_audit_account ON operation_audit(account_id);
 ```
 
 ## Миграции
-- Файлы `schema_v*.sql` в корне
+- Файлы `schema_v*.sql` в корне (+ дубли в `database/` при наличии)
+- Применяются `database/db.py::create_pool()` **заново при каждом старте
+  процесса** — нет пропуска уже применённых файлов, единственная защита от
+  повторного применения — идемпотентность SQL (`IF NOT EXISTS` и т.п.).
+  Таблица `schema_migrations` фиксирует статус применения каждого файла, но
+  используется только для наблюдаемости, не для skip-логики.
 - Идемпотентны (IF NOT EXISTS)
-- Только ADD COLUMN, не удалять
+- Только ADD COLUMN, не удалять (в 151 файле на 2026-07-09 нет ни одного
+  `DROP TABLE`/`DROP COLUMN`)
+- Число файлов уже нарушает `.botmother/21_DATABASE_GOVERNANCE.md`
+  ("avoid uncontrolled schema growth"). Не консолидировать всё разом —
+  конкретный, дробимый на фазы план: `docs/SCHEMA_CONSOLIDATION_PLAN.md`.

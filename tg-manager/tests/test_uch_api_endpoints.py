@@ -542,12 +542,47 @@ class TestMergeEngine:
     @pytest.mark.asyncio
     async def test_manual_merge(self):
         from services.contacts_hub.merge_engine import manual_merge
-        pool = FakePool(execute_val="UPDATE 1")
+        # Оба контакта "найдены" под owner_id=123 -> ownership-проверка проходит.
+        pool = FakePool(fetch_row={"id": "primary-id"}, execute_val="UPDATE 1")
         result = await manual_merge(pool, "primary-id", "secondary-id", 123)
         assert result["status"] == "merged"
         assert result["primary_id"] == "primary-id"
         assert result["removed_id"] == "secondary-id"
-        assert len(pool._calls) == 3
+        # 2x fetchrow (ownership) + 3x execute (2 UPDATE + 1 DELETE)
+        assert len(pool._calls) == 5
+
+    @pytest.mark.asyncio
+    async def test_manual_merge_rejects_foreign_primary(self):
+        # Регрессия: primary_id/secondary_id, не принадлежащие owner_id, раньше
+        # молча переписывали contact_sources/contact_history чужого контакта
+        # (межарендный IDOR) -- только финальный DELETE был скоупнут owner_id.
+        from services.contacts_hub.merge_engine import manual_merge
+        pool = FakePool(fetch_row=None, execute_val="UPDATE 1")  # владение не подтверждено
+        result = await manual_merge(pool, "not-mine", "also-not-mine", 123)
+        assert result["status"] == "error"
+        assert result["error"] == "primary_not_found"
+        # Ничего не должно было исполниться -- только проверка владения.
+        assert all(call[0] == "fetchrow" for call in pool._calls)
+
+    @pytest.mark.asyncio
+    async def test_manual_merge_rejects_foreign_secondary(self):
+        from services.contacts_hub.merge_engine import manual_merge
+
+        class _OwnershipPool(FakePool):
+            """primary принадлежит владельцу, secondary -- нет."""
+
+            async def fetchrow(self, query, *args):
+                self._calls.append(("fetchrow", query, args))
+                contact_id = args[0]
+                if contact_id == "primary-id":
+                    return {"id": "primary-id"}
+                return None
+
+        pool = _OwnershipPool(execute_val="UPDATE 1")
+        result = await manual_merge(pool, "primary-id", "foreign-id", 123)
+        assert result["status"] == "error"
+        assert result["error"] == "secondary_not_found"
+        assert all(call[0] == "fetchrow" for call in pool._calls)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1211,6 +1246,64 @@ class TestBulkOpsEngine:
         pool = FakePool(execute_val="DELETE 0")
         result = await delete_group(pool, 1, 123)
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_bulk_merge_owned_pair_merges(self):
+        # Раньше (до фикса IDOR) второй/третий execute шли БЕЗ проверки
+        # владения -- сейчас перед ними обязана быть ownership-проверка.
+        from services.contacts_hub.bulk_ops_engine import bulk_merge
+        pool = FakePool(fetch_row={"cnt": 2}, execute_val="UPDATE 1")
+        result = await bulk_merge(pool, 123, [{"primary_id": "a", "secondary_id": "b"}])
+        assert result == {"merged": 1, "skipped": 0}
+        kinds = [c[0] for c in pool._calls]
+        assert kinds == ["fetchrow", "execute", "execute", "execute"]
+
+    @pytest.mark.asyncio
+    async def test_bulk_merge_foreign_pair_skipped_not_merged(self):
+        # Регрессия межарендного IDOR: пара с чужим contact_id (владение не
+        # подтверждено owner_id) обязана быть пропущена, а НЕ помечена merged,
+        # и contact_sources/contact_history чужого контакта не трогаются.
+        from services.contacts_hub.bulk_ops_engine import bulk_merge
+        pool = FakePool(fetch_row={"cnt": 1}, execute_val="UPDATE 1")  # только 1 из 2 -- чужой
+        result = await bulk_merge(pool, 123, [{"primary_id": "mine", "secondary_id": "not-mine"}])
+        assert result == {"merged": 0, "skipped": 1}
+        assert all(call[0] == "fetchrow" for call in pool._calls)
+
+    @pytest.mark.asyncio
+    async def test_bulk_merge_same_id_skipped(self):
+        from services.contacts_hub.bulk_ops_engine import bulk_merge
+        pool = FakePool(fetch_row={"cnt": 2}, execute_val="UPDATE 1")
+        result = await bulk_merge(pool, 123, [{"primary_id": "a", "secondary_id": "a"}])
+        assert result == {"merged": 0, "skipped": 1}
+        assert pool._calls == []
+
+    @pytest.mark.asyncio
+    async def test_bulk_export_json_delegates(self):
+        from services.contacts_hub.bulk_ops_engine import bulk_export
+        pool = FakePool(fetch_rows=[])
+        result = await bulk_export(pool, 123, ["id1"], "json")
+        assert result["format"] == "json"
+
+    @pytest.mark.asyncio
+    async def test_bulk_set_importance(self):
+        from services.contacts_hub.bulk_ops_engine import bulk_set_importance
+        pool = FakePool(execute_val="UPDATE 2")
+        result = await bulk_set_importance(pool, 123, ["id1", "id2"], 3)
+        assert result["updated"] == 2
+        # owner_id обязан участвовать в запросе -- иначе можно поднять importance
+        # чужому контакту, зная только его id.
+        _, query, params = pool._calls[-1]
+        assert "owner_id=$2" in query or "owner_id=$2" in query.replace(" ", "")
+        assert 123 in params
+
+    @pytest.mark.asyncio
+    async def test_bulk_set_rating(self):
+        from services.contacts_hub.bulk_ops_engine import bulk_set_rating
+        pool = FakePool(execute_val="UPDATE 1")
+        result = await bulk_set_rating(pool, 123, ["id1"], 5)
+        assert result["updated"] == 1
+        _, query, params = pool._calls[-1]
+        assert 123 in params
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
