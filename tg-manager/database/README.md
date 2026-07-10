@@ -24,9 +24,13 @@ The pool automatically applies all `schema*.sql` files on startup.
 
 ### Schema Migration
 
-Schema files are applied in version order:
+Schema files are applied in version order, in full, on every process start
+(no skip-already-applied tracking — idempotent SQL is what makes repeated
+application safe):
 - `schema.sql` — base schema
-- `schema_v2.sql` through `schema_v150.sql` — incremental migrations
+- `schema_v2.sql` through `schema_v152.sql` — incremental migrations (151
+  files as of 2026-07-09; growth already flagged as technical debt, see
+  `docs/SCHEMA_CONSOLIDATION_PLAN.md` for a phased consolidation plan)
 
 Each file is split into individual statements and executed idempotently.
 

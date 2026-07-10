@@ -8814,59 +8814,8 @@ async function submitGrowth() {
 
 // ── Quick Post ───────────────────────────────────────────
 let QUICK_POST_SELECTED = new Set();
-// ── Spintax ────────────────────────────────────────────
-let SPIN_TEMPLATES = [];
-function openSpintax() {
-  push('s-spintax');
-  SPIN_TEMPLATES = [];
-  const t = document.getElementById('spinText'); if (t) t.value='';
-  txt('spinResult',''); txt('spinErr','');
-  document.getElementById('spinRerollBtn').style.display='none';
-}
-function _spinRender(variants) {
-  SPIN_TEMPLATES = variants.map(v=>v.template);
-  txt('spinResult', variants.map((v,i)=>{
-    const warn = (v.warnings&&v.warnings.length)
-      ? `<div style="font-size:11px;color:var(--orange);margin-top:4px">⚠️ ${esc(v.warnings.join('; '))}</div>` : '';
-    return `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
-      <div style="font-weight:600">${i+1}. ${esc(v.sample||'')}</div>
-      <div onclick="copySpinTpl(${i})"
-           style="font-family:monospace;font-size:12px;background:var(--bg-input);border-radius:8px;padding:8px;white-space:pre-wrap;word-break:break-word;cursor:pointer">${esc(v.template)}</div>
-      ${warn}
-    </div>`;
-  }).join(''));
-  document.getElementById('spinRerollBtn').style.display = variants.length?'block':'none';
-}
-function copySpinTpl(i) {
-  const tpl = SPIN_TEMPLATES[i];
-  if (tpl==null) return;
-  navigator.clipboard?.writeText(tpl).then(()=>toast('📋 Шаблон скопирован')).catch(()=>toast('Не удалось скопировать'));
-}
-async function submitSpin() {
-  const script = (document.getElementById('spinText').value||'').trim();
-  txt('spinErr','');
-  if (!script) { txt('spinErr','Пришлите текст сценария'); return; }
-  const btn = document.getElementById('spinBtn');
-  btn.disabled=true; const old=btn.textContent; btn.textContent='🎲 Генерирую…';
-  txt('spinResult','<div class="spin-wrap"><div class="spin"></div></div>');
-  document.getElementById('spinRerollBtn').style.display='none';
-  try {
-    const d = await api('/api/miniapp/spintax/generate',{method:'POST',body:JSON.stringify({script})});
-    _spinRender(d.variants||[]);
-  } catch(e) {
-    txt('spinResult',''); txt('spinErr', e.message);
-  } finally { btn.disabled=false; btn.textContent=old; }
-}
-async function rerollSpin() {
-  if (!SPIN_TEMPLATES.length) return;
-  const btn = document.getElementById('spinRerollBtn');
-  btn.disabled=true; const old=btn.textContent; btn.textContent='🔁 …';
-  try {
-    const d = await api('/api/miniapp/spintax/expand',{method:'POST',body:JSON.stringify({templates:SPIN_TEMPLATES})});
-    _spinRender(d.variants||[]);
-  } catch(e) { toast(e.message); }
-  finally { btn.disabled=false; btn.textContent=old; }
-}
+// ── Spintax — вынесен в mini_app/screens/spintax.js (см. подключение
+// <script src="screens/spintax.js"> перед закрывающим </body>) ───────────
 
 async function openQuickPost() {
   push('s-quickpost');
@@ -8926,35 +8875,8 @@ async function submitQuickPost() {
   finally { btn.disabled=false; }
 }
 
-// ── SEO ──────────────────────────────────────────────────
-async function openSeo() {
-  push('s-seo');
-  txt('seoKeywords','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('seoSuggestions','');
-  try {
-    const d = await api('/api/miniapp/seo');
-    const kws = d.keywords||[];
-    txt('seoKeywords', kws.length ? kws.map(k=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-green-16)">🔍</div>
-        <div class="row-body"><div class="row-name">${esc(k.keyword)}</div></div>
-        <div class="row-right" style="color:var(--hint)">${k.search_count} поисков</div>
-      </div>
-    `).join('') : empty('🔍','Нет ключевых слов','Добавьте в разделе Позиции'));
-    const sug = d.suggestions||[];
-    txt('seoSuggestions', sug.length ? sug.map(s=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-purple-16)">✨</div>
-        <div class="row-body">
-          <div class="row-name">${esc(s.channel_title||s.channel_username||s.chan_id)}</div>
-          <div class="row-val">${s.title?'Название: '+esc(s.title.slice(0,40)):''} ${s.username?'@'+esc(s.username):''}</div>
-        </div>
-      </div>
-    `).join('') : empty('✨','Нет SEO-предложений','Запустите SEO-анализ в боте'));
-  } catch(e) {
-    txt('seoKeywords', empty('⚠️','Ошибка',e.message));
-  }
-}
+// ── SEO — вынесен в mini_app/screens/seo.js (см. подключение
+// <script src="screens/seo.js"> перед закрывающим </body>) ──────────────
 
 // ── Unified Contacts Hub ──────────────────────────────────
 let CONTACT_FILTER = null;
@@ -13748,5 +13670,11 @@ async function submitAdminBroadcast() {
   } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
 }
 </script>
+<!-- Точечно вынесенные экраны (см. docs/CLAUDE.md → «Известный технический
+     долг»). Подключаются ПОСЛЕ основного скрипта — используют его глобальные
+     хелперы (push/txt/esc/api/toast/empty), которые к этому моменту уже
+     определены. -->
+<script src="screens/spintax.js"></script>
+<script src="screens/seo.js"></script>
 </body>
 </html>

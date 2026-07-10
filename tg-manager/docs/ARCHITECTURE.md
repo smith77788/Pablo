@@ -100,8 +100,11 @@ The `_resilient()` wrapper provides:
 - Monitored by `pool_monitor` service
 
 **Schema Migrations**:
-- Applied automatically on startup
-- Files: `schema.sql`, `schema_v2.sql` ... `schema_v150.sql`
+- Applied automatically on startup (replayed in full every process start —
+  no skip-already-applied logic, see `docs/DATABASE.md`)
+- Files: `schema.sql`, `schema_v2.sql` ... `schema_v152.sql` (151 files as of
+  2026-07-09 — uncontrolled growth already flagged, see
+  `docs/SCHEMA_CONSOLIDATION_PLAN.md`)
 - Idempotent (IF NOT EXISTS)
 
 **Query Pattern**:

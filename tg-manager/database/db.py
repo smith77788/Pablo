@@ -3115,7 +3115,18 @@ async def get_keyword_notify_enabled(
 async def upsert_managed_channels(
     pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict]
 ) -> int:
-    """Сохраняет/обновляет список каналов аккаунта в managed_channels. Возвращает кол-во строк."""
+    """Сохраняет/обновляет список каналов аккаунта в managed_channels. Возвращает кол-во строк.
+
+    ⚠️ ОПАСНО для частичных данных: сначала DELETE ВСЕХ существующих строк
+    (owner_id, acc_id), затем INSERT только переданного списка. Рассчитана
+    на ПОЛНЫЙ ре-импорт (например, «перезагрузить с нуля из Telegram», где
+    channels — заведомо исчерпывающий список для аккаунта). Вызов с
+    усечённым/частичным списком (одна страница пагинации диалогов, один
+    только что созданный канал, срез списка, обрезанный лимитом квоты
+    подписки) тихо стирает все остальные ранее сохранённые каналы этого
+    аккаунта. Для частичных данных используй add_managed_channels() ниже —
+    она ничего не удаляет, только добавляет/обновляет переданные строки.
+    """
     if not channels:
         return 0
     async with pool.acquire() as conn:
@@ -3145,6 +3156,44 @@ async def upsert_managed_channels(
                     for ch in channels
                 ],
             )
+    return len(channels)
+
+
+async def add_managed_channels(
+    pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict]
+) -> int:
+    """Точечно добавляет/обновляет каналы в managed_channels БЕЗ удаления
+    остальных ранее сохранённых строк аккаунта.
+
+    Используй для ЧАСТИЧНЫХ данных (одна страница пагинации диалогов, один
+    только что созданный канал, срез списка, обрезанный лимитом квоты
+    подписки) — то есть везде, где переданный `channels` не гарантированно
+    является полным набором каналов аккаунта. Для настоящего полного
+    ре-импорта (когда список заведомо полный и стейл-записи действительно
+    нужно удалить) — см. upsert_managed_channels().
+    """
+    if not channels:
+        return 0
+    await pool.executemany(
+        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+           VALUES($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (owner_id, channel_id) DO UPDATE
+           SET title=EXCLUDED.title, username=EXCLUDED.username,
+               acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
+               type=EXCLUDED.type""",
+        [
+            (
+                owner_id,
+                acc_id,
+                ch["id"],
+                ch.get("title", ""),
+                ch.get("username", ""),
+                ch.get("access_hash", 0),
+                ch.get("type", "channel"),
+            )
+            for ch in channels
+        ],
+    )
     return len(channels)
 
 
