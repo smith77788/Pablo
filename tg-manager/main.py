@@ -428,6 +428,13 @@ async def main() -> None:
         "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS is_backup BOOLEAN DEFAULT FALSE",
         # Mutual Contacts (взаимные) — колонка нужна до первого uch-запроса (schema_v152).
         "ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS is_mutual BOOLEAN DEFAULT FALSE",
+        # Device-fingerprint tg_accounts — без них check_accounts_health и другие
+        # запросы с device-полями падали при лаге миграции (поздние колонки).
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS system_version TEXT",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS app_version TEXT",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS lang_code TEXT",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS system_lang_code TEXT",
     ):
         try:
             await pool.execute(_ddl)
