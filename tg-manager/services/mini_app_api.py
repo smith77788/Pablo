@@ -10911,6 +10911,234 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("audience_analytics uid=%s", uid)
             return _err(str(e)[:150], 500)
 
+    async def networks_list(request: web.Request) -> web.Response:
+        """Network Builder — список сеток владельца (форма экрана s-network-builder)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await _safe_fetch(pool,
+                """SELECT ni.id, ni.name, COALESCE(ni.status,'active') AS status,
+                     (SELECT COUNT(*) FROM network_nodes n WHERE n.instance_id=ni.id) AS node_count,
+                     (SELECT COUNT(*) FROM network_edges e WHERE e.instance_id=ni.id) AS edge_count
+                   FROM network_instances ni WHERE ni.owner_id=$1 ORDER BY ni.created_at DESC""",
+                uid)
+            return _json_resp({"networks": [dict(r) for r in (rows or [])]})
+        except Exception as e:
+            log.exception("networks_list uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def network_create_plural(request: web.Request) -> web.Response:
+        """Создать сетку. body: {name, template?, description?}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = validate_string(body.get("name"), max_len=100)
+        if not name:
+            return _err("Укажите название сети", 400)
+        try:
+            nid = await pool.fetchval(
+                "INSERT INTO network_instances(owner_id, name, status) "
+                "VALUES($1,$2,'active') RETURNING id", uid, name)
+            return _json_resp({"ok": True, "id": nid})
+        except Exception as e:
+            log.exception("network_create uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def network_detail_plural(request: web.Request) -> web.Response:
+        """Детали сети: узлы/рёбра в форме, которую рисует граф (from_id/to_id/labels)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        from services import network_builder as _nb
+        d = await _nb.get_instance_detail(pool, uid, nid)
+        if not d:
+            return _err("Сеть не найдена", 404)
+        label_by_id = {n["id"]: (n.get("label") or n.get("node_type") or "#") for n in d["nodes"]}
+        nodes = [{"id": n["id"], "type": n.get("node_type"),
+                  "label": n.get("label") or "", "object_id": n.get("ref_id")}
+                 for n in d["nodes"]]
+        edges = [{"id": e["id"], "from_id": e.get("source_node_id"),
+                  "to_id": e.get("target_node_id"), "type": e.get("edge_type"),
+                  "from_label": label_by_id.get(e.get("source_node_id"), "#"),
+                  "to_label": label_by_id.get(e.get("target_node_id"), "#")}
+                 for e in d["edges"]]
+        inst = d["instance"]
+        return _json_resp({"id": nid, "name": inst.get("name"),
+                           "status": inst.get("status"), "nodes": nodes, "edges": edges})
+
+    async def network_add_node(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
+        if not owns:
+            return _err("Сеть не найдена", 404)
+        from services import network_builder as _nb
+        typ = validate_string(body.get("type"), max_len=40) or "node"
+        label = validate_string(body.get("label"), max_len=200) or ""
+        try:
+            ref = int(body.get("object_id")) if str(body.get("object_id") or "").strip() else None
+        except (TypeError, ValueError):
+            ref = None
+        res = await _nb.add_node(pool, nid, typ, label, ref_id=ref)
+        return _json_resp(res)
+
+    async def network_delete_node(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        await pool.execute(
+            "DELETE FROM network_nodes WHERE id=$1 AND instance_id IN "
+            "(SELECT id FROM network_instances WHERE owner_id=$2)", node_id, uid)
+        return _json_resp({"ok": True})
+
+    async def network_add_edge(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+            body = await request.json()
+            frm = int(body.get("from_id")); to = int(body.get("to_id"))
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
+        if not owns:
+            return _err("Сеть не найдена", 404)
+        from services import network_builder as _nb
+        typ = validate_string(body.get("type"), max_len=40) or "forward"
+        res = await _nb.add_edge(pool, nid, frm, to, edge_type=typ)
+        return _json_resp(res)
+
+    async def network_delete_edge(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            edge_id = int(request.match_info["edge_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        await pool.execute(
+            "DELETE FROM network_edges WHERE id=$1 AND instance_id IN "
+            "(SELECT id FROM network_instances WHERE owner_id=$2)", edge_id, uid)
+        return _json_resp({"ok": True})
+
+    async def workflow_create_plural(request: web.Request) -> web.Response:
+        """Создать воркфлоу (контракт экрана: POST /workflows {name,bot_id?,description?})."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = validate_string(body.get("name"), max_len=120)
+        if not name:
+            return _err("Укажите название воркфлоу", 400)
+        desc = validate_string(body.get("description"), max_len=500) or None
+        try:
+            wid = await pool.fetchval(
+                "INSERT INTO workflow_definitions(owner_id, name, description, steps, is_active) "
+                "VALUES($1,$2,$3,'[]'::jsonb, FALSE) RETURNING id", uid, name, desc)
+            return _json_resp({"ok": True, "id": wid})
+        except Exception as e:
+            log.exception("workflow_create_plural uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def workflow_detail_plural(request: web.Request) -> web.Response:
+        """Детали воркфлоу: {id,name,active,steps[]} (шаги хранятся inline jsonb)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT id, name, description, steps, COALESCE(is_active,FALSE) AS is_active "
+            "FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
+        if not row:
+            return _err("Воркфлоу не найден", 404)
+        steps = row["steps"]
+        if isinstance(steps, str):
+            try:
+                steps = _json.loads(steps)
+            except Exception:
+                steps = []
+        return _json_resp({"id": row["id"], "name": row["name"],
+                           "description": row["description"] or "",
+                           "active": bool(row["is_active"]), "steps": steps or []})
+
+    async def workflow_toggle_plural(request: web.Request) -> web.Response:
+        """Активировать/поставить на паузу: PATCH /workflows/{id} {active}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        active = bool(body.get("active"))
+        res = await pool.execute(
+            "UPDATE workflow_definitions SET is_active=$1, updated_at=NOW() "
+            "WHERE id=$2 AND owner_id=$3", active, wid, uid)
+        if isinstance(res, str) and res.endswith(" 0"):
+            return _err("Воркфлоу не найден", 404)
+        return _json_resp({"ok": True, "active": active})
+
+    async def workflow_delete_plural(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        await pool.execute(
+            "DELETE FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
+        return _json_resp({"ok": True})
+
+    async def workflow_add_step(request: web.Request) -> web.Response:
+        """Добавить шаг: POST /workflows/{id}/steps {type,...} — аппенд в steps jsonb."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not isinstance(body, dict) or not body.get("type"):
+            return _err("Шаг должен содержать type", 400)
+        res = await pool.execute(
+            "UPDATE workflow_definitions SET steps = COALESCE(steps,'[]'::jsonb) || $1::jsonb, "
+            "updated_at=NOW() WHERE id=$2 AND owner_id=$3",
+            _json.dumps([body]), wid, uid)
+        if isinstance(res, str) and res.endswith(" 0"):
+            return _err("Воркфлоу не найден", 404)
+        return _json_resp({"ok": True})
+
     async def operation_export(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10939,6 +11167,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
     app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
+    app.router.add_get("/api/miniapp/networks", networks_list)
+    app.router.add_post("/api/miniapp/networks", network_create_plural)
+    app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)
+    app.router.add_delete("/api/miniapp/networks/edges/{edge_id}", network_delete_edge)
+    app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
+    app.router.add_post("/api/miniapp/networks/{net_id}/nodes", network_add_node)
+    app.router.add_post("/api/miniapp/networks/{net_id}/edges", network_add_edge)
     app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}/overlaps", ecosystem_overlaps)
     app.router.add_get("/api/miniapp/operations/export", operation_export)
@@ -11971,12 +12206,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # ── Automation Workflows ─────────────────────────────────────────────────
 
     async def workflow_list(request: web.Request) -> web.Response:
+        """Список воркфлоу в форме экрана (раньше звал несуществующий
+        list_workflows → 500). Прямой запрос: статус из is_active, число шагов из
+        inline-jsonb, last_run из workflow_runs."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            from services.workflow_engine import list_workflows
-            workflows = await list_workflows(pool, uid)
+            rows = await _safe_fetch(pool,
+                """SELECT wd.id, wd.name,
+                          CASE WHEN COALESCE(wd.is_active,FALSE) THEN 'active' ELSE 'paused' END AS status,
+                          COALESCE(jsonb_array_length(wd.steps), 0) AS step_count,
+                          (SELECT MAX(r.started_at) FROM workflow_runs r
+                           WHERE r.workflow_id = wd.id) AS last_run
+                   FROM workflow_definitions wd
+                   WHERE wd.owner_id=$1 ORDER BY wd.name""", uid)
+            workflows = [{
+                "id": r["id"], "name": r["name"], "status": r["status"],
+                "step_count": int(r["step_count"] or 0),
+                "last_run": r["last_run"].isoformat() if r["last_run"] else None,
+            } for r in (rows or [])]
             return _json_resp({"workflows": workflows})
         except Exception as exc:
             log.exception("workflow_list uid=%d", uid)
@@ -12108,6 +12357,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     app.router.add_get("/api/miniapp/workflows", workflow_list)
+    app.router.add_post("/api/miniapp/workflows", workflow_create_plural)
+    app.router.add_get("/api/miniapp/workflows/{wf_id}", workflow_detail_plural)
+    app.router.add_patch("/api/miniapp/workflows/{wf_id}", workflow_toggle_plural)
+    app.router.add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_plural)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
     app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)

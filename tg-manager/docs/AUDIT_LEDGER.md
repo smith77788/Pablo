@@ -542,3 +542,14 @@ UI: кнопка «🔁 Ротация IP» на экране Прокси + `ro
 Верификация: +2 tests (test_bulk_menu_entry_wired: вход покрывает 7 action + confirm реально обрабатывает op; проверка downstream). Полный tests/ зелёный (exit 0). Python AST чисто.
 Несуществующие кнопки «которые должны быть» (записано в DEAD_BUTTONS_AUDIT §D): полноценный релог-флоу в mini-app; авто-ротация прокси по расписанию; bulk-переавторизация списком в mini-app; bot-паритет операторских модулей. Кандидаты на отдельные заходы.
 Метод-урок для будущих сканов: хендлер может прятаться под .in_({set}) (не список!), многострочный фильтр, F.action==переменная в цикле, startswith, ветвление в теле — учитывать ВСЕ формы, иначе десятки ложных.
+
+## tg-manager: оживлены 4 «несуществующих» раздела mini-app (end-to-end) — 2026-07-10
+Запрос пользователя: реализовать все несуществующие разделы; выбор — «беру все 4 сам». Взял полное владение 4 half-built экранами (были 404/500, разрыв контракта фронт↔бэк на обеих сторонах).
+Проверено сначала: параллельная ветка yvz4yw полностью слита в нашу (0 коммитов сверху) — «потерянной» работы нет, это вопрос деплоя.
+Сделано (mini_app_api + index.html):
+  - **Analytics Dashboard**: эндпоинт `dashboard_realtime` в точной форме экрана (total_subscribers/channels/posts/views, growth_7d, *_history, top_channels, recent_activity) — реальные данные (каналы/аудитория ботов/операции/активность), просмотры+история пусто (сбор такой stat в системе не ведётся → «Нет данных», не врём). Фикс бага вызова фронта `method:'?'+params` → правильный URL.
+  - **Audience Analytics**: `audience_analytics` — owner-агрегат аудитории ботов (сегменты активные/новые/спящие, avg_engagement, heatmap по часам из bot_users.last_seen).
+  - **Network Builder**: plural-CRUD поверх network_builder-движка/таблиц — `GET/POST /networks`, `GET /networks/{id}` (форма графа: nodes {id,type,label,object_id} + edges {id,from_id,to_id,type,from_label,to_label}), `POST /networks/{id}/nodes|edges`, `DELETE /networks/nodes/{id}|edges/{id}` (owner-scoped через instance владельца, каскад).
+  - **Workflows**: plural — `POST /workflows`, `GET /workflows/{id}` (steps inline-jsonb + active), `PATCH` (toggle is_active), `DELETE`, `POST /workflows/{id}/steps` (аппенд в jsonb). Плюс ПОЧИНЕН `workflow_list`: звал несуществующий `list_workflows` → **500**; переписан на прямой запрос (status из is_active, step_count из jsonb_array_length, last_run из workflow_runs).
+Границы честности: где система не собирает данные (просмотры/история графиков каналов) — отдаём пусто, экран деградирует в «Нет данных». Полноценные графики требуют отдельной инфраструктуры сбора stat каналов (кандидат далее).
+Верификация: +2 теста (test_analytics_screens_wired, test_network_workflow_screens_wired) — маршруты+форма ответа+фикс бага фронта+фикс 500. Полный tests/ зелёный (exit 0). Python AST + node JS чисто.

@@ -46,7 +46,10 @@ per-account `prof_*` в том же файле, регистрация ~стро
 bulk» (bulk_prof_*) — аккаунт-ops. Не берём с наскока (файл активно правит Агент B):
 координировать, чтобы не конфликтовать. Все backend-op'ы готовы — это чисто проводка UI→op.
 
-## B. Mini-app: мёртвые экраны (контракт-рассинхрон фронт↔бэк) — чужие полосы (A/C)
+## B. Mini-app: мёртвые экраны — ✅ ИСПРАВЛЕНО 2026-07-10 (взял все 4 end-to-end)
+Все 4 раздела оживлены: dashboard_realtime, audience_analytics, plural networks-CRUD,
+plural workflows-CRUD + фикс 500 в workflow_list. См. AUDIT_LEDGER. Ниже — исходный разбор.
+
 Уже зафиксировано ранее в AUDIT_LEDGER (запись про dead-routes), подтверждено этим сканом:
 - **Network Builder**: фронт зовёт `/api/miniapp/networks`, `/networks/{id}/nodes`,
   `/networks/{id}/edges`, `/networks/nodes/{id}`, `/networks/edges/{id}` (**plural**);
