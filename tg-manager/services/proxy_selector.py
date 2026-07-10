@@ -353,6 +353,11 @@ async def get_healthy_proxies(
         )
         return []
 
+    # proxy_url хранится зашифрованным — get_proxy_score сам нормализует ключ к
+    # plaintext внутри, но потребители ЭТОГО списка (если будут построить socks-
+    # соединение или показать пользователю) ждут читаемый URL, не шифротекст.
+    from services.token_vault import decrypt_token
+
     result = []
     for row in rows:
         proxy_url = row["proxy_url"] or ""
@@ -360,7 +365,7 @@ async def get_healthy_proxies(
         if score >= min_score:
             result.append(
                 {
-                    "proxy_url": proxy_url,
+                    "proxy_url": decrypt_token(proxy_url) if proxy_url else proxy_url,
                     "geo_country": row.get("geo_country", ""),
                     "is_active": row.get("is_active", True),
                     "score": score,
@@ -421,7 +426,16 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
     else:
         status = "unknown"
 
-    result: dict = {"proxy_url": proxy_url, "score": score, "status": status}
+    # echo обратно читаемый URL, а не то, что пришло (вызывающий может передать
+    # как plaintext, так и зашифрованное значение из БД — decrypt_token безопасен
+    # в обоих случаях, passthrough для legacy plaintext).
+    from services.token_vault import decrypt_token
+
+    result: dict = {
+        "proxy_url": decrypt_token(proxy_url) if proxy_url else proxy_url,
+        "score": score,
+        "status": status,
+    }
     if latency_ms is not None:
         result["latency_ms"] = latency_ms
     return result
