@@ -11592,6 +11592,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def ranking_overview(request: web.Request) -> web.Response:
+        """Свод для экрана «Рейтинг»: слитые отслеживаемые ключи + их последние
+        позиции (position/trend) + алерты. Фронт (loadRanking) звал bare
+        /api/miniapp/ranking, но такого маршрута не было → экран не грузил данные
+        (404). Собираем из готовых функций ranking_engine — без дублей.
+        trend = previous_position - position (положительный = рост позиции)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import (
+                get_tracked_keywords, get_all_positions, get_alerts)
+            tracked = await get_tracked_keywords(pool, uid)
+            positions = await get_all_positions(pool, uid)
+            alerts = await get_alerts(pool, uid)
+            # позиции по ключу (последняя на канал/ключ)
+            pos_by_kw = {}
+            for p in positions:
+                pos_by_kw[(p.get('keyword'), p.get('channel_id'))] = p
+            keywords = []
+            for k in tracked:
+                p = pos_by_kw.get((k.get('keyword'), k.get('channel_id')))
+                cur = p.get('position') if p else None
+                prev = p.get('previous_position') if p else None
+                trend = (prev - cur) if (cur is not None and prev) else 0
+                keywords.append({
+                    'keyword': k.get('keyword'),
+                    'channel_id': k.get('channel_id'),
+                    'position': cur,
+                    'trend': trend,
+                    'region': k.get('region') or 'ru',
+                })
+            return _json_resp({'keywords': keywords, 'alerts': alerts})
+        except Exception as e:
+            log.exception("ranking_overview uid=%d", uid)
+            return _err(str(e), 500)
+
     async def ranking_alerts(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -11617,6 +11653,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/ranking/record", ranking_record)
     app.router.add_get("/api/miniapp/ranking/history/{channel_id}", ranking_history)
     app.router.add_get("/api/miniapp/ranking/positions", ranking_positions)
+    app.router.add_get("/api/miniapp/ranking", ranking_overview)
     app.router.add_get("/api/miniapp/ranking/keywords", ranking_keywords)
     app.router.add_get("/api/miniapp/ranking/alerts", ranking_alerts)
     app.router.add_get("/api/miniapp/ranking/stats", ranking_stats)

@@ -38,3 +38,18 @@ def test_ranking_backend_routes_registered():
                  "/api/miniapp/ranking/alerts", "/api/miniapp/ranking/track",
                  "/api/miniapp/ranking/untrack"):
         assert f'"{path}"' in src, f"маршрут {path} должен быть зарегистрирован"
+
+
+def test_ranking_bare_overview_route_exists():
+    """loadRanking (фронт) зовёт bare /api/miniapp/ranking — маршрут ДОЛЖЕН быть
+    (иначе экран Рейтинг не грузит данные, 404). Отдаёт keywords+alerts."""
+    src = inspect.getsource(mini_app_api)
+    assert re.search(r'add_get\(\s*"/api/miniapp/ranking"\s*,\s*ranking_overview', src), (
+        "bare-маршрут /api/miniapp/ranking должен быть зарегистрирован"
+    )
+    m = re.search(r"async def ranking_overview\(.*?\n(.*?)async def ", src, re.DOTALL)
+    assert m, "ranking_overview handler not found"
+    body = m.group(1)
+    assert "'keywords'" in body and "'alerts'" in body, (
+        "ranking_overview должен отдавать keywords и alerts (форма для loadRanking)"
+    )
