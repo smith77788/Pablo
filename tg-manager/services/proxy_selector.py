@@ -24,6 +24,7 @@ import logging
 import re
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import asyncpg
 
@@ -181,6 +182,16 @@ def validate_ip_diversity(accounts: list[dict], max_per_ip: int = 3) -> dict:
         'datacenter_warnings': list[str]
     }
     """
+    if not accounts or not isinstance(accounts, list):
+        return {
+            "valid": True,
+            "warnings": [],
+            "ip_usage": {},
+            "datacenter_warnings": [],
+            "datacenter_count": 0,
+            "total_accounts_checked": 0,
+        }
+    max_per_ip = max(1, min(max_per_ip, 100))
     ip_to_accounts: dict[str, list[int]] = {}
     datacenter_accounts: list[tuple[int, str]] = []  # (account_id, provider)
     
@@ -313,21 +324,55 @@ async def failover_dead_proxies(pool, owner_id: int) -> dict:
         if ip:
             used_ips.add(ip)
 
-    # Пробим резервные один раз, оставляем живые с уникальным IP.
+    # Пробим резервные параллельно (до 5 одновременно), оставляем живые с уникальным IP.
+    _BACKUP_CONCURRENCY = 5
+    _sem = asyncio.Semaphore(_BACKUP_CONCURRENCY)
+
+    async def _probe_with_sem(b: dict) -> dict | None:
+        async with _sem:
+            probe = await probe_proxy(b["proxy_url"])
+            if not probe.get("ok"):
+                return None
+            ip = extract_ip_from_proxy(b["proxy_url"] or "")
+            if ip and ip in used_ips:
+                return None
+            return {"id": b["id"], "ip": ip}
+
     healthy_backups: list[dict] = []
-    for b in backups:
-        probe = await probe_proxy(b["proxy_url"])
-        if not probe.get("ok"):
-            continue
-        ip = extract_ip_from_proxy(b["proxy_url"] or "")
-        # Резервный на уже занятом IP не берём (иначе нарушим изоляцию).
-        if ip and ip in used_ips:
-            continue
-        healthy_backups.append({"id": b["id"], "ip": ip})
+    if backups:
+        probe_results = await asyncio.gather(
+            *(_probe_with_sem(b) for b in backups),
+            return_exceptions=True,
+        )
+        for r in probe_results:
+            if isinstance(r, dict) and r is not None:
+                healthy_backups.append(r)
     result["backups_healthy"] = len(healthy_backups)
 
     # Кэш проб основных прокси по proxy_id (несколько аккаунтов могут делить прокси).
+    # Пробим уникальные proxy_id параллельно, результаты кэшируем.
+    unique_proxy_ids: dict[int, str] = {}
+    for acc in accounts:
+        pid = acc["proxy_id"]
+        if pid not in unique_proxy_ids:
+            unique_proxy_ids[pid] = acc["proxy_url"] or ""
+
     probe_cache: dict[int, bool] = {}
+    if unique_proxy_ids:
+        _main_sem = asyncio.Semaphore(_BACKUP_CONCURRENCY)
+
+        async def _probe_main(pid: int, purl: str) -> tuple[int, bool]:
+            async with _main_sem:
+                return pid, bool((await probe_proxy(purl)).get("ok"))
+
+        main_results = await asyncio.gather(
+            *(_probe_main(pid, purl) for pid, purl in unique_proxy_ids.items()),
+            return_exceptions=True,
+        )
+        for r in main_results:
+            if isinstance(r, tuple):
+                probe_cache[r[0]] = r[1]
+
     for acc in accounts:
         result["checked"] += 1
         pid = acc["proxy_id"]
@@ -477,6 +522,11 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
 
     Возвращает: {proxy_url, score, status: 'good'|'degraded'|'bad'|'unknown', latency_ms?}
     """
+    _cache_key = f"hp:{proxy_url}:{action_type}"
+    _cached = _proxy_health_cache.get(_cache_key)
+    if _cached is not None:
+        return _cached
+
     score = get_proxy_score(proxy_url, action_type)
     latency_ms: int | None = None
 
@@ -531,6 +581,7 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
     }
     if latency_ms is not None:
         result["latency_ms"] = latency_ms
+    _proxy_health_cache.set(_cache_key, result)
     return result
 
 
@@ -542,8 +593,10 @@ async def probe_proxy(proxy_url: str, timeout: float = 10.0) -> dict:
     не блокирует event loop — в отличие от account_manager.test_proxy (блокирующий
     сокет). Возвращает {ok, latency_ms?, error?}.
     """
-    if not proxy_url:
+    if not proxy_url or not isinstance(proxy_url, str):
         return {"ok": False, "error": "empty"}
+    if len(proxy_url) > 2048:
+        return {"ok": False, "error": "proxy URL too long"}
     try:
         import time as _t
         import aiohttp

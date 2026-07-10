@@ -6,6 +6,7 @@ network_builder, audience_analytics, analytics_dashboard.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import types
 import uuid
@@ -1336,7 +1337,8 @@ class TestBroadcasterOptimizations:
         assert stats["hits"] >= 2
         assert stats["size"] == 2
 
-    def test_broadcaster_async_processing(self):
+    @pytest.mark.asyncio
+    async def test_broadcaster_async_processing(self):
         from services.broadcaster import cancel, is_running, _running
 
         _running.clear()
@@ -1345,7 +1347,6 @@ class TestBroadcasterOptimizations:
         assert cancel(999) is False
 
         async def _dummy():
-            import asyncio
             await asyncio.sleep(10)
 
         task = asyncio.create_task(_dummy())
@@ -1501,20 +1502,23 @@ class TestBroadcasterSecurity:
         assert "&lt;/b&gt;" in result
         assert escape_html("normal text") == "normal text"
 
-    def test_broadcaster_access_check_not_found(self):
+    @pytest.mark.asyncio
+    async def test_broadcaster_access_check_not_found(self):
         from services.broadcaster import get_broadcast_analytics
         pool = FakePool(fetch_row=None, fetch_rows=[])
         result = await get_broadcast_analytics(pool, 123, 999)
         assert result["ok"] is False
         assert "not found" in result["error"].lower()
 
-    def test_broadcaster_access_check_wrong_owner(self):
+    @pytest.mark.asyncio
+    async def test_broadcaster_access_check_wrong_owner(self):
         from services.broadcaster import get_broadcast_analytics
         pool = FakePool(fetch_row=None, fetch_rows=[])
         result = await get_broadcast_analytics(pool, 999, 1)
         assert result["ok"] is False
 
-    def test_broadcaster_access_check_authorized(self):
+    @pytest.mark.asyncio
+    async def test_broadcaster_access_check_authorized(self):
         from services.broadcaster import get_broadcast_analytics
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
@@ -1610,7 +1614,7 @@ class TestProxySelectorSecurity:
     def test_proxy_selector_ip_diversity_valid(self):
         from services.proxy_selector import validate_ip_diversity
 
-        with patch("services.proxy_selector.extract_ip_from_proxy", side_effect=lambda u: "1.2.3.4" if u else None):
+        with patch("services.proxy_selector.extract_ip_from_proxy", side_effect=lambda u: "1.2.3.4" if "1.2.3.4" in (u or "") else "5.6.7.8"):
             accounts = [
                 {"id": 1, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
                 {"id": 2, "proxy_url": "socks5://u:p@5.6.7.8:1080"},
@@ -1651,10 +1655,9 @@ class TestProxySelectorSecurity:
         assert provider == ""
 
     def test_proxy_selector_extract_ip_from_proxy(self):
-        from unittest.mock import patch
         from services.proxy_selector import extract_ip_from_proxy
 
-        with patch("services.proxy_selector.decrypt_token", side_effect=lambda t: t):
+        with patch("services.token_vault.decrypt_token", side_effect=lambda t: t):
             result = extract_ip_from_proxy("socks5://user:pass@1.2.3.4:1080")
             assert result == "1.2.3.4"
 

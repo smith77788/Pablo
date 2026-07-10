@@ -820,7 +820,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
   <div class="sb">
-    <div style="padding:6px 0 2px"><button class="btn btn-s" onclick="openSpintax()" style="width:100%">🎲 Spintax — рандомизация текста</button></div>
+    <div style="display:flex;gap:8px;padding:6px 0 2px">
+      <button class="btn btn-s" onclick="openSpintax()" style="flex:1;font-size:13px;padding:9px 6px">🎲 Spintax</button>
+      <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1;font-size:13px;padding:9px 6px">📅 Расписание</button>
+      <button class="btn btn-s" onclick="openExperiments()" style="flex:1;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
+    </div>
     <div class="sec-row"><div class="sec">Рассылки по ботам</div></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div><span class="sec-btn" onclick="openCmpModal()">+ Создать</span></div>
@@ -1076,6 +1080,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Рассылки</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openBroadcastSchedule()">
+        <div class="mgmt-tile-ico">📅</div>
+        <div class="mgmt-tile-lbl">Расписание</div>
+        <div class="mgmt-tile-val" id="m-bcsched-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openExperiments()">
+        <div class="mgmt-tile-ico">🧪</div>
+        <div class="mgmt-tile-lbl">A/B Тесты</div>
+        <div class="mgmt-tile-val" id="m-exp-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openOps()">
         <div class="mgmt-tile-ico">⚙️</div>
         <div class="mgmt-tile-lbl">Операции</div>
@@ -1085,6 +1099,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-ico">🌐</div>
         <div class="mgmt-tile-lbl">Прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openProxyPool()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Пул прокси</div>
+        <div class="mgmt-tile-val" id="m-proxy-pool-val"></div>
       </div>
     </div>
 
@@ -1165,6 +1184,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-ico">📱</div>
         <div class="mgmt-tile-lbl">Авторег</div>
         <div class="mgmt-tile-val" id="m-autoreg-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAutoregPro()">
+        <div class="mgmt-tile-ico">📱</div>
+        <div class="mgmt-tile-lbl">Авторег Pro</div>
+        <div class="mgmt-tile-val" id="m-autoreg-pro-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openContacts()">
         <div class="mgmt-tile-ico">📇</div>
@@ -8593,6 +8617,375 @@ async function submitProxyImport() {
     toggleProxyImport();
     loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+// ── Proxy Pool Manager ─────────────────────────────────
+let _proxyPoolData = [];
+function openProxyPool() {
+  push('s-proxy-pool');
+  txt('proxyPoolList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadProxyPool();
+}
+async function loadProxyPool() {
+  try {
+    const d = await api('/api/miniapp/proxies');
+    _proxyPoolData = d.proxies||[];
+    const alive = _proxyPoolData.filter(p=>p.is_alive===true).length;
+    const dead = _proxyPoolData.filter(p=>p.is_alive===false).length;
+    const total = _proxyPoolData.length;
+    const latencies = _proxyPoolData.filter(p=>p.latency_ms).map(p=>p.latency_ms);
+    const avgLat = latencies.length ? Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length) : '—';
+    txt('pp-total', num(total));
+    txt('pp-alive', num(alive));
+    txt('pp-dead', num(dead));
+    txt('pp-avg-latency', avgLat === '—' ? '—' : avgLat+'мс');
+    renderProxyPoolBars(_proxyPoolData);
+    renderProxyPoolList(_proxyPoolData);
+  } catch(e) {
+    txt('proxyPoolList', errHtml(e.message,'loadProxyPool()'));
+  }
+}
+function renderProxyPoolBars(items) {
+  const el = document.getElementById('proxyPoolBars');
+  if (!el) return;
+  const withLat = items.filter(p=>p.latency_ms).slice(0,20);
+  if (!withLat.length) { el.innerHTML='<div style="font-size:12px;color:var(--hint);text-align:center;width:100%">Нет данных о задержке</div>'; return; }
+  const max = Math.max(...withLat.map(p=>p.latency_ms));
+  el.innerHTML = withLat.map(p=>{
+    const h = Math.max(3, Math.round((p.latency_ms||0)/max*46));
+    const c = p.is_alive===true?'var(--green)':p.is_alive===false?'var(--red)':'var(--hint)';
+    return `<div style="flex:1;height:${h}px;background:${c};border-radius:2px 2px 0 0;min-height:3px" title="${esc(p.label||'')}: ${p.latency_ms}мс"></div>`;
+  }).join('');
+}
+function renderProxyPoolList(items) {
+  const el = document.getElementById('proxyPoolList');
+  if (!items.length) { el.innerHTML=empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить',fn:'openProxyModal()'}); return; }
+  el.innerHTML = items.map(p=>{
+    const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
+    const type = (p.proxy_type||'socks5').toUpperCase();
+    const host = (p.proxy_url||'').split('@').pop();
+    const lat = p.latency_ms ? p.latency_ms+'мс' : '';
+    const backup = p.is_backup?' 🛟':'';
+    const accounts = p.account_count ? ' · 📱'+p.account_count : '';
+    return `<div class="li">
+      <div class="ava ava-blue">🌐</div>
+      <div class="li-body">
+        <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}${backup}</div>
+        <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'} · ${lat}${accounts}</div>
+      </div>
+      <div class="li-right">
+        <span style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})" title="Резервный">${p.is_backup?'🛟':'⚪'}</span>
+        <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
+        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+function proxyPoolFilter(filter, el) {
+  document.querySelectorAll('#proxyPoolSeg .seg-opt').forEach(o=>o.classList.remove('on'));
+  if(el) el.classList.add('on');
+  let filtered = _proxyPoolData;
+  if (filter==='alive') filtered = filtered.filter(p=>p.is_alive===true);
+  else if (filter==='dead') filtered = filtered.filter(p=>p.is_alive===false);
+  else if (filter==='backup') filtered = filtered.filter(p=>p.is_backup);
+  renderProxyPoolList(filtered);
+}
+async function proxyPoolCheckAll() {
+  toast('🔄 Проверяю все прокси…');
+  try { await checkAllProxies(); loadProxyPool(); } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function proxyPoolCleanDead() {
+  const dead = _proxyPoolData.filter(p=>p.is_alive===false);
+  if (!dead.length) { toast('🟢 Нет мёртвых прокси'); return; }
+  if (!await askConfirm(`Удалить ${dead.length} мёртвых прокси?`)) return;
+  try {
+    for (const p of dead) { await api('/api/miniapp/proxy/'+p.id, {method:'DELETE'}); }
+    toast(`🧹 Удалено ${dead.length} прокси`);
+    loadProxyPool();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// ── Broadcast Schedule (Mass Messaging Pro) ─────────────
+let _bcSchedData = [];
+let _bcAbData = [];
+async function openBroadcastSchedule() {
+  push('s-broadcast-schedule');
+  txt('bcSchedList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('bcAbList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('bcAnalyticsBars','');
+  txt('bcAnalyticsList','');
+  loadBroadcastSchedule();
+}
+async function loadBroadcastSchedule() {
+  try {
+    const d = await api('/api/miniapp/broadcasts');
+    const all = d.broadcasts||[];
+    const scheduled = all.filter(b=>b.status==='pending'||b.scheduled_at);
+    const done = all.filter(b=>b.status==='done'||b.status==='completed');
+    const totalSent = all.reduce((s,b)=>(s+(b.sent_count||0)),0);
+    const totalFailed = all.reduce((s,b)=>(s+(b.failed_count||0)),0);
+    const delivery = (totalSent+totalFailed)>0 ? Math.round(totalSent/(totalSent+totalFailed)*100)+'%' : '—';
+    _bcSchedData = scheduled;
+    txt('bs-pending', num(scheduled.length));
+    txt('bs-done', num(done.length));
+    txt('bs-delivery', delivery);
+    const abList = all.filter(b=>b.ab_variant);
+    txt('bs-ab-active', num(abList.length));
+    _bcAbData = abList;
+    renderBcScheduleList(scheduled);
+    renderBcAbList(abList);
+    renderBcAnalytics(all);
+  } catch(e) {
+    txt('bcSchedList', errHtml(e.message,'loadBroadcastSchedule()'));
+  }
+}
+function renderBcScheduleList(items) {
+  const el = document.getElementById('bcSchedList');
+  if (!items.length) { el.innerHTML=empty('📅','Нет запланированных','Создайте через + '); return; }
+  el.innerHTML = items.map(b=>{
+    const [bc,bl]=stb(b.status);
+    const time = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru') : '—';
+    const bot = b.bot_username?'@'+b.bot_username:'#'+b.bot_id;
+    return `<div class="li">
+      <div class="ava ava-blue">📅</div>
+      <div class="li-body">
+        <div class="li-name">${esc((b.message_text||'').substring(0,30))}</div>
+        <div class="li-sub">${esc(bot)} · ${time}</div>
+      </div>
+      <span class="badge ${bc}">${bl}</span>
+    </div>`;
+  }).join('');
+}
+function renderBcAbList(items) {
+  const el = document.getElementById('bcAbList');
+  if (!items.length) { el.innerHTML=empty('🧪','Нет A/B тестов','Включите A/B при создании рассылки'); return; }
+  el.innerHTML = items.map(b=>{
+    const winsA = b.ab_wins_a||0, winsB = b.ab_wins_b||0;
+    const total = winsA+winsB;
+    const pctA = total>0 ? Math.round(winsA/total*100) : 50;
+    return `<div class="li" style="cursor:default">
+      <div class="ava" style="background:rgba(168,85,247,.15);color:var(--purple)">🧪</div>
+      <div class="li-body">
+        <div class="li-name">${esc((b.message_text||'').substring(0,28))}</div>
+        <div class="li-sub">А: ${winsA} (${pctA}%) · Б: ${winsB}</div>
+        <div class="prog"><div class="prog-fill" style="width:${pctA}%;background:var(--blue)"></div></div>
+      </div>
+      <span class="badge ${pctA>=50?'b-bl':'b-pu'}">${pctA>=50?'А лидирует':'Б лидирует'}</span>
+    </div>`;
+  }).join('');
+}
+function renderBcAnalytics(items) {
+  const el = document.getElementById('bcAnalyticsBars');
+  const labels = document.getElementById('bcAnalyticsLabels');
+  const list = document.getElementById('bcAnalyticsList');
+  if (!items.length) { if(el) el.innerHTML=''; if(labels) labels.innerHTML=''; if(list) list.innerHTML=''; return; }
+  const sent = items.reduce((s,b)=>(s+(b.sent_count||0)),0);
+  const failed = items.reduce((s,b)=>(s+(b.failed_count||0)),0);
+  const byBot = {};
+  items.forEach(b=>{
+    const k = b.bot_username||b.bot_id||'—';
+    if(!byBot[k]) byBot[k]={sent:0,failed:0,count:0};
+    byBot[k].sent+=(b.sent_count||0);
+    byBot[k].failed+=(b.failed_count||0);
+    byBot[k].count++;
+  });
+  const bots = Object.entries(byBot).sort((a,b)=>b[1].sent-a[1].sent).slice(0,7);
+  const maxSent = Math.max(1,...bots.map(([,v])=>v.sent));
+  if(el) el.innerHTML = bots.map(([name,v])=>{
+    const h = Math.max(3, Math.round(v.sent/maxSent*50));
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
+      <div style="width:100%;height:${h}px;background:var(--accent);border-radius:2px 2px 0 0;min-height:3px"></div>
+    </div>`;
+  }).join('');
+  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:9px;color:var(--hint)">@${(name||'').substring(0,6)}</span>`).join('');
+  if(list) list.innerHTML = `<div class="li" style="cursor:default">
+    <div class="ava ava-teal">📊</div>
+    <div class="li-body">
+      <div class="li-name">Всего рассылок: ${items.length}</div>
+      <div class="li-sub">Отправлено: ${num(sent)} · Ошибки: ${num(failed)} · Доставка: ${sent+failed>0?Math.round(sent/(sent+failed)*100):'—'}%</div>
+    </div>
+  </div>`;
+}
+function openBcScheduleModal() {
+  if (!BOTS.length) { toast('Сначала загрузите список ботов'); goTab('bots'); return; }
+  const sel = document.getElementById('bs-bot');
+  sel.innerHTML = BOTS.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} (${num(b.subscriber_count||0)} подп.)</option>`).join('');
+  document.getElementById('bs-text').value='';
+  document.getElementById('bs-ab-toggle').checked=false;
+  document.getElementById('bsAbWrap').style.display='none';
+  document.getElementById('bs-ab-text').value='';
+  document.getElementById('bs-err').style.display='none';
+  const now = new Date();
+  now.setMinutes(now.getMinutes()+60);
+  document.getElementById('bs-datetime').value = now.toISOString().slice(0,16);
+  document.getElementById('mo-bc-schedule').classList.add('show');
+}
+async function submitBcSchedule() {
+  const errEl = document.getElementById('bs-err');
+  errEl.style.display='none';
+  const botId = document.getElementById('bs-bot').value;
+  const text = document.getElementById('bs-text').value.trim();
+  const segment = document.getElementById('bs-segment').value;
+  const datetime = document.getElementById('bs-datetime').value;
+  const repeat = document.getElementById('bs-repeat').value;
+  const abToggle = document.getElementById('bs-ab-toggle').checked;
+  if (!text) { errEl.textContent='Введите текст сообщения'; errEl.style.display='block'; return; }
+  if (!datetime) { errEl.textContent='Укажите дату и время'; errEl.style.display='block'; return; }
+  try {
+    const body = {bot_id:parseInt(botId), message_text:text, segment, scheduled_at:datetime, repeat};
+    if (abToggle) {
+      body.ab_variant = 'B';
+      body.ab_text_b = document.getElementById('bs-ab-text').value.trim();
+      body.ab_split = parseInt(document.getElementById('bs-ab-split').value)||50;
+    }
+    const r = await api('/api/miniapp/broadcasts/schedule', {method:'POST', body:JSON.stringify(body)});
+    toast('📅 Рассылка запланирована');
+    closeModal('mo-bc-schedule');
+    loadBroadcastSchedule();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; errEl.style.display='block'; }
+}
+
+// ── Auto-Registration Pro ──────────────────────────────
+let _arpData = [];
+let _arpHistory = [];
+async function openAutoregPro() {
+  push('s-autoreg-pro');
+  txt('autoregProList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('autoregProHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadAutoregPro();
+}
+async function loadAutoregPro() {
+  try {
+    const d = await api('/api/miniapp/autoreg');
+    const accounts = d.recent||[];
+    const total = d.total_accounts||0;
+    const pending = d.pending_registrations||0;
+    const success = accounts.filter(a=>a.acc_status==='active').length;
+    const failed = accounts.filter(a=>a.acc_status==='banned'||a.acc_status==='error').length;
+    _arpData = accounts;
+    _arpHistory = accounts;
+    txt('arp-total', num(total));
+    txt('arp-success', num(success));
+    txt('arp-pending', num(pending));
+    txt('arp-failed', num(failed));
+    txt('m-autoreg-val', total+' аккаунтов');
+    renderAutoregProBars(accounts);
+    renderAutoregProList(accounts);
+    renderAutoregProHistory(accounts.slice(0,20));
+    loadAutoregProProxyList();
+  } catch(e) {
+    txt('autoregProList', errHtml(e.message,'loadAutoregPro()'));
+  }
+}
+function renderAutoregProBars(items) {
+  const el = document.getElementById('autoregProBars');
+  const labels = document.getElementById('autoregProLabels');
+  if (!el) return;
+  if (!items.length) { el.innerHTML='<div style="font-size:12px;color:var(--hint);text-align:center;width:100%">Нет данных</div>'; return; }
+  const byDay = {};
+  items.forEach(a=>{
+    const d = (a.added_at||a.created_at||'').slice(0,10);
+    if(d) byDay[d]=(byDay[d]||0)+1;
+  });
+  const days = Object.entries(byDay).sort((a,b)=>a[0].localeCompare(b[0])).slice(-7);
+  const max = Math.max(1,...days.map(d=>d[1]));
+  el.innerHTML = days.map(([,v])=>{
+    const h = Math.max(3, Math.round(v/max*46));
+    return `<div style="flex:1;height:${h}px;background:var(--accent);border-radius:2px 2px 0 0;min-height:3px"></div>`;
+  }).join('');
+  if(labels) labels.innerHTML = days.map(([d])=>`<span>${d.slice(5)}</span>`).join('');
+}
+function renderAutoregProList(items) {
+  const el = document.getElementById('autoregProList');
+  if (!items.length) { el.innerHTML=empty('📱','Нет аккаунтов','Запустите пакетную регистрацию'); return; }
+  el.innerHTML = items.map(a=>{
+    const status = a.acc_status||'—';
+    const sc = status==='active'?'b-gr':status==='banned'?'b-rd':status==='pending'?'b-or':'b-gy';
+    const phone = a.phone||'—';
+    const name = a.first_name||a.username||phone;
+    const date = (a.added_at||a.created_at) ? new Date(a.added_at||a.created_at).toLocaleDateString('ru') : '';
+    return `<div class="li">
+      <div class="ava ava-green">📱</div>
+      <div class="li-body">
+        <div class="li-name">${esc(name)}</div>
+        <div class="li-sub">${esc(phone)} · ${date}</div>
+      </div>
+      <span class="badge ${sc}">${status}</span>
+    </div>`;
+  }).join('');
+}
+function renderAutoregProHistory(items) {
+  const el = document.getElementById('autoregProHistory');
+  if (!items.length) { el.innerHTML=empty('📜','Нет истории',''); return; }
+  el.innerHTML = items.slice(0,15).map(a=>{
+    const date = (a.added_at||a.created_at) ? new Date(a.added_at||a.created_at).toLocaleString('ru') : '—';
+    const status = a.acc_status||'—';
+    const sc = status==='active'?'b-gr':status==='banned'?'b-rd':'b-gy';
+    return `<div class="li" style="cursor:default">
+      <div class="row-ico" style="background:var(--bg-green-16)">📱</div>
+      <div class="li-body">
+        <div class="li-name">${esc(a.phone||a.first_name||'—')}</div>
+        <div class="li-sub">${date}</div>
+      </div>
+      <span class="badge ${sc}">${status}</span>
+    </div>`;
+  }).join('');
+}
+async function loadAutoregProProxyList() {
+  try {
+    const d = await api('/api/miniapp/proxies');
+    const sel = document.getElementById('arp-proxy');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Без прокси</option>' + (d.proxies||[]).map(p=>{
+      const host = (p.proxy_url||'').split('@').pop();
+      return `<option value="${p.id}">${esc(p.label||host)}</option>`;
+    }).join('');
+  } catch(_) {}
+}
+function openAutoregProModal() {
+  document.getElementById('arp-count').value='10';
+  document.getElementById('arp-err').style.display='none';
+  document.getElementById('arp-btn').disabled=false;
+  document.getElementById('arp-btn').textContent='📱 Запустить пакет';
+  document.getElementById('mo-autoreg-pro').classList.add('show');
+}
+async function submitAutoregPro() {
+  const errEl = document.getElementById('arp-err');
+  errEl.style.display='none';
+  const count = parseInt(document.getElementById('arp-count').value)||10;
+  const country = document.getElementById('arp-country').value;
+  const service = document.getElementById('arp-service').value;
+  const proxyId = document.getElementById('arp-proxy').value;
+  if (count<1||count>100) { errEl.textContent='Количество: от 1 до 100'; errEl.style.display='block'; return; }
+  if (!await askConfirm(`Зарегистрировать ${count} аккаунтов через ${service}?`)) return;
+  const btn = document.getElementById('arp-btn');
+  btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const body = {count, country, service};
+    if (proxyId) body.proxy_id = parseInt(proxyId);
+    const r = await api('/api/miniapp/autoreg', {method:'POST', body:JSON.stringify(body)});
+    toast(`📱 Пакет ${r.count} акк. запущен (#${r.op_id})`);
+    closeModal('mo-autoreg-pro');
+    loadAutoregPro();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; errEl.style.display='block'; }
+  finally { btn.disabled=false; btn.textContent='📱 Запустить пакет'; }
+}
+async function autoregProCheckAll() {
+  toast('🔍 Проверяю все аккаунты…');
+  try {
+    await api('/api/miniapp/accounts/check_all', {method:'POST'});
+    toast('✅ Проверка запущена');
+    loadAutoregPro();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+function autoregProFilter(filter, el) {
+  document.querySelectorAll('#autoregProSeg .seg-opt').forEach(o=>o.classList.remove('on'));
+  if(el) el.classList.add('on');
+  let filtered = _arpData;
+  if (filter==='active') filtered = filtered.filter(a=>a.acc_status==='active');
+  else if (filter==='pending') filtered = filtered.filter(a=>a.acc_status==='pending');
+  else if (filter==='failed') filtered = filtered.filter(a=>a.acc_status==='banned'||a.acc_status==='error');
+  renderAutoregProList(filtered);
 }
 
 // ── Bot Subscribers ────────────────────────────────────

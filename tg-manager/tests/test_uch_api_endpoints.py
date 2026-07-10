@@ -1962,3 +1962,427 @@ class TestAnalyticsDashboard:
         ])
         result = await get_historical_data(pool, 123, "operations", days=7)
         assert isinstance(result, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Mass Messaging Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMassMessaging:
+    """Tests for broadcaster.py mass messaging functions."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_schedule_immediate(self):
+        from services.broadcaster import mass_broadcast_with_scheduling
+        pool = FakePool(
+            fetch_row={"id": 42, "bot_id": 1, "token": "tok", "username": "testbot"},
+            fetch_val=42,
+            fetch_rows=[],
+        )
+        with patch("services.broadcaster.db") as mock_db:
+            mock_db.safe_count = AsyncMock(return_value=100)
+            result = await mass_broadcast_with_scheduling(
+                pool, 123, 1, "Hello!", {"segment": "all"}
+            )
+        assert result["ok"] is True
+        assert result["total_users"] == 100
+        assert result["scheduled_minutes"] == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_schedule_delayed(self):
+        from services.broadcaster import mass_broadcast_with_scheduling
+        pool = FakePool(
+            fetch_row={"id": 42, "bot_id": 1, "token": "tok", "username": "testbot"},
+            fetch_val=42,
+        )
+        with patch("services.broadcaster.db") as mock_db:
+            mock_db.safe_count = AsyncMock(return_value=50)
+            result = await mass_broadcast_with_scheduling(
+                pool, 123, 1, "Hello!", {"schedule_minutes": 30}
+            )
+        assert result["ok"] is True
+        assert result["scheduled_minutes"] == 30
+
+    @pytest.mark.asyncio
+    async def test_broadcast_schedule_bot_not_found(self):
+        from services.broadcaster import mass_broadcast_with_scheduling
+        pool = FakePool(fetch_row=None)
+        result = await mass_broadcast_with_scheduling(
+            pool, 123, 999, "Hello!", {}
+        )
+        assert result["ok"] is False
+        assert "Bot not found" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_broadcast_schedule_suspicious_text(self):
+        from services.broadcaster import mass_broadcast_with_scheduling
+        pool = FakePool()
+        with patch("services.broadcaster.check_sql_suspicious", return_value=True):
+            result = await mass_broadcast_with_scheduling(
+                pool, 123, 1, "'; DROP TABLE--", {}
+            )
+        assert result["ok"] is False
+
+    @pytest.mark.asyncio
+    async def test_ab_test_no_variants(self):
+        from services.broadcaster import ab_test_broadcast
+        pool = FakePool()
+        result = await ab_test_broadcast(pool, 123, 1, [])
+        assert result["ok"] is False
+        assert "variants" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_ab_test_too_many_variants(self):
+        from services.broadcaster import ab_test_broadcast
+        pool = FakePool()
+        variants = [{"text": f"msg{i}", "weight": 1} for i in range(15)]
+        result = await ab_test_broadcast(pool, 123, 1, variants)
+        assert result["ok"] is False
+        assert "Max 10" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_ab_test_bot_not_found(self):
+        from services.broadcaster import ab_test_broadcast
+        pool = FakePool(fetch_row=None)
+        result = await ab_test_broadcast(
+            pool, 123, 999, [{"text": "A", "weight": 1}]
+        )
+        assert result["ok"] is False
+        assert "Bot not found" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_ab_test_no_subscribers(self):
+        from services.broadcaster import ab_test_broadcast
+        pool = FakePool(
+            fetch_row={"bot_id": 1, "token": "tok", "username": "testbot"},
+        )
+        with patch("services.broadcaster.db") as mock_db:
+            mock_db.get_audience_user_ids = AsyncMock(return_value=[])
+            result = await ab_test_broadcast(
+                pool, 123, 1, [{"text": "A", "weight": 1}]
+            )
+        assert result["ok"] is False
+        assert "No active subscribers" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_ab_test_success(self):
+        from services.broadcaster import ab_test_broadcast
+        pool = FakePool(
+            fetch_row={"id": 10, "bot_id": 1, "token": "tok", "username": "testbot"},
+            fetch_val=20,
+        )
+        with patch("services.broadcaster.db") as mock_db:
+            mock_db.get_audience_user_ids = AsyncMock(
+                return_value=list(range(1, 101))
+            )
+            with patch("services.broadcaster.check_sql_suspicious", return_value=False):
+                result = await ab_test_broadcast(
+                    pool, 123, 1, [
+                        {"text": "Variant A", "weight": 1},
+                        {"text": "Variant B", "weight": 1},
+                    ]
+                )
+        assert result["ok"] is True
+        assert result["total_users"] == 100
+        assert len(result["broadcasts"]) >= 1
+
+    @pytest.mark.asyncio
+    async def test_broadcast_analytics_found(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(
+            fetch_row={
+                "id": 1, "bot_id": 1, "message_text": "Hello",
+                "status": "done", "sent_count": 95, "failed_count": 5,
+                "total_users": 100, "created_at": None,
+                "buttons": None, "silent": False, "bot_username": "testbot",
+            },
+            fetch_rows=[
+                {"user_id": 1, "sent_at": None},
+                {"user_id": 2, "sent_at": None},
+            ],
+        )
+        result = await get_broadcast_analytics(pool, 123, 1)
+        assert result["ok"] is True
+        assert result["sent_count"] == 95
+        assert result["failed_count"] == 5
+        assert result["total_users"] == 100
+        assert result["delivery_rate_pct"] == 95.0
+        assert result["bot_username"] == "testbot"
+
+    @pytest.mark.asyncio
+    async def test_broadcast_analytics_not_found(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(fetch_row=None)
+        result = await get_broadcast_analytics(pool, 123, 999)
+        assert result["ok"] is False
+        assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_analytics_zero_total(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(
+            fetch_row={
+                "id": 1, "bot_id": 1, "message_text": "Hello",
+                "status": "done", "sent_count": 0, "failed_count": 0,
+                "total_users": 0, "created_at": None,
+                "buttons": None, "silent": False, "bot_username": "testbot",
+            },
+            fetch_rows=[],
+        )
+        result = await get_broadcast_analytics(pool, 123, 1)
+        assert result["ok"] is True
+        assert result["delivery_rate_pct"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Proxy Pool Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestProxyPool:
+    """Tests for proxy_selector.py and proxy_hygiene.py proxy pool functions."""
+
+    @pytest.mark.asyncio
+    async def test_proxy_pool_stats_empty(self):
+        from services.proxy_selector import get_proxy_pool_stats
+        pool = FakePool(fetch_rows=[])
+        result = await get_proxy_pool_stats(pool, 123)
+        assert result["total"] == 0
+        assert result["active"] == 0
+        assert result["dead"] == 0
+
+    @pytest.mark.asyncio
+    async def test_proxy_pool_stats_with_proxies(self):
+        from services.proxy_selector import get_proxy_pool_stats
+        pool = FakePool(fetch_rows=[
+            {
+                "id": 1, "is_active": True, "is_alive": True,
+                "geo_country": "US", "proxy_url": "enc1", "assigned_count": 2,
+            },
+            {
+                "id": 2, "is_active": True, "is_alive": False,
+                "geo_country": "DE", "proxy_url": "enc2", "assigned_count": 0,
+            },
+            {
+                "id": 3, "is_active": False, "is_alive": True,
+                "geo_country": "US", "proxy_url": "enc3", "assigned_count": 1,
+            },
+        ])
+        with patch("services.proxy_selector.get_proxy_score", return_value=0.7):
+            result = await get_proxy_pool_stats(pool, 123)
+        assert result["total"] == 3
+        assert result["active"] == 2
+        assert result["inactive"] == 1
+        assert result["dead"] == 1
+        assert result["assigned"] == 2
+        assert result["unassigned"] == 1
+        assert result["avg_score"] == 0.7
+        assert result["geo_distribution"]["US"] == 2
+        assert result["geo_distribution"]["DE"] == 1
+
+    @pytest.mark.asyncio
+    async def test_proxy_pool_stats_db_error(self):
+        from services.proxy_selector import get_proxy_pool_stats
+        pool = FakePool(error=Exception("DB down"))
+        result = await get_proxy_pool_stats(pool, 123)
+        assert result["total"] == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_rotate_no_account(self):
+        from services.proxy_selector import auto_rotate_proxy
+        pool = FakePool(fetch_row=None)
+        result = await auto_rotate_proxy(pool, 123, 999)
+        assert result["success"] is False
+        assert "not found" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_auto_rotate_no_proxies(self):
+        from services.proxy_selector import auto_rotate_proxy
+        pool = FakePool(
+            fetch_row={"id": 1, "proxy_id": 10},
+            fetch_rows=[],
+        )
+        result = await auto_rotate_proxy(pool, 123, 1)
+        assert result["success"] is False
+        assert "no active proxies" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_auto_rotate_success(self):
+        from services.proxy_selector import auto_rotate_proxy
+        pool = FakePool(
+            fetch_row={"id": 1, "proxy_id": 10},
+            fetch_rows=[
+                {"id": 10, "proxy_url": "enc1", "is_alive": True, "is_active": True},
+            ],
+        )
+        with patch("services.proxy_selector.get_proxy_score", return_value=0.8), \
+             patch("services.proxy_selector.extract_ip_from_proxy", return_value="1.2.3.4"):
+            result = await auto_rotate_proxy(pool, 123, 1)
+        assert result["success"] is True
+        assert result["new_proxy_id"] == 10
+        assert result["old_proxy_id"] == 10
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_no_proxies(self):
+        from services.proxy_hygiene import cleanup_dead_proxies
+        pool = FakePool(fetch_rows=[])
+        result = await cleanup_dead_proxies(pool, 123)
+        assert result["removed_count"] == 0
+        assert result["removed_ids"] == []
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_removes_unassigned_dead(self):
+        from services.proxy_hygiene import cleanup_dead_proxies
+        pool = FakePool(
+            fetch_rows=[
+                {"id": 1, "is_active": True, "is_alive": False, "assigned_count": 0},
+                {"id": 2, "is_active": True, "is_alive": False, "assigned_count": 0},
+            ],
+            execute_val="DELETE 1",
+        )
+        result = await cleanup_dead_proxies(pool, 123)
+        assert result["removed_count"] == 2
+        assert 1 in result["removed_ids"]
+        assert 2 in result["removed_ids"]
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_skips_assigned(self):
+        from services.proxy_hygiene import cleanup_dead_proxies
+        pool = FakePool(
+            fetch_rows=[
+                {"id": 1, "is_active": True, "is_alive": False, "assigned_count": 3},
+                {"id": 2, "is_active": True, "is_alive": False, "assigned_count": 0},
+            ],
+            execute_val="DELETE 1",
+        )
+        result = await cleanup_dead_proxies(pool, 123)
+        assert result["removed_count"] == 1
+        assert result["skipped_assigned"] == 1
+        assert 2 in result["removed_ids"]
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_skips_alive(self):
+        from services.proxy_hygiene import cleanup_dead_proxies
+        pool = FakePool(
+            fetch_rows=[
+                {"id": 1, "is_active": True, "is_alive": True, "assigned_count": 0},
+            ],
+        )
+        result = await cleanup_dead_proxies(pool, 123)
+        assert result["removed_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_skips_null_alive(self):
+        from services.proxy_hygiene import cleanup_dead_proxies
+        pool = FakePool(
+            fetch_rows=[
+                {"id": 1, "is_active": True, "is_alive": None, "assigned_count": 0},
+            ],
+        )
+        result = await cleanup_dead_proxies(pool, 123)
+        assert result["removed_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_dead_db_error(self):
+        from services.proxy_hygiene import cleanup_dead_proxies
+        pool = FakePool(error=Exception("DB error"))
+        result = await cleanup_dead_proxies(pool, 123)
+        assert result["errors"]
+        assert result["removed_count"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Auto-Registration Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAutoRegistration:
+    """Tests for auto_registrar.py batch registration and stats."""
+
+    @pytest.mark.asyncio
+    async def test_batch_register_no_api_key(self):
+        from bot.handlers.auto_registrar import batch_register_with_scheduling
+        pool = FakePool()
+        with patch("bot.handlers.auto_registrar.db") as mock_db:
+            mock_db.get_platform_setting = AsyncMock(return_value="")
+            result = await batch_register_with_scheduling(pool, 123, 5)
+        assert result["status"] == "no_api_key"
+        assert result["count"] == 0
+        assert result["task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_batch_register_scheduled(self):
+        from bot.handlers.auto_registrar import batch_register_with_scheduling
+        pool = FakePool(fetch_val=100)
+        with patch("bot.handlers.auto_registrar.db") as mock_db:
+            mock_db.get_platform_setting = AsyncMock(return_value="real_key")
+            mock_db.create_scheduled = AsyncMock(return_value=100)
+            result = await batch_register_with_scheduling(
+                pool, 123, 10,
+                {"execute_at": "2025-01-01T12:00:00", "country": "russia"},
+            )
+        assert result["task_id"] == 100
+        assert result["status"] == "queued"
+        assert result["count"] == 10
+
+    @pytest.mark.asyncio
+    async def test_batch_register_with_repetition(self):
+        from bot.handlers.auto_registrar import batch_register_with_scheduling
+        pool = FakePool(fetch_val=200)
+        with patch("bot.handlers.auto_registrar.db") as mock_db:
+            mock_db.get_platform_setting = AsyncMock(return_value="real_key")
+            mock_db.create_scheduled = AsyncMock(return_value=200)
+            result = await batch_register_with_scheduling(
+                pool, 123, 5,
+                {"execute_at": "2025-01-01T12:00:00", "interval_minutes": 60},
+            )
+        assert result["task_id"] == 200
+        assert result["status"] == "queued"
+        assert len(pool._calls) >= 1
+
+    @pytest.mark.asyncio
+    async def test_registration_stats_empty(self):
+        from bot.handlers.auto_registrar import get_registration_stats
+        pool = FakePool(fetch_row=None)
+        result = await get_registration_stats(pool, 123)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_registration_stats_with_data(self):
+        from bot.handlers.auto_registrar import get_registration_stats
+        pool = FakePool(fetch_row={
+            "total": 50,
+            "active": 40,
+            "inactive": 8,
+            "banned": 2,
+            "added_today": 3,
+            "added_this_week": 12,
+            "added_this_month": 30,
+            "avg_trust_score": 0.85,
+            "last_registration_at": None,
+        })
+        result = await get_registration_stats(pool, 123)
+        assert result["total"] == 50
+        assert result["active"] == 40
+        assert result["inactive"] == 8
+        assert result["banned"] == 2
+        assert result["added_today"] == 3
+        assert result["added_this_week"] == 12
+        assert result["added_this_month"] == 30
+        assert result["avg_trust_score"] == 0.85
+
+    @pytest.mark.asyncio
+    async def test_registration_stats_zero_accounts(self):
+        from bot.handlers.auto_registrar import get_registration_stats
+        pool = FakePool(fetch_row={
+            "total": 0,
+            "active": 0,
+            "inactive": 0,
+            "banned": 0,
+            "added_today": 0,
+            "added_this_week": 0,
+            "added_this_month": 0,
+            "avg_trust_score": None,
+            "last_registration_at": None,
+        })
+        result = await get_registration_stats(pool, 123)
+        assert result["total"] == 0
+        assert result["active"] == 0
