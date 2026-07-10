@@ -10796,6 +10796,121 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def dashboard_realtime(request: web.Request) -> web.Response:
+        """Analytics Dashboard — сводка owner-уровня в форме, которую ждёт экран
+        s-analytics-dashboard. Реальные данные там, где система их собирает
+        (каналы, аудитория ботов, операции, активность); просмотры/история графиков
+        — пусто (сбор этой статистики в системе пока не ведётся, экран деградирует
+        в «Нет данных», а не врёт числами)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rng = request.query.get("range", "7d")
+        days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(rng, 7)
+        try:
+            from services import analytics_dashboard as _ad
+            stats = await _ad.get_dashboard_stats(pool, uid)
+            aud = stats.get("audience", {}) or {}
+            ch_total = await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid) or 0
+            top_rows = await _safe_fetch(pool,
+                "SELECT title, username, channel_id FROM managed_channels "
+                "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT 10", uid)
+            top_channels = [{
+                "name": r["title"] or r["username"] or str(r["channel_id"]),
+                "username": r["username"] or "",
+                "subscribers": 0, "views": 0, "growth": 0,  # нет сбора stat по каналам
+            } for r in (top_rows or [])]
+            posts = await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1 "
+                "AND action ILIKE '%post%' AND occurred_at > NOW() - ($2 * INTERVAL '1 day')",
+                uid, days) or 0
+            act_rows = await _safe_fetch(pool,
+                "SELECT action, result, target, occurred_at FROM operation_audit "
+                "WHERE owner_id=$1 ORDER BY occurred_at DESC LIMIT 15", uid)
+            def _atype(a: str) -> str:
+                a = (a or "").lower()
+                if "post" in a: return "post"
+                if "join" in a or "sub" in a or "invite" in a: return "sub"
+                if "leave" in a or "unsub" in a: return "unsub"
+                return "other"
+            recent_activity = [{
+                "type": _atype(r["action"]),
+                "text": f"{r['action']}"
+                        + (f" → {r['target']}" if r["target"] else "")
+                        + (f" ({r['result']})" if r["result"] and r["result"] != "success" else ""),
+                "timestamp": r["occurred_at"].isoformat() if r["occurred_at"] else None,
+            } for r in (act_rows or [])]
+            return _json_resp({
+                "total_subscribers": int(aud.get("total_users", 0) or 0),
+                "total_channels": int(ch_total),
+                "total_posts": int(posts),
+                "total_views": 0,
+                "growth_7d": int(aud.get("new_7d", 0) or 0),
+                "subs_history": [], "views_history": [], "engagement_history": [],
+                "top_channels": top_channels,
+                "recent_activity": recent_activity,
+                "range": rng,
+            })
+        except Exception as e:
+            log.exception("dashboard_realtime uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def audience_analytics(request: web.Request) -> web.Response:
+        """Audience Analytics — owner-агрегат аудитории ботов в форме экрана
+        s-audience-analytics. Сегменты — по активности пользователей ботов
+        владельца; heatmap — по часам активности (реальные данные из bot_users)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            total = await _safe_fetchval(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.is_active=TRUE""", uid) or 0
+            active = await _safe_fetchval(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.is_active=TRUE
+                     AND bu.last_seen > NOW() - INTERVAL '7 days'""", uid) or 0
+            total = int(total); active = int(active)
+            new_7d = await _safe_fetchval(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.first_seen > NOW() - INTERVAL '7 days'""", uid) or 0
+            dormant = max(total - active, 0)
+            def _seg(name, count, color):
+                return {"name": name, "count": int(count),
+                        "percentage": round(count / total * 100, 1) if total else 0.0,
+                        "growth_pct": None, "avg_activity": "", "color": color}
+            segments = [
+                _seg("Активные (7д)", active, "#34c759"),
+                _seg("Новые (7д)", int(new_7d), "#0a84ff"),
+                _seg("Спящие", dormant, "#ff9f0a"),
+            ] if total else []
+            avg_eng = round(active / total * 100, 1) if total else 0.0
+            hm_rows = await _safe_fetch(pool,
+                """SELECT EXTRACT(HOUR FROM bu.last_seen)::int AS h, COUNT(*) AS c
+                   FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.last_seen IS NOT NULL
+                   GROUP BY 1 ORDER BY 1""", uid)
+            heatmap = [{"hour": int(r["h"]), "value": int(r["c"])} for r in (hm_rows or [])]
+            insights = []
+            if total:
+                insights.append({"title": "Аудитория", "text":
+                    f"Всего {total}, активных за 7д — {active} ({avg_eng}%)."})
+                if dormant:
+                    insights.append({"title": "Реактивация", "text":
+                        f"{dormant} спящих — кандидаты на прогрев/рассылку."})
+            return _json_resp({
+                "total_users": total, "active_users": active,
+                "avg_engagement": avg_eng, "segments": segments,
+                "insights": insights, "heatmap": heatmap,
+            })
+        except Exception as e:
+            log.exception("audience_analytics uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
     async def operation_export(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10822,6 +10937,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
+    app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
+    app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}/overlaps", ecosystem_overlaps)
     app.router.add_get("/api/miniapp/operations/export", operation_export)

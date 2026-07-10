@@ -15145,7 +15145,7 @@ function startDashAutoRefresh() {
 
 async function loadDashboard() {
   try {
-    const d = await api('/api/miniapp/dashboard_realtime', { method: '?' + new URLSearchParams({ range: _dashRange }) });
+    const d = await api('/api/miniapp/dashboard_realtime?' + new URLSearchParams({ range: _dashRange }));
 
     document.getElementById('dk-users').textContent = num(d.total_subscribers || 0);
     document.getElementById('dk-channels').textContent = num(d.total_channels || 0);
@@ -15259,7 +15259,7 @@ function switchDashRange(range, el) {
 
 async function exportDashboard() {
   try {
-    const d = await api('/api/miniapp/dashboard_realtime', { method: '?' + new URLSearchParams({ range: _dashRange }) });
+    const d = await api('/api/miniapp/dashboard_realtime?' + new URLSearchParams({ range: _dashRange }));
     const csv = convertDashboardToCSV(d);
     downloadBlob(csv, 'dashboard_' + _dashRange + '.csv', 'text/csv');
     toast('📤 Дашборд экспортирован');
