@@ -4560,6 +4560,384 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: RANKING ENGINE ══════════════════════ -->
+<div class="screen" id="s-ranking">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🏆 Рейтинг — позиции</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openRankingAddModal()">+ Ключевое слово</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="acc-kpi" id="rankingKpi">
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-total">—</div><div class="acc-kpi-lbl">Слов</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-top3" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Топ-3</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-top10" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Топ-10</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-alerts" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Алерты</div></div>
+    </div>
+    <div class="filter-chips" id="rankingFilter">
+      <div class="chip on" onclick="filterRanking('all',this)">Все</div>
+      <div class="chip" onclick="filterRanking('improved',this)">📈 Рост</div>
+      <div class="chip" onclick="filterRanking('dropped',this)">📉 Падение</div>
+      <div class="chip" onclick="filterRanking('top3',this)">🏆 Топ-3</div>
+    </div>
+    <div class="sec">Отслеживаемые ключевые слова</div>
+    <div class="lst" id="rankingKeywords"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">График позиций</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <canvas id="rankingChart" style="width:100%;height:160px"></canvas>
+      <div id="rankingChartEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Добавьте ключевые слова для отслеживания</div>
+    </div>
+    <div class="sec" style="margin-top:12px">🔔 Последние алерты</div>
+    <div class="lst" id="rankingAlerts"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: ADD RANKING KEYWORD ══════════════════════ -->
+<div class="mbg" id="mo-ranking-add" onclick="if(event.target===this)closeModal('mo-ranking-add')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-ranking-add')">✕</div>
+    <div class="modal-title">🔍 Добавить ключевое слово</div>
+    <div class="field">
+      <label>Ключевое слово *</label>
+      <input type="text" id="rkAddKeyword" placeholder="напр: маркетинг ботов" class="inp">
+    </div>
+    <div class="field">
+      <label>Бот для проверки</label>
+      <select id="rkAddBot" class="sel"></select>
+    </div>
+    <div class="field">
+      <label>Целевой регион</label>
+      <select id="rkAddRegion" class="sel">
+        <option value="ru">🇷🇺 Россия</option>
+        <option value="ua">🇺🇦 Украина</option>
+        <option value="kz">🇰🇿 Казахстан</option>
+        <option value="global">🌍 Глобально</option>
+      </select>
+    </div>
+    <div class="field-err" id="rkAddErr"></div>
+    <button class="btn btn-p" id="rkAddBtn" onclick="submitRankingAdd()" style="width:100%">🔍 Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: NETWORK BUILDER ══════════════════════ -->
+<div class="screen" id="s-network-builder">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🕸️ Сетки — конструктор</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openNetBuilderCreateModal()">+ Новая сеть</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="acc-kpi" id="netKpi">
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="nb-total">—</div><div class="acc-kpi-lbl">Сеток</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="nb-nodes" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Узлов</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="nb-edges" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Рёбер</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="nb-active" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Активных</div></div>
+    </div>
+    <div class="sec">Шаблоны сеток</div>
+    <div style="display:flex;gap:8px;padding:4px 16px 8px;overflow-x:auto">
+      <div class="mgmt-tile" onclick="applyNetTemplate('hub_spoke')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">🎯</div>
+        <div class="mgmt-tile-lbl">Хаб</div>
+      </div>
+      <div class="mgmt-tile" onclick="applyNetTemplate('chain')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">🔗</div>
+        <div class="mgmt-tile-lbl">Цепочка</div>
+      </div>
+      <div class="mgmt-tile" onclick="applyNetTemplate('mesh')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">🕸️</div>
+        <div class="mgmt-tile-lbl">Меш</div>
+      </div>
+      <div class="mgmt-tile" onclick="applyNetTemplate('tree')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">🌲</div>
+        <div class="mgmt-tile-lbl">Дерево</div>
+      </div>
+    </div>
+    <div class="sec">Мои сетки</div>
+    <div class="lst" id="netBuilderList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Топология выбранной сети</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px;min-height:180px">
+      <div id="netTopologyCanvas" style="width:100%;height:180px;position:relative">
+        <div id="netTopologyEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:40px 0">Выберите сеть для просмотра топологии</div>
+      </div>
+    </div>
+    <div id="netTopologyNodes" style="display:none">
+      <div class="sec" style="margin-top:12px">Узлы и рёбра</div>
+      <div style="padding:4px 16px;display:flex;gap:8px">
+        <button class="btn btn-s" onclick="openNetAddNodeModal()" style="flex:1;font-size:13px;padding:8px 6px">+ Узел</button>
+        <button class="btn btn-s" onclick="openNetAddEdgeModal()" style="flex:1;font-size:13px;padding:8px 6px">+ Ребро</button>
+      </div>
+      <div class="lst" id="netNodesList"></div>
+      <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: CREATE NETWORK ══════════════════════ -->
+<div class="mbg" id="mo-net-create" onclick="if(event.target===this)closeModal('mo-net-create')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-net-create')">✕</div>
+    <div class="modal-title">🕸️ Новая сеть</div>
+    <div class="field">
+      <label>Название *</label>
+      <input type="text" id="nbCreateName" placeholder="Моя сеть" class="inp">
+    </div>
+    <div class="field">
+      <label>Шаблон</label>
+      <select id="nbCreateTemplate" class="sel">
+        <option value="">Пустая сеть</option>
+        <option value="hub_spoke">🎯 Хаб-спицы</option>
+        <option value="chain">🔗 Цепочка</option>
+        <option value="mesh">🕸️ Меш</option>
+        <option value="tree">🌲 Дерево</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Описание</label>
+      <textarea id="nbCreateDesc" rows="2" placeholder="Описание сети..." class="input-bc"></textarea>
+    </div>
+    <div class="field-err" id="nbCreateErr"></div>
+    <button class="btn btn-p" id="nbCreateBtn" onclick="submitNetCreate()" style="width:100%">🕸️ Создать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: ADD NODE ══════════════════════ -->
+<div class="mbg" id="mo-net-node" onclick="if(event.target===this)closeModal('mo-net-node')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-net-node')">✕</div>
+    <div class="modal-title">➕ Добавить узел</div>
+    <div class="field">
+      <label>Тип узла *</label>
+      <select id="nbNodeType" class="sel">
+        <option value="bot">🤖 Бот</option>
+        <option value="channel">📡 Канал</option>
+        <option value="group">👥 Группа</option>
+        <option value="account">📱 Аккаунт</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>ID объекта *</label>
+      <input type="text" id="nbNodeId" placeholder="bot_id, channel_id..." class="inp">
+    </div>
+    <div class="field">
+      <label>Метка</label>
+      <input type="text" id="nbNodeLabel" placeholder="Необязательная метка" class="inp">
+    </div>
+    <div class="field-err" id="nbNodeErr"></div>
+    <button class="btn btn-p" onclick="submitNetAddNode()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: ADD EDGE ══════════════════════ -->
+<div class="mbg" id="mo-net-edge" onclick="if(event.target===this)closeModal('mo-net-edge')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-net-edge')">✕</div>
+    <div class="modal-title">🔗 Добавить ребро</div>
+    <div class="field">
+      <label>Из узла *</label>
+      <select id="nbEdgeFrom" class="sel"></select>
+    </div>
+    <div class="field">
+      <label>В узел *</label>
+      <select id="nbEdgeTo" class="sel"></select>
+    </div>
+    <div class="field">
+      <label>Тип связи</label>
+      <select id="nbEdgeType" class="sel">
+        <option value="forward">📨 Пересылка</option>
+        <option value="crosspost">🔁 Кросс-постинг</option>
+        <option value="mention">📢 Упоминание</option>
+        <option value="referral">🔗 Реферальная</option>
+      </select>
+    </div>
+    <div class="field-err" id="nbEdgeErr"></div>
+    <button class="btn btn-p" onclick="submitNetAddEdge()" style="width:100%">🔗 Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: WORKFLOWS ══════════════════════ -->
+<div class="screen" id="s-workflows">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔄 Воркфлоу</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openWorkflowCreateModal()">+ Создать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="acc-kpi" id="wfKpi">
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-total">—</div><div class="acc-kpi-lbl">Всего</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-active" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Активных</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-running" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Выполняется</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-failed" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Ошибки</div></div>
+    </div>
+    <div class="sec">Шаблоны воркфлоу</div>
+    <div style="display:flex;gap:8px;padding:4px 16px 8px;overflow-x:auto">
+      <div class="mgmt-tile" onclick="createWorkflowFromTemplate('welcome')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">👋</div>
+        <div class="mgmt-tile-lbl">Приветствие</div>
+      </div>
+      <div class="mgmt-tile" onclick="createWorkflowFromTemplate('drip')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">💧</div>
+        <div class="mgmt-tile-lbl">Дрип</div>
+      </div>
+      <div class="mgmt-tile" onclick="createWorkflowFromTemplate('react')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">⚡</div>
+        <div class="mgmt-tile-lbl">Реакция</div>
+      </div>
+      <div class="mgmt-tile" onclick="createWorkflowFromTemplate('condition')" style="min-width:100px;flex:1">
+        <div class="mgmt-tile-ico">🔀</div>
+        <div class="mgmt-tile-lbl">Условие</div>
+      </div>
+    </div>
+    <div class="sec">Мои воркфлоу</div>
+    <div class="lst" id="wfList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: CREATE WORKFLOW ══════════════════════ -->
+<div class="mbg" id="mo-wf-create" onclick="if(event.target===this)closeModal('mo-wf-create')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-wf-create')">✕</div>
+    <div class="modal-title">🔄 Новый воркфлоу</div>
+    <div class="field">
+      <label>Название *</label>
+      <input type="text" id="wfCreateName" placeholder="Мой воркфлоу" class="inp">
+    </div>
+    <div class="field">
+      <label>Бот</label>
+      <select id="wfCreateBot" class="sel"></select>
+    </div>
+    <div class="field">
+      <label>Описание</label>
+      <textarea id="wfCreateDesc" rows="2" placeholder="Назначение воркфлоу..." class="input-bc"></textarea>
+    </div>
+    <div class="field-err" id="wfCreateErr"></div>
+    <button class="btn btn-p" id="wfCreateBtn" onclick="submitWorkflowCreate()" style="width:100%">🔄 Создать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: WORKFLOW DETAIL ══════════════════════ -->
+<div class="screen" id="s-workflow-detail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="wfd-name">Воркфлоу</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openWfAddStepModal()">+ Шаг</button></div>
+  </div>
+  <div class="sub-sb" id="wfd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ MODAL: ADD WORKFLOW STEP ══════════════════════ -->
+<div class="mbg" id="mo-wf-step" onclick="if(event.target===this)closeModal('mo-wf-step')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-wf-step')">✕</div>
+    <div class="modal-title">➕ Добавить шаг</div>
+    <div class="field">
+      <label>Тип шага *</label>
+      <select id="wfStepType" class="sel">
+        <option value="message">💬 Сообщение</option>
+        <option value="delay">⏳ Задержка</option>
+        <option value="condition">🔀 Условие</option>
+        <option value="action">⚡ Действие</option>
+        <option value="webhook">🌐 Webhook</option>
+      </select>
+    </div>
+    <div class="field" id="wfStepMsgField">
+      <label>Текст сообщения</label>
+      <textarea id="wfStepMsg" rows="3" placeholder="Текст сообщения пользователю..." class="input-bc"></textarea>
+    </div>
+    <div class="field" id="wfStepDelayField" style="display:none">
+      <label>Задержка (минуты)</label>
+      <input type="number" id="wfStepDelay" min="1" max="1440" placeholder="60" class="inp">
+    </div>
+    <div class="field" id="wfStepConditionField" style="display:none">
+      <label>Условие</label>
+      <select id="wfStepCondition" class="sel">
+        <option value="subscribed">Подписан на канал</option>
+        <option value="clicked">Нажал кнопку</option>
+        <option value="inactive_days">Дней неактивен (≥)</option>
+        <option value="tag_has">Есть тег</option>
+      </select>
+      <input type="text" id="wfStepConditionVal" placeholder="Значение (если нужно)" class="inp" style="margin-top:6px">
+    </div>
+    <div class="field-err" id="wfStepErr"></div>
+    <button class="btn btn-p" onclick="submitWfAddStep()" style="width:100%">➕ Добавить шаг</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AUDIENCE ANALYTICS ══════════════════════ -->
+<div class="screen" id="s-audience-analytics">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👥 Аудитория+ — анализ</div>
+  </div>
+  <div class="sub-sb">
+    <div class="acc-kpi" id="audAnaKpi">
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-total">—</div><div class="acc-kpi-lbl">Всего</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-active" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Активных</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-segments" style="color:var(--purple)">—</div><div class="acc-kpi-lbl">Сегментов</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-engagement" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">ER</div></div>
+    </div>
+    <div class="sec">Сегменты аудитории</div>
+    <div id="audSegmentChips" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto"></div>
+    <div class="lst" id="audSegmentsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Инсайты</div>
+    <div class="lst" id="audInsightsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Активность по часам</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <canvas id="audHeatmap" style="width:100%;height:120px"></canvas>
+      <div id="audHeatmapEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Нет данных для тепловой карты</div>
+    </div>
+    <div class="sec" style="margin-top:12px">Рост по сегментам</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <div id="audSegChart"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ANALYTICS DASHBOARD ══════════════════════ -->
+<div class="screen" id="s-analytics-dashboard">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📈 Дашборд метрик</div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
+      <span class="ld pulse" id="dashLiveDot"></span>
+      <button class="btn btn-s" style="flex:0;padding:6px 10px;min-width:0;font-size:12px" onclick="exportDashboard()">📤 Экспорт</button>
+    </div>
+  </div>
+  <div class="sub-sb">
+    <div class="kpi-scroll" id="dashKpiScroll">
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-users" style="color:var(--blue)">—</div><div class="kpi-chip-lbl">👥 Подписчики</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-channels" style="color:var(--purple)">—</div><div class="kpi-chip-lbl">📡 Каналы</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-posts" style="color:var(--green)">—</div><div class="kpi-chip-lbl">📝 Посты</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">👁 Просмотры</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Рост 7д</div></div>
+    </div>
+    <div class="seg" id="dashTimeSeg">
+      <div class="seg-opt on" onclick="switchDashRange('24h',this)">24ч</div>
+      <div class="seg-opt" onclick="switchDashRange('7d',this)">7 дн</div>
+      <div class="seg-opt" onclick="switchDashRange('30d',this)">30 дн</div>
+      <div class="seg-opt" onclick="switchDashRange('90d',this)">90 дн</div>
+    </div>
+    <div class="sec">Подписчики</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <canvas id="dashSubsChart" style="width:100%;height:140px"></canvas>
+      <div id="dashSubsEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
+    </div>
+    <div class="sec" style="margin-top:12px">Просмотры постов</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <canvas id="dashViewsChart" style="width:100%;height:140px"></canvas>
+      <div id="dashViewsEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
+    </div>
+    <div class="sec" style="margin-top:12px">Вовлечённость</div>
+    <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <canvas id="dashEngChart" style="width:100%;height:140px"></canvas>
+      <div id="dashEngEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
+    </div>
+    <div class="sec" style="margin-top:12px">Топ каналов</div>
+    <div class="lst" id="dashTopChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Последние события</div>
+    <div class="lst" id="dashActivity"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 </div><!-- /app -->
 
 <script>
