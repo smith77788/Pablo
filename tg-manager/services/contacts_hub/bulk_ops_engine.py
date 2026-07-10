@@ -111,12 +111,23 @@ async def delete_group(pool, group_id: int, owner_id: int) -> bool:
 
 async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
     merged = 0
+    skipped = 0
     conn = await pool.acquire()
     try:
         for pair in pairs:
             primary_id = pair.get('primary_id')
             secondary_id = pair.get('secondary_id')
             if not primary_id or not secondary_id or primary_id == secondary_id:
+                skipped += 1
+                continue
+            # Владение ОБОИМИ контактами обязано быть проверено до того, как мы
+            # тронем contact_sources/contact_history — иначе пара с чужим id
+            # даёт межарендный IDOR (см. manual_merge / AUDIT_LEDGER).
+            owned = await conn.fetchrow(
+                'SELECT COUNT(*) AS cnt FROM unified_contacts WHERE id IN ($1,$2) AND owner_id=$3',
+                primary_id, secondary_id, owner_id)
+            if not owned or owned['cnt'] != 2:
+                skipped += 1
                 continue
             async with conn.transaction():
                 await conn.execute(
@@ -131,7 +142,7 @@ async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
             merged += 1
     finally:
         await pool.release(conn)
-    return {'merged': merged}
+    return {'merged': merged, 'skipped': skipped}
 
 
 async def bulk_export(pool, owner_id: int, contact_ids: list, format: str = 'json') -> dict:
