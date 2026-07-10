@@ -4888,6 +4888,10 @@ async def get_all_proxy_quality_stats(pool: asyncpg.Pool, owner_id: int) -> list
            ORDER BY p.label""",
         owner_id,
     )
+    # proxy_url хранится зашифрованным (token_vault) — расшифровываем для потребителя,
+    # как во всех остальных листьях (passthrough legacy plaintext).
+    from services.token_vault import decrypt_token
+
     result = []
     for r in rows:
         total = r["total"] or 0
@@ -4895,7 +4899,7 @@ async def get_all_proxy_quality_stats(pool: asyncpg.Pool, owner_id: int) -> list
             {
                 "id": r["id"],
                 "label": r["label"],
-                "proxy_url": r["proxy_url"],
+                "proxy_url": decrypt_token(r["proxy_url"]) if r["proxy_url"] else r["proxy_url"],
                 "success_rate": round((r["successes"] or 0) / total * 100, 1)
                 if total > 0
                 else None,
