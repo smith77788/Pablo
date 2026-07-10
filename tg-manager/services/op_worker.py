@@ -6434,20 +6434,36 @@ async def _exec_check_accounts_health(
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
     """
-    if account_ids:
-        rows = await _safe_fetch(
-                pool,
-            _HC_COLS + "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
-            owner_id, account_ids,
-        )
-    else:
-        rows = await _safe_fetch(
-                pool,
-            _HC_COLS + "WHERE a.owner_id=$1",
-            owner_id,
-        )
+    # Минимальный безопасный набор колонок — на случай лага миграции device-полей
+    # (app_version/system_lang_code добавлены поздно). Device-fingerprint для
+    # проверки статуса не критичен, поэтому фолбэк без него лучше, чем ложное
+    # «Нет аккаунтов» (было: _safe_fetch глушил UndefinedColumnError → [] → failed).
+    _HC_MIN = """
+        SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+               p.proxy_url
+        FROM tg_accounts a
+        LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+    """
+    _where = ("WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])"
+              if account_ids else "WHERE a.owner_id=$1")
+    _args = (owner_id, account_ids) if account_ids else (owner_id,)
+    query_errored = False
+    try:
+        rows = await pool.fetch(_HC_COLS + _where, *_args)
+    except Exception as exc:
+        # Полный набор колонок не прошёл (лаг миграции device-полей и т.п.) —
+        # пробуем минимальный. Не глушим совсем: если и он падает — это реальная
+        # ошибка БД, её и вернём (а не ложное «нет аккаунтов»).
+        log.warning("check_accounts_health: full column set failed (%s), fallback to minimal", exc)
+        try:
+            rows = await pool.fetch(_HC_MIN + _where, *_args)
+        except Exception as exc2:
+            return {"status": "failed", "reason": f"Ошибка запроса аккаунтов: {str(exc2)[:100]}"}
+        query_errored = True
     accounts = [dict(r) for r in rows]
     if not accounts:
+        # Тут аккаунтов реально нет (запрос отработал) — либо у владельца их нет,
+        # либо переданы чужие id. Не путаем с ошибкой запроса (см. выше).
         return {"status": "failed", "reason": "Нет аккаунтов для проверки"}
 
     n = len(accounts)
