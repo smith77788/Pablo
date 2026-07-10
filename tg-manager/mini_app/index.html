@@ -2649,6 +2649,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="exportProxies()">📤 Экспорт</button>
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="cleanupDeadProxies()">🧹 Очистить мёртвые</button>
     </div>
+    <div style="margin-bottom:8px">
+      <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px" onclick="toggleProxyStats()">📊 Аналитика прокси</button>
+    </div>
+    <div id="proxyStatsBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyImportBox" style="display:none;margin-bottom:8px">
       <textarea id="proxyImport" rows="4" placeholder="socks5://user:pass@host:port&#10;http://host:port&#10;по одному на строку"></textarea>
@@ -8386,6 +8390,30 @@ async function cleanupDeadProxies() {
     toast(msg);
     loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+async function toggleProxyStats() {
+  const box = document.getElementById('proxyStatsBox');
+  if (box.style.display !== 'none') { box.style.display='none'; return; }
+  box.style.display='block';
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const r = await api('/api/miniapp/proxy_stats');
+    const list = r.proxies||[];
+    if (!list.length) { box.innerHTML = '<div style="opacity:.7">Прокси нет.</div>'; return; }
+    let h = '<div style="opacity:.6;margin-bottom:6px">Здоровье — durable (из «Проверить все»); скорость/успешность — с момента старта воркера (не durable).</div>';
+    h += list.map(p=>{
+      const health = (p.alive==null?'⚪ не проверен':(p.alive?'🟢 живой':'🔴 мёртв'));
+      const rate = (p.total_checks>0? `${p.success_rate}% · ${p.avg_latency_ms}мс · ${p.total_checks} пров.` : 'нет замеров');
+      const assigned = p.assigned>0? `🔗 ${p.assigned} акк.` : 'не назначен';
+      const nm = esc(p.label||p.url||('Прокси #'+p.id));
+      return `<div class="li" style="display:block;padding:8px 10px">
+        <div class="li-name">${nm}${p.geo?(' · '+esc(p.geo)):''}${p.active?'':' · ⏸ выкл'}</div>
+        <div class="li-sub">${health} · ${assigned}</div>
+        <div class="li-sub">⚡ ${rate}</div>
+      </div>`;
+    }).join('');
+    box.innerHTML = h;
+  } catch(e) { box.innerHTML = errHtml(e.message,'toggleProxyStats()'); }
 }
 async function checkProxy(id, el) {
   if (el) { el.textContent='⏳'; el.style.pointerEvents='none'; }

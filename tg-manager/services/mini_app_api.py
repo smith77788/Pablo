@@ -10617,23 +10617,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            from services import account_manager as _am
+            from services import account_manager as _am, proxy_hygiene
+            from services.token_vault import decrypt_token
             rows = await pool.fetch(
-                "SELECT id, proxy_url, geo_country, is_active FROM user_proxies WHERE owner_id=$1",
+                """SELECT up.id, up.label, up.proxy_url, up.geo_country, up.is_active,
+                          up.is_alive, up.last_check,
+                          (SELECT COUNT(*) FROM tg_accounts a
+                           WHERE a.owner_id=$1 AND a.proxy_id=up.id) AS assigned
+                   FROM user_proxies up WHERE up.owner_id=$1 ORDER BY up.id""",
                 uid,
             )
             stats = []
             for r in rows:
+                # runtime-статы keyed по СТРОКЕ proxy_url из БД (тот же шифротекст
+                # используется в test_proxy → ключи совпадают); в UI показываем
+                # МАСКИРОВАННЫЙ расшифрованный url, а не сырой ENC:-шифротекст.
                 s = _am.get_proxy_stats(r["proxy_url"])
+                try:
+                    disp = proxy_hygiene.mask_proxy_url(decrypt_token(r["proxy_url"]))
+                except Exception:
+                    disp = proxy_hygiene.mask_proxy_url(r["proxy_url"])
                 stats.append({
                     "id": r["id"],
-                    "url": r["proxy_url"][:30] + "..." if len(r["proxy_url"] or "") > 30 else r["proxy_url"],
+                    "label": r["label"] or "",
+                    "url": disp,
                     "geo": r["geo_country"],
-                    "active": r["is_active"],
+                    "active": bool(r["is_active"]),
+                    "alive": (None if r["is_alive"] is None else bool(r["is_alive"])),
+                    "last_check": str(r["last_check"] or ""),
+                    "assigned": int(r["assigned"] or 0),
                     **s,
                 })
             return _json_resp({"proxies": stats})
         except Exception as e:
+            log.exception("proxy_stats uid=%s", uid)
             return _err(str(e), 500)
 
     async def ecosystem_recommendations(request: web.Request) -> web.Response:

@@ -69,3 +69,15 @@ def test_endpoints_routes_and_ui_wired():
     ui = _read("mini_app/index.html")
     assert "exportProxies" in ui and "cleanupDeadProxies" in ui
     assert "/api/miniapp/proxy/cleanup_dead" in ui and "/api/miniapp/proxy/export" in ui
+
+
+def test_proxy_stats_masks_and_enriches():
+    api = _read("services/mini_app_api.py")
+    seg = api[api.index("async def proxy_stats"):api.index("async def ecosystem_recommendations")]
+    # НЕ отдаём сырой ENC:-шифротекст в UI: расшифровка + маскировка
+    assert "decrypt_token" in seg and "proxy_hygiene.mask_proxy_url" in seg
+    assert 'r["proxy_url"][:30]' not in seg  # старый баг (показ шифротекста) устранён
+    # durable-здоровье и назначение обогащены
+    assert "is_alive" in seg and "last_check" in seg and "assigned" in seg
+    ui = _read("mini_app/index.html")
+    assert "toggleProxyStats" in ui and "/api/miniapp/proxy_stats" in ui
