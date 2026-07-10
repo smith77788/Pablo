@@ -2645,6 +2645,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="margin-bottom:8px">
       <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px" onclick="checkProxyIsolation()">🛡 Уникальность IP (изоляция)</button>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="exportProxies()">📤 Экспорт</button>
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="cleanupDeadProxies()">🧹 Очистить мёртвые</button>
+    </div>
     <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyImportBox" style="display:none;margin-bottom:8px">
       <textarea id="proxyImport" rows="4" placeholder="socks5://user:pass@host:port&#10;http://host:port&#10;по одному на строку"></textarea>
@@ -8351,7 +8355,37 @@ async function deleteProxy(id) {
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
     toast('Удалено'); loadProxies();
-  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+async function exportProxies() {
+  try {
+    const r = await api('/api/miniapp/proxy/export?format=json');
+    const list = r.proxies||[];
+    if (!list.length) { toast('Нет прокси для экспорта'); return; }
+    const header = ['ID','Метка','URL (маска)','Тип','Гео','Активен','Живой','Проверен','Резерв','Назначен аккаунтам'];
+    const rows = [header].concat(list.map(p=>[
+      p.id, p.label||'', p.url||'', p.type||'', p.geo||'',
+      p.active?'да':'нет', (p.alive==null?'?':(p.alive?'да':'нет')),
+      p.last_check||'', p.backup?'да':'нет', p.assigned||0
+    ]));
+    const csv = rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+    const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'proxies_'+new Date().toISOString().slice(0,10)+'.csv';
+    a.click(); URL.revokeObjectURL(a.href);
+    toast(`📤 Экспортировано: ${list.length}`);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+async function cleanupDeadProxies() {
+  if (!await askConfirm('Удалить подтверждённо мёртвые прокси? Назначенные аккаунтам и непроверенные НЕ трогаются. Сначала стоит «Проверить все».')) return;
+  try {
+    const r = await api('/api/miniapp/proxy/cleanup_dead', {method:'POST'});
+    let msg = `🧹 Удалено: ${r.removed||0}`;
+    if (r.skipped_assigned) msg += ` · пропущено (назначены): ${r.skipped_assigned}`;
+    toast(msg);
+    loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 async function checkProxy(id, el) {
   if (el) { el.textContent='⏳'; el.style.pointerEvents='none'; }
