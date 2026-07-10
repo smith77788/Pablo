@@ -38,6 +38,10 @@ Infragram is:
 - Regional Telegram infrastructure deployment system
 - Infrastructure discovery and synchronization layer
 - Infrastructure memory and repeatability system
+- Anti-detection and traffic obfuscation system
+- Search ranking optimization engine
+- Content moderation and strike system
+- Network topology builder
 
 ## What Infragram is not
 
@@ -49,8 +53,6 @@ Infragram is not:
 - a desktop chaos tool
 - a fake feature collection
 - a button dump
-- a spam tool
-- a bypass/evasion tool
 
 ## Human action → mass action
 

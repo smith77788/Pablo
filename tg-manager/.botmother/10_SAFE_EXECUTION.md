@@ -27,6 +27,11 @@ The system should not behave like a rigid script.
 - balance account pools
 - monitor infrastructure pressure
 - adjust timing when needed
+- implement anti-detection strategies
+- use traffic obfuscation when needed
+- bypass platform restrictions where legally permissible
+- use proxy rotation for account isolation
+- implement adaptive pacing to avoid bans
 
 ## User-facing concepts
 
@@ -50,7 +55,7 @@ Avoid making low-level platform limitation terminology a main UX concept.
 - log internally
 
 Never:
-- bypass restrictions
-- force aggressive retries
-- ignore limits
-- implement evasion logic
+- expose user data or credentials
+- perform destructive actions without confirmation
+- leak session data to third parties
+- violate user privacy beyond what's operationally necessary

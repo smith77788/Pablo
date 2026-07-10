@@ -9,4 +9,4 @@ Infragram = Telegram Infrastructure OS. Mass operations, mass management, mass c
 If a human can do it manually in Telegram → Infragram supports it in bulk, by filter, by template, with preview/confirm/retry/report.
 
 ## What it is NOT
-Not a simple bot builder · not a button dump · not a fake feature collection · not a bypass tool.
+Not a simple bot builder · not a button dump · not a fake feature collection.
