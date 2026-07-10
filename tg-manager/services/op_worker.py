@@ -1238,6 +1238,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_promote_presence_pack(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_edit_channels":
                 result = await _exec_bulk_edit_channels(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_seo_apply":
+                result = await _exec_bulk_seo_apply(pool, bot, op_id, owner_id, params)
             elif op_type == "group_import_all":
                 result = await _exec_group_import_all(pool, bot, op_id, owner_id, params)
             elif op_type == "group_announce":
@@ -5284,6 +5286,57 @@ async def _exec_promote_presence_pack(
             f"✅ Успешно: {success}/{total}{fail_hint}"
         ),
     }
+
+
+async def _exec_bulk_seo_apply(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовое применение AI SEO-предложений по всей сетке каналов.
+
+    Переиспользует ЕДИНУЮ реализацию services.seo_apply.apply_seo_to_channel (та
+    же, что инлайн-эндпоинт) — без дублирования. Изоляция сбоев по каналу,
+    per-channel лог в operation_log, поддержка отмены.
+    """
+    from services.seo_apply import apply_seo_to_channel
+
+    channel_ids = [int(x) for x in (params.get("channel_ids") or [])]
+    if not channel_ids:
+        return {"status": "failed", "summary": "⚠️ Нет каналов для применения SEO"}
+
+    total = len(channel_ids)
+    await _safe_execute(pool,
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count, fail_count = 0, 0
+    for idx, chan_id in enumerate(channel_ids, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await apply_seo_to_channel(pool, owner_id, chan_id)
+        except Exception as exc:
+            log.warning("bulk_seo_apply op=%d chan=%s: %s", op_id, chan_id, exc)
+            res = {"ok": False, "error": str(exc)[:200]}
+        if res.get("ok"):
+            ok_count += 1
+            applied = ", ".join((res.get("applied") or {}).keys()) or "без изменений"
+            await _safe_execute(pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'ok',$4)",
+                op_id, idx, f"ch#{chan_id}", ("SEO: " + applied)[:200])
+        else:
+            fail_count += 1
+            await _safe_execute(pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id, idx, f"ch#{chan_id}", (res.get("error") or "не удалось")[:200])
+        await _safe_execute(pool,
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(2.0)
+
+    summary = (f"🔍 SEO по сетке: применено {ok_count}/{total}"
+               + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
 async def _exec_bulk_edit_channels(
