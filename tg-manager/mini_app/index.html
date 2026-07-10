@@ -3063,7 +3063,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">Популярные ключевые слова</div>
     <div class="lst" id="seoKeywords"></div>
-    <div class="sec" style="margin-top:8px">AI SEO-предложения</div>
+    <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Применить всё →</span></div>
     <div class="lst" id="seoSuggestions"></div>
   </div>
 </div>
@@ -9511,6 +9511,16 @@ async function applySeo(chanId, btn) {
     toast('⚠️ '+(e.message||'Ошибка'));
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
+  }
+}
+// Массовое применение SEO по всей сетке (в очередь — результат в боте/операциях)
+async function applySeoAll() {
+  if (!await askConfirm('Применить SEO-оптимизацию ко ВСЕМ каналам сети с готовыми предложениями?')) return;
+  try {
+    const r = await api('/api/miniapp/seo/apply_all', {method:'POST'});
+    toast(`✅ Поставлено в очередь: ${r.count||0} каналов. Результат — в операциях/боте.`);
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
   }
 }
 

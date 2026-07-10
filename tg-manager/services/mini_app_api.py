@@ -3962,65 +3962,43 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             chan_id = int(body.get("chan_id"))
         except (TypeError, ValueError):
             return _err("chan_id обязателен", 400)
-        want = body.get("fields") or ["title", "about", "username"]
-        want = [f for f in want if f in ("title", "about", "username")]
-        if not want:
-            return _err("Нечего применять", 400)
+        fields = body.get("fields") or None
 
-        # Последнее предложение по каналу (скоуп по владельцу).
-        sug = await _safe_fetchrow(pool,
-            "SELECT title, about, username FROM seo_ai_suggestions "
-            "WHERE owner_id=$1 AND chan_id=$2 ORDER BY created_at DESC LIMIT 1",
-            uid, chan_id)
-        if not sug:
-            return _err("Нет SEO-предложения для этого канала", 404)
-
-        # Управляющий аккаунт канала (скоуп по владельцу).
-        ch = await _safe_fetchrow(pool,
-            "SELECT acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-            uid, chan_id)
-        if not ch or not ch.get("acc_id"):
-            return _err("Канал не найден или у него нет управляющего аккаунта", 404)
-
-        from database import db as _db
-        from services import account_manager
-        acc = await _db.get_account_for_telethon(pool, int(ch["acc_id"]), uid)
-        if not acc or not acc.get("session_str"):
-            return _err("Сессия управляющего аккаунта недоступна", 400)
-        session = acc["session_str"]
-        _acc = dict(acc)
-
-        applied, errors = {}, {}
+        # Единая реализация применения (та же, что в bulk-исполнителе) — без дублей.
+        from services.seo_apply import apply_seo_to_channel
         try:
-            if "title" in want and (sug.get("title") or "").strip():
-                ok = await asyncio.wait_for(
-                    account_manager.edit_channel_title(session, chan_id, sug["title"].strip(), _acc=_acc),
-                    timeout=45)
-                (applied if ok else errors)["title"] = sug["title"].strip() if ok else "не удалось"
-            if "about" in want and (sug.get("about") or "").strip():
-                ok = await asyncio.wait_for(
-                    account_manager.edit_channel_about(session, chan_id, sug["about"].strip(), _acc=_acc),
-                    timeout=45)
-                (applied if ok else errors)["about"] = "ok" if ok else "не удалось"
-            if "username" in want and (sug.get("username") or "").strip():
-                err = await asyncio.wait_for(
-                    account_manager.set_channel_username(session, chan_id, sug["username"].strip(), _acc=_acc),
-                    timeout=45)
-                if err:
-                    errors["username"] = err
-                else:
-                    applied["username"] = sug["username"].strip()
-        except asyncio.TimeoutError:
-            return _err("Аккаунт не ответил за 45с — проверьте прокси/сессию", 400)
+            res = await apply_seo_to_channel(pool, uid, chan_id, fields)
         except Exception as exc:
             log.exception("seo_apply uid=%d chan=%d", uid, chan_id)
             return _err(str(exc)[:200], 500)
 
-        if applied and not errors:
-            return _json_resp({"ok": True, "applied": applied})
-        if applied and errors:
-            return _json_resp({"ok": True, "applied": applied, "errors": errors, "partial": True})
-        return _err("Не удалось применить: " + "; ".join(f"{k}: {v}" for k, v in errors.items()), 400)
+        if res.get("ok"):
+            return _json_resp(res)
+        return _err(res.get("error") or "Не удалось применить", 400)
+
+    async def seo_apply_all(request: web.Request) -> web.Response:
+        """Массовое применение SEO-предложений по ВСЕЙ сетке — в очередь (op_worker),
+        т.к. правок много и инлайн упрётся в таймаут шлюза."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        # Каналы владельца, у которых есть хотя бы одно SEO-предложение и
+        # управляющий аккаунт.
+        rows = await _safe_fetch(pool,
+            "SELECT DISTINCT mc.channel_id FROM managed_channels mc "
+            "WHERE mc.owner_id=$1 AND mc.acc_id IS NOT NULL "
+            "AND EXISTS (SELECT 1 FROM seo_ai_suggestions s "
+            "            WHERE s.owner_id=$1 AND s.chan_id=mc.channel_id)",
+            uid)
+        chan_ids = [int(r["channel_id"]) for r in (rows or [])]
+        if not chan_ids:
+            return _err("Нет каналов с SEO-предложениями для применения", 400)
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,'bulk_seo_apply','pending',$2,$3,$4) RETURNING id",
+            uid, _json.dumps({"channel_ids": chan_ids}), len(chan_ids),
+            f"SEO по сетке: {len(chan_ids)} каналов")
+        return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
@@ -10406,6 +10384,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # SEO
     app.router.add_get("/api/miniapp/seo", seo_overview)
     app.router.add_post("/api/miniapp/seo/apply", seo_apply)
+    app.router.add_post("/api/miniapp/seo/apply_all", seo_apply_all)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
