@@ -3272,6 +3272,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
         elif act == "delete_pm":
             op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
+        elif act == "reauth":
+            op_type, params, label = "reauth_account", {"account_id": acc_id}, "Переавторизация аккаунта"
+        elif act == "export_session":
+            op_type, params, label = "export_session", {"account_id": acc_id}, "Экспорт сессии"
+        elif act == "reset_cooldown":
+            op_type, params, label = "reset_cooldown", {"account_id": acc_id}, "Сброс кулдауна"
         else:
             return _err("Неизвестное действие", 400)
         try:

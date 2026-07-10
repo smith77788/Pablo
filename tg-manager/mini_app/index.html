@@ -6234,6 +6234,50 @@ async function massCheckAccounts() {
     toast(`🔍 Проверка ${r.count} аккаунтов запущена (#${r.op_id}). Результат придёт в бот.`);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
+
+// ── Re-authorization ──────────────────────────────────────
+async function reauthAccount(id) {
+  if (!await askConfirm('Запустить переавторизацию этого аккаунта? Нужен новый код из Telegram.')) return;
+  toast('🔑 Запускаю переавторизацию…');
+  try {
+    const r = await api(`/api/miniapp/account/${id}/action/reauth`, {method:'POST'});
+    toast(r.message || '🔑 Переавторизация запущена');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+
+// ── Unbind proxy ──────────────────────────────────────────
+async function unbindAccProxy(id) {
+  if (!await askConfirm('Снять прокси с этого аккаунта? Он будет работать напрямую.')) return;
+  try {
+    await api(`/api/miniapp/account/${id}/proxy`, {method:'POST', body:JSON.stringify({proxy_id:null})});
+    toast('🔌 Прокси снят');
+    openAccount(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// ── Export session ────────────────────────────────────────
+async function exportAccSession(id) {
+  if (!await askConfirm('Экспортировать сессию аккаунта? Сессия будет скопирована в буфер обмена.')) return;
+  try {
+    const r = await api(`/api/miniapp/account/${id}/action/export_session`, {method:'POST'});
+    if (r.session) {
+      navigator.clipboard?.writeText(r.session);
+      toast('💾 Сессия скопирована в буфер обмена');
+    } else {
+      toast(r.message || '⚠️ Не удалось экспортировать');
+    }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+
+// ── Reset cooldown ────────────────────────────────────────
+async function resetAccCooldown(id) {
+  if (!await askConfirm('Сбросить кулдаун этого аккаунта? Аккаунт станет доступен немедленно.')) return;
+  try {
+    await api(`/api/miniapp/account/${id}/action/reset_cooldown`, {method:'POST'});
+    toast('⚡ Кулдаун сброшен');
+    openAccount(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
   api(_accQuery(0)).then(ad => {
@@ -6668,6 +6712,7 @@ function buildAccDetail(d) {
       <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
+      ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
       <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
@@ -6676,8 +6721,11 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
       <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
       <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
+      <button class="btn btn-s" onclick="unbindAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔌 Снять прокси</button>
       <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
       <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
+      <button class="btn btn-s" onclick="exportAccSession(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">💾 Экспорт сессии</button>
+      <button class="btn btn-s" onclick="resetAccCooldown(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">⚡ Сброс кулдауна</button>
     </div>
 
     <div class="sec">Профиль</div>
@@ -14295,6 +14343,923 @@ async function submitAdminBroadcast() {
     back();
   } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// ── RANKING ENGINE ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+let _rankingFilter = 'all';
+
+async function openRanking() {
+  push('s-ranking');
+  loadRanking();
+}
+
+async function loadRanking() {
+  txt('rankingKeywords', '<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('rankingAlerts', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/ranking');
+    const kw = d.keywords || [];
+    const alerts = d.alerts || [];
+
+    document.getElementById('rk-total').textContent = kw.length;
+    document.getElementById('rk-top3').textContent = kw.filter(k => k.position != null && k.position <= 3).length;
+    document.getElementById('rk-top10').textContent = kw.filter(k => k.position != null && k.position <= 10).length;
+    document.getElementById('rk-alerts').textContent = alerts.length;
+
+    renderRankingList(kw);
+    renderRankingAlerts(alerts);
+    renderRankingChart(kw);
+  } catch(e) {
+    txt('rankingKeywords', errHtml(e.message));
+    txt('rankingAlerts', '');
+  }
+}
+
+function renderRankingList(kw) {
+  let filtered = kw;
+  if (_rankingFilter === 'improved') filtered = kw.filter(k => k.trend > 0);
+  else if (_rankingFilter === 'dropped') filtered = kw.filter(k => k.trend < 0);
+  else if (_rankingFilter === 'top3') filtered = kw.filter(k => k.position != null && k.position <= 3);
+
+  if (!filtered.length) {
+    txt('rankingKeywords', empty('🏆', 'Нет ключевых слов', 'Нажмите + для добавления'));
+    return;
+  }
+  txt('rankingKeywords', filtered.map(k => {
+    const pos = k.position;
+    const posStr = pos != null ? '#' + pos : '—';
+    const pc = pos != null ? (pos <= 3 ? 'b-gr' : pos <= 10 ? 'b-bl' : pos <= 30 ? 'b-or' : 'b-gy') : 'b-gy';
+    const trend = k.trend > 0 ? '📈 +' + k.trend : k.trend < 0 ? '📉 ' + k.trend : '';
+    const trendColor = k.trend > 0 ? 'var(--green)' : k.trend < 0 ? 'var(--red)' : 'var(--hint)';
+    const region = k.region || 'ru';
+    const regionFlags = { ru: '🇷🇺', ua: '🇺🇦', kz: '🇰🇿', global: '🌍' };
+    return `<div class="li">
+      <div class="ava ava-teal">🏆</div>
+      <div class="li-body">
+        <div class="li-name">${esc(k.keyword)}</div>
+        <div class="li-sub">${regionFlags[region] || ''} ${esc(k.bot_username || '—')} · ${k.last_checked ? ago(k.last_checked) : 'не проверено'}</div>
+      </div>
+      <div class="li-right" style="flex-direction:column;align-items:flex-end;gap:2px">
+        <span class="badge ${pc}">${posStr}</span>
+        <span style="font-size:11px;color:${trendColor}">${trend}</span>
+      </div>
+    </div>`;
+  }).join(''));
+}
+
+function renderRankingAlerts(alerts) {
+  if (!alerts.length) {
+    txt('rankingAlerts', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет алертов</div>');
+    return;
+  }
+  txt('rankingAlerts', alerts.map(a => {
+    const type = a.type === 'improved' ? '📈' : a.type === 'dropped' ? '📉' : '🔔';
+    const color = a.type === 'improved' ? 'var(--green)' : a.type === 'dropped' ? 'var(--red)' : 'var(--orange)';
+    return `<div class="li">
+      <div class="ava" style="background:${color}22;color:${color}">${type}</div>
+      <div class="li-body">
+        <div class="li-name">${esc(a.keyword)}</div>
+        <div class="li-sub" style="color:${color}">${esc(a.message || '')}</div>
+      </div>
+      <div class="li-right"><span style="font-size:11px;color:var(--hint)">${ago(a.created_at)}</span></div>
+    </div>`;
+  }).join(''));
+}
+
+function renderRankingChart(kw) {
+  const canvas = document.getElementById('rankingChart');
+  const emptyEl = document.getElementById('rankingChartEmpty');
+  if (!canvas || !kw.length) { if (emptyEl) emptyEl.style.display = 'block'; return; }
+  if (emptyEl) emptyEl.style.display = 'none';
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 160 * dpr;
+  canvas.style.height = '160px';
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 160;
+  ctx.clearRect(0, 0, W, H);
+
+  const withPos = kw.filter(k => k.history && k.history.length > 1);
+  if (!withPos.length) { if (emptyEl) emptyEl.style.display = 'block'; return; }
+  const maxPos = Math.max(...withPos.flatMap(k => k.history.map(h => h.position)), 1);
+  const colors = ['#2dd4bf', '#60a5fa', '#f59e0b', '#c084fc', '#f87171', '#34d399', '#a78bfa'];
+
+  withPos.slice(0, 7).forEach((k, idx) => {
+    const hist = k.history;
+    ctx.beginPath();
+    ctx.strokeStyle = colors[idx % colors.length];
+    ctx.lineWidth = 2;
+    hist.forEach((h, i) => {
+      const x = (i / (hist.length - 1)) * (W - 20) + 10;
+      const y = (h.position / maxPos) * (H - 30) + 15;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    const last = hist[hist.length - 1];
+    ctx.fillStyle = colors[idx % colors.length];
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.fillText(k.keyword.substring(0, 10), (W - 20) + 12, (last.position / maxPos) * (H - 30) + 19);
+  });
+}
+
+function filterRanking(filter, el) {
+  _rankingFilter = filter;
+  document.querySelectorAll('#rankingFilter .chip').forEach(c => c.classList.remove('on'));
+  if (el) el.classList.add('on');
+  loadRanking();
+}
+
+function openRankingAddModal() {
+  if (!BOTS.length) { toast('Сначала загрузите боты'); return; }
+  document.getElementById('rkAddBot').innerHTML = BOTS.map(b => {
+    const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + b.bot_id);
+    return `<option value="${b.bot_id}">${esc(name)}</option>`;
+  }).join('');
+  document.getElementById('rkAddKeyword').value = '';
+  document.getElementById('rkAddErr').style.display = 'none';
+  document.getElementById('rkAddBtn').disabled = false;
+  document.getElementById('rkAddBtn').textContent = '🔍 Добавить';
+  document.getElementById('mo-ranking-add').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+async function submitRankingAdd() {
+  const keyword = document.getElementById('rkAddKeyword').value.trim();
+  const bot_id = document.getElementById('rkAddBot').value;
+  const region = document.getElementById('rkAddRegion').value;
+  const errEl = document.getElementById('rkAddErr');
+  errEl.style.display = 'none';
+  if (!keyword) { errEl.textContent = 'Введите ключевое слово'; errEl.style.display = 'block'; return; }
+  const btn = document.getElementById('rkAddBtn');
+  btn.disabled = true; btn.textContent = '⏳ Добавление...';
+  try {
+    await api('/api/miniapp/ranking/keywords', { method: 'POST', body: JSON.stringify({ keyword, bot_id, region }) });
+    closeModal('mo-ranking-add');
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Ключевое слово добавлено');
+    loadRanking();
+  } catch(e) {
+    errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled = false; btn.textContent = '🔍 Добавить'; }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ── NETWORK BUILDER ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+let _currentNetId = null;
+
+async function openNetworkBuilder() {
+  push('s-network-builder');
+  loadNetworkBuilder();
+}
+
+async function loadNetworkBuilder() {
+  txt('netBuilderList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/networks');
+    const nets = d.networks || [];
+    document.getElementById('nb-total').textContent = nets.length;
+    document.getElementById('nb-nodes').textContent = nets.reduce((s, n) => s + (n.node_count || 0), 0);
+    document.getElementById('nb-edges').textContent = nets.reduce((s, n) => s + (n.edge_count || 0), 0);
+    document.getElementById('nb-active').textContent = nets.filter(n => n.status === 'active').length;
+
+    if (!nets.length) {
+      txt('netBuilderList', empty('🕸️', 'Нет сеток', 'Создайте первую сеть'));
+      return;
+    }
+    txt('netBuilderList', nets.map(n => {
+      const status = n.status === 'active' ? '🟢' : n.status === 'paused' ? '🟡' : '⚪';
+      return `<div class="li tap" onclick="selectNetwork(${n.id})">
+        <div class="ava ava-teal">🕸️</div>
+        <div class="li-body">
+          <div class="li-name">${esc(n.name)}</div>
+          <div class="li-sub">${n.node_count || 0} узлов · ${n.edge_count || 0} рёбер</div>
+        </div>
+        <div class="li-right"><span>${status}</span><span class="chev">›</span></div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('netBuilderList', errHtml(e.message));
+  }
+}
+
+async function selectNetwork(netId) {
+  _currentNetId = netId;
+  const el = document.getElementById('netTopologyNodes');
+  el.style.display = 'block';
+  document.getElementById('netTopologyEmpty').style.display = 'none';
+  try {
+    const d = await api('/api/miniapp/networks/' + netId);
+    renderNetTopology(d);
+    renderNetNodesEdges(d);
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+function renderNetTopology(d) {
+  const canvas = document.getElementById('netTopologyCanvas');
+  const nodes = d.nodes || [];
+  const edges = d.edges || [];
+  if (!nodes.length) return;
+  canvas.innerHTML = '';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '180');
+  svg.setAttribute('viewBox', '0 0 300 180');
+
+  const nodePositions = {};
+  nodes.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / nodes.length;
+    const cx = 150 + 70 * Math.cos(angle);
+    const cy = 90 + 60 * Math.sin(angle);
+    nodePositions[n.id] = { x: cx, y: cy };
+  });
+
+  edges.forEach(e => {
+    const from = nodePositions[e.from_id], to = nodePositions[e.to_id];
+    if (from && to) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
+      line.setAttribute('x2', to.x); line.setAttribute('y2', to.y);
+      line.setAttribute('stroke', 'rgba(45,212,191,.3)');
+      line.setAttribute('stroke-width', '2');
+      svg.appendChild(line);
+    }
+  });
+
+  const icoMap = { bot: '🤖', channel: '📡', group: '👥', account: '📱' };
+  nodes.forEach(n => {
+    const pos = nodePositions[n.id];
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', pos.x); text.setAttribute('y', pos.y + 5);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('font-size', '16');
+    text.textContent = icoMap[n.type] || '⚫';
+    svg.appendChild(text);
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', pos.x); circle.setAttribute('cy', pos.y);
+    circle.setAttribute('r', '14');
+    circle.setAttribute('fill', 'rgba(45,212,191,.12)');
+    circle.setAttribute('stroke', 'rgba(45,212,191,.4)');
+    circle.setAttribute('stroke-width', '1.5');
+    svg.insertBefore(circle, text);
+  });
+
+  canvas.appendChild(svg);
+}
+
+function renderNetNodesEdges(d) {
+  const nodes = d.nodes || [];
+  const edges = d.edges || [];
+  const icoMap = { bot: '🤖', channel: '📡', group: '👥', account: '📱' };
+
+  txt('netNodesList', nodes.map(n => `<div class="li">
+    <div class="ava ava-blue">${icoMap[n.type] || '⚫'}</div>
+    <div class="li-body">
+      <div class="li-name">${esc(n.label || n.type + ' #' + n.object_id)}</div>
+      <div class="li-sub">${n.type} · ID: ${n.object_id}</div>
+    </div>
+    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetNode(${n.id})">🗑</span></div>
+  </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет узлов</div>');
+
+  txt('netEdgesList', edges.map(e => `<div class="li">
+    <div class="ava ava-green">🔗</div>
+    <div class="li-body">
+      <div class="li-name">${e.from_label || '#'} → ${e.to_label || '#'}</div>
+      <div class="li-sub">${e.type || 'forward'}</div>
+    </div>
+    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetEdge(${e.id})">🗑</span></div>
+  </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет рёбер</div>');
+}
+
+function openNetBuilderCreateModal() {
+  document.getElementById('nbCreateName').value = '';
+  document.getElementById('nbCreateDesc').value = '';
+  document.getElementById('nbCreateErr').style.display = 'none';
+  document.getElementById('nbCreateBtn').disabled = false;
+  document.getElementById('mo-net-create').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+async function submitNetCreate() {
+  const name = document.getElementById('nbCreateName').value.trim();
+  const template = document.getElementById('nbCreateTemplate').value;
+  const desc = document.getElementById('nbCreateDesc').value.trim();
+  const errEl = document.getElementById('nbCreateErr');
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'Введите название'; errEl.style.display = 'block'; return; }
+  const btn = document.getElementById('nbCreateBtn');
+  btn.disabled = true; btn.textContent = '⏳ Создание...';
+  try {
+    await api('/api/miniapp/networks', { method: 'POST', body: JSON.stringify({ name, template, description: desc }) });
+    closeModal('mo-net-create');
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Сеть создана');
+    loadNetworkBuilder();
+  } catch(e) {
+    errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block';
+  } finally { btn.disabled = false; btn.textContent = '🕸️ Создать'; }
+}
+
+async function applyNetTemplate(template) {
+  if (!await askConfirm('Создать сеть по шаблону "' + template + '"?')) return;
+  try {
+    const d = await api('/api/miniapp/networks', { method: 'POST', body: JSON.stringify({ name: template.replace(/_/g, ' '), template }) });
+    toast('✅ Сеть по шаблону создана');
+    loadNetworkBuilder();
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+function openNetAddNodeModal() {
+  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  document.getElementById('nbNodeId').value = '';
+  document.getElementById('nbNodeLabel').value = '';
+  document.getElementById('nbNodeErr').style.display = 'none';
+  document.getElementById('mo-net-node').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+async function submitNetAddNode() {
+  const type = document.getElementById('nbNodeType').value;
+  const object_id = document.getElementById('nbNodeId').value.trim();
+  const label = document.getElementById('nbNodeLabel').value.trim();
+  const errEl = document.getElementById('nbNodeErr');
+  errEl.style.display = 'none';
+  if (!object_id) { errEl.textContent = 'Введите ID объекта'; errEl.style.display = 'block'; return; }
+  try {
+    await api(`/api/miniapp/networks/${_currentNetId}/nodes`, { method: 'POST', body: JSON.stringify({ type, object_id, label }) });
+    closeModal('mo-net-node');
+    toast('✅ Узел добавлен');
+    selectNetwork(_currentNetId);
+  } catch(e) { errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function removeNetNode(nodeId) {
+  if (!await askConfirm('Удалить узел?')) return;
+  try {
+    await api(`/api/miniapp/networks/nodes/${nodeId}`, { method: 'DELETE' });
+    toast('🗑 Узел удалён');
+    selectNetwork(_currentNetId);
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+function openNetAddEdgeModal() {
+  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  const nodes = document.querySelectorAll('#netNodesList .li');
+  if (nodes.length < 2) { toast('Нужно минимум 2 узла'); return; }
+  selectNetwork(_currentNetId).then(() => {
+    const d = window._lastNetData;
+    if (!d) return;
+    const opts = (d.nodes || []).map(n => `<option value="${n.id}">${esc(n.label || n.type + ' #' + n.object_id)}</option>`).join('');
+    document.getElementById('nbEdgeFrom').innerHTML = opts;
+    document.getElementById('nbEdgeTo').innerHTML = opts;
+    document.getElementById('nbEdgeErr').style.display = 'none';
+    document.getElementById('mo-net-edge').classList.add('show');
+  });
+}
+
+async function submitNetAddEdge() {
+  const from_id = parseInt(document.getElementById('nbEdgeFrom').value);
+  const to_id = parseInt(document.getElementById('nbEdgeTo').value);
+  const type = document.getElementById('nbEdgeType').value;
+  const errEl = document.getElementById('nbEdgeErr');
+  errEl.style.display = 'none';
+  if (from_id === to_id) { errEl.textContent = 'Узлы должны быть разными'; errEl.style.display = 'block'; return; }
+  try {
+    await api(`/api/miniapp/networks/${_currentNetId}/edges`, { method: 'POST', body: JSON.stringify({ from_id, to_id, type }) });
+    closeModal('mo-net-edge');
+    toast('✅ Ребро добавлено');
+    selectNetwork(_currentNetId);
+  } catch(e) { errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function removeNetEdge(edgeId) {
+  if (!await askConfirm('Удалить ребро?')) return;
+  try {
+    await api(`/api/miniapp/networks/edges/${edgeId}`, { method: 'DELETE' });
+    toast('🗑 Ребро удалено');
+    selectNetwork(_currentNetId);
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ── WORKFLOW ENGINE ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+let _currentWfId = null;
+
+async function openWorkflows() {
+  push('s-workflows');
+  loadWorkflows();
+}
+
+async function loadWorkflows() {
+  txt('wfList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/workflows');
+    const wfs = d.workflows || [];
+    document.getElementById('wf-total').textContent = wfs.length;
+    document.getElementById('wf-active').textContent = wfs.filter(w => w.status === 'active').length;
+    document.getElementById('wf-running').textContent = wfs.filter(w => w.status === 'running').length;
+    document.getElementById('wf-failed').textContent = wfs.filter(w => w.status === 'failed').length;
+
+    if (!wfs.length) {
+      txt('wfList', empty('🔄', 'Нет воркфлоу', 'Создайте первый процесс'));
+      return;
+    }
+    txt('wfList', wfs.map(w => {
+      const statusColors = { active: 'var(--green)', running: 'var(--blue)', paused: 'var(--orange)', failed: 'var(--red)' };
+      const statusLabels = { active: '🟢 Активен', running: '🔵 Выполняется', paused: '🟡 На паузе', failed: '🔴 Ошибка' };
+      const color = statusColors[w.status] || 'var(--hint)';
+      const lastRun = w.last_run ? ago(w.last_run) : 'не запускался';
+      return `<div class="li tap" onclick="openWorkflowDetail(${w.id},'${esc(w.name)}')">
+        <div class="ava" style="background:${color}15;color:${color}">🔄</div>
+        <div class="li-body">
+          <div class="li-name">${esc(w.name)}</div>
+          <div class="li-sub">${w.step_count || 0} шагов · Последний запуск: ${lastRun}</div>
+        </div>
+        <div class="li-right"><span class="badge" style="background:${color}15;color:${color}">${w.status}</span><span class="chev">›</span></div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('wfList', errHtml(e.message));
+  }
+}
+
+function openWorkflowCreateModal() {
+  if (!BOTS.length) { toast('Сначала загрузите боты'); return; }
+  document.getElementById('wfCreateBot').innerHTML = '<option value="">Не привязан</option>' + BOTS.map(b => {
+    const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + b.bot_id);
+    return `<option value="${b.bot_id}">${esc(name)}</option>`;
+  }).join('');
+  document.getElementById('wfCreateName').value = '';
+  document.getElementById('wfCreateDesc').value = '';
+  document.getElementById('wfCreateErr').style.display = 'none';
+  document.getElementById('wfCreateBtn').disabled = false;
+  document.getElementById('mo-wf-create').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+async function submitWorkflowCreate() {
+  const name = document.getElementById('wfCreateName').value.trim();
+  const bot_id = document.getElementById('wfCreateBot').value || undefined;
+  const description = document.getElementById('wfCreateDesc').value.trim();
+  const errEl = document.getElementById('wfCreateErr');
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'Введите название'; errEl.style.display = 'block'; return; }
+  const btn = document.getElementById('wfCreateBtn');
+  btn.disabled = true; btn.textContent = '⏳ Создание...';
+  try {
+    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name, bot_id, description }) });
+    closeModal('mo-wf-create');
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Воркфлоу создан');
+    loadWorkflows();
+  } catch(e) {
+    errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block';
+  } finally { btn.disabled = false; btn.textContent = '🔄 Создать'; }
+}
+
+async function createWorkflowFromTemplate(tpl) {
+  const tplNames = { welcome: '👋 Приветствие', drip: '💧 Дрип-серия', react: '⚡ Реакция на событие', condition: '🔀 Условная логика' };
+  if (!await askConfirm('Создать воркфлоу по шаблону "' + tplNames[tpl] + '"?')) return;
+  try {
+    await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name: tplNames[tpl], template: tpl }) });
+    toast('✅ Воркфлоу по шаблону создан');
+    loadWorkflows();
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+async function openWorkflowDetail(wfId, wfName) {
+  _currentWfId = wfId;
+  push('s-workflow-detail');
+  document.getElementById('wfd-name').textContent = '🔄 ' + wfName;
+  txt('wfd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/workflows/' + wfId);
+    const steps = d.steps || [];
+    let html = '';
+
+    html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
+      <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
+      <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0;padding:8px 14px;font-size:13px">🗑</button>
+    </div>`;
+
+    if (!steps.length) {
+      html += empty('📝', 'Нет шагов', 'Нажмите + Шаг для добавления');
+    } else {
+      html += '<div class="funnel-flow">';
+      steps.forEach((s, i) => {
+        const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐' };
+        const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)' };
+        const color = typeColors[s.type] || 'var(--hint)';
+        const icon = typeIcons[s.type] || '•';
+        const isLast = i === steps.length - 1;
+        html += `<div class="ffstep">
+          <div class="ffstep-line">
+            <div class="ffstep-dot" style="background:${color}">${icon}</div>
+            ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
+          </div>
+          <div class="ffstep-body" style="border-left:3px solid ${color}">
+            <div class="ffstep-delay" style="color:${color}">${s.type.toUpperCase()} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</div>
+            <div class="ffstep-text">${esc(s.text || s.condition || s.url || s.type)}</div>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+
+    if (d.runs && d.runs.length) {
+      html += '<div class="sec" style="margin-top:12px">📊 Последние запуски</div>';
+      html += '<div class="lst">' + d.runs.slice(0, 5).map(r => {
+        const sc = r.status === 'completed' ? 'var(--green)' : r.status === 'failed' ? 'var(--red)' : 'var(--blue)';
+        return `<div class="li">
+          <div class="ava" style="background:${sc}15;color:${sc}">▶️</div>
+          <div class="li-body">
+            <div class="li-name">${r.status === 'completed' ? '✅ Выполнен' : r.status === 'failed' ? '❌ Ошибка' : '🔵 В работе'}</div>
+            <div class="li-sub">Шаг ${r.current_step || 0}/${r.total_steps || 0} · ${ago(r.started_at)}</div>
+          </div>
+        </div>`;
+      }).join('') + '</div>';
+    }
+
+    txt('wfd-body', html);
+  } catch(e) { txt('wfd-body', errHtml(e.message)); }
+}
+
+async function toggleWorkflow(wfId, active) {
+  try {
+    await api(`/api/miniapp/workflows/${wfId}`, { method: 'PATCH', body: JSON.stringify({ active: active === 'true' }) });
+    toast(active === 'true' ? '▶️ Активирован' : '⏸ На паузе');
+    back();
+    loadWorkflows();
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+async function deleteWorkflow(wfId) {
+  if (!await askConfirm('Удалить воркфлоу?')) return;
+  try {
+    await api(`/api/miniapp/workflows/${wfId}`, { method: 'DELETE' });
+    toast('🗑 Удалён');
+    back();
+    loadWorkflows();
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+function openWfAddStepModal() {
+  if (!_currentWfId) return;
+  document.getElementById('wfStepMsg').value = '';
+  document.getElementById('wfStepDelay').value = '';
+  document.getElementById('wfStepConditionVal').value = '';
+  document.getElementById('wfStepErr').style.display = 'none';
+  document.getElementById('mo-wf-step').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+document.getElementById('wfStepType')?.addEventListener('change', function() {
+  const v = this.value;
+  document.getElementById('wfStepMsgField').style.display = v === 'message' ? 'block' : 'none';
+  document.getElementById('wfStepDelayField').style.display = v === 'delay' ? 'block' : 'none';
+  document.getElementById('wfStepConditionField').style.display = v === 'condition' ? 'block' : 'none';
+});
+
+async function submitWfAddStep() {
+  if (!_currentWfId) return;
+  const type = document.getElementById('wfStepType').value;
+  const text = document.getElementById('wfStepMsg').value.trim();
+  const delay_minutes = parseInt(document.getElementById('wfStepDelay').value) || null;
+  const condition = document.getElementById('wfStepCondition').value;
+  const condition_val = document.getElementById('wfStepConditionVal').value.trim();
+  const errEl = document.getElementById('wfStepErr');
+  errEl.style.display = 'none';
+
+  if (type === 'message' && !text) { errEl.textContent = 'Введите текст сообщения'; errEl.style.display = 'block'; return; }
+  if (type === 'delay' && !delay_minutes) { errEl.textContent = 'Укажите задержку'; errEl.style.display = 'block'; return; }
+
+  try {
+    const payload = { type };
+    if (type === 'message') payload.text = text;
+    if (type === 'delay') payload.delay_minutes = delay_minutes;
+    if (type === 'condition') { payload.condition = condition; payload.condition_value = condition_val; }
+    await api(`/api/miniapp/workflows/${_currentWfId}/steps`, { method: 'POST', body: JSON.stringify(payload) });
+    closeModal('mo-wf-step');
+    toast('✅ Шаг добавлен');
+    openWorkflowDetail(_currentWfId, document.getElementById('wfd-name').textContent.replace('🔄 ', ''));
+  } catch(e) { errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block'; }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ── AUDIENCE ANALYTICS ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+let _audSegFilter = null;
+
+async function openAudienceAnalytics() {
+  push('s-audience-analytics');
+  loadAudienceAnalytics();
+}
+
+async function loadAudienceAnalytics() {
+  txt('audSegmentsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('audInsightsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/audience_analytics');
+    const segments = d.segments || [];
+    const insights = d.insights || [];
+
+    document.getElementById('aa-total').textContent = num(d.total_users || 0);
+    document.getElementById('aa-active').textContent = num(d.active_users || 0);
+    document.getElementById('aa-segments').textContent = segments.length;
+    document.getElementById('aa-engagement').textContent = d.avg_engagement ? d.avg_engagement.toFixed(1) + '%' : '—';
+
+    renderAudSegmentChips(segments);
+    renderAudSegments(segments);
+    renderAudInsights(insights);
+    renderAudHeatmap(d.heatmap || []);
+    renderAudSegChart(segments);
+  } catch(e) {
+    txt('audSegmentsList', errHtml(e.message));
+  }
+}
+
+function renderAudSegmentChips(segments) {
+  const el = document.getElementById('audSegmentChips');
+  if (!segments.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="chip ${!_audSegFilter ? 'on' : ''}" onclick="filterAudSegment(null,this)">Все</div>` +
+    segments.map(s => `<div class="chip ${_audSegFilter === s.name ? 'on' : ''}" onclick="filterAudSegment('${esc(s.name)}',this)">${esc(s.name)}</div>`).join('');
+}
+
+function filterAudSegment(name, el) {
+  _audSegFilter = name;
+  loadAudienceAnalytics();
+}
+
+function renderAudSegments(segments) {
+  let filtered = segments;
+  if (_audSegFilter) filtered = segments.filter(s => s.name === _audSegFilter);
+  if (!filtered.length) {
+    txt('audSegmentsList', empty('👥', 'Нет сегментов', 'Анализ появится после сбора данных'));
+    return;
+  }
+  txt('audSegmentsList', filtered.map(s => {
+    const pct = s.percentage ? s.percentage.toFixed(1) + '%' : '—';
+    const growth = s.growth_pct != null ? (s.growth_pct > 0 ? '📈 +' : '📉 ') + s.growth_pct.toFixed(1) + '%' : '';
+    const growthColor = s.growth_pct > 0 ? 'var(--green)' : s.growth_pct < 0 ? 'var(--red)' : 'var(--hint)';
+    const barW = Math.min(s.percentage || 0, 100);
+    return `<div class="li">
+      <div class="ava" style="background:${s.color || 'var(--bg-blue-16)'};color:${s.color || 'var(--blue)'}">👥</div>
+      <div class="li-body">
+        <div class="li-name">${esc(s.name)}</div>
+        <div class="li-sub">${num(s.count || 0)} · ${pct} · ${s.avg_activity || '—'}</div>
+        <div class="prog"><div class="prog-fill" style="width:${barW}%;background:${s.color || 'var(--accent)'}"></div></div>
+      </div>
+      <div class="li-right" style="flex-direction:column;align-items:flex-end;gap:2px">
+        <span style="font-size:12px;color:${growthColor}">${growth}</span>
+      </div>
+    </div>`;
+  }).join(''));
+}
+
+function renderAudInsights(insights) {
+  if (!insights.length) {
+    txt('audInsightsList', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Пока нет инсайтов</div>');
+    return;
+  }
+  const iconMap = { growth: '📈', churn: '📉', activity: '⚡', content: '📝', timing: '⏰', segment: '👥' };
+  txt('audInsightsList', insights.map(i => {
+    const icon = iconMap[i.type] || '💡';
+    const color = i.impact === 'positive' ? 'var(--green)' : i.impact === 'negative' ? 'var(--red)' : 'var(--blue)';
+    return `<div class="li">
+      <div class="ava" style="background:${color}15;color:${color}">${icon}</div>
+      <div class="li-body">
+        <div class="li-name">${esc(i.title || 'Инсайт')}</div>
+        <div class="li-sub">${esc(i.description || '')}</div>
+      </div>
+    </div>`;
+  }).join(''));
+}
+
+function renderAudHeatmap(heatmap) {
+  const canvas = document.getElementById('audHeatmap');
+  const emptyEl = document.getElementById('audHeatmapEmpty');
+  if (!canvas || !heatmap.length) { if (emptyEl) emptyEl.style.display = 'block'; return; }
+  if (emptyEl) emptyEl.style.display = 'none';
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 120 * dpr;
+  canvas.style.height = '120px';
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 120;
+  ctx.clearRect(0, 0, W, H);
+
+  const maxVal = Math.max(...heatmap.map(h => h.count || 0), 1);
+  const barW = (W - 20) / 24;
+  heatmap.forEach(h => {
+    const x = (h.hour || 0) * barW + 10;
+    const barH = ((h.count || 0) / maxVal) * (H - 25);
+    const intensity = (h.count || 0) / maxVal;
+    ctx.fillStyle = `rgba(45,212,191,${0.15 + intensity * 0.7})`;
+    ctx.beginPath();
+    if (ctx.roundRect) { ctx.roundRect(x, H - barH - 15, barW - 2, barH, 2); }
+    else { ctx.rect(x, H - barH - 15, barW - 2, barH); }
+    ctx.fill();
+    if (h.hour % 4 === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,.4)';
+      ctx.font = '9px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(h.hour + 'ч', x + barW / 2, H - 2);
+    }
+  });
+}
+
+function renderAudSegChart(segments) {
+  const el = document.getElementById('audSegChart');
+  if (!segments.length) { el.innerHTML = '<div style="text-align:center;color:var(--hint);font-size:13px;padding:8px">Нет данных</div>'; return; }
+  const maxCount = Math.max(...segments.map(s => s.count || 0), 1);
+  el.innerHTML = segments.slice(0, 8).map(s => {
+    const pct = ((s.count || 0) / maxCount * 100).toFixed(0);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <span style="font-size:11px;color:var(--hint);min-width:70px;text-align:right">${esc(s.name)}</span>
+      <div style="flex:1;height:18px;background:var(--bg);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${s.color || 'var(--accent)'};border-radius:4px;transition:width .5s"></div>
+      </div>
+      <span style="font-size:11px;font-weight:600;min-width:40px">${num(s.count || 0)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ── ANALYTICS DASHBOARD ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+let _dashRange = '7d';
+let _dashRefreshTimer = null;
+
+async function openAnalyticsDashboard() {
+  push('s-analytics-dashboard');
+  loadDashboard();
+  startDashAutoRefresh();
+}
+
+function startDashAutoRefresh() {
+  if (_dashRefreshTimer) clearInterval(_dashRefreshTimer);
+  _dashRefreshTimer = setInterval(() => {
+    if (STACK[STACK.length - 1] === 's-analytics-dashboard') loadDashboard();
+  }, 60000);
+}
+
+async function loadDashboard() {
+  try {
+    const d = await api('/api/miniapp/dashboard_realtime', { method: '?' + new URLSearchParams({ range: _dashRange }) });
+
+    document.getElementById('dk-users').textContent = num(d.total_subscribers || 0);
+    document.getElementById('dk-channels').textContent = num(d.total_channels || 0);
+    document.getElementById('dk-posts').textContent = num(d.total_posts || 0);
+    document.getElementById('dk-views').textContent = num(d.total_views || 0);
+    document.getElementById('dk-growth').textContent = (d.growth_7d != null && d.growth_7d > 0 ? '+' : '') + num(d.growth_7d || 0);
+
+    renderDashLineChart('dashSubsChart', 'dashSubsEmpty', d.subs_history || [], 'var(--blue)');
+    renderDashLineChart('dashViewsChart', 'dashViewsEmpty', d.views_history || [], 'var(--orange)');
+    renderDashLineChart('dashEngChart', 'dashEngEmpty', d.engagement_history || [], 'var(--green)');
+
+    const topCh = d.top_channels || [];
+    if (topCh.length) {
+      txt('dashTopChannels', topCh.map(c => {
+        return `<div class="li">
+          <div class="ava ava-purple">📡</div>
+          <div class="li-body">
+            <div class="li-name">${esc(c.name || c.username || '#')}</div>
+            <div class="li-sub">${num(c.subscribers || 0)} подписчиков · ${num(c.views || 0)} просмотров</div>
+          </div>
+          <div class="li-right"><span class="badge b-bl">+${num(c.growth || 0)}</span></div>
+        </div>`;
+      }).join(''));
+    } else {
+      txt('dashTopChannels', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет данных</div>');
+    }
+
+    const acts = d.recent_activity || [];
+    if (acts.length) {
+      txt('dashActivity', acts.slice(0, 10).map(a => {
+        const icon = a.type === 'sub' ? '📥' : a.type === 'unsub' ? '📤' : a.type === 'post' ? '📝' : '⚡';
+        return `<div class="act">
+          <div class="act-ico">${icon}</div>
+          <div class="act-body">
+            <div class="act-txt">${esc(a.text || a.type)}</div>
+            <div class="act-time">${ago(a.timestamp || a.created_at)}</div>
+          </div>
+        </div>`;
+      }).join(''));
+    } else {
+      txt('dashActivity', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет событий</div>');
+    }
+  } catch(e) {
+    document.getElementById('dk-users').textContent = '—';
+    toast('⚠️ ' + (e.message || 'Ошибка загрузки дашборда'));
+  }
+}
+
+function renderDashLineChart(canvasId, emptyId, data, color) {
+  const canvas = document.getElementById(canvasId);
+  const emptyEl = document.getElementById(emptyId);
+  if (!canvas) return;
+  if (!data.length) { if (emptyEl) { emptyEl.style.display = 'block'; emptyEl.textContent = 'Нет данных'; } return; }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 140 * dpr;
+  canvas.style.height = '140px';
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 140;
+  ctx.clearRect(0, 0, W, H);
+
+  const vals = data.map(d => typeof d === 'object' ? d.value : d);
+  const maxVal = Math.max(...vals, 1);
+  const minVal = Math.min(...vals, 0);
+  const range = maxVal - minVal || 1;
+
+  const padL = 40, padR = 10, padT = 10, padB = 20;
+  const gW = W - padL - padR, gH = H - padT - padB;
+
+  ctx.strokeStyle = 'rgba(255,255,255,.06)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (i / 4) * gH;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    const val = maxVal - (i / 4) * range;
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
+    ctx.font = '9px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(val >= 1000 ? (val / 1000).toFixed(1) + 'k' : Math.round(val), padL - 5, y + 3);
+  }
+
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  vals.forEach((v, i) => {
+    const x = padL + (i / (vals.length - 1 || 1)) * gW;
+    const y = padT + ((maxVal - v) / range) * gH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  const last = vals[vals.length - 1];
+  const lastX = padL + gW;
+  const lastY = padT + ((maxVal - last) / range) * gH;
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function switchDashRange(range, el) {
+  _dashRange = range;
+  document.querySelectorAll('#dashTimeSeg .seg-opt').forEach(o => o.classList.remove('on'));
+  if (el) el.classList.add('on');
+  loadDashboard();
+}
+
+async function exportDashboard() {
+  try {
+    const d = await api('/api/miniapp/dashboard_realtime', { method: '?' + new URLSearchParams({ range: _dashRange }) });
+    const csv = convertDashboardToCSV(d);
+    downloadBlob(csv, 'dashboard_' + _dashRange + '.csv', 'text/csv');
+    toast('📤 Дашборд экспортирован');
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка экспорта')); }
+}
+
+function convertDashboardToCSV(d) {
+  let csv = 'Метрика,Значение\n';
+  csv += 'Подписчики,' + (d.total_subscribers || 0) + '\n';
+  csv += 'Каналы,' + (d.total_channels || 0) + '\n';
+  csv += 'Посты,' + (d.total_posts || 0) + '\n';
+  csv += 'Просмотры,' + (d.total_views || 0) + '\n';
+  csv += 'Рост 7д,' + (d.growth_7d || 0) + '\n\n';
+  csv += 'Дата,Подписчики,Просмотры,Вовлечённость\n';
+  (d.subs_history || []).forEach((s, i) => {
+    const v = (d.views_history || [])[i] || 0;
+    const e = (d.engagement_history || [])[i] || 0;
+    csv += (s.date || s.label || i) + ',' + (s.value || s) + ',' + (v.value || v) + ',' + (e.value || e) + '\n';
+  });
+  return csv;
+}
+
+function downloadBlob(content, filename, type) {
+  const blob = new Blob([content], { type: type + ';charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 </script>
 </body>
 </html>
