@@ -6246,11 +6246,10 @@ async function massCheckAccounts() {
 
 // ── Re-authorization ──────────────────────────────────────
 async function reauthAccount(id) {
-  if (!await askConfirm('Запустить переавторизацию этого аккаунта? Нужен новый код из Telegram.')) return;
-  toast('🔑 Запускаю переавторизацию…');
   try {
     const r = await api(`/api/miniapp/account/${id}/action/reauth`, {method:'POST'});
-    toast(r.message || '🔑 Переавторизация запущена');
+    // Переавторизация интерактивна (код из Telegram) → показываем инструкцию, ведущую в бота.
+    await askConfirm(r.message || 'Переавторизация выполняется в боте: Аккаунты → 🔄 Переавторизатор → Релог.');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 

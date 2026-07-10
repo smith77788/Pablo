@@ -3272,12 +3272,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
         elif act == "delete_pm":
             op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
-        elif act == "reauth":
-            op_type, params, label = "reauth_account", {"account_id": acc_id}, "Переавторизация аккаунта"
-        elif act == "export_session":
-            op_type, params, label = "export_session", {"account_id": acc_id}, "Экспорт сессии"
         elif act == "reset_cooldown":
-            op_type, params, label = "reset_cooldown", {"account_id": acc_id}, "Сброс кулдауна"
+            # СИНХРОННО (раньше был фантомный op reset_cooldown без исполнителя →
+            # кнопка ничего не делала). Чистим durable-кулдаун.
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
+                    acc_id, uid)
+                return _json_resp({"ok": True, "message": "⚡ Кулдаун сброшен"})
+            except Exception as exc:
+                log.exception("reset_cooldown uid=%d acc=%d", uid, acc_id)
+                return _err(str(exc)[:120], 500)
+        elif act == "export_session":
+            # СИНХРОННО (раньше фантомный op → r.session никогда не приходил).
+            # Владелец экспортирует СВОЮ сессию (owner-scoped), расшифровываем.
+            row = await _safe_fetchrow(pool,
+                "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            if not row or not row["session_str"]:
+                return _err("Сессия недоступна", 404)
+            try:
+                from services.token_vault import decrypt_token
+                sess = decrypt_token(row["session_str"])
+            except Exception:
+                sess = row["session_str"]
+            return _json_resp({"ok": True, "session": sess})
+        elif act == "reauth":
+            # Переавторизация требует ОДНОРАЗОВЫЙ КОД из Telegram (вводится вручную) —
+            # фоновой операцией невозможно. Раньше ставился фантомный op reauth_account
+            # (нет исполнителя) → «запущена», но ничего не происходило. Честно ведём в
+            # бота, где flow релога реально работает (шлёт код → приём кода → вход).
+            return _json_resp({"ok": True, "message": (
+                "🔑 Переавторизация требует код из Telegram (вводится вручную), поэтому "
+                "выполняется в боте: Аккаунты → 🔄 Переавторизатор → выберите этот аккаунт "
+                "→ Релог. После входа аккаунт снова станет активным.")})
         else:
             return _err("Неизвестное действие", 400)
         try:
