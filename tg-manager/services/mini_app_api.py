@@ -466,6 +466,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
             "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
             "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
+            # Automation Workflows
+            """CREATE TABLE IF NOT EXISTS automation_workflows (
+                id BIGSERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                steps JSONB NOT NULL DEFAULT '[]',
+                status TEXT DEFAULT 'created',
+                created_at TIMESTAMPTZ DEFAULT now(),
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_wf_owner ON automation_workflows(owner_id, created_at DESC)",
+            """CREATE TABLE IF NOT EXISTS workflow_step_runs (
+                id BIGSERIAL PRIMARY KEY,
+                workflow_id BIGINT NOT NULL REFERENCES automation_workflows(id) ON DELETE CASCADE,
+                step_num INTEGER NOT NULL,
+                action TEXT NOT NULL DEFAULT '',
+                params JSONB DEFAULT '{}',
+                status TEXT DEFAULT 'pending',
+                label TEXT DEFAULT '',
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                result_data JSONB DEFAULT '{}'
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_wf_steps_wf ON workflow_step_runs(workflow_id, step_num)",
+            """CREATE TABLE IF NOT EXISTS workflow_step_logs (
+                id BIGSERIAL PRIMARY KEY,
+                workflow_id BIGINT NOT NULL,
+                step_num INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT '',
+                message TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
         ]
         for stmt in stmts:
             try:
@@ -11488,6 +11523,253 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/network/instance", network_instance_create)
     app.router.add_get("/api/miniapp/network/instance/{instance_id}", network_instance_detail)
     app.router.add_get("/api/miniapp/network/stats", network_stats)
+
+    # ── Automation Workflows ─────────────────────────────────────────────────
+
+    async def workflow_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.workflow_engine import list_workflows
+            workflows = await list_workflows(pool, uid)
+            return _json_resp({"workflows": workflows})
+        except Exception as exc:
+            log.exception("workflow_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def workflow_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = (body.get("name") or "").strip()
+        steps = body.get("steps")
+        if not name:
+            return _err("name обязателен", 400)
+        if not isinstance(steps, list) or not steps:
+            return _err("steps обязателен и должен быть списком", 400)
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                return _err(f"Шаг {i+1} должен быть объектом", 400)
+            if not step.get("action"):
+                return _err(f"Шаг {i+1}: action обязателен", 400)
+        try:
+            from services.workflow_engine import create_workflow
+            wf_id = await create_workflow(pool, uid, name, steps)
+            return _json_resp({"ok": True, "workflow_id": wf_id})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def workflow_execute(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import execute_workflow
+            result = await execute_workflow(pool, uid, wf_id)
+            return _json_resp({"ok": True, **result})
+        except LookupError as e:
+            return _err(str(e), 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_execute uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import get_workflow_status
+            status = await get_workflow_status(pool, uid, wf_id)
+            return _json_resp(status)
+        except LookupError as e:
+            return _err(str(e), 404)
+        except Exception as exc:
+            log.exception("workflow_status uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_pause(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import pause_workflow
+            result = await pause_workflow(pool, uid, wf_id)
+            return _json_resp({"ok": True, **result})
+        except LookupError as e:
+            return _err(str(e), 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_pause uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_resume(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import resume_workflow
+            result = await resume_workflow(pool, uid, wf_id)
+            return _json_resp({"ok": True, **result})
+        except LookupError as e:
+            return _err(str(e), 404)
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as exc:
+            log.exception("workflow_resume uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    async def workflow_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wf_id = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad wf_id", 400)
+        try:
+            from services.workflow_engine import delete_workflow
+            ok = await delete_workflow(pool, uid, wf_id)
+            if not ok:
+                return _err("Workflow не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("workflow_delete uid=%d wf=%d", uid, wf_id)
+            return _err(str(exc), 500)
+
+    app.router.add_get("/api/miniapp/workflows", workflow_list)
+    app.router.add_post("/api/miniapp/workflow/create", workflow_create)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
+    app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/pause", workflow_pause)
+    app.router.add_post("/api/miniapp/workflow/{wf_id}/resume", workflow_resume)
+    app.router.add_delete("/api/miniapp/workflow/{wf_id}", workflow_delete)
+
+    # ── Audience Analytics ─────────────────────────────────────────────────
+
+    async def audience_analyze(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channel_id = int(request.match_info["channel_id"])
+        except (KeyError, ValueError):
+            return _err("bad channel_id", 400)
+        try:
+            from services.audience_analytics import analyze_audience
+            overview = await analyze_audience(pool, uid, channel_id)
+            if not overview:
+                return _err("Нет данных для анализа", 404)
+            return _json_resp({
+                "total_subscribers": overview.total_subscribers,
+                "active_users": overview.active_users,
+                "active_rate": overview.active_rate,
+                "peak_hour": overview.peak_hour,
+                "peak_day": overview.peak_day,
+                "retention_7d": overview.retention_7d,
+                "retention_30d": overview.retention_30d,
+                "avg_session_duration_min": overview.avg_session_duration_min,
+            })
+        except Exception as exc:
+            log.exception("audience_analyze uid=%d ch=%d", uid, channel_id)
+            return _err(str(exc), 500)
+
+    async def audience_segment(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            channel_id = int(request.match_info["channel_id"])
+        except (KeyError, ValueError):
+            return _err("bad channel_id", 400)
+        try:
+            from services.audience_analytics import segment_audience
+            segments = await segment_audience(pool, uid, channel_id)
+            return _json_resp({"segments": [
+                {
+                    "name": s.name,
+                    "user_count": s.user_count,
+                    "percentage": s.percentage,
+                    "avg_engagement": s.avg_engagement,
+                    "description": s.description,
+                    "tags": s.tags,
+                }
+                for s in segments
+            ]})
+        except Exception as exc:
+            log.exception("audience_segment uid=%d ch=%d", uid, channel_id)
+            return _err(str(exc), 500)
+
+    app.router.add_get("/api/miniapp/audience/analyze/{channel_id}", audience_analyze)
+    app.router.add_get("/api/miniapp/audience/segment/{channel_id}", audience_segment)
+
+    # ── Analytics Dashboard ───────────────────────────────────────────────
+
+    async def analytics_dashboard(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.analytics_dashboard import get_dashboard_stats
+            stats = await get_dashboard_stats(pool, uid)
+            return _json_resp(stats)
+        except Exception as exc:
+            log.exception("analytics_dashboard uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def analytics_realtime(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.analytics_dashboard import get_realtime_metrics
+            metrics = await get_realtime_metrics(pool, uid)
+            return _json_resp(metrics)
+        except Exception as exc:
+            log.exception("analytics_realtime uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def analytics_historical(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        metric = request.query.get("metric", "operations")
+        try:
+            days = max(1, min(365, int(request.query.get("days", 30))))
+        except (TypeError, ValueError):
+            days = 30
+        try:
+            from services.analytics_dashboard import get_historical_data
+            data = await get_historical_data(pool, uid, metric, days)
+            return _json_resp({"metric": metric, "days": days, "data": data})
+        except Exception as exc:
+            log.exception("analytics_historical uid=%d", uid)
+            return _err(str(exc), 500)
+
+    app.router.add_get("/api/miniapp/analytics/dashboard", analytics_dashboard)
+    app.router.add_get("/api/miniapp/analytics/realtime", analytics_realtime)
+    app.router.add_get("/api/miniapp/analytics/historical", analytics_historical)
 
     # SSE
     app.router.add_get("/api/miniapp/events", events)

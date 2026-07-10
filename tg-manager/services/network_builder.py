@@ -270,3 +270,282 @@ async def get_network_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
     except Exception as e:
         log.warning("get_network_stats error: %s", e)
         return {'templates': 0, 'instances': 0, 'total_nodes': 0, 'total_edges': 0}
+
+
+async def get_graph_data(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Get graph data for visualization across all user instances."""
+    try:
+        instances = await pool.fetch(
+            '''SELECT ni.id, ni.name, ni.status, ni.nodes, ni.edges
+               FROM network_instances ni
+               WHERE ni.owner_id = $1
+               ORDER BY ni.created_at DESC''',
+            owner_id)
+        if not instances:
+            return {'ok': True, 'nodes': [], 'edges': [], 'instances': []}
+
+        all_nodes: list[dict] = []
+        all_edges: list[dict] = []
+        instance_summaries: list[dict] = []
+
+        for inst in instances:
+            inst_id = inst['id']
+            inst_name = inst['name']
+            inst_status = inst['status']
+            inst_nodes = await pool.fetch(
+                'SELECT * FROM network_nodes WHERE instance_id = $1', inst_id)
+            inst_edges = await pool.fetch(
+                'SELECT * FROM network_edges WHERE instance_id = $1', inst_id)
+
+            node_map: dict[int, int] = {}
+            for n in inst_nodes:
+                global_idx = len(all_nodes)
+                node_map[n['id']] = global_idx
+                all_nodes.append({
+                    'id': global_idx,
+                    'instance_id': inst_id,
+                    'instance_name': inst_name,
+                    'db_id': n['id'],
+                    'label': n['label'] or f"Node {n['id']}",
+                    'type': n['node_type'],
+                    'status': n['status'],
+                })
+
+            for e in inst_edges:
+                src = node_map.get(e['source_node_id'])
+                tgt = node_map.get(e['target_node_id'])
+                if src is not None and tgt is not None:
+                    all_edges.append({
+                        'source': src,
+                        'target': tgt,
+                        'type': e['edge_type'],
+                    })
+
+            instance_summaries.append({
+                'id': inst_id,
+                'name': inst_name,
+                'status': inst_status,
+                'node_count': len(inst_nodes),
+                'edge_count': len(inst_edges),
+            })
+
+        return {
+            'ok': True,
+            'nodes': all_nodes,
+            'edges': all_edges,
+            'instances': instance_summaries,
+        }
+    except Exception as e:
+        log.warning("get_graph_data error: %s", e)
+        return {'ok': False, 'error': str(e), 'nodes': [], 'edges': [], 'instances': []}
+
+
+async def get_graph_clusters(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Cluster nodes by connectivity using union-find."""
+    try:
+        graph_data = await get_graph_data(pool, owner_id)
+        if not graph_data.get('ok'):
+            return {'ok': False, 'error': graph_data.get('error', 'Failed to get graph data')}
+
+        nodes = graph_data['nodes']
+        edges = graph_data['edges']
+        n = len(nodes)
+        if n == 0:
+            return {'ok': True, 'clusters': [], 'node_cluster_map': {}}
+
+        parent = list(range(n))
+        rank = [0] * n
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                return
+            if rank[ra] < rank[rb]:
+                ra, rb = rb, ra
+            parent[rb] = ra
+            if rank[ra] == rank[rb]:
+                rank[ra] += 1
+
+        for edge in edges:
+            union(edge['source'], edge['target'])
+
+        cluster_map: dict[int, list[int]] = {}
+        node_cluster_map: dict[int, int] = {}
+        for i in range(n):
+            root = find(i)
+            if root not in cluster_map:
+                cluster_map[root] = []
+            cluster_map[root].append(i)
+            node_cluster_map[i] = root
+
+        clusters = []
+        for idx, (_, member_ids) in enumerate(cluster_map.items()):
+            cluster_nodes = [nodes[mid] for mid in member_ids]
+            type_counts: dict[str, int] = {}
+            for cn in cluster_nodes:
+                t = cn['type']
+                type_counts[t] = type_counts.get(t, 0) + 1
+            clusters.append({
+                'cluster_id': idx,
+                'size': len(member_ids),
+                'nodes': member_ids,
+                'type_distribution': type_counts,
+            })
+
+        clusters.sort(key=lambda c: c['size'], reverse=True)
+        return {'ok': True, 'clusters': clusters, 'node_cluster_map': node_cluster_map}
+    except Exception as e:
+        log.warning("get_graph_clusters error: %s", e)
+        return {'ok': False, 'error': str(e)}
+
+
+async def find_shortest_path(pool: asyncpg.Pool, owner_id: int,
+                             source_id: int, target_id: int) -> dict:
+    """Find shortest path between two nodes via BFS."""
+    try:
+        graph_data = await get_graph_data(pool, owner_id)
+        if not graph_data.get('ok'):
+            return {'ok': False, 'error': graph_data.get('error', 'Failed to get graph data')}
+
+        nodes = graph_data['nodes']
+        edges = graph_data['edges']
+
+        db_to_global: dict[int, int] = {}
+        for node in nodes:
+            if node['db_id'] == source_id and source_id not in db_to_global:
+                db_to_global[source_id] = node['id']
+            if node['db_id'] == target_id and target_id not in db_to_global:
+                db_to_global[target_id] = node['id']
+
+        src_global = db_to_global.get(source_id)
+        tgt_global = db_to_global.get(target_id)
+
+        if src_global is None or tgt_global is None:
+            return {'ok': False, 'error': 'Source or target node not found'}
+
+        adj: dict[int, list[int]] = {}
+        for edge in edges:
+            adj.setdefault(edge['source'], []).append(edge['target'])
+            adj.setdefault(edge['target'], []).append(edge['source'])
+
+        from collections import deque
+        queue: deque[int] = deque([src_global])
+        prev: dict[int, int | None] = {src_global: None}
+
+        while queue:
+            current = queue.popleft()
+            if current == tgt_global:
+                break
+            for neighbor in adj.get(current, []):
+                if neighbor not in prev:
+                    prev[neighbor] = current
+                    queue.append(neighbor)
+
+        if tgt_global not in prev:
+            return {'ok': True, 'found': False, 'path': [], 'length': -1}
+
+        path_ids: list[int] = []
+        cur: int | None = tgt_global
+        while cur is not None:
+            path_ids.append(cur)
+            cur = prev.get(cur)
+        path_ids.reverse()
+
+        path_nodes = [nodes[pid] for pid in path_ids]
+        return {
+            'ok': True,
+            'found': True,
+            'path': path_nodes,
+            'length': len(path_ids) - 1,
+        }
+    except Exception as e:
+        log.warning("find_shortest_path error: %s", e)
+        return {'ok': False, 'error': str(e)}
+
+
+async def get_community_detection(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Detect communities using label propagation algorithm."""
+    try:
+        graph_data = await get_graph_data(pool, owner_id)
+        if not graph_data.get('ok'):
+            return {'ok': False, 'error': graph_data.get('error', 'Failed to get graph data')}
+
+        nodes = graph_data['nodes']
+        edges = graph_data['edges']
+        n = len(nodes)
+        if n == 0:
+            return {'ok': True, 'communities': [], 'node_community_map': {}}
+
+        import random
+        adj: dict[int, list[int]] = {}
+        for edge in edges:
+            adj.setdefault(edge['source'], []).append(edge['target'])
+            adj.setdefault(edge['target'], []).append(edge['source'])
+
+        label = list(range(n))
+        max_iterations = n * 10
+        order = list(range(n))
+
+        for _ in range(max_iterations):
+            random.shuffle(order)
+            changed = False
+            for node_idx in order:
+                neighbors = adj.get(node_idx, [])
+                if not neighbors:
+                    continue
+                freq: dict[int, int] = {}
+                for nb in neighbors:
+                    nb_label = label[nb]
+                    freq[nb_label] = freq.get(nb_label, 0) + 1
+                best_label = max(freq, key=freq.get)  # type: ignore[arg-type]
+                if label[node_idx] != best_label:
+                    label[node_idx] = best_label
+                    changed = True
+            if not changed:
+                break
+
+        community_map: dict[int, list[int]] = {}
+        node_community_map: dict[int, int] = {}
+        for i in range(n):
+            lbl = label[i]
+            community_map.setdefault(lbl, []).append(i)
+            node_community_map[i] = lbl
+
+        communities = []
+        for idx, (_, member_ids) in enumerate(community_map.items()):
+            community_nodes = [nodes[mid] for mid in member_ids]
+            type_counts: dict[str, int] = {}
+            for cn in community_nodes:
+                t = cn['type']
+                type_counts[t] = type_counts.get(t, 0) + 1
+            internal_edges = sum(
+                1 for e in edges
+                if e['source'] in member_ids and e['target'] in member_ids
+            )
+            total_possible = len(member_ids) * (len(member_ids) - 1) // 2
+            density = internal_edges / total_possible if total_possible > 0 else 0.0
+            communities.append({
+                'community_id': idx,
+                'size': len(member_ids),
+                'nodes': member_ids,
+                'type_distribution': type_counts,
+                'internal_edges': internal_edges,
+                'density': round(density, 4),
+            })
+
+        communities.sort(key=lambda c: c['size'], reverse=True)
+        return {
+            'ok': True,
+            'communities': communities,
+            'node_community_map': node_community_map,
+            'num_communities': len(communities),
+        }
+    except Exception as e:
+        log.warning("get_community_detection error: %s", e)
+        return {'ok': False, 'error': str(e)}

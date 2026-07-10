@@ -143,3 +143,95 @@ def invalidate_pattern(pattern: str) -> int:
             cache.delete(key)
             count += 1
     return count
+
+
+def cache_decorator(ttl: float = 300.0, cache_instance: TTLCache | None = None):
+    """Decorator to cache function results (sync and async).
+
+    Args:
+        ttl: Time-to-live in seconds
+        cache_instance: Cache to use (default: global cache)
+
+    Usage:
+        @cache_decorator(ttl=60)
+        async def get_user(user_id): ...
+
+        @cache_decorator(ttl=120)
+        def compute(x): ...
+    """
+    cache = cache_instance or default_cache
+
+    def decorator(func: Callable) -> Callable:
+        import asyncio
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            key_parts = [func.__name__] + [str(a) for a in args]
+            key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
+            cache_key = ":".join(key_parts)
+
+            result = cache.get(cache_key)
+            if result is not None:
+                return result
+
+            if asyncio.iscoroutinefunction(func):
+                async def _async_wrapper():
+                    result = await func(*args, **kwargs)
+                    cache.set(cache_key, result, ttl)
+                    return result
+                return _async_wrapper()
+            else:
+                result = func(*args, **kwargs)
+                cache.set(cache_key, result, ttl)
+                return result
+
+        wrapper.cache_clear = lambda: cache.clear()
+        wrapper.cache_stats = lambda: cache.stats()
+        return wrapper
+
+    return decorator
+
+
+def invalidate_cache(pattern: str) -> int:
+    """Invalidate all cache keys matching pattern across all cache instances.
+
+    Args:
+        pattern: Substring to match in cache keys
+
+    Returns:
+        Number of invalidated entries
+    """
+    return invalidate_pattern(pattern)
+
+
+def get_cache_stats() -> dict:
+    """Get aggregated statistics across all cache instances.
+
+    Returns:
+        Dict with per-cache stats and aggregate totals.
+    """
+    caches = {
+        "default": default_cache,
+        "account": account_cache,
+        "proxy": proxy_cache,
+        "stats": stats_cache,
+        "query": query_cache,
+    }
+    per_cache = {}
+    total_hits = 0
+    total_misses = 0
+    total_size = 0
+    for name, c in caches.items():
+        s = c.stats()
+        per_cache[name] = s
+        total_hits += s["hits"]
+        total_misses += s["misses"]
+        total_size += s["size"]
+    total = total_hits + total_misses
+    return {
+        "caches": per_cache,
+        "total_hits": total_hits,
+        "total_misses": total_misses,
+        "total_size": total_size,
+        "overall_hit_rate": round(total_hits / total * 100, 1) if total > 0 else 0,
+    }
