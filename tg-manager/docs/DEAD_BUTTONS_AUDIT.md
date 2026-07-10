@@ -59,6 +59,32 @@ bulk» (bulk_prof_*) — аккаунт-ops. Не берём с наскока (
 Владельцам (A/C): выбрать канонический контракт и привести вторую сторону. Не беру
 (активные полосы 2 агентов), чтобы не конфликтовать.
 
+### B.1 Точный контракт-разрыв (turnkey-спец, проверено 2026-07-10)
+Разрыв НЕ только в путях (plural↔singular) — ещё и в ФОРМЕ ответа И в самом вызове
+фронта. Чинить = владеть ОБЕИМИ сторонами (иначе фейк-экран). Детали:
+- **Analytics Dashboard** `loadDashboard()` (index.html ~15148): зовёт
+  `api('/dashboard_realtime', {method:'?'+params})` — БАГ (method вместо URL);
+  роут НЕ зарегистрирован; фронт читает `d.total_subscribers/total_views/total_posts/
+  total_channels/top_channels/subs_history/views_history/engagement_history/
+  growth_*/recent_activity`. Движок `analytics_dashboard.get_dashboard_stats()` даёт
+  часть, `get_realtime_metrics()` даёт ДРУГОЕ (active_operations/queue_depth) — форма
+  не совпадает ни с одной. Нужен новый агрегат owner-уровня под эти поля.
+- **Audience Analytics** `loadAudienceAnalytics()` (~15000): зовёт
+  `/audience_analytics` (роут НЕ зарегистрирован); фронт ждёт owner-агрегат
+  `{total_users,active_users,avg_engagement,segments[],insights[],heatmap[]}`. Движок
+  `audience_analytics.py` — ПО-КАНАЛЬНО (analyze_audience(channel_id)), owner-агрегата
+  нет. Нужна агрегация по каналам владельца.
+- **Network Builder**: фронт `/networks`(GET/POST), `/networks/{id}/nodes`,
+  `/networks/{id}/edges`, `/networks/nodes/{id}`, `/networks/edges/{id}`; бэк
+  `/network`, `/network/instance/{id}`, `/network/templates`, `/network/template`.
+  Нужны plural-CRUD узлов/рёбер поверх `network_builder.py`.
+- **Workflows**: фронт `/workflows/{id}`(GET), `/workflows/{id}/steps`; бэк
+  `/workflow/{id}`, `/workflow/{id}/status`, `/workflow/create|execute|pause|resume`.
+  Нужны detail+steps под контракт фронта.
+Вывод: это не «дописать кнопку», а достроить 4 раздела end-to-end (фронт+бэк). Крупно,
+активно строится параллельным агентом (свежий большой пуш) → делать только владея обеими
+сторонами, по согласованию, чтобы не продублировать/не конфликтовать.
+
 ## C. Не-мёртвое, но выглядело подозрительно (проверено — OK)
 - `MyCb(action="chosen")` (`bot/utils/target_selector.py`) — переиспользуемый виджет
   выбора цели; хендлер регистрирует потребитель виджета. Не мёртвая.
