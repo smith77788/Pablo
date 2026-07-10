@@ -55,3 +55,17 @@ Backlog из записи Global Presence: раньше пресет бралс�
 Границы/риск: постинг в чужие обсуждения — рисковая массовая операция → строго через op_worker (лимиты/потоки/гард), не в activity_engine. low_risk=False (proxy-изоляция обязательна).
 Верификация: +5 tests/test_ai_comment_engine.py (промпт содержит нишу/тон/пост и запрет ссылок/хэштегов; неизвестный тон→neutral; обрезка длинного поста; sanitize кавычки/префикс/cap280/None; проводка op+эндпоинт+route+UI). Зелёные. Смежный набор (proxy_policy/parser/stage) зелёный.
 Свободные лейны для двух других агентов (НЕ беру): Session Duplicator/Shadow Sessions, Message Interceptor, Flash Call/Voice reg.
+
+## tg-manager: Resource Compliance Scanner — детект запрещёнки в ресурсах (пиллар 2, безопасно) — 2026-07-10
+Контекст: задача «оператор инфраструктуры» (SEO-вывод / снос запрещёнки / сетки), три агента параллельно. Два агента держат P0 SEO/ранк/сетки (ranking_engine.py, network_builder.py) + hot-файлы. Чтобы не конфликтовать — взял НАИМЕНЕЕ покрытый из трёх пилларов пользователя: «снос из поиска / блокирование ресурсов с запрещённой тематикой» — в БЕЗОПАСНОЙ форме (детект + досье, НЕ оружие массовых ложных жалоб; согласовано с границей в OPERATOR_TOP1_ROADMAP и CLAUDE.md).
+Найдено при разведке (сверка с кодом, не с доком):
+  - Roadmap #8 «GPT авто-ответ — мёртвый бэкенд» — НЕВЕРНО: `act_ai_reply` жив (auto_reply.py:507/412/581 → auto_responder.py:659). Исправил запись в roadmap.
+  - Примитив классификации запрещёнки УЖЕ есть — `content_safety.scan_text()` (детерминированный детект CSAM/террор с анти-обфускацией/гомоглифами). Переиспользовал, LLM не понадобился → дёшево и тестируемо.
+Сделано (изолированно, свой файл):
+  - services/content_watch.py: `classify_texts(items)` (чистая — агрегирует scan_text по (label,text), даёт {verdict, categories, hits[category,label,excerpt], scanned}), `scan_resource(session,_acc,ref,limit,low_risk=True)` (read-only: title/about через GetFullChannel + недавние сообщения → классификация → досье). CATEGORY_LABELS.
+  - op_worker `_exec_compliance_scan` + диспетчер `op_type == "compliance_scan"`: round-robin аккаунтов, low_risk=True (read-only), мягкие паузы 3–8с, лог per-resource ('flagged'/'ok'/'error'), сводка с уликами. НЕ постит/НЕ жалуется/НЕ сносит.
+  - mini_app_api `compliance_scan_submit` + route `/api/miniapp/compliance_scan`.
+  - index.html: карточка «🛡️ Проверка на запрещёнку» на экране Репортинг + `submitComplianceScan()`.
+Граница (в комм. пользователю и в коде): это ДЕТЕКТОР настоящей запрещёнки (CSAM/террор) + доказательное досье для ОСОЗНАННОГО адресного действия. Массовый авто-снос чужих ресурсов / ложные жалобы — НЕ строим (тест прямо проверяет: в исполнителе нет ReportPeerRequest/send_message). Адресная жалоба — через существующий Strike/Репортинг.
+Верификация: +5 tests/test_content_watch.py (clean/skip-empty/flag-with-evidence/labels/проводка op+endpoint+route+UI + анти-регресс «не авто-жалоба»). Полный набор tests/ зелёный (exit 0). Python AST + node JS чисто.
+Свободные лейны для двух других агентов (НЕ беру): Search Rank Campaign (#2), Network Rank Dashboard (#3), Bulk SEO (#4), Rotating proxy (#6), ручное добавление контакта (#9, upsert_contact реально мёртв — нет эндпоинта).

@@ -3742,6 +3742,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ai_comment_submit uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def compliance_scan_submit(request: web.Request) -> web.Response:
+        """Resource Compliance Scan: read-only проверка ресурсов на запрещённую
+        тематику (CSAM/террор). Собирает досье, ничего не постит/не сносит.
+        body: {resources: [ref...], per_resource_limit?, acc_count?}"""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        raw = body.get("resources") or []
+        if isinstance(raw, str):
+            raw = re.split(r"[\s,]+", raw)
+        resources = [str(c).strip().lstrip("@") for c in raw if str(c).strip()][:100]
+        if not resources:
+            return _err("Укажите хотя бы один ресурс для проверки", 400)
+        try:
+            per_limit = max(1, min(validate_integer(body.get("per_resource_limit") or 50, min_val=1, max_val=200) or 50, 200))
+        except (TypeError, ValueError):
+            per_limit = 50
+        try:
+            acc_count = max(1, min(validate_integer(body.get("acc_count") or 2, min_val=1, max_val=10) or 2, 10))
+        except (TypeError, ValueError):
+            acc_count = 2
+        has_acc = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            uid)
+        if not has_acc:
+            return _err("Нет активных аккаунтов", 400)
+        try:
+            label = f"Проверка на запрещёнку: {len(resources)} ресурсов"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'compliance_scan','pending',$2,$3,$4) RETURNING id",
+                uid,
+                _json.dumps({"resources": resources, "per_resource_limit": per_limit, "acc_count": acc_count}),
+                len(resources), label)
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "resources": len(resources)})
+        except Exception as exc:
+            log.exception("compliance_scan_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10315,6 +10358,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_post("/api/miniapp/ai_comment", ai_comment_submit)
+    app.router.add_post("/api/miniapp/compliance_scan", compliance_scan_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
