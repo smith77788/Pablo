@@ -34,6 +34,20 @@ async def auto_merge(pool, owner_id) -> dict:
 
 
 async def manual_merge(pool, primary_id: str, secondary_id: str, owner_id: int) -> dict:
+    # Владение ОБОИМИ контактами обязано быть проверено ДО того, как мы тронем
+    # contact_sources/contact_history — иначе через /api/miniapp/uch/merge можно
+    # подставить чужой primary_id/secondary_id и переписать метаданные (источники
+    # синхронизации, историю правок) чужого контакта на свой, минуя owner_id
+    # (межарендный IDOR — раньше только финальный DELETE был скоупнут).
+    primary_row = await pool.fetchrow(
+        'SELECT id FROM unified_contacts WHERE id=$1 AND owner_id=$2', primary_id, owner_id)
+    if not primary_row:
+        return {'status': 'error', 'error': 'primary_not_found'}
+    secondary_row = await pool.fetchrow(
+        'SELECT id FROM unified_contacts WHERE id=$1 AND owner_id=$2', secondary_id, owner_id)
+    if not secondary_row:
+        return {'status': 'error', 'error': 'secondary_not_found'}
+
     conn = await pool.acquire()
     try:
         async with conn.transaction():
