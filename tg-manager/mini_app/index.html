@@ -2853,6 +2853,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field-err" id="reporterErr"></div>
       <button class="btn btn-d" id="reporterBtn" onclick="submitReporter()" style="width:100%">🚨 Отправить репорт</button>
     </div>
+    <div class="sec" style="margin-top:8px">🛡️ Проверка на запрещёнку</div>
+    <div style="padding:8px 0">
+      <div style="font-size:12px;opacity:.7;margin-bottom:6px">Read-only: сканирует ресурсы на запрещённую тематику (CSAM/террор) и собирает доказательное досье. Ничего не постит и не сносит — жалобу подаёте адресно выше.</div>
+      <div class="field"><label>Ресурсы (по одному в строке или через запятую)</label><textarea id="cscanResources" rows="4" placeholder="@channel1&#10;t.me/channel2"></textarea></div>
+      <div class="field"><label>Сообщений на ресурс (1–200)</label><input type="number" id="cscanLimit" value="50" min="1" max="200" class="inp"></div>
+      <div class="field"><label>Аккаунтов для чтения (1–10)</label><input type="number" id="cscanAccCount" value="2" min="1" max="10" class="inp"></div>
+      <div class="field-err" id="cscanErr"></div>
+      <button class="btn btn-p" id="cscanBtn" onclick="submitComplianceScan()" style="width:100%">🛡️ Запустить проверку</button>
+    </div>
     <div class="sec" style="margin-top:8px">История задач</div>
     <div class="lst" id="reporterHistory"></div>
   </div>
@@ -2961,6 +2970,24 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
+    </div>
+    <div class="sec" style="margin-top:14px">💬 AI-комментинг</div>
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны AI-ключи). Естественно, по теме, на языке поста.</div>
+    <div style="padding:8px 0">
+      <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><label>Тематика (опционально, контекст для ИИ)</label><input type="text" id="aicNiche" placeholder="например: крипта, фитнес"></div>
+      <div class="field"><label>Тон</label>
+        <select id="aicTone" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
+          <option value="neutral">Нейтральный</option>
+          <option value="friendly">Дружелюбный</option>
+          <option value="expert">Экспертный</option>
+          <option value="question">Вопрос по теме</option>
+          <option value="support">Поддержка</option>
+        </select>
+      </div>
+      <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="aicAccCount" min="1" max="10" value="3"></div>
+      <div class="field-err" id="aicErr"></div>
+      <button class="btn btn-p" id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить AI-комментинг</button>
     </div>
     <div class="sec" style="margin-top:8px">История</div>
     <div class="lst" id="growthHistory"></div>
@@ -8610,6 +8637,22 @@ async function submitReporter() {
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚨 Отправить репорт'; }
 }
+async function submitComplianceScan() {
+  const raw = document.getElementById('cscanResources').value.trim();
+  const resources = raw.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);
+  const per_resource_limit = parseInt(document.getElementById('cscanLimit').value)||50;
+  const acc_count = parseInt(document.getElementById('cscanAccCount').value)||2;
+  const errEl = document.getElementById('cscanErr');
+  if (!resources.length) { errEl.textContent='Укажите хотя бы один ресурс'; return; }
+  const btn = document.getElementById('cscanBtn');
+  btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r = await api('/api/miniapp/compliance_scan',{method:'POST',body:JSON.stringify({resources,per_resource_limit,acc_count})});
+    toast(`🛡️ Проверка ${r.resources} ресурсов в очереди (#${r.op_id})`);
+    errEl.textContent='';
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🛡️ Запустить проверку'; }
+}
 
 // ── Boost (Накрутка) ─────────────────────────────────────
 let BOOST_TYPE = 'views';
@@ -8861,6 +8904,22 @@ async function submitGrowth() {
     openGrowth();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🌿 Запустить'; }
+}
+async function submitAiComment() {
+  const errEl=document.getElementById('aicErr'); errEl.textContent='';
+  const channels=document.getElementById('aicChannels').value.trim();
+  const niche=document.getElementById('aicNiche').value.trim();
+  const tone=document.getElementById('aicTone').value;
+  const acc_count=parseInt(document.getElementById('aicAccCount').value)||3;
+  const list=channels.split(/[\s,]+/).map(s=>s.trim().replace(/^@/,'')).filter(Boolean);
+  if(!list.length){ errEl.textContent='Укажите хотя бы один канал'; return; }
+  const btn=document.getElementById('aicBtn'); btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r=await api('/api/miniapp/ai_comment',{method:'POST',body:JSON.stringify({channels:list,niche,tone,acc_count})});
+    toast(`💬 AI-комментинг запущен: ${r.channels||list.length} каналов (#${r.op_id})`);
+    openGrowth();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='💬 Запустить AI-комментинг'; }
 }
 
 // ── Quick Post ───────────────────────────────────────────

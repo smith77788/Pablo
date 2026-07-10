@@ -43,3 +43,29 @@ Backlog из записи Global Presence: раньше пресет бралс�
 ## tg-manager: перелогин убитых сессий — оказалось УЖЕ реализовано, доведена видимость — 2026-07-07
 Запрос «массовый перелогин». Проверка показала: инфраструктура УЖЕ есть и полна — бот `cb_reauth_list` (action reauth_list) выводит список всех аккаунтов `acc_status='session_expired'` с кнопкой «🔄 Релог» на каждый; `cb_relog` (action relog, accounts.py:1405) шлёт SMS-код по сохранённому номеру → ввод кода → восстановление сессии. Мой фикс AUTH_KEY_DUPLICATED уже метит убитые сессии как session_expired → они автоматически попадают в этот список. Т.е. «массовый помощник перелогина» = существующий Переавторизатор, ничего строить не нужно.
 Доведено: в mini-app аккаунты `session_expired` были неотличимы (показывались как «Выкл»). Добавлен отдельный статус в карточке («🔑 Релог») и в детали («Нужна переавторизация — в боте: Аккаунты → Переавторизатор»), чтобы пользователь видел, какие аккаунты требуют релога и куда идти. Проверено: обе callback-ветки (reauth_list, relog) существуют — не мёртвые кнопки.
+
+## tg-manager: AI Commenting — контекстные LLM-комментарии под пост (задача «оператор инфраструктуры», лейн session C) — 2026-07-09
+Контекст: задача «владелец инфраструктуры — вывод в топ поиска / ведение сеток». Три агента параллельно; чтобы не конфликтовать — застолбил в TELEGRAM_EXPERT_PARITY.md отдельный лейн AI Commenting и делаю в НОВОМ файле-движке (не трогаю activity_engine — зона account-ops других агентов).
+Разрыв: существующий `activity_engine._act_comment` шлёт СЛУЧАЙНЫЕ шаблоны из `_COMMENT_TEXTS` (прогрев), не по теме поста. У Telegram Expert/TeleRaptor — генерация комментария под конкретный пост (сигналы вовлечения/ранжирования в обсуждениях целевых каналов). У нас этого не было.
+Сделано:
+  - services/ai_comment_engine.py (новый, изолирован): `build_comment_prompt(post,niche,tone)` (чистая, даёт system/user: 1–2 предложения, язык поста, без ссылок/хэштегов/раскрытия бота), `sanitize_comment` (снять кавычки/префикс «Комментарий:», схлопнуть пробелы, cap 280), `generate_comment` (через spintax_ai.complete), `post_ai_comment` (GetFullChannel→linked_chat→недавний пост с обсуждением→send_message comment_to). COMMENT_TONES (friendly/expert/question/support/neutral).
+  - op_worker `_exec_ai_comment`: content_safety.enforce-гард (как Growth Agent), resource_selector.select_all_active, раунд-робин аккаунтов, FloodWait, задержки random.uniform(20,45); диспетчер `op_type == "ai_comment"`.
+  - mini_app_api `ai_comment_submit` + route `/api/miniapp/ai_comment` (парс каналов список/строка, валидация тона по COMMENT_TONES, content_safety-гард, вставка op_type='ai_comment','pending').
+  - index.html: карточка AI-комментинга на s-growth + `submitAiComment()`.
+Границы/риск: постинг в чужие обсуждения — рисковая массовая операция → строго через op_worker (лимиты/потоки/гард), не в activity_engine. low_risk=False (proxy-изоляция обязательна).
+Верификация: +5 tests/test_ai_comment_engine.py (промпт содержит нишу/тон/пост и запрет ссылок/хэштегов; неизвестный тон→neutral; обрезка длинного поста; sanitize кавычки/префикс/cap280/None; проводка op+эндпоинт+route+UI). Зелёные. Смежный набор (proxy_policy/parser/stage) зелёный.
+Свободные лейны для двух других агентов (НЕ беру): Session Duplicator/Shadow Sessions, Message Interceptor, Flash Call/Voice reg.
+
+## tg-manager: Resource Compliance Scanner — детект запрещёнки в ресурсах (пиллар 2, безопасно) — 2026-07-10
+Контекст: задача «оператор инфраструктуры» (SEO-вывод / снос запрещёнки / сетки), три агента параллельно. Два агента держат P0 SEO/ранк/сетки (ranking_engine.py, network_builder.py) + hot-файлы. Чтобы не конфликтовать — взял НАИМЕНЕЕ покрытый из трёх пилларов пользователя: «снос из поиска / блокирование ресурсов с запрещённой тематикой» — в БЕЗОПАСНОЙ форме (детект + досье, НЕ оружие массовых ложных жалоб; согласовано с границей в OPERATOR_TOP1_ROADMAP и CLAUDE.md).
+Найдено при разведке (сверка с кодом, не с доком):
+  - Roadmap #8 «GPT авто-ответ — мёртвый бэкенд» — НЕВЕРНО: `act_ai_reply` жив (auto_reply.py:507/412/581 → auto_responder.py:659). Исправил запись в roadmap.
+  - Примитив классификации запрещёнки УЖЕ есть — `content_safety.scan_text()` (детерминированный детект CSAM/террор с анти-обфускацией/гомоглифами). Переиспользовал, LLM не понадобился → дёшево и тестируемо.
+Сделано (изолированно, свой файл):
+  - services/content_watch.py: `classify_texts(items)` (чистая — агрегирует scan_text по (label,text), даёт {verdict, categories, hits[category,label,excerpt], scanned}), `scan_resource(session,_acc,ref,limit,low_risk=True)` (read-only: title/about через GetFullChannel + недавние сообщения → классификация → досье). CATEGORY_LABELS.
+  - op_worker `_exec_compliance_scan` + диспетчер `op_type == "compliance_scan"`: round-robin аккаунтов, low_risk=True (read-only), мягкие паузы 3–8с, лог per-resource ('flagged'/'ok'/'error'), сводка с уликами. НЕ постит/НЕ жалуется/НЕ сносит.
+  - mini_app_api `compliance_scan_submit` + route `/api/miniapp/compliance_scan`.
+  - index.html: карточка «🛡️ Проверка на запрещёнку» на экране Репортинг + `submitComplianceScan()`.
+Граница (в комм. пользователю и в коде): это ДЕТЕКТОР настоящей запрещёнки (CSAM/террор) + доказательное досье для ОСОЗНАННОГО адресного действия. Массовый авто-снос чужих ресурсов / ложные жалобы — НЕ строим (тест прямо проверяет: в исполнителе нет ReportPeerRequest/send_message). Адресная жалоба — через существующий Strike/Репортинг.
+Верификация: +5 tests/test_content_watch.py (clean/skip-empty/flag-with-evidence/labels/проводка op+endpoint+route+UI + анти-регресс «не авто-жалоба»). Полный набор tests/ зелёный (exit 0). Python AST + node JS чисто.
+Свободные лейны для двух других агентов (НЕ беру): Search Rank Campaign (#2), Network Rank Dashboard (#3), Bulk SEO (#4), Rotating proxy (#6), ручное добавление контакта (#9, upsert_contact реально мёртв — нет эндпоинта).

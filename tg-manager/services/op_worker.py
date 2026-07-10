@@ -1276,6 +1276,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_boost_bot_starts(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_invite":
                 result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
+            elif op_type == "ai_comment":
+                result = await _exec_ai_comment(pool, bot, op_id, owner_id, params)
+            elif op_type == "compliance_scan":
+                result = await _exec_compliance_scan(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_set_profile":
                 result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_report":
@@ -7617,6 +7621,144 @@ async def _exec_content_clone(
         "cloned_to": cloned_to[:50],
         "summary": summary,
     }
+
+
+async def _exec_ai_comment(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """AI Commenting: под каждым целевым каналом (его группой обсуждений) постит
+    контекстный AI-комментарий к недавнему посту. Round-robin по аккаунтам,
+    задержки, обработка FloodWait, content_safety-гард на нишу.
+    params: {channels: [ref...], niche, tone, acc_count, per_channel_delay}
+    """
+    from services import ai_comment_engine, resource_selector, account_manager, content_safety
+
+    channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
+    niche = (params.get("niche") or "").strip()
+    tone = (params.get("tone") or "neutral").strip()
+    acc_count = max(1, min(int(params.get("acc_count") or 3), 10))
+    if not channels:
+        return {"status": "failed", "summary": "⚠️ Не указаны каналы"}
+
+    # Гард безопасности контента (ниша — единственный пользовательский текст;
+    # сам коммент генерит LLM под постом, но нишу проверяем как контекст-инструкцию).
+    verdict = await content_safety.enforce(pool, owner_id, niche or "comment", "", surface="ai_comment")
+    if verdict.blocked:
+        return {"status": "failed", "summary": "⚠️ Контент заблокирован политикой платформы"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="comment", respect_cooldown=True)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    accounts = accounts[:acc_count]
+
+    channels = channels[:50]  # потолок против гигантских прогонов
+    ok_count, fail_count = 0, 0
+    total = len(channels)
+    for idx, ref in enumerate(channels, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        acc = accounts[idx % len(accounts)]
+        try:
+            res = await ai_comment_engine.post_ai_comment(
+                acc["session_str"], dict(acc), ref, niche=niche, tone=tone)
+            if res.get("ok"):
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)",
+                    op_id, idx, ref, (res.get("comment") or "")[:200])
+            else:
+                fail_count += 1
+                err = (res.get("error") or "")
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, err[:200])
+                if "FloodWait" in err or "flood" in err.lower():
+                    await asyncio.sleep(30)
+        except Exception as exc:
+            fail_count += 1
+            log.warning("ai_comment op=%d ref=%s: %s", op_id, ref, exc)
+        await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(random.uniform(20, 45))  # органическая пауза между каналами
+
+    summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
+               + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_compliance_scan(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Resource Compliance Scan: read-only проверка списка ресурсов на запрещённую
+    тематику (CSAM/террор) через content_safety. Собирает доказательное досье —
+    НЕ постит, НЕ жалуется, НЕ сносит (адресное действие оператор делает вручную,
+    в т.ч. через strike_engine). Round-robin по аккаунтам, паузы между ресурсами.
+    params: {resources: [ref...], per_resource_limit, acc_count}
+    """
+    from services import content_watch, resource_selector
+
+    resources = [str(c).strip() for c in (params.get("resources") or []) if str(c).strip()]
+    per_limit = max(1, min(int(params.get("per_resource_limit") or 50), 200))
+    acc_count = max(1, min(int(params.get("acc_count") or 2), 10))
+    if not resources:
+        return {"status": "failed", "summary": "⚠️ Не указаны ресурсы для проверки"}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, action_type="parse", respect_cooldown=True)
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    accounts = accounts[:acc_count]
+
+    resources = resources[:100]  # потолок против гигантских прогонов
+    total = len(resources)
+    await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    flagged, clean_count, err_count = 0, 0, 0
+    flagged_lines: list[str] = []
+    for idx, ref in enumerate(resources, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        acc = accounts[idx % len(accounts)]
+        try:
+            dossier = await content_watch.scan_resource(
+                acc["session_str"], dict(acc), ref, limit=per_limit, low_risk=True)
+            if not dossier.get("ok"):
+                err_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, (dossier.get("error") or "")[:200])
+            elif dossier.get("verdict") == "prohibited":
+                flagged += 1
+                cats = ", ".join(dossier.get("categories") or [])
+                first_hit = (dossier.get("hits") or [{}])[0]
+                evidence = f"{first_hit.get('category_label','')}: «{first_hit.get('excerpt','')}»"
+                flagged_lines.append(f"🚫 {dossier.get('resource', ref)} — {cats}")
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'flagged',$4)", op_id, idx, dossier.get("resource", ref),
+                    (f"[{cats}] {evidence}")[:200])
+            else:
+                clean_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx, dossier.get("resource", ref),
+                    f"чисто ({dossier.get('scanned',0)} текстов)")
+        except Exception as exc:
+            err_count += 1
+            log.warning("compliance_scan op=%d ref=%s: %s", op_id, ref, exc)
+        await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(random.uniform(3, 8))  # мягкая пауза между read-only проверками
+
+    head = (f"🛡️ Проверка на запрещёнку\n🚫 Найдено нарушений: {flagged}/{total}"
+            f"\n✅ Чисто: {clean_count}" + (f"\n⚠️ Ошибок: {err_count}" if err_count else ""))
+    if flagged_lines:
+        head += "\n\n" + "\n".join(flagged_lines[:20])
+        head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел Strike)."
+    return {"status": "done", "flagged": flagged, "clean": clean_count,
+            "failed": err_count, "summary": head}
 
 
 async def _exec_niche_growth_post(
