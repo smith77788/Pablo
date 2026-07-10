@@ -4427,6 +4427,38 @@ async def cb_bulk_select_none(
     await _show_bulk_select(callback, pool, op, set())
 
 
+# Точки входа bulk-меню, которые раньше были МЁРТВЫМИ (кнопки есть, хендлера не было):
+# они должны открывать выбор аккаунтов для соответствующей bulk-операции. Вся
+# downstream-логика (выбор → cb_bulk_confirm_selection → op) уже существует и покрывает
+# эти op-коды (dm/post/chan_uname/chan_about/prof_name/prof_bio/prof_uname), не хватало
+# только проводки входа. См. docs/DEAD_BUTTONS_AUDIT.md (раздел A).
+_BULK_MENU_ENTRY = {
+    "bulk_dm": "dm",
+    "bulk_post": "post",
+    "bulk_chan_uname": "chan_uname",
+    "bulk_chan_about": "chan_about",
+    "bulk_prof_name": "prof_name",
+    "bulk_prof_bio": "prof_bio",
+    "bulk_prof_uname": "prof_uname",
+}
+
+
+@router.callback_query(ChanCb.filter(F.action.in_({
+    "bulk_dm", "bulk_post", "bulk_chan_uname", "bulk_chan_about",
+    "bulk_prof_name", "bulk_prof_bio", "bulk_prof_uname",
+})))
+async def cb_bulk_menu_entry(
+    callback: CallbackQuery, callback_data: ChanCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Открыть выбор аккаунтов для bulk-операции (ранее — мёртвые кнопки bulk-меню)."""
+    await safe_answer(callback)
+    op = _BULK_MENU_ENTRY.get(callback_data.action)
+    if not op:
+        return
+    await state.update_data(bulk_op=op, bulk_selected=[])
+    await _show_bulk_select(callback, pool, op, set())
+
+
 # Confirm selection — route to operation-specific input
 @router.callback_query(F.data.startswith("chan:bsdone:"))
 async def cb_bulk_confirm_selection(
