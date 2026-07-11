@@ -348,6 +348,8 @@ async def main() -> None:
     dp.include_router(net_bc_handler.router)
     dp.include_router(ai_handler.router)
     dp.include_router(ranking_handler.router)
+    from bot.handlers import metrics_dashboard as _metrics_dashboard_handler
+    dp.include_router(_metrics_dashboard_handler.router)
     dp.include_router(accounts_handler.router)
     dp.include_router(referral_handler.router)
     dp.include_router(channel_ops_handler.router)

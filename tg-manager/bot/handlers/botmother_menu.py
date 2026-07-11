@@ -244,6 +244,7 @@ def _comms_kb():
 
 def _analytics_kb(plan: str = "free"):
     kb = InlineKeyboardBuilder()
+    kb.button(text="📈 Дашборд метрик", callback_data=BmCb(action="metrics_dashboard"))
     kb.button(text="🔎 Ключевые слова", callback_data=BmCb(action="pick_bot_for", sub="rank"))
     kb.button(text="📊 Позиции в поиске", callback_data=VisCb(action="dashboard"))
     kb.button(text="🏆 Конкуренты", callback_data=CompCb(action="menu"))
