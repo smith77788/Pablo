@@ -4034,10 +4034,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT keyword, search_count FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 20",
                 uid,
             )
+            # Рекомендации по переоптимизации БОТОВ (авто-сгенерированы при падении
+            # позиции; применяются в один клик через /api/miniapp/seo/apply_bot).
+            bot_suggestions = await _safe_fetch(pool,
+                """SELECT bs.bot_id, bs.name, bs.short_desc, bs.reason, bs.keyword,
+                          bs.created_at, bs.applied_at, mb.username AS bot_username
+                   FROM bot_seo_suggestions bs
+                   LEFT JOIN managed_bots mb ON mb.bot_id=bs.bot_id
+                   WHERE bs.owner_id=$1 ORDER BY bs.created_at DESC LIMIT 20""",
+                uid) or []
             return _json_resp({
                 "suggestions": [
                     {**dict(s), "created_at": s["created_at"].isoformat() if s["created_at"] else None}
                     for s in suggestions
+                ],
+                "bot_suggestions": [
+                    {**dict(b),
+                     "created_at": b["created_at"].isoformat() if b["created_at"] else None,
+                     "applied_at": b["applied_at"].isoformat() if b["applied_at"] else None}
+                    for b in bot_suggestions
                 ],
                 "keywords": [dict(k) for k in keywords],
             })
@@ -4102,6 +4117,55 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             uid, _json.dumps({"channel_ids": chan_ids}), len(chan_ids),
             f"SEO по сетке: {len(chan_ids)} каналов")
         return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
+
+    async def seo_apply_bot(request: web.Request) -> web.Response:
+        """Применить рекомендацию по переоптимизации БОТА в один клик (замыкает
+        петлю анализ→рекомендация→применение для стороны ботов; аналог
+        /seo/apply для каналов). Рекомендация авто-генерируется при падении
+        позиции (ranking_checker, opt-in). body: {bot_id, fields?}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            bot_id = int(body.get("bot_id"))
+        except (TypeError, ValueError):
+            return _err("bot_id обязателен", 400)
+        fields = body.get("fields") or None
+        from services import bot_reoptimizer
+        try:
+            res = await bot_reoptimizer.apply_bot_seo(pool, uid, bot_id, fields)
+        except Exception as exc:
+            log.exception("seo_apply_bot uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc)[:200], 500)
+        if res.get("ok"):
+            return _json_resp(res)
+        return _err(res.get("error") or "Не удалось применить", 400)
+
+    async def reopt_setting(request: web.Request) -> web.Response:
+        """Тумблер авто-переоптимизации ботов при падении позиции (opt-in).
+        body: {enabled: bool}. Хранится в visibility_alert_settings.auto_reoptimize."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        enabled = bool(body.get("enabled"))
+        try:
+            await pool.execute(
+                """INSERT INTO visibility_alert_settings(owner_id, auto_reoptimize, alerts_enabled)
+                   VALUES($1,$2,TRUE)
+                   ON CONFLICT(owner_id) DO UPDATE SET auto_reoptimize=$2""",
+                uid, enabled)
+        except Exception as exc:
+            log.exception("reopt_setting uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "enabled": enabled})
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
@@ -10577,6 +10641,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/seo", seo_overview)
     app.router.add_post("/api/miniapp/seo/apply", seo_apply)
     app.router.add_post("/api/miniapp/seo/apply_all", seo_apply_all)
+    app.router.add_post("/api/miniapp/seo/apply_bot", seo_apply_bot)
+    app.router.add_post("/api/miniapp/ranking/reopt_setting", reopt_setting)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub

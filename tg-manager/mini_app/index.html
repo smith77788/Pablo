@@ -3074,6 +3074,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="lst" id="seoKeywords"></div>
     <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Применить всё →</span></div>
     <div class="lst" id="seoSuggestions"></div>
+    <div class="sec" style="margin-top:8px">Переоптимизация ботов
+      <label style="float:right;font-size:12px;color:var(--hint);cursor:pointer">
+        <input type="checkbox" id="reoptToggle" onchange="toggleReopt(this)" style="vertical-align:middle"> авто при падении
+      </label>
+    </div>
+    <div class="hint" style="padding:0 2px 6px">При падении позиции бота в поиске система готовит рекомендацию по имени/описанию — примените в один клик.</div>
+    <div class="lst" id="seoBotSuggestions"></div>
   </div>
 </div>
 
@@ -9512,8 +9519,45 @@ async function openSeo() {
         <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="applySeo(${s.chan_id}, this)">Применить</button>
       </div>
     `).join('') : empty('✨','Нет SEO-предложений','Запустите SEO-анализ в боте'));
+    const bsug = d.bot_suggestions||[];
+    txt('seoBotSuggestions', bsug.length ? bsug.map(b=>`
+      <div class="row">
+        <div class="row-ico" style="background:var(--bg-blue-16)">🤖</div>
+        <div class="row-body">
+          <div class="row-name">${esc(b.bot_username?'@'+b.bot_username:('bot#'+b.bot_id))}</div>
+          <div class="row-val">${b.name?'Имя: '+esc(b.name.slice(0,42)):''}${b.applied_at?' · ✅ применено':''}</div>
+        </div>
+        <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="applyBotSeo(${b.bot_id}, this)">Применить</button>
+      </div>
+    `).join('') : empty('🤖','Нет рекомендаций для ботов','Включите авто-переоптимизацию — рекомендации появятся при падении позиций'));
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+// Применить рекомендацию по переоптимизации бота (имя/краткое описание) в один клик
+async function applyBotSeo(botId, btn) {
+  if (!await askConfirm('Применить рекомендацию (имя/краткое описание) к боту?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await api('/api/miniapp/seo/apply_bot', {method:'POST', body:JSON.stringify({bot_id:botId})});
+    const parts = r.applied||[];
+    const errs = (r.errors||[]).join('; ');
+    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):'')) : ('⚠️ '+(errs||'без изменений')));
+    openSeo();
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
+  }
+}
+// Тумблер авто-переоптимизации ботов при падении позиции (opt-in)
+async function toggleReopt(el) {
+  try {
+    await api('/api/miniapp/ranking/reopt_setting', {method:'POST', body:JSON.stringify({enabled:el.checked})});
+    toast(el.checked ? '✅ Авто-переоптимизация включена' : 'Авто-переоптимизация выключена');
+  } catch(e) {
+    el.checked = !el.checked;
+    toast('⚠️ '+(e.message||'Ошибка'));
   }
 }
 // Применить SEO-предложение к каналу в один клик (замыкает петлю анализ→применение)
