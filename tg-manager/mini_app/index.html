@@ -4920,11 +4920,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="kpi-scroll" id="dashKpiScroll">
-      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-users" style="color:var(--blue)">—</div><div class="kpi-chip-lbl">👥 Подписчики</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-users" style="color:var(--blue)">—</div><div class="kpi-chip-lbl">👥 Аудитория</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-channels" style="color:var(--purple)">—</div><div class="kpi-chip-lbl">📡 Каналы</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-posts" style="color:var(--green)">—</div><div class="kpi-chip-lbl">📝 Посты</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">👁 Просмотры</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Рост 7д</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">📱 Аккаунты</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Ауд. +7д</div></div>
     </div>
     <div class="seg" id="dashTimeSeg">
       <div class="seg-opt on" onclick="switchDashRange('24h',this)">24ч</div>
@@ -4932,22 +4932,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="switchDashRange('30d',this)">30 дн</div>
       <div class="seg-opt" onclick="switchDashRange('90d',this)">90 дн</div>
     </div>
-    <div class="sec">Подписчики</div>
+    <div class="sec">Новая аудитория / день</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="dashSubsChart" style="width:100%;height:140px"></canvas>
       <div id="dashSubsEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
     </div>
-    <div class="sec" style="margin-top:12px">Просмотры постов</div>
+    <div class="sec" style="margin-top:12px">Операции / день</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="dashViewsChart" style="width:100%;height:140px"></canvas>
       <div id="dashViewsEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
     </div>
-    <div class="sec" style="margin-top:12px">Вовлечённость</div>
+    <div class="sec" style="margin-top:12px">Успешность операций, %</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="dashEngChart" style="width:100%;height:140px"></canvas>
       <div id="dashEngEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
     </div>
-    <div class="sec" style="margin-top:12px">Топ каналов</div>
+    <div class="sec" style="margin-top:12px">Топ каналов по активности</div>
     <div class="lst" id="dashTopChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Последние события</div>
     <div class="lst" id="dashActivity"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -15194,7 +15194,7 @@ async function loadDashboard() {
     document.getElementById('dk-users').textContent = num(d.total_subscribers || 0);
     document.getElementById('dk-channels').textContent = num(d.total_channels || 0);
     document.getElementById('dk-posts').textContent = num(d.total_posts || 0);
-    document.getElementById('dk-views').textContent = num(d.total_views || 0);
+    document.getElementById('dk-views').textContent = num(d.total_accounts || 0);
     document.getElementById('dk-growth').textContent = (d.growth_7d != null && d.growth_7d > 0 ? '+' : '') + num(d.growth_7d || 0);
 
     renderDashLineChart('dashSubsChart', 'dashSubsEmpty', d.subs_history || [], 'var(--blue)');
@@ -15208,7 +15208,7 @@ async function loadDashboard() {
           <div class="ava ava-purple">📡</div>
           <div class="li-body">
             <div class="li-name">${esc(c.name || c.username || '#')}</div>
-            <div class="li-sub">${num(c.subscribers || 0)} подписчиков · ${num(c.views || 0)} просмотров</div>
+            <div class="li-sub">${num(c.subscribers || 0)} операций за период</div>
           </div>
           <div class="li-right"><span class="badge b-bl">+${num(c.growth || 0)}</span></div>
         </div>`;

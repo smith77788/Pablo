@@ -25,8 +25,12 @@ def test_dashboard_endpoint_route_and_shape():
     # все поля, которые читает экран, присутствуют в ответе
     for f in ["total_subscribers", "total_channels", "total_posts", "total_views",
               "growth_7d", "subs_history", "views_history", "engagement_history",
-              "top_channels", "recent_activity"]:
+              "top_channels", "recent_activity", "total_accounts", "total_operations"]:
         assert f'"{f}"' in seg, f"нет поля {f}"
+    # тайм-серии считаются из РЕАЛЬНЫХ таблиц (bot_users/operation_audit), не пусто
+    assert "FROM bot_users" in seg and "FROM operation_audit" in seg
+    assert "date_trunc('day'" in seg  # дневные серии
+    assert "_fill(" in seg            # заполнение пропусков нулями (непрерывный график)
 
 
 def test_audience_endpoint_route_and_shape():
