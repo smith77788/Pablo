@@ -236,6 +236,49 @@ async def _global_error_handler(event: ErrorEvent) -> None:
         log_exc_swallow(log, "Double-fault in error handler")
 
 
+_bootstrap_runner = None
+
+
+async def _start_bootstrap_health_server() -> None:
+    """Занять $PORT минимальным health-сервером до тяжёлой инициализации.
+
+    create_pool применяет миграции — на холодной/большой БД это может занять
+    десятки секунд; если за это время порт не занят, Railway убивает деплой по
+    health-check («Application failed to respond»). Этот сервер отвечает 200 на всё,
+    пока идёт инициализация; останавливается перед стартом реального сервера.
+    Не переживает рестарт, живёт только на время старта процесса.
+    """
+    global _bootstrap_runner
+    try:
+        from aiohttp import web as _web
+
+        _port = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
+        _app = _web.Application()
+
+        async def _ok(_req):
+            return _web.Response(text="starting", status=200)
+
+        _app.router.add_route("*", "/{tail:.*}", _ok)
+        _bootstrap_runner = _web.AppRunner(_app)
+        await _bootstrap_runner.setup()
+        await _web.TCPSite(_bootstrap_runner, "0.0.0.0", _port).start()
+        log.info("bootstrap health server bound on :%d (heavy init in progress)", _port)
+    except Exception as e:
+        log.warning("bootstrap health server failed to bind: %s", e)
+        _bootstrap_runner = None
+
+
+async def _stop_bootstrap_health_server() -> None:
+    """Освободить $PORT перед стартом реального HTTP-сервера."""
+    global _bootstrap_runner
+    if _bootstrap_runner is not None:
+        try:
+            await _bootstrap_runner.cleanup()
+        except Exception as e:
+            log.warning("bootstrap health server cleanup: %s", e)
+        _bootstrap_runner = None
+
+
 async def main() -> None:
     install_button_style_patch()
 
@@ -247,6 +290,11 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=bot_session,
     )
+    # Health-first: биндим $PORT МИНИМАЛЬНЫМ сервером ДО create_pool (миграции могут
+    # быть медленными на холодной/большой БД). Railway health-check проходит сразу —
+    # «Application failed to respond» становится невозможным. Реальный сервер займёт
+    # порт после готовности (bootstrap останавливается перед его стартом).
+    await _start_bootstrap_health_server()
     pool = await create_pool()
     fsm_storage = await PostgresFSMStorage.create(pool)
     dp = Dispatcher(storage=fsm_storage)
@@ -527,6 +575,9 @@ async def main() -> None:
     ]
 
     try:
+        # Освобождаем $PORT от bootstrap health-сервера прямо перед стартом реального —
+        # окно, когда порт свободен, минимально (мс), Railway health-check его не заметит.
+        await _stop_bootstrap_health_server()
         # HTTP server starts FIRST — must bind to PORT immediately for Railway web services.
         # Если задан WEBHOOK_URL — передаём dp чтобы Telegram webhook работал на том же порту.
         # Это предотвращает конфликт двух серверов на одном PORT.
