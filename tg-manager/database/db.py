@@ -672,6 +672,20 @@ async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> in
         return await batch_upsert_users(pool, bot_id, users)
 
 
+async def safe_count(pool: asyncpg.Pool, query: str, *args: object) -> int:
+    """COUNT-запрос, устойчивый к миграционному лагу.
+
+    Если таблица/колонка ещё не создана (UndefinedColumn при отставании
+    схемы) — возвращает 0 вместо падения, а не даёт всплыть исключению в
+    вызывающую логику рассылок. Логирует причину, секреты в query не попадают.
+    """
+    try:
+        return int(await pool.fetchval(query, *args) or 0)
+    except Exception as e:  # noqa: BLE001 — намеренно широко: любой сбой БД → 0
+        log.warning("safe_count error: %s | query=%.120s", e, query)
+        return 0
+
+
 async def get_audience_count(pool: asyncpg.Pool, bot_id: int) -> int:
     return await pool.fetchval(
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
@@ -2875,6 +2889,50 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
     )
 
 
+async def set_cf_credentials(pool, owner_id: int, api_token: str | None,
+                             account_id: str, subdomain: str) -> None:
+    """Сохранить доступы Cloudflare владельца в platform_users.settings_json.cf.
+    Токен шифруется (token_vault). Если api_token пустой — НЕ перезатираем
+    существующий (можно менять только account_id/subdomain). Merge, не clobber."""
+    import json as _json
+    from services.token_vault import encrypt_token
+    cf: dict = {
+        "account_id": (account_id or "").strip(),
+        "subdomain": (subdomain or "").strip().replace(".workers.dev", ""),
+    }
+    if api_token and api_token.strip():
+        cf["token_enc"] = encrypt_token(api_token.strip())
+    await pool.execute(
+        """UPDATE platform_users
+           SET settings_json = COALESCE(settings_json,'{}'::jsonb)
+               || jsonb_build_object('cf',
+                    COALESCE(settings_json->'cf','{}'::jsonb) || $2::jsonb)
+           WHERE user_id=$1""",
+        owner_id, _json.dumps(cf))
+
+
+async def get_cf_credentials(pool, owner_id: int) -> dict | None:
+    """Достать доступы Cloudflare владельца (токен расшифрован). None если нет строки."""
+    import json as _json
+    from services.token_vault import decrypt_token
+    try:
+        raw = await pool.fetchval(
+            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    d = raw if isinstance(raw, dict) else _json.loads(raw)
+    cf = (d or {}).get("cf") or {}
+    tok_enc = cf.get("token_enc")
+    return {
+        "api_token": decrypt_token(tok_enc) if tok_enc else "",
+        "account_id": cf.get("account_id") or "",
+        "subdomain": cf.get("subdomain") or "",
+        "has_token": bool(tok_enc),
+    }
+
+
 async def get_proxy_policy(pool, owner_id: int | None) -> str:
     """Политика прокси владельца: 'strict' (все соединения только через прокси)
     | 'allow_direct' (можно без прокси, риск блокировок). Хранится в
@@ -2905,7 +2963,7 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
         row = await pool.fetchrow(
             """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
-                      a.lang_code, a.system_lang_code,
+                      a.lang_code, a.system_lang_code, a.cf_relay_url,
                       a.proxy_id, p.proxy_url, p.geo_country
                FROM tg_accounts a
                LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
@@ -2917,7 +2975,7 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
         row = await pool.fetchrow(
             """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
-                      a.lang_code, a.system_lang_code,
+                      a.lang_code, a.system_lang_code, a.cf_relay_url,
                       a.proxy_id, p.proxy_url, p.geo_country
                FROM tg_accounts a
                LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE

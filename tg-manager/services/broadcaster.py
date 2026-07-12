@@ -555,11 +555,13 @@ async def mass_broadcast_with_scheduling(
         "active_30d": " AND last_seen >= now() - interval '30 days'",
     }.get(segment, "")
 
-    total = int(
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql,
-            bot_id,
-        ) or 0
+    # safe_count: сегментный фильтр по last_seen может ссылаться на колонку,
+    # которой ещё нет при миграционном лаге — тогда COUNT падает UndefinedColumn.
+    # db.safe_count глотает сбой БД → 0, рассылка не падает целиком.
+    total = await db.safe_count(
+        pool,
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql,
+        bot_id,
     )
 
     buttons = []

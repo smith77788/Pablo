@@ -753,11 +753,18 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # прокси, а его нет; low_risk-операции не блокируются)
     proxy = _resolve_client_proxy(d, low_risk=low_risk)
 
-    # Выбор транспорта: если нет аккаунт-bound/TG_PROXY И задан CF relay → используем relay
+    # Выбор транспорта: если нет аккаунт-bound/TG_PROXY И задан CF relay → используем relay.
+    # ПЕР-АККАУНТНЫЙ cf_relay_url (из tg_accounts, раздаётся cf_pool_manager) имеет
+    # приоритет над глобальным CF_RELAY_URL — это и даёт «уникальный edge-IP на аккаунт».
+    # Аккаунт со своим relay всегда ходит через него (стабильный exit → без рассинхрона IP).
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
-    if not has_bound_proxy and CF_RELAY_URL:
+    acc_relay = ""
+    if device:
+        acc_relay = str(device.get("cf_relay_url") or "").strip()
+    relay_url = acc_relay or CF_RELAY_URL
+    if not has_bound_proxy and relay_url:
         from services.cf_relay import make_cf_relay_connection as _make_relay
-        connection_cls = _make_relay(CF_RELAY_URL)
+        connection_cls = _make_relay(relay_url)
         effective_proxy = None  # relay сам маршрутизирует
     else:
         connection_cls = ConnectionTcpObfuscated

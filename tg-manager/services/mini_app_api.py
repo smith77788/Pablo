@@ -1101,7 +1101,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON")
         bot_id = validate_integer(body.get("bot_id"), min_val=1)
-        text = validate_string(body.get("text"), max_len=4096)
+        # Фронт (submitScheduledBroadcast) шлёт message_text/scheduled_at — принимаем
+        # оба контракта (иначе кнопка «Запланировать» отдавала бы 400/404).
+        text = validate_string(body.get("text") or body.get("message_text"), max_len=4096)
         if not bot_id or not text:
             return _err("bot_id and text required")
         if check_sql_suspicious(text):
@@ -1112,7 +1114,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid bot_id")
         schedule = {
             "schedule_minutes": body.get("schedule_minutes"),
-            "scheduled_for": body.get("scheduled_for"),
+            "scheduled_for": body.get("scheduled_for") or body.get("scheduled_at"),
             "segment": body.get("segment"),
             "buttons": body.get("buttons"),
         }
@@ -8727,10 +8729,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         bot_id = int(bot_id)
                     except (TypeError, ValueError):
                         return _err("Invalid bot_id", 400)
+                    # Owner-scope: привязывать к паку можно ТОЛЬКО свой бот
+                    # (added_by=uid), иначе — линковка чужого bot_id в свой пак.
                     bot_row = await pool.fetchrow(
-                        "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
+                        "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                        bot_id, uid,
                     )
-                    bot_username = bot_row["username"] if bot_row else None
+                    if not bot_row:
+                        return _err("Бот не найден или не принадлежит вам", 404)
+                    bot_username = bot_row["username"]
                 await pool.execute(
                     "UPDATE presence_packs SET bot_id=$3, bot_username=$4 WHERE id=$1 AND owner_id=$2",
                     pack_id, uid, bot_id, bot_username,
@@ -10512,6 +10519,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/broadcast/{bc_id}/resend", broadcast_resend)
     app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)
     app.router.add_post("/api/miniapp/broadcast/schedule", broadcast_schedule)
+    # Алиас: фронт зовёт множественное /broadcasts/schedule (был 404).
+    app.router.add_post("/api/miniapp/broadcasts/schedule", broadcast_schedule)
     app.router.add_post("/api/miniapp/broadcast/ab_test", broadcast_ab_test)
     app.router.add_get("/api/miniapp/broadcast/{bc_id}/analytics", broadcast_analytics)
     # Channels
@@ -10699,6 +10708,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/platform_users", platform_new_users)
     app.router.add_get("/api/miniapp/platform_users/export", platform_new_users_export)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    # Алиас: фронт (autoregProCheckAll) зовёт /accounts/check_all (был 404);
+    # accounts_check и так проверяет ВСЕ аккаунты владельца.
+    app.router.add_post("/api/miniapp/accounts/check_all", accounts_check)
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/global_search", global_search)
@@ -12197,15 +12209,59 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
 
     # ── CF Pool Manager ──────────────────────────────────────────────────────
+    async def _cf_resolve_creds(uid: int) -> dict:
+        """Доступы CF: сперва из БД владельца (заданы в приложении, шифр),
+        иначе — из env (обратная совместимость с Railway-переменными)."""
+        import os
+        from database import db
+        creds = await db.get_cf_credentials(pool, uid) or {}
+        return {
+            "api_token": creds.get("api_token") or os.getenv("CF_API_TOKEN", ""),
+            "account_id": creds.get("account_id") or os.getenv("CF_ACCOUNT_ID", ""),
+            "subdomain": creds.get("subdomain") or os.getenv("CF_WORKERS_SUBDOMAIN", ""),
+            "has_token": bool(creds.get("has_token") or os.getenv("CF_API_TOKEN")),
+        }
+
     async def cf_pool_status(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             from services.cf_pool_manager import get_pool_status
             status = await get_pool_status(pool, uid)
+            c = await _cf_resolve_creds(uid)
+            # доступы — без утечки токена: только флаги/некритичные поля
+            status["credentials"] = {
+                "has_token": c["has_token"],
+                "account_id": c["account_id"],
+                "subdomain": c["subdomain"],
+                "ready": bool(c["has_token"] and c["account_id"]),
+            }
             return _json_resp(status)
         except Exception as e:
+            log.exception("cf_pool_status uid=%s", uid)
             return _err(str(e), 500)
+
+    async def cf_credentials_save(request: web.Request) -> web.Response:
+        """Сохранить доступы CF в приложении (без Railway). Токен шифруется в БД.
+        body: {api_token?, account_id, subdomain}. Пустой api_token не затирает."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        account_id = validate_string(data.get("account_id"), max_len=64) or ""
+        subdomain = validate_string(data.get("subdomain"), max_len=80) or ""
+        api_token = (data.get("api_token") or "").strip()
+        if not account_id:
+            return _err("Укажите Account ID", 400)
+        try:
+            from database import db
+            await db.set_cf_credentials(pool, uid, api_token or None, account_id, subdomain)
+            return _json_resp({"ok": True})
+        except Exception as e:
+            log.exception("cf_credentials_save uid=%s", uid)
+            return _err(str(e)[:150], 500)
 
     async def cf_pool_deploy(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12214,22 +12270,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
             count = int(data.get('count', 5))
             prefix = data.get('name_prefix', f'tg-relay-{uid}')
-            import os
-            api_token = os.getenv('CF_API_TOKEN', '')
-            account_id = os.getenv('CF_ACCOUNT_ID', '')
-            if not api_token or not account_id:
-                return _err("CF_API_TOKEN and CF_ACCOUNT_ID required", 400)
+            c = await _cf_resolve_creds(uid)
+            if not c["api_token"] or not c["account_id"]:
+                return _err("Не заданы доступы Cloudflare (токен + Account ID). "
+                            "Впишите их в приложении или в переменных Railway.", 400)
             from services.cf_pool_manager import deploy_pool, assign_urls_to_accounts
-            urls = await deploy_pool(count, prefix, api_token, account_id)
+            urls = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
+                                     subdomain=c["subdomain"])
             if urls:
                 result = await assign_urls_to_accounts(pool, uid, urls)
                 return _json_resp({"ok": True, **result})
-            return _err("No workers deployed", 500)
+            return _err("Воркеры не задеплоились — проверьте токен/поддомен Cloudflare", 500)
         except Exception as e:
+            log.exception("cf_pool_deploy uid=%s", uid)
             return _err(str(e), 500)
 
     app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
     app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
+    app.router.add_post("/api/miniapp/cf/credentials", cf_credentials_save)
 
     # ── Search Ranking Engine ──────────────────────────────────────────────────
     async def ranking_track(request: web.Request) -> web.Response:
