@@ -55,6 +55,26 @@ def test_cf_pool_ui_button_wired():
     assert "deploy_pool" in seg and "assign_urls_to_accounts" in seg
 
 
+def test_cf_credentials_in_app_no_railway():
+    """Доступы CF можно вписать в приложении (шифр в БД), Railway не обязателен."""
+    dbsrc = _read("database/db.py")
+    assert "async def set_cf_credentials" in dbsrc and "async def get_cf_credentials" in dbsrc
+    assert "encrypt_token" in dbsrc[dbsrc.index("async def set_cf_credentials"):dbsrc.index("async def get_cf_credentials")]
+    api = _read("services/mini_app_api.py")
+    assert "async def cf_credentials_save" in api
+    assert 'add_post("/api/miniapp/cf/credentials", cf_credentials_save)' in api
+    # deploy берёт доступы из БД-владельца, с фолбэком на env (не жёстко Railway)
+    seg = api[api.index("async def _cf_resolve_creds"):api.index("async def cf_pool_status")]
+    assert "db.get_cf_credentials" in seg and 'os.getenv("CF_API_TOKEN"' in seg
+    assert "from database import db" in seg  # иначе NameError в проде
+    # статус не отдаёт токен наружу (только флаги)
+    st = api[api.index("async def cf_pool_status"):api.index("async def cf_credentials_save")]
+    assert "has_token" in st and "api_token" not in st.split("credentials")[1][:200]
+    ui = _read("mini_app/index.html")
+    assert "saveCfCreds" in ui and "/api/miniapp/cf/credentials" in ui
+    assert 'type="password" id="cfToken"' in ui  # токен вводится как пароль
+
+
 def test_schema_v154_restores_and_indexes():
     s = _read("schema_v154.sql")
     # восстановлена потерянная таблица + opt-in колонка

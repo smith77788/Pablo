@@ -2837,8 +2837,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:8px">☁️ Уникальный IP без прокси (Cloudflare)</div>
     <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
-      <div style="font-size:12px;opacity:.7;margin-bottom:8px">Каждому аккаунту — свой Cloudflare Worker (свой edge-IP), бесплатно вместо платных прокси. Нужны переменные <code>CF_API_TOKEN</code> и <code>CF_ACCOUNT_ID</code> в Railway.</div>
+      <div style="font-size:12px;opacity:.7;margin-bottom:8px">Каждому аккаунту — свой Cloudflare Worker (свой edge-IP), бесплатно вместо платных прокси. Доступы можно вписать прямо здесь — Railway не нужен.</div>
       <div id="cfPoolStatus" style="font-size:13px;margin-bottom:8px;opacity:.85">—</div>
+      <details id="cfCredsBox" style="margin-bottom:8px">
+        <summary style="font-size:13px;cursor:pointer;opacity:.85">🔑 Доступы Cloudflare</summary>
+        <div style="padding-top:8px">
+          <div class="field"><label>API Token <span style="opacity:.6">(вставится 1 раз, хранится в БД зашифровано)</span></label><input type="password" id="cfToken" placeholder="cfut_… (оставьте пустым, чтобы не менять)" autocomplete="off"></div>
+          <div class="field"><label>Account ID</label><input type="text" id="cfAccountId" placeholder="6d808bb24be683c5a0e556074977a78a"></div>
+          <div class="field"><label>Workers-поддомен</label><input type="text" id="cfSubdomain" placeholder="infragram"></div>
+          <button class="btn btn-s" id="cfSaveCredsBtn" style="width:100%;font-size:13px;padding:9px 6px" onclick="saveCfCreds()">💾 Сохранить доступы</button>
+        </div>
+      </details>
       <div style="display:flex;gap:8px;align-items:center">
         <input type="number" id="cfPoolCount" value="10" min="1" max="100" class="inp" style="width:80px" title="Сколько воркеров">
         <button class="btn btn-p" id="cfDeployBtn" style="flex:1;font-size:13px;padding:9px 6px" onclick="deployCfPool()">☁️ Задеплоить пул</button>
@@ -8619,14 +8628,34 @@ async function rotateProxies() {
     loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
+async function saveCfCreds() {
+  const api_token = document.getElementById('cfToken').value.trim();
+  const account_id = document.getElementById('cfAccountId').value.trim();
+  const subdomain = document.getElementById('cfSubdomain').value.trim();
+  if (!account_id) { toast('Укажите Account ID'); return; }
+  const btn = document.getElementById('cfSaveCredsBtn');
+  btn.disabled=true; btn.textContent='💾 Сохраняю…';
+  try {
+    await api('/api/miniapp/cf/credentials', {method:'POST', body: JSON.stringify({api_token, account_id, subdomain})});
+    document.getElementById('cfToken').value='';  // не держим токен в поле
+    toast('✅ Доступы сохранены');
+    loadCfPoolStatus();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+  finally { btn.disabled=false; btn.textContent='💾 Сохранить доступы'; }
+}
 async function loadCfPoolStatus() {
   const el = document.getElementById('cfPoolStatus');
   if (!el) return;
   try {
     const r = await api('/api/miniapp/cf/pool/status');
     const w = r.total_workers||0, a = r.total_accounts_with_relay||0;
-    el.innerHTML = w ? `☁️ Воркеров: <b>${w}</b> · аккаунтов с релеем: <b>${a}</b>`
-                     : 'Пул ещё не задеплоен.';
+    const c = r.credentials||{};
+    // префилл некритичных полей (токен никогда не отдаётся)
+    if (c.account_id && !document.getElementById('cfAccountId').value) document.getElementById('cfAccountId').value = c.account_id;
+    if (c.subdomain && !document.getElementById('cfSubdomain').value) document.getElementById('cfSubdomain').value = c.subdomain;
+    const credLine = c.ready ? '🔑 доступы заданы ✓' : (c.has_token ? '🔑 нет Account ID' : '🔑 доступы не заданы');
+    el.innerHTML = (w ? `☁️ Воркеров: <b>${w}</b> · аккаунтов с релеем: <b>${a}</b>` : 'Пул ещё не задеплоен.')
+                   + `<br><span style="opacity:.7">${credLine}</span>`;
   } catch(e) { el.textContent = '—'; }
 }
 async function deployCfPool() {

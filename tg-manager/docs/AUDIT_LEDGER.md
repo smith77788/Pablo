@@ -621,3 +621,13 @@ Bot-паритет: новый `bot/handlers/metrics_dashboard.py` — нати�
 2. `autoregProCheckAll` звал `POST /api/miniapp/accounts/check_all` — не зарегистрирован (были `/accounts/check` и `/proxies/check_all`). `accounts_check` и так проверяет ВСЕ аккаунты владельца (health-op, без body) = ровно то, что нужно. Исправлено: алиас-маршрут `/accounts/check_all`→accounts_check.
 Фиксы на БЭКЕНДЕ (алиасы + толерантность полей) — index.html (11k строк, хрупкий) не трогал; обратно совместимо, существующие singular-маршруты живы.
 Верификация: +3 tests/test_frontend_routes_wired.py (общий гвард: НЕТ фронтовых вызовов без маршрута — с учётом конкатенации/параметров; оба алиаса зарегистрированы; broadcast_schedule принимает оба контракта полей). Python AST чисто. Гвард ловит будущие dead-routes в CI.
+
+## tg-manager: CF-доступы в приложении (без Railway) — 2026-07-11
+Пользователь: «впиши сам». У меня нет доступа к его Railway (env живут в панели Railway), а класть живой CF_API_TOKEN в репозиторий нельзя (секрет в git-историю). Решение: перенёс доступы CF из env В ПРИЛОЖЕНИЕ — вводятся в UI, шифруются в БД.
+Сделано:
+  - db.set_cf_credentials/get_cf_credentials — хранение в platform_users.settings_json.cf (merge, не clobber), токен через token_vault (AES-GCM). Пустой api_token не затирает существующий.
+  - mini_app_api: `_cf_resolve_creds` (БД владельца → фолбэк env), эндпоинт `POST /cf/credentials` (сохранить), `cf_pool_status` отдаёт `credentials.{has_token,account_id,subdomain,ready}` БЕЗ токена, `cf_pool_deploy` берёт доступы из БД (или env) + передаёт subdomain в deploy_pool.
+  - cf_pool_manager.deploy_pool: опц. параметр subdomain (из БД-доступов).
+  - index.html: в карточке CF — `<details> Доступы Cloudflare` (token как password, account_id, subdomain) + «Сохранить доступы» (saveCfCreds → /cf/credentials); статус показывает «доступы заданы ✓/нет», префилл account_id/subdomain (токен наружу не отдаётся).
+Важно (честно пользователю): я НЕ вписываю сам живой токен (нет доступа к Railway; в репозиторий секрет класть нельзя — это git-история). Теперь это делается ОДНОЙ вставкой в приложении (Прокси → CF → Доступы), Railway больше не нужен. Найден и предотвращён баг: `db` в mini_app_api импортируется локально в функциях — добавил `from database import db` в новые (иначе NameError в проде).
+Верификация: test_cf_pool_fixes +1 (in-app creds: db-хелперы с шифрованием, эндпоинт+route, deploy из БД+фолбэк, статус без токена, UI password-поле). Полный tests/ зелёный (exit 0). Python AST + node JS чисто.

@@ -167,9 +167,11 @@ async def deploy_worker(name: str, api_token: str, account_id: str,
     return worker_url
 
 
-async def deploy_pool(count: int, name_prefix: str, api_token: str, account_id: str) -> list:
+async def deploy_pool(count: int, name_prefix: str, api_token: str, account_id: str,
+                      subdomain: str = "") -> list:
     """Deploy multiple CF Workers and return their URLs."""
-    subdomain = await get_workers_subdomain(api_token, account_id)
+    if not subdomain:
+        subdomain = await get_workers_subdomain(api_token, account_id)
     if not subdomain:
         log.error("deploy_pool: workers.dev subdomain не настроен — деплой отменён")
         return []

@@ -2889,6 +2889,50 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
     )
 
 
+async def set_cf_credentials(pool, owner_id: int, api_token: str | None,
+                             account_id: str, subdomain: str) -> None:
+    """Сохранить доступы Cloudflare владельца в platform_users.settings_json.cf.
+    Токен шифруется (token_vault). Если api_token пустой — НЕ перезатираем
+    существующий (можно менять только account_id/subdomain). Merge, не clobber."""
+    import json as _json
+    from services.token_vault import encrypt_token
+    cf: dict = {
+        "account_id": (account_id or "").strip(),
+        "subdomain": (subdomain or "").strip().replace(".workers.dev", ""),
+    }
+    if api_token and api_token.strip():
+        cf["token_enc"] = encrypt_token(api_token.strip())
+    await pool.execute(
+        """UPDATE platform_users
+           SET settings_json = COALESCE(settings_json,'{}'::jsonb)
+               || jsonb_build_object('cf',
+                    COALESCE(settings_json->'cf','{}'::jsonb) || $2::jsonb)
+           WHERE user_id=$1""",
+        owner_id, _json.dumps(cf))
+
+
+async def get_cf_credentials(pool, owner_id: int) -> dict | None:
+    """Достать доступы Cloudflare владельца (токен расшифрован). None если нет строки."""
+    import json as _json
+    from services.token_vault import decrypt_token
+    try:
+        raw = await pool.fetchval(
+            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    d = raw if isinstance(raw, dict) else _json.loads(raw)
+    cf = (d or {}).get("cf") or {}
+    tok_enc = cf.get("token_enc")
+    return {
+        "api_token": decrypt_token(tok_enc) if tok_enc else "",
+        "account_id": cf.get("account_id") or "",
+        "subdomain": cf.get("subdomain") or "",
+        "has_token": bool(tok_enc),
+    }
+
+
 async def get_proxy_policy(pool, owner_id: int | None) -> str:
     """Политика прокси владельца: 'strict' (все соединения только через прокси)
     | 'allow_direct' (можно без прокси, риск блокировок). Хранится в
