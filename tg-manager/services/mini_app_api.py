@@ -11595,6 +11595,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
     app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
 
+    # ── CF Pool Manager ──────────────────────────────────────────────────────
+    async def cf_pool_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.cf_pool_manager import get_pool_status
+            status = await get_pool_status(pool, uid)
+            return _json_resp(status)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cf_pool_deploy(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            count = int(data.get('count', 5))
+            prefix = data.get('name_prefix', f'tg-relay-{uid}')
+            import os
+            api_token = os.getenv('CF_API_TOKEN', '')
+            account_id = os.getenv('CF_ACCOUNT_ID', '')
+            if not api_token or not account_id:
+                return _err("CF_API_TOKEN and CF_ACCOUNT_ID required", 400)
+            from services.cf_pool_manager import deploy_pool, assign_urls_to_accounts
+            urls = await deploy_pool(count, prefix, api_token, account_id)
+            if urls:
+                result = await assign_urls_to_accounts(pool, uid, urls)
+                return _json_resp({"ok": True, **result})
+            return _err("No workers deployed", 500)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
+    app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
+
     # ── Search Ranking Engine ──────────────────────────────────────────────────
     async def ranking_track(request: web.Request) -> web.Response:
         uid = _get_uid(request)
