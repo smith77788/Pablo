@@ -2183,7 +2183,9 @@ class TestProxyPool:
     async def test_proxy_pool_stats_db_error(self):
         from services.proxy_selector import get_proxy_pool_stats
         pool = FakePool(error=Exception("DB down"))
-        result = await get_proxy_pool_stats(pool, 123)
+        # Уникальный owner_id: кэш pps:{owner_id} у success-теста (owner 123)
+        # иначе вернул бы закэшированный total=3, минуя ветку ошибки.
+        result = await get_proxy_pool_stats(pool, 998877)
         assert result["total"] == 0
 
     @pytest.mark.asyncio

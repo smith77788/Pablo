@@ -672,6 +672,20 @@ async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> in
         return await batch_upsert_users(pool, bot_id, users)
 
 
+async def safe_count(pool: asyncpg.Pool, query: str, *args: object) -> int:
+    """COUNT-запрос, устойчивый к миграционному лагу.
+
+    Если таблица/колонка ещё не создана (UndefinedColumn при отставании
+    схемы) — возвращает 0 вместо падения, а не даёт всплыть исключению в
+    вызывающую логику рассылок. Логирует причину, секреты в query не попадают.
+    """
+    try:
+        return int(await pool.fetchval(query, *args) or 0)
+    except Exception as e:  # noqa: BLE001 — намеренно широко: любой сбой БД → 0
+        log.warning("safe_count error: %s | query=%.120s", e, query)
+        return 0
+
+
 async def get_audience_count(pool: asyncpg.Pool, bot_id: int) -> int:
     return await pool.fetchval(
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
