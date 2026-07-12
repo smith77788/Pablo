@@ -11,7 +11,7 @@ set -u
 (
   cd /app/pablo 2>/dev/null || { echo "[start-all] /app/pablo missing, assistant skipped"; exit 0; }
   while true; do
-    /app/pablo/.venv/bin/python -m assistant || true
+    /app/pablo/.venv/bin/python -u -m assistant || true
     echo "[start-all] assistant process returned — restarting in 5s"
     sleep 5
   done

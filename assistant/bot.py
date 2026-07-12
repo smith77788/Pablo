@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
+import anthropic
 import httpx
 
 from assistant import telegram_api as tg
@@ -179,12 +180,26 @@ class AssistantBot:
 
     def _claude_turn(self, chat_id: int, content: str | list[dict]) -> None:
         tg.send_chat_action(chat_id, "typing")
-        reply, history = self.chat.run_turn(
-            model=self.state.model,
-            history=self.state.history(chat_id),
-            user_content=content,
-            on_progress=lambda: tg.send_chat_action(chat_id, "typing"),
-        )
+        try:
+            reply, history = self.chat.run_turn(
+                model=self.state.model,
+                history=self.state.history(chat_id),
+                user_content=content,
+                on_progress=lambda: tg.send_chat_action(chat_id, "typing"),
+            )
+        except anthropic.AuthenticationError:
+            logger.error("Claude auth failed — check ANTHROPIC_API_KEY")
+            tg.send_message(
+                chat_id,
+                "⚠️ Claude API отклонил ключ. Проверь переменную ANTHROPIC_API_KEY "
+                "в Railway (действующий ключ Claude). Команды вроде /status работают "
+                "и без него.",
+            )
+            return
+        except anthropic.APIError as e:
+            logger.exception("Claude API error")
+            tg.send_message(chat_id, f"⚠️ Claude API временно недоступен ({e}). Попробуй ещё раз.")
+            return
         self.state.update_history(chat_id, history)
         self.turns_handled += 1
         tg.send_message(chat_id, reply)
@@ -367,6 +382,7 @@ def run() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+    logger.info("==== Pablo assistant bot: supervisor starting ====")
 
     backoff = 1
     while True:

@@ -156,7 +156,15 @@ class ClaudeChat:
     """One Claude conversation turn with tools over a persistent history."""
 
     def __init__(self) -> None:
-        self.client = anthropic.Anthropic()
+        # Built lazily on first turn so a missing/invalid ANTHROPIC_API_KEY
+        # never blocks the bot from coming online and answering commands.
+        self._client: anthropic.Anthropic | None = None
+
+    @property
+    def client(self) -> anthropic.Anthropic:
+        if self._client is None:
+            self._client = anthropic.Anthropic()
+        return self._client
 
     def run_turn(
         self,
