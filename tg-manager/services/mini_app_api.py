@@ -8727,10 +8727,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         bot_id = int(bot_id)
                     except (TypeError, ValueError):
                         return _err("Invalid bot_id", 400)
+                    # Owner-scope: привязывать к паку можно ТОЛЬКО свой бот
+                    # (added_by=uid), иначе — линковка чужого bot_id в свой пак.
                     bot_row = await pool.fetchrow(
-                        "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
+                        "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                        bot_id, uid,
                     )
-                    bot_username = bot_row["username"] if bot_row else None
+                    if not bot_row:
+                        return _err("Бот не найден или не принадлежит вам", 404)
+                    bot_username = bot_row["username"]
                 await pool.execute(
                     "UPDATE presence_packs SET bot_id=$3, bot_username=$4 WHERE id=$1 AND owner_id=$2",
                     pack_id, uid, bot_id, bot_username,
