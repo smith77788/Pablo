@@ -2825,6 +2825,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="exportProxies()">📤 Экспорт</button>
       <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="cleanupDeadProxies()">🧹 Очистить мёртвые</button>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="toggleProxyStats()">📊 Аналитика прокси</button>
+      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="rotateProxies()">🔁 Ротация IP</button>
+    </div>
+    <div id="proxyStatsBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyImportBox" style="display:none;margin-bottom:8px">
       <textarea id="proxyImport" rows="4" placeholder="socks5://user:pass@host:port&#10;http://host:port&#10;по одному на строку"></textarea>
@@ -3245,6 +3250,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="lst" id="seoKeywords"></div>
     <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Применить всё →</span></div>
     <div class="lst" id="seoSuggestions"></div>
+    <div class="sec" style="margin-top:8px">Переоптимизация ботов
+      <label style="float:right;font-size:12px;color:var(--hint);cursor:pointer">
+        <input type="checkbox" id="reoptToggle" onchange="toggleReopt(this)" style="vertical-align:middle"> авто при падении
+      </label>
+    </div>
+    <div class="hint" style="padding:0 2px 6px">При падении позиции бота в поиске система готовит рекомендацию по имени/описанию — примените в один клик.</div>
+    <div class="lst" id="seoBotSuggestions"></div>
   </div>
 </div>
 
@@ -5084,11 +5096,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="kpi-scroll" id="dashKpiScroll">
-      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-users" style="color:var(--blue)">—</div><div class="kpi-chip-lbl">👥 Подписчики</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-users" style="color:var(--blue)">—</div><div class="kpi-chip-lbl">👥 Аудитория</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-channels" style="color:var(--purple)">—</div><div class="kpi-chip-lbl">📡 Каналы</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-posts" style="color:var(--green)">—</div><div class="kpi-chip-lbl">📝 Посты</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">👁 Просмотры</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Рост 7д</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">📱 Аккаунты</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Ауд. +7д</div></div>
     </div>
     <div class="seg" id="dashTimeSeg">
       <div class="seg-opt on" onclick="switchDashRange('24h',this)">24ч</div>
@@ -5096,22 +5108,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="switchDashRange('30d',this)">30 дн</div>
       <div class="seg-opt" onclick="switchDashRange('90d',this)">90 дн</div>
     </div>
-    <div class="sec">Подписчики</div>
+    <div class="sec">Новая аудитория / день</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="dashSubsChart" style="width:100%;height:140px"></canvas>
       <div id="dashSubsEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
     </div>
-    <div class="sec" style="margin-top:12px">Просмотры постов</div>
+    <div class="sec" style="margin-top:12px">Операции / день</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="dashViewsChart" style="width:100%;height:140px"></canvas>
       <div id="dashViewsEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
     </div>
-    <div class="sec" style="margin-top:12px">Вовлечённость</div>
+    <div class="sec" style="margin-top:12px">Успешность операций, %</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="dashEngChart" style="width:100%;height:140px"></canvas>
       <div id="dashEngEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Загрузка графика...</div>
     </div>
-    <div class="sec" style="margin-top:12px">Топ каналов</div>
+    <div class="sec" style="margin-top:12px">Топ каналов по активности</div>
     <div class="lst" id="dashTopChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Последние события</div>
     <div class="lst" id="dashActivity"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -6417,11 +6429,10 @@ async function massCheckAccounts() {
 
 // ── Re-authorization ──────────────────────────────────────
 async function reauthAccount(id) {
-  if (!await askConfirm('Запустить переавторизацию этого аккаунта? Нужен новый код из Telegram.')) return;
-  toast('🔑 Запускаю переавторизацию…');
   try {
     const r = await api(`/api/miniapp/account/${id}/action/reauth`, {method:'POST'});
-    toast(r.message || '🔑 Переавторизация запущена');
+    // Переавторизация интерактивна (код из Telegram) → показываем инструкцию, ведущую в бота.
+    await askConfirm(r.message || 'Переавторизация выполняется в боте: Аккаунты → 🔄 Переавторизатор → Релог.');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 
@@ -8563,6 +8574,41 @@ async function cleanupDeadProxies() {
     loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
+async function toggleProxyStats() {
+  const box = document.getElementById('proxyStatsBox');
+  if (box.style.display !== 'none') { box.style.display='none'; return; }
+  box.style.display='block';
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const r = await api('/api/miniapp/proxy_stats');
+    const list = r.proxies||[];
+    if (!list.length) { box.innerHTML = '<div style="opacity:.7">Прокси нет.</div>'; return; }
+    let h = '<div style="opacity:.6;margin-bottom:6px">Здоровье — durable (из «Проверить все»); скорость/успешность — с момента старта воркера (не durable).</div>';
+    h += list.map(p=>{
+      const health = (p.alive==null?'⚪ не проверен':(p.alive?'🟢 живой':'🔴 мёртв'));
+      const rate = (p.total_checks>0? `${p.success_rate}% · ${p.avg_latency_ms}мс · ${p.total_checks} пров.` : 'нет замеров');
+      const assigned = p.assigned>0? `🔗 ${p.assigned} акк.` : 'не назначен';
+      const nm = esc(p.label||p.url||('Прокси #'+p.id));
+      return `<div class="li" style="display:block;padding:8px 10px">
+        <div class="li-name">${nm}${p.geo?(' · '+esc(p.geo)):''}${p.active?'':' · ⏸ выкл'}</div>
+        <div class="li-sub">${health} · ${assigned}</div>
+        <div class="li-sub">⚡ ${rate}</div>
+      </div>`;
+    }).join('');
+    box.innerHTML = h;
+  } catch(e) { box.innerHTML = errHtml(e.message,'toggleProxyStats()'); }
+}
+async function rotateProxies() {
+  if (!await askConfirm('Перемешать назначения прокси по всем активным аккаунтам? Изоляция (1 аккаунт = 1 прокси) сохраняется; занятые операцией аккаунты пропускаются.')) return;
+  try {
+    const r = await api('/api/miniapp/proxy/rotate', {method:'POST', body: JSON.stringify({})});
+    let msg = `🔁 Ротировано: ${r.rotated}`;
+    if (r.skipped_busy) msg += ` · занято: ${r.skipped_busy}`;
+    if (r.skipped_no_proxy) msg += ` · без прокси: ${r.skipped_no_proxy}`;
+    toast(msg);
+    loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
 async function checkProxy(id, el) {
   if (el) { el.textContent='⏳'; el.style.pointerEvents='none'; }
   try {
@@ -10018,8 +10064,45 @@ async function openSeo() {
         <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="applySeo(${s.chan_id}, this)">Применить</button>
       </div>
     `).join('') : empty('✨','Нет SEO-предложений','Запустите SEO-анализ в боте'));
+    const bsug = d.bot_suggestions||[];
+    txt('seoBotSuggestions', bsug.length ? bsug.map(b=>`
+      <div class="row">
+        <div class="row-ico" style="background:var(--bg-blue-16)">🤖</div>
+        <div class="row-body">
+          <div class="row-name">${esc(b.bot_username?'@'+b.bot_username:('bot#'+b.bot_id))}</div>
+          <div class="row-val">${b.name?'Имя: '+esc(b.name.slice(0,42)):''}${b.applied_at?' · ✅ применено':''}</div>
+        </div>
+        <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="applyBotSeo(${b.bot_id}, this)">Применить</button>
+      </div>
+    `).join('') : empty('🤖','Нет рекомендаций для ботов','Включите авто-переоптимизацию — рекомендации появятся при падении позиций'));
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+// Применить рекомендацию по переоптимизации бота (имя/краткое описание) в один клик
+async function applyBotSeo(botId, btn) {
+  if (!await askConfirm('Применить рекомендацию (имя/краткое описание) к боту?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await api('/api/miniapp/seo/apply_bot', {method:'POST', body:JSON.stringify({bot_id:botId})});
+    const parts = r.applied||[];
+    const errs = (r.errors||[]).join('; ');
+    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):'')) : ('⚠️ '+(errs||'без изменений')));
+    openSeo();
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
+  }
+}
+// Тумблер авто-переоптимизации ботов при падении позиции (opt-in)
+async function toggleReopt(el) {
+  try {
+    await api('/api/miniapp/ranking/reopt_setting', {method:'POST', body:JSON.stringify({enabled:el.checked})});
+    toast(el.checked ? '✅ Авто-переоптимизация включена' : 'Авто-переоптимизация выключена');
+  } catch(e) {
+    el.checked = !el.checked;
+    toast('⚠️ '+(e.message||'Ошибка'));
   }
 }
 // Применить SEO-предложение к каналу в один клик (замыкает петлю анализ→применение)
@@ -15651,12 +15734,12 @@ function startDashAutoRefresh() {
 
 async function loadDashboard() {
   try {
-    const d = await api('/api/miniapp/dashboard_realtime', { method: '?' + new URLSearchParams({ range: _dashRange }) });
+    const d = await api('/api/miniapp/dashboard_realtime?' + new URLSearchParams({ range: _dashRange }));
 
     document.getElementById('dk-users').textContent = num(d.total_subscribers || 0);
     document.getElementById('dk-channels').textContent = num(d.total_channels || 0);
     document.getElementById('dk-posts').textContent = num(d.total_posts || 0);
-    document.getElementById('dk-views').textContent = num(d.total_views || 0);
+    document.getElementById('dk-views').textContent = num(d.total_accounts || 0);
     document.getElementById('dk-growth').textContent = (d.growth_7d != null && d.growth_7d > 0 ? '+' : '') + num(d.growth_7d || 0);
 
     renderDashLineChart('dashSubsChart', 'dashSubsEmpty', d.subs_history || [], 'var(--blue)');
@@ -15670,7 +15753,7 @@ async function loadDashboard() {
           <div class="ava ava-purple">📡</div>
           <div class="li-body">
             <div class="li-name">${esc(c.name || c.username || '#')}</div>
-            <div class="li-sub">${num(c.subscribers || 0)} подписчиков · ${num(c.views || 0)} просмотров</div>
+            <div class="li-sub">${num(c.subscribers || 0)} операций за период</div>
           </div>
           <div class="li-right"><span class="badge b-bl">+${num(c.growth || 0)}</span></div>
         </div>`;
@@ -15765,7 +15848,7 @@ function switchDashRange(range, el) {
 
 async function exportDashboard() {
   try {
-    const d = await api('/api/miniapp/dashboard_realtime', { method: '?' + new URLSearchParams({ range: _dashRange }) });
+    const d = await api('/api/miniapp/dashboard_realtime?' + new URLSearchParams({ range: _dashRange }));
     const csv = convertDashboardToCSV(d);
     downloadBlob(csv, 'dashboard_' + _dashRange + '.csv', 'text/csv');
     toast('📤 Дашборд экспортирован');

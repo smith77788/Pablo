@@ -272,6 +272,143 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🌱",
     },
+    # ── Op-типы с исполнителями в op_worker, ранее не заведённые в реестр ──────
+    # Раньше list_active/get_status показывали для них сырой op_type и generic ⚙️
+    # вместо человекочитаемого лейбла, а любая постановка через operation_bus.submit
+    # падала бы ValueError (см. контракт модуля). Реестр приведён в паритет с
+    # диспетчером op_worker (регресс: tests/test_op_registry_dispatch_parity.py).
+    "account_warmup": {
+        "description": "Прогрев аккаунтов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔥",
+    },
+    "auto_register": {
+        "description": "Авторегистрация аккаунтов",
+        "min_plan": "pro",
+        "max_retries": 1,
+        "icon": "📲",
+    },
+    "reg_check": {
+        "description": "Проверка номеров на регистрацию в Telegram",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "✅",
+    },
+    "phone_check": {
+        "description": "Проверка номеров телефонов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "☎️",
+    },
+    "parse_audience": {
+        "description": "Парсинг аудитории",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "👥",
+    },
+    "profile_setter": {
+        "description": "Настройка профиля аккаунтов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "👤",
+    },
+    "create_channel": {
+        "description": "Создание канала",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "📡",
+    },
+    "create_group": {
+        "description": "Создание группы",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "👥",
+    },
+    "channel_add": {
+        "description": "Добавление канала под управление",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "➕",
+    },
+    "quick_post": {
+        "description": "Быстрая публикация поста",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "📝",
+    },
+    "run_broadcast": {
+        "description": "Рассылка по аудитории",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📢",
+    },
+    "ai_comment": {
+        "description": "AI-комментирование",
+        "min_plan": "pro",
+        "max_retries": 1,
+        "icon": "💬",
+    },
+    "self_promo_blast": {
+        "description": "Самопродвижение — рассылка промо",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📣",
+    },
+    "clone_adapt": {
+        "description": "Клонирование с адаптацией контента",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "🧬",
+    },
+    "ad_intel_scan": {
+        "description": "Разведка рекламы конкурентов",
+        "min_plan": "pro",
+        "max_retries": 1,
+        "icon": "🕵️",
+    },
+    "compliance_scan": {
+        "description": "Проверка ресурсов на соответствие правилам",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🛡️",
+    },
+    "gift_scan": {
+        "description": "Сканирование подарков",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🎁",
+    },
+    "report_peer": {
+        "description": "Жалоба на объект",
+        "min_plan": "pro",
+        "max_retries": 1,
+        "icon": "🚩",
+    },
+    "leave_all_chats": {
+        "description": "Выход из всех чатов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🚪",
+    },
+    "read_all_dialogs": {
+        "description": "Прочитать все диалоги",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "👁",
+    },
+    "delete_private_dialogs": {
+        "description": "Удаление личных диалогов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🗑",
+    },
+    "delete_contacts": {
+        "description": "Удаление контактов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🗑",
+    },
 }
 
 

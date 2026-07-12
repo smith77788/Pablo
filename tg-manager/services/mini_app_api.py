@@ -3358,12 +3358,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "read_all_dialogs", {"account_id": acc_id}, "Прочитать все диалоги"
         elif act == "delete_pm":
             op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
-        elif act == "reauth":
-            op_type, params, label = "reauth_account", {"account_id": acc_id}, "Переавторизация аккаунта"
-        elif act == "export_session":
-            op_type, params, label = "export_session", {"account_id": acc_id}, "Экспорт сессии"
         elif act == "reset_cooldown":
-            op_type, params, label = "reset_cooldown", {"account_id": acc_id}, "Сброс кулдауна"
+            # СИНХРОННО (раньше был фантомный op reset_cooldown без исполнителя →
+            # кнопка ничего не делала). Чистим durable-кулдаун.
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
+                    acc_id, uid)
+                return _json_resp({"ok": True, "message": "⚡ Кулдаун сброшен"})
+            except Exception as exc:
+                log.exception("reset_cooldown uid=%d acc=%d", uid, acc_id)
+                return _err(str(exc)[:120], 500)
+        elif act == "export_session":
+            # СИНХРОННО (раньше фантомный op → r.session никогда не приходил).
+            # Владелец экспортирует СВОЮ сессию (owner-scoped), расшифровываем.
+            row = await _safe_fetchrow(pool,
+                "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+            if not row or not row["session_str"]:
+                return _err("Сессия недоступна", 404)
+            try:
+                from services.token_vault import decrypt_token
+                sess = decrypt_token(row["session_str"])
+            except Exception:
+                sess = row["session_str"]
+            return _json_resp({"ok": True, "session": sess})
+        elif act == "reauth":
+            # Переавторизация требует ОДНОРАЗОВЫЙ КОД из Telegram (вводится вручную) —
+            # фоновой операцией невозможно. Раньше ставился фантомный op reauth_account
+            # (нет исполнителя) → «запущена», но ничего не происходило. Честно ведём в
+            # бота, где flow релога реально работает (шлёт код → приём кода → вход).
+            return _json_resp({"ok": True, "message": (
+                "🔑 Переавторизация требует код из Telegram (вводится вручную), поэтому "
+                "выполняется в боте: Аккаунты → 🔄 Переавторизатор → выберите этот аккаунт "
+                "→ Релог. После входа аккаунт снова станет активным.")})
         else:
             return _err("Неизвестное действие", 400)
         try:
@@ -3912,6 +3939,82 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("compliance_scan_submit uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def rotate_proxies(request: web.Request) -> web.Response:
+        """Безопасная ротация назначений прокси по пулу (anti-detection), без потери
+        изоляции. Меняет только proxy_id простаивающих аккаунтов внутри транзакции с
+        FOR UPDATE; резолвер не трогаем. body: {account_ids?: [], proxy_ids?: []}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        acc_ids = [int(x) for x in (body.get("account_ids") or []) if str(x).strip().isdigit()]
+        pool_ids_in = [int(x) for x in (body.get("proxy_ids") or []) if str(x).strip().isdigit()]
+        from services import proxy_rotation
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # 1. Блокируем строки ротируемых аккаунтов (busy-safe против claim).
+                    if acc_ids:
+                        accs = await conn.fetch(
+                            "SELECT id, proxy_id, COALESCE(in_operation,FALSE) AS busy "
+                            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+                            "AND id = ANY($2::bigint[]) FOR UPDATE",
+                            uid, acc_ids)
+                    else:
+                        accs = await conn.fetch(
+                            "SELECT id, proxy_id, COALESCE(in_operation,FALSE) AS busy "
+                            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE FOR UPDATE",
+                            uid)
+                    group_ids = [int(r["id"]) for r in accs]
+                    free = [{"account_id": int(r["id"]), "proxy_id": r["proxy_id"]}
+                            for r in accs if not r["busy"]]
+                    skipped_busy = len(accs) - len(free)
+                    free_ids = [a["account_id"] for a in free]
+
+                    # 2. Пул: владелец + активные; вычесть прокси, занятые ЛЮБЫМ
+                    # не-ротируемым аккаунтом (busy в группе ИЛИ вне группы) — иначе
+                    # два аккаунта окажутся на одном прокси (потеря изоляции).
+                    if pool_ids_in:
+                        prows = await conn.fetch(
+                            "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE "
+                            "AND id = ANY($2::int[])", uid, pool_ids_in)
+                    else:
+                        prows = await conn.fetch(
+                            "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE", uid)
+                    pool_available = [int(r["id"]) for r in prows]
+                    blocked_rows = await conn.fetch(
+                        "SELECT DISTINCT proxy_id FROM tg_accounts "
+                        "WHERE owner_id=$1 AND proxy_id = ANY($2::int[]) "
+                        "AND NOT (id = ANY($3::bigint[]))",
+                        uid, pool_available, free_ids or [0])
+                    blocked = {int(r["proxy_id"]) for r in blocked_rows if r["proxy_id"] is not None}
+                    pool_final = [p for p in pool_available if p not in blocked]
+
+                    # 3. План (чистый, инъективный) + 4. применение с гвардом busy.
+                    result = proxy_rotation.plan_rotation(free, pool_final)
+                    applied = 0
+                    for ch in result["plan"]:
+                        if ch["new"] == ch["old"]:
+                            continue
+                        res = await conn.execute(
+                            "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3 "
+                            "AND COALESCE(in_operation,FALSE)=FALSE",
+                            ch["new"], ch["account_id"], uid)
+                        if isinstance(res, str) and res.endswith(" 1"):
+                            applied += 1
+            return _json_resp({
+                "ok": True, "rotated": applied,
+                "skipped_busy": skipped_busy,
+                "skipped_no_proxy": result["skipped_no_proxy"],
+                "accounts": len(group_ids), "pool": len(pool_final),
+            })
+        except Exception as exc:
+            log.exception("rotate_proxies uid=%d", uid)
+            return _err(str(exc)[:150], 500)
+
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -4017,10 +4120,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT keyword, search_count FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 20",
                 uid,
             )
+            # Рекомендации по переоптимизации БОТОВ (авто-сгенерированы при падении
+            # позиции; применяются в один клик через /api/miniapp/seo/apply_bot).
+            bot_suggestions = await _safe_fetch(pool,
+                """SELECT bs.bot_id, bs.name, bs.short_desc, bs.reason, bs.keyword,
+                          bs.created_at, bs.applied_at, mb.username AS bot_username
+                   FROM bot_seo_suggestions bs
+                   LEFT JOIN managed_bots mb ON mb.bot_id=bs.bot_id
+                   WHERE bs.owner_id=$1 ORDER BY bs.created_at DESC LIMIT 20""",
+                uid) or []
             return _json_resp({
                 "suggestions": [
                     {**dict(s), "created_at": s["created_at"].isoformat() if s["created_at"] else None}
                     for s in suggestions
+                ],
+                "bot_suggestions": [
+                    {**dict(b),
+                     "created_at": b["created_at"].isoformat() if b["created_at"] else None,
+                     "applied_at": b["applied_at"].isoformat() if b["applied_at"] else None}
+                    for b in bot_suggestions
                 ],
                 "keywords": [dict(k) for k in keywords],
             })
@@ -4085,6 +4203,55 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             uid, _json.dumps({"channel_ids": chan_ids}), len(chan_ids),
             f"SEO по сетке: {len(chan_ids)} каналов")
         return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
+
+    async def seo_apply_bot(request: web.Request) -> web.Response:
+        """Применить рекомендацию по переоптимизации БОТА в один клик (замыкает
+        петлю анализ→рекомендация→применение для стороны ботов; аналог
+        /seo/apply для каналов). Рекомендация авто-генерируется при падении
+        позиции (ranking_checker, opt-in). body: {bot_id, fields?}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            bot_id = int(body.get("bot_id"))
+        except (TypeError, ValueError):
+            return _err("bot_id обязателен", 400)
+        fields = body.get("fields") or None
+        from services import bot_reoptimizer
+        try:
+            res = await bot_reoptimizer.apply_bot_seo(pool, uid, bot_id, fields)
+        except Exception as exc:
+            log.exception("seo_apply_bot uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc)[:200], 500)
+        if res.get("ok"):
+            return _json_resp(res)
+        return _err(res.get("error") or "Не удалось применить", 400)
+
+    async def reopt_setting(request: web.Request) -> web.Response:
+        """Тумблер авто-переоптимизации ботов при падении позиции (opt-in).
+        body: {enabled: bool}. Хранится в visibility_alert_settings.auto_reoptimize."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        enabled = bool(body.get("enabled"))
+        try:
+            await pool.execute(
+                """INSERT INTO visibility_alert_settings(owner_id, auto_reoptimize, alerts_enabled)
+                   VALUES($1,$2,TRUE)
+                   ON CONFLICT(owner_id) DO UPDATE SET auto_reoptimize=$2""",
+                uid, enabled)
+        except Exception as exc:
+            log.exception("reopt_setting uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "enabled": enabled})
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
@@ -10412,6 +10579,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/proxies", proxies)
     app.router.add_post("/api/miniapp/proxy", add_proxy)
     app.router.add_post("/api/miniapp/proxy/cleanup_dead", proxy_cleanup_dead)
+    app.router.add_post("/api/miniapp/proxy/rotate", rotate_proxies)
     app.router.add_get("/api/miniapp/proxy/export", proxy_export)
     app.router.add_delete("/api/miniapp/proxy/{proxy_id}", delete_proxy)
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/check", check_proxy)
@@ -10562,6 +10730,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/seo", seo_overview)
     app.router.add_post("/api/miniapp/seo/apply", seo_apply)
     app.router.add_post("/api/miniapp/seo/apply_all", seo_apply_all)
+    app.router.add_post("/api/miniapp/seo/apply_bot", seo_apply_bot)
+    app.router.add_post("/api/miniapp/ranking/reopt_setting", reopt_setting)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
@@ -10706,23 +10876,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            from services import account_manager as _am
+            from services import account_manager as _am, proxy_hygiene
+            from services.token_vault import decrypt_token
             rows = await pool.fetch(
-                "SELECT id, proxy_url, geo_country, is_active FROM user_proxies WHERE owner_id=$1",
+                """SELECT up.id, up.label, up.proxy_url, up.geo_country, up.is_active,
+                          up.is_alive, up.last_check,
+                          (SELECT COUNT(*) FROM tg_accounts a
+                           WHERE a.owner_id=$1 AND a.proxy_id=up.id) AS assigned
+                   FROM user_proxies up WHERE up.owner_id=$1 ORDER BY up.id""",
                 uid,
             )
             stats = []
             for r in rows:
+                # runtime-статы keyed по СТРОКЕ proxy_url из БД (тот же шифротекст
+                # используется в test_proxy → ключи совпадают); в UI показываем
+                # МАСКИРОВАННЫЙ расшифрованный url, а не сырой ENC:-шифротекст.
                 s = _am.get_proxy_stats(r["proxy_url"])
+                try:
+                    disp = proxy_hygiene.mask_proxy_url(decrypt_token(r["proxy_url"]))
+                except Exception:
+                    disp = proxy_hygiene.mask_proxy_url(r["proxy_url"])
                 stats.append({
                     "id": r["id"],
-                    "url": r["proxy_url"][:30] + "..." if len(r["proxy_url"] or "") > 30 else r["proxy_url"],
+                    "label": r["label"] or "",
+                    "url": disp,
                     "geo": r["geo_country"],
-                    "active": r["is_active"],
+                    "active": bool(r["is_active"]),
+                    "alive": (None if r["is_alive"] is None else bool(r["is_alive"])),
+                    "last_check": str(r["last_check"] or ""),
+                    "assigned": int(r["assigned"] or 0),
                     **s,
                 })
             return _json_resp({"proxies": stats})
         except Exception as e:
+            log.exception("proxy_stats uid=%s", uid)
             return _err(str(e), 500)
 
     async def ecosystem_recommendations(request: web.Request) -> web.Response:
@@ -10764,6 +10951,411 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def dashboard_realtime(request: web.Request) -> web.Response:
+        """Analytics Dashboard — операторская сводка на РЕАЛЬНЫХ данных, которые
+        система собирает: аккаунты, каналы, аудитория ботов, операции + дневные
+        тайм-серии (аудитория/операции/успешность из bot_users и operation_audit).
+        Просмотров/подписчиков каналов система не собирает — этих метрик тут нет
+        (не выдумываем), вместо них показываем реальную операционную активность."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rng = request.query.get("range", "7d")
+        days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(rng, 7)
+        try:
+            # ── KPI (реальные) ──────────────────────────────────────────────
+            acc = await _safe_fetchrow(pool,
+                "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE is_active) AS active "
+                "FROM tg_accounts WHERE owner_id=$1", uid)
+            acc_total = int(acc["total"]) if acc else 0
+            acc_active = int(acc["active"]) if acc else 0
+            ch_total = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid) or 0)
+            aud_row = await _safe_fetchrow(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) AS total,
+                          COUNT(DISTINCT bu.user_id) FILTER (
+                              WHERE bu.first_seen > NOW() - INTERVAL '7 days') AS new_7d
+                   FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.is_active=TRUE""", uid)
+            aud_total = int(aud_row["total"]) if aud_row else 0
+            aud_new_7d = int(aud_row["new_7d"]) if aud_row else 0
+            ops_row = await _safe_fetchrow(pool,
+                """SELECT COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE action ILIKE '%post%') AS posts
+                   FROM operation_audit WHERE owner_id=$1
+                     AND occurred_at > NOW() - ($2 * INTERVAL '1 day')""", uid, days)
+            ops_total = int(ops_row["total"]) if ops_row else 0
+            ops_posts = int(ops_row["posts"]) if ops_row else 0
+
+            # ── Дневные тайм-серии (реальные, с заполнением пропусков нулями) ──
+            def _fill(rows, key="d", val="c"):
+                by_day = {}
+                for r in (rows or []):
+                    dd = r[key]
+                    if dd is not None:
+                        by_day[dd.date() if hasattr(dd, "date") else dd] = float(r[val] or 0)
+                from datetime import date, timedelta
+                today = date.today()
+                out = []
+                for i in range(days - 1, -1, -1):
+                    out.append({"value": by_day.get(today - timedelta(days=i), 0)})
+                return out
+            aud_series = await _safe_fetch(pool,
+                """SELECT date_trunc('day', bu.first_seen) AS d, COUNT(*) AS c
+                   FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.first_seen > NOW() - ($2 * INTERVAL '1 day')
+                   GROUP BY 1 ORDER BY 1""", uid, days)
+            ops_series = await _safe_fetch(pool,
+                """SELECT date_trunc('day', occurred_at) AS d, COUNT(*) AS c
+                   FROM operation_audit WHERE owner_id=$1
+                     AND occurred_at > NOW() - ($2 * INTERVAL '1 day')
+                   GROUP BY 1 ORDER BY 1""", uid, days)
+            succ_series = await _safe_fetch(pool,
+                """SELECT date_trunc('day', occurred_at) AS d,
+                          ROUND(100.0*COUNT(*) FILTER (WHERE result='success')
+                                /NULLIF(COUNT(*),0), 1) AS c
+                   FROM operation_audit WHERE owner_id=$1
+                     AND occurred_at > NOW() - ($2 * INTERVAL '1 day')
+                   GROUP BY 1 ORDER BY 1""", uid, days)
+
+            # ── Топ каналов по операционной активности (реально) ──────────────
+            top_rows = await _safe_fetch(pool,
+                """SELECT mc.title, mc.username, mc.channel_id,
+                          (SELECT COUNT(*) FROM operation_audit oa
+                           WHERE oa.owner_id=$1 AND oa.target IS NOT NULL
+                             AND (oa.target = mc.username OR oa.target = mc.channel_id::text)
+                          ) AS activity
+                   FROM managed_channels mc WHERE mc.owner_id=$1
+                   ORDER BY activity DESC, mc.added_at DESC LIMIT 10""", uid)
+            top_channels = [{
+                "name": r["title"] or r["username"] or str(r["channel_id"]),
+                "username": r["username"] or "",
+                "subscribers": int(r["activity"] or 0),  # операц. активность канала
+                "views": 0, "growth": 0,
+            } for r in (top_rows or [])]
+
+            act_rows = await _safe_fetch(pool,
+                "SELECT action, result, target, occurred_at FROM operation_audit "
+                "WHERE owner_id=$1 ORDER BY occurred_at DESC LIMIT 15", uid)
+            def _atype(a: str) -> str:
+                a = (a or "").lower()
+                if "post" in a: return "post"
+                if "join" in a or "sub" in a or "invite" in a: return "sub"
+                if "leave" in a or "unsub" in a: return "unsub"
+                return "other"
+            recent_activity = [{
+                "type": _atype(r["action"]),
+                "text": f"{r['action']}"
+                        + (f" → {r['target']}" if r["target"] else "")
+                        + (f" ({r['result']})" if r["result"] and r["result"] != "success" else ""),
+                "timestamp": r["occurred_at"].isoformat() if r["occurred_at"] else None,
+            } for r in (act_rows or [])]
+
+            return _json_resp({
+                # KPI (реальные) — фронт-плитки перелейблены под них
+                "total_subscribers": aud_total,      # 👥 Аудитория
+                "total_channels": ch_total,          # 📡 Каналы
+                "total_posts": ops_posts,            # 📝 Посты (постинг-операции)
+                "total_accounts": acc_total,         # 📱 Аккаунты
+                "active_accounts": acc_active,
+                "total_operations": ops_total,       # ⚡ Операций за период
+                "total_views": ops_total,            # (совместимость со старой плиткой)
+                "growth_7d": aud_new_7d,             # 📈 Новая аудитория 7д
+                # Тайм-серии (реальные, заполнены по дням)
+                "subs_history": _fill(aud_series),          # Аудитория/день
+                "views_history": _fill(ops_series),         # Операции/день
+                "engagement_history": _fill(succ_series),   # Успешность %/день
+                "top_channels": top_channels,
+                "recent_activity": recent_activity,
+                "range": rng,
+            })
+        except Exception as e:
+            log.exception("dashboard_realtime uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def audience_analytics(request: web.Request) -> web.Response:
+        """Audience Analytics — owner-агрегат аудитории ботов в форме экрана
+        s-audience-analytics. Сегменты — по активности пользователей ботов
+        владельца; heatmap — по часам активности (реальные данные из bot_users)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            total = await _safe_fetchval(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.is_active=TRUE""", uid) or 0
+            active = await _safe_fetchval(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.is_active=TRUE
+                     AND bu.last_seen > NOW() - INTERVAL '7 days'""", uid) or 0
+            total = int(total); active = int(active)
+            new_7d = await _safe_fetchval(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.first_seen > NOW() - INTERVAL '7 days'""", uid) or 0
+            dormant = max(total - active, 0)
+            def _seg(name, count, color):
+                return {"name": name, "count": int(count),
+                        "percentage": round(count / total * 100, 1) if total else 0.0,
+                        "growth_pct": None, "avg_activity": "", "color": color}
+            segments = [
+                _seg("Активные (7д)", active, "#34c759"),
+                _seg("Новые (7д)", int(new_7d), "#0a84ff"),
+                _seg("Спящие", dormant, "#ff9f0a"),
+            ] if total else []
+            avg_eng = round(active / total * 100, 1) if total else 0.0
+            hm_rows = await _safe_fetch(pool,
+                """SELECT EXTRACT(HOUR FROM bu.last_seen)::int AS h, COUNT(*) AS c
+                   FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.last_seen IS NOT NULL
+                   GROUP BY 1 ORDER BY 1""", uid)
+            heatmap = [{"hour": int(r["h"]), "value": int(r["c"])} for r in (hm_rows or [])]
+            insights = []
+            if total:
+                insights.append({"title": "Аудитория", "text":
+                    f"Всего {total}, активных за 7д — {active} ({avg_eng}%)."})
+                if dormant:
+                    insights.append({"title": "Реактивация", "text":
+                        f"{dormant} спящих — кандидаты на прогрев/рассылку."})
+            return _json_resp({
+                "total_users": total, "active_users": active,
+                "avg_engagement": avg_eng, "segments": segments,
+                "insights": insights, "heatmap": heatmap,
+            })
+        except Exception as e:
+            log.exception("audience_analytics uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def networks_list(request: web.Request) -> web.Response:
+        """Network Builder — список сеток владельца (форма экрана s-network-builder)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await _safe_fetch(pool,
+                """SELECT ni.id, ni.name, COALESCE(ni.status,'active') AS status,
+                     (SELECT COUNT(*) FROM network_nodes n WHERE n.instance_id=ni.id) AS node_count,
+                     (SELECT COUNT(*) FROM network_edges e WHERE e.instance_id=ni.id) AS edge_count
+                   FROM network_instances ni WHERE ni.owner_id=$1 ORDER BY ni.created_at DESC""",
+                uid)
+            return _json_resp({"networks": [dict(r) for r in (rows or [])]})
+        except Exception as e:
+            log.exception("networks_list uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def network_create_plural(request: web.Request) -> web.Response:
+        """Создать сетку. body: {name, template?, description?}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = validate_string(body.get("name"), max_len=100)
+        if not name:
+            return _err("Укажите название сети", 400)
+        try:
+            nid = await pool.fetchval(
+                "INSERT INTO network_instances(owner_id, name, status) "
+                "VALUES($1,$2,'active') RETURNING id", uid, name)
+            return _json_resp({"ok": True, "id": nid})
+        except Exception as e:
+            log.exception("network_create uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def network_detail_plural(request: web.Request) -> web.Response:
+        """Детали сети: узлы/рёбра в форме, которую рисует граф (from_id/to_id/labels)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        from services import network_builder as _nb
+        d = await _nb.get_instance_detail(pool, uid, nid)
+        if not d:
+            return _err("Сеть не найдена", 404)
+        label_by_id = {n["id"]: (n.get("label") or n.get("node_type") or "#") for n in d["nodes"]}
+        nodes = [{"id": n["id"], "type": n.get("node_type"),
+                  "label": n.get("label") or "", "object_id": n.get("ref_id")}
+                 for n in d["nodes"]]
+        edges = [{"id": e["id"], "from_id": e.get("source_node_id"),
+                  "to_id": e.get("target_node_id"), "type": e.get("edge_type"),
+                  "from_label": label_by_id.get(e.get("source_node_id"), "#"),
+                  "to_label": label_by_id.get(e.get("target_node_id"), "#")}
+                 for e in d["edges"]]
+        inst = d["instance"]
+        return _json_resp({"id": nid, "name": inst.get("name"),
+                           "status": inst.get("status"), "nodes": nodes, "edges": edges})
+
+    async def network_add_node(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
+        if not owns:
+            return _err("Сеть не найдена", 404)
+        from services import network_builder as _nb
+        typ = validate_string(body.get("type"), max_len=40) or "node"
+        label = validate_string(body.get("label"), max_len=200) or ""
+        try:
+            ref = int(body.get("object_id")) if str(body.get("object_id") or "").strip() else None
+        except (TypeError, ValueError):
+            ref = None
+        res = await _nb.add_node(pool, nid, typ, label, ref_id=ref)
+        return _json_resp(res)
+
+    async def network_delete_node(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        await pool.execute(
+            "DELETE FROM network_nodes WHERE id=$1 AND instance_id IN "
+            "(SELECT id FROM network_instances WHERE owner_id=$2)", node_id, uid)
+        return _json_resp({"ok": True})
+
+    async def network_add_edge(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+            body = await request.json()
+            frm = int(body.get("from_id")); to = int(body.get("to_id"))
+        except Exception:
+            return _err("bad request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
+        if not owns:
+            return _err("Сеть не найдена", 404)
+        from services import network_builder as _nb
+        typ = validate_string(body.get("type"), max_len=40) or "forward"
+        res = await _nb.add_edge(pool, nid, frm, to, edge_type=typ)
+        return _json_resp(res)
+
+    async def network_delete_edge(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            edge_id = int(request.match_info["edge_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        await pool.execute(
+            "DELETE FROM network_edges WHERE id=$1 AND instance_id IN "
+            "(SELECT id FROM network_instances WHERE owner_id=$2)", edge_id, uid)
+        return _json_resp({"ok": True})
+
+    async def workflow_create_plural(request: web.Request) -> web.Response:
+        """Создать воркфлоу (контракт экрана: POST /workflows {name,bot_id?,description?})."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = validate_string(body.get("name"), max_len=120)
+        if not name:
+            return _err("Укажите название воркфлоу", 400)
+        desc = validate_string(body.get("description"), max_len=500) or None
+        try:
+            wid = await pool.fetchval(
+                "INSERT INTO workflow_definitions(owner_id, name, description, steps, is_active) "
+                "VALUES($1,$2,$3,'[]'::jsonb, FALSE) RETURNING id", uid, name, desc)
+            return _json_resp({"ok": True, "id": wid})
+        except Exception as e:
+            log.exception("workflow_create_plural uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def workflow_detail_plural(request: web.Request) -> web.Response:
+        """Детали воркфлоу: {id,name,active,steps[]} (шаги хранятся inline jsonb)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT id, name, description, steps, COALESCE(is_active,FALSE) AS is_active "
+            "FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
+        if not row:
+            return _err("Воркфлоу не найден", 404)
+        steps = row["steps"]
+        if isinstance(steps, str):
+            try:
+                steps = _json.loads(steps)
+            except Exception:
+                steps = []
+        return _json_resp({"id": row["id"], "name": row["name"],
+                           "description": row["description"] or "",
+                           "active": bool(row["is_active"]), "steps": steps or []})
+
+    async def workflow_toggle_plural(request: web.Request) -> web.Response:
+        """Активировать/поставить на паузу: PATCH /workflows/{id} {active}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        active = bool(body.get("active"))
+        res = await pool.execute(
+            "UPDATE workflow_definitions SET is_active=$1, updated_at=NOW() "
+            "WHERE id=$2 AND owner_id=$3", active, wid, uid)
+        if isinstance(res, str) and res.endswith(" 0"):
+            return _err("Воркфлоу не найден", 404)
+        return _json_resp({"ok": True, "active": active})
+
+    async def workflow_delete_plural(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        await pool.execute(
+            "DELETE FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
+        return _json_resp({"ok": True})
+
+    async def workflow_add_step(request: web.Request) -> web.Response:
+        """Добавить шаг: POST /workflows/{id}/steps {type,...} — аппенд в steps jsonb."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["wf_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not isinstance(body, dict) or not body.get("type"):
+            return _err("Шаг должен содержать type", 400)
+        res = await pool.execute(
+            "UPDATE workflow_definitions SET steps = COALESCE(steps,'[]'::jsonb) || $1::jsonb, "
+            "updated_at=NOW() WHERE id=$2 AND owner_id=$3",
+            _json.dumps([body]), wid, uid)
+        if isinstance(res, str) and res.endswith(" 0"):
+            return _err("Воркфлоу не найден", 404)
+        return _json_resp({"ok": True})
+
     async def operation_export(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10790,6 +11382,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
+    app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
+    app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
+    app.router.add_get("/api/miniapp/networks", networks_list)
+    app.router.add_post("/api/miniapp/networks", network_create_plural)
+    app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)
+    app.router.add_delete("/api/miniapp/networks/edges/{edge_id}", network_delete_edge)
+    app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
+    app.router.add_post("/api/miniapp/networks/{net_id}/nodes", network_add_node)
+    app.router.add_post("/api/miniapp/networks/{net_id}/edges", network_add_edge)
     app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}/overlaps", ecosystem_overlaps)
     app.router.add_get("/api/miniapp/operations/export", operation_export)
@@ -11699,6 +12300,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def ranking_overview(request: web.Request) -> web.Response:
+        """Свод для экрана «Рейтинг»: слитые отслеживаемые ключи + их последние
+        позиции (position/trend) + алерты. Фронт (loadRanking) звал bare
+        /api/miniapp/ranking, но такого маршрута не было → экран не грузил данные
+        (404). Собираем из готовых функций ranking_engine — без дублей.
+        trend = previous_position - position (положительный = рост позиции)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.ranking_engine import (
+                get_tracked_keywords, get_all_positions, get_alerts)
+            tracked = await get_tracked_keywords(pool, uid)
+            positions = await get_all_positions(pool, uid)
+            alerts = await get_alerts(pool, uid)
+            # позиции по ключу (последняя на канал/ключ)
+            pos_by_kw = {}
+            for p in positions:
+                pos_by_kw[(p.get('keyword'), p.get('channel_id'))] = p
+            keywords = []
+            for k in tracked:
+                p = pos_by_kw.get((k.get('keyword'), k.get('channel_id')))
+                cur = p.get('position') if p else None
+                prev = p.get('previous_position') if p else None
+                trend = (prev - cur) if (cur is not None and prev) else 0
+                keywords.append({
+                    'keyword': k.get('keyword'),
+                    'channel_id': k.get('channel_id'),
+                    'position': cur,
+                    'trend': trend,
+                    'region': k.get('region') or 'ru',
+                })
+            return _json_resp({'keywords': keywords, 'alerts': alerts})
+        except Exception as e:
+            log.exception("ranking_overview uid=%d", uid)
+            return _err(str(e), 500)
+
     async def ranking_alerts(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -11724,6 +12361,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/ranking/record", ranking_record)
     app.router.add_get("/api/miniapp/ranking/history/{channel_id}", ranking_history)
     app.router.add_get("/api/miniapp/ranking/positions", ranking_positions)
+    app.router.add_get("/api/miniapp/ranking", ranking_overview)
     app.router.add_get("/api/miniapp/ranking/keywords", ranking_keywords)
     app.router.add_get("/api/miniapp/ranking/alerts", ranking_alerts)
     app.router.add_get("/api/miniapp/ranking/stats", ranking_stats)
@@ -11820,12 +12458,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # ── Automation Workflows ─────────────────────────────────────────────────
 
     async def workflow_list(request: web.Request) -> web.Response:
+        """Список воркфлоу в форме экрана (раньше звал несуществующий
+        list_workflows → 500). Прямой запрос: статус из is_active, число шагов из
+        inline-jsonb, last_run из workflow_runs."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            from services.workflow_engine import list_workflows
-            workflows = await list_workflows(pool, uid)
+            rows = await _safe_fetch(pool,
+                """SELECT wd.id, wd.name,
+                          CASE WHEN COALESCE(wd.is_active,FALSE) THEN 'active' ELSE 'paused' END AS status,
+                          COALESCE(jsonb_array_length(wd.steps), 0) AS step_count,
+                          (SELECT MAX(r.started_at) FROM workflow_runs r
+                           WHERE r.workflow_id = wd.id) AS last_run
+                   FROM workflow_definitions wd
+                   WHERE wd.owner_id=$1 ORDER BY wd.name""", uid)
+            workflows = [{
+                "id": r["id"], "name": r["name"], "status": r["status"],
+                "step_count": int(r["step_count"] or 0),
+                "last_run": r["last_run"].isoformat() if r["last_run"] else None,
+            } for r in (rows or [])]
             return _json_resp({"workflows": workflows})
         except Exception as exc:
             log.exception("workflow_list uid=%d", uid)
@@ -11957,6 +12609,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
 
     app.router.add_get("/api/miniapp/workflows", workflow_list)
+    app.router.add_post("/api/miniapp/workflows", workflow_create_plural)
+    app.router.add_get("/api/miniapp/workflows/{wf_id}", workflow_detail_plural)
+    app.router.add_patch("/api/miniapp/workflows/{wf_id}", workflow_toggle_plural)
+    app.router.add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_plural)
+    app.router.add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)
     app.router.add_post("/api/miniapp/workflow/create", workflow_create)
     app.router.add_post("/api/miniapp/workflow/{wf_id}/execute", workflow_execute)
     app.router.add_get("/api/miniapp/workflow/{wf_id}/status", workflow_status)

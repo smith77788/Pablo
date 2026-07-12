@@ -177,10 +177,27 @@ async def create_pool() -> asyncpg.Pool:
         except Exception as _mig_exc:
             log.warning("schema_migrations table create failed: %s", _mig_exc)
 
+        # Уже применённые ЧИСТО файлы пропускаем — иначе на каждом старте
+        # перезапускались ВСЕ ~154 schema-файла целиком (тысячи no-op запросов +
+        # риск, что медленный CREATE INDEX из нового файла залочит старт и Railway
+        # убьёт деплой по health-check — «Application failed to respond»). Файлы со
+        # статусом 'warnings' и незаписанные — перезапускаем (ретрай/новые).
+        _applied_ok: set[str] = set()
+        try:
+            _rows = await conn.fetch("SELECT filename FROM schema_migrations WHERE status='ok'")
+            _applied_ok = {r["filename"] for r in _rows}
+        except Exception:
+            _applied_ok = set()
+
         applied = 0
         failed = 0
+        skipped = 0
         failed_files: list[str] = []
         for path in schema_files:
+            _bn0 = os.path.basename(path)
+            if _bn0 in _applied_ok:
+                skipped += 1
+                continue
             with open(path, encoding="utf-8") as f:
                 sql = f.read().strip()
             if not sql:
@@ -236,7 +253,8 @@ async def create_pool() -> asyncpg.Pool:
                 applied, failed, ", ".join(failed_files[:30]),
             )
         else:
-            log.info("Schema migration: %d files OK, 0 with errors", applied)
+            log.info("Schema migration: %d files OK, %d skipped (already applied), 0 with errors",
+                     applied, skipped)
 
         # Verify critical tables exist after migration — log ERROR if missing
         _CRITICAL_TABLES = ["activity_log", "operation_audit", "operation_queue"]

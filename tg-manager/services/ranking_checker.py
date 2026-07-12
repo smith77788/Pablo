@@ -340,7 +340,8 @@ async def _check_visibility_alerts(
         return
     try:
         row = await pool.fetchrow(
-            "SELECT drop_threshold, rise_threshold, alerts_enabled "
+            "SELECT drop_threshold, rise_threshold, alerts_enabled, "
+            "       COALESCE(auto_reoptimize, FALSE) AS auto_reoptimize "
             "FROM visibility_alert_settings WHERE owner_id=$1",
             owner_id,
         )
@@ -352,6 +353,7 @@ async def _check_visibility_alerts(
 
     drop_thr: int = row["drop_threshold"] or 10
     rise_thr: int = row["rise_threshold"] or 5
+    auto_reoptimize: bool = bool(row["auto_reoptimize"])
 
     # Fetch previous position from position_history (second-to-last entry)
     try:
@@ -398,6 +400,26 @@ async def _check_visibility_alerts(
             f"Позиция упала до #{position} (была #{prev_pos})\n"
             f"Порог: #{drop_thr}"
         )
+        # Авто-переоптимизация (opt-in): на падении генерируем рекомендацию по
+        # имени/описанию бота, где всплывает просевший ключ. НЕ применяем —
+        # только предлагаем; применение в один клик из мини-аппа.
+        if auto_reoptimize:
+            try:
+                from services import bot_reoptimizer
+
+                sugg = await bot_reoptimizer.generate_and_store(
+                    pool, owner_id, bot_id, keyword
+                )
+                if sugg:
+                    reopt_line = "\n\n🔄 <b>Готова рекомендация по переоптимизации:</b>"
+                    if sugg.get("changed_name"):
+                        reopt_line += f"\n• Имя → «{sugg['name']}»"
+                    if sugg.get("changed_desc"):
+                        reopt_line += f"\n• Описание → «{sugg['short_desc']}»"
+                    reopt_line += "\nПрименить одним кликом в разделе SEO."
+                    msg += reopt_line
+            except Exception as exc:
+                log.warning("auto-reoptimize failed bot=%s kw=%r: %s", bot_id, keyword, exc)
     else:
         msg = (
             f"🎉 <b>Visibility Alert</b>\n\n"
