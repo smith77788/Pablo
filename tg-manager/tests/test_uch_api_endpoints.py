@@ -1985,8 +1985,8 @@ class TestMassMessaging:
                 pool, 123, 1, "Hello!", {"segment": "all"}
             )
         assert result["ok"] is True
-        assert result["total_users"] == 100
-        assert result["scheduled_minutes"] == 0
+        assert "broadcast_id" in result
+        assert "op_id" in result
 
     @pytest.mark.asyncio
     async def test_broadcast_schedule_delayed(self):
