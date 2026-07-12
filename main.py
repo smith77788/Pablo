@@ -18,6 +18,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("telegram", help="Start Telegram polling loop")
+    sub.add_parser("assistant", help="Start personal assistant Telegram bot (Claude chat)")
     sub.add_parser("briefing", help="Print morning briefing")
     sub.add_parser("orders", help="Process new orders")
     sub.add_parser("stock", help="Check stock levels")
@@ -36,6 +37,12 @@ def main() -> None:
     receive_p.add_argument("--reason", default="Надходження товару")
 
     args = parser.parse_args()
+
+    if args.command == "assistant":
+        from assistant.bot import run as run_assistant
+
+        run_assistant()
+        return
 
     from orchestrator import Pablo
 
