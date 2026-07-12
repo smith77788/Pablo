@@ -589,3 +589,15 @@ Bot-паритет: новый `bot/handlers/metrics_dashboard.py` — нати�
 Верификация: +tests/test_cf_pool_fixes.py (per-account relay в _make_client + колонка в путях; URL с поддоменом + включение роута; schema восстановление+индекс). Python AST 4 файла чисто.
 ВНЕШНИЕ красные (НЕ мои, пришли с ребейзом от др. агента — падают и со stash моих правок): test_uch_api_endpoints TestMassMessaging::test_broadcast_schedule_immediate (broadcaster total_users 42≠100), TestProxyPool::test_proxy_pool_stats_db_error. Зона broadcaster/proxy_pool, оставил владельцу.
 Пользователю: после ротации засвеченного токена и ввода CF_API_TOKEN/CF_ACCOUNT_ID (+опц. CF_WORKERS_SUBDOMAIN=infragram) в Railway — деплой пула даст рабочие URL и per-account IP.
+
+## tg-manager: CF-relay — верификация «в проде» + добавлена недостающая UI-кнопка деплоя — 2026-07-11
+Запрос: убедиться, что всё реально в проде (таблицы/кнопки/переменные/хендлеры, без заглушек).
+Проверено по коду (сквозная трассировка):
+  - Миграции: db.create_pool авто-применяет ВСЕ schema*.sql по порядку версий, пропуская уже применённые (schema_migrations) → schema_v153 (cf_relay_url, cf_worker_pool) и schema_v154 (uniq-индекс + восстановленный bot_seo_suggestions) накатятся при старте. ✓
+  - cf_relay.py — РЕАЛЬНЫЙ WS→TCP транспорт (_WSReader/_WSWriter/ConnectionTcpObfuscatedViaWS/make_cf_relay_connection), не заглушка. ✓
+  - Эндпоинты cf/pool/status+deploy зарегистрированы, хендлеры зовут реальные deploy_pool/assign/get_pool_status. ✓
+  - Переменные: CF_RELAY_URL (config), CF_API_TOKEN/CF_ACCOUNT_ID/CF_WORKERS_SUBDOMAIN (os.getenv в эндпоинте/менеджере). ✓
+  - Заглушек в свежих файлах нет (TODO/NotImplemented/placeholder не найдены). ✓
+НАЙДЕН пробел: НЕ было UI-КНОПКИ деплоя пула — только read-only строка «CF relay вкл/выкл» (глобальный env). Фича была доступна лишь через curl → для оператора = мёртвый бэкенд.
+Исправлено: карточка «☁️ Уникальный IP без прокси (Cloudflare)» на экране Прокси — статус пула (loadCfPoolStatus → /cf/pool/status) + поле count + кнопка «Задеплоить пул» (deployCfPool → /cf/pool/deploy). Статус грузится при открытии экрана прокси. Проводка UI→route→cf_pool_manager полная.
+Верификация: test_cf_pool_fixes расширен (UI-кнопка+роут+реальные вызовы в хендлере). Полный tests/ ЗЕЛЁНЫЙ (exit 0) — 2 внешних красных (broadcaster/proxy_pool) починены др. агентом в ребейзе. Python AST + node JS чисто.

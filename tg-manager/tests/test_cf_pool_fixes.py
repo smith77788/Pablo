@@ -42,6 +42,19 @@ def test_worker_url_uses_subdomain_and_enables_route():
     assert "async def _enable_workers_dev" in cf and "/subdomain" in cf
 
 
+def test_cf_pool_ui_button_wired():
+    """Кнопка деплоя пула должна существовать и звать реальный роут (не только curl)."""
+    ui = _read("mini_app/index.html")
+    assert "deployCfPool" in ui and "loadCfPoolStatus" in ui
+    assert "/api/miniapp/cf/pool/deploy" in ui and "/api/miniapp/cf/pool/status" in ui
+    api = _read("services/mini_app_api.py")
+    assert 'add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)' in api
+    assert 'add_get("/api/miniapp/cf/pool/status", cf_pool_status)' in api
+    # хендлеры делают реальную работу (не заглушки)
+    seg = api[api.index("async def cf_pool_deploy"):api.index("async def cf_pool_deploy") + 1200]
+    assert "deploy_pool" in seg and "assign_urls_to_accounts" in seg
+
+
 def test_schema_v154_restores_and_indexes():
     s = _read("schema_v154.sql")
     # восстановлена потерянная таблица + opt-in колонка
