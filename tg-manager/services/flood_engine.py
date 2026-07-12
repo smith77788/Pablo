@@ -229,6 +229,28 @@ def account_rank_score(account_id: int, trust_score: object) -> float:
     return get_account_state(account_id).risk_score - normalize_trust_score(trust_score)
 
 
+def _recency_penalty(last_used: object, now_ts: float, *, max_penalty: float = 0.08,
+                     half_life_s: float = 1800.0) -> float:
+    """Мягкий штраф за недавнее использование (для балансировки нагрузки).
+
+    Никогда не использованный аккаунт → 0 (предпочитаем его). Только что
+    использованный → ~max_penalty, штраф экспоненциально спадает за ~half_life.
+    Величина мала относительно разницы trust/risk — сдвигает выбор только среди
+    почти равных аккаунтов, не жертвуя безопасностью ради ротации."""
+    if not last_used:
+        return 0.0
+    try:
+        ts = last_used.timestamp()
+    except Exception:
+        return 0.0
+    age = now_ts - ts
+    if age <= 0:
+        return max_penalty
+    import math
+
+    return max_penalty * math.exp(-age / half_life_s)
+
+
 async def record_flood(
     pool: Optional[asyncpg.Pool],
     account_id: int,
@@ -440,7 +462,7 @@ async def get_best_account(
         f"""SELECT a.id, a.session_str, a.first_name, a.phone,
                    a.device_model, a.system_version, a.app_version,
                    a.lang_code, a.system_lang_code, a.proxy_id,
-                   a.trust_score, a.cooldown_until, a.tags, a.pool,
+                   a.trust_score, a.cooldown_until, a.tags, a.pool, a.last_used,
                    p.proxy_url, p.geo_country,
                    r.ban_probability AS physics_ban_probability
             FROM tg_accounts a
@@ -464,16 +486,34 @@ async def get_best_account(
     safe = [r for r in candidates if (r["physics_ban_probability"] or 0.0) < 0.85]
     pool_rows = safe or candidates  # if everything is high-risk, still return the least-bad one
 
+    # Load balancing (Account Rotation 2C): среди почти равных по риску аккаунтов
+    # предпочитаем наименее недавно использованный. Без этого при ≤10 кандидатах
+    # финальный выбор игнорировал last_used и один и тот же аккаунт брался снова
+    # и снова → неравномерный износ и повышенный риск бана «любимого» аккаунта.
+    now_ts = time.time()
     best = None
     best_score = float("inf")
     for row in pool_rows:
         combined = account_rank_score(row["id"], row["trust_score"])
         combined += float(row["physics_ban_probability"] or 0.0) * 1.5
+        combined += _recency_penalty(row.get("last_used"), now_ts)
         if combined < best_score:
             best_score = combined
             best = dict(row)
 
-    return best or dict(rows[0])
+    best = best or dict(rows[0])
+
+    # Замкнуть петлю ротации: пометить выбранный аккаунт использованным, чтобы
+    # last_used ASC в следующем выборе реально сдвигался. Best-effort — сбой
+    # записи не должен ломать выбор аккаунта.
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET last_used=now() WHERE id=$1", best["id"]
+        )
+    except Exception:
+        log_exc_swallow(log, "get_best_account: last_used update acc=%s", best.get("id"))
+
+    return best
 
 
 async def get_active_accounts(
