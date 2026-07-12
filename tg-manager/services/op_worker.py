@@ -2033,7 +2033,7 @@ async def _exec_mass_publish(
         f"mc.channel_id AS id, mc.title, mc.username, mc.access_hash, mc.type, "
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
         f"a.device_model, a.system_version, a.app_version, "
-        f"a.lang_code, a.system_lang_code, a.proxy_id, p.proxy_url, p.geo_country "
+        f"a.lang_code, a.system_lang_code, a.cf_relay_url, a.proxy_id, p.proxy_url, p.geo_country "
         f"FROM managed_channels mc "
         f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
         f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
@@ -6602,7 +6602,7 @@ async def _exec_scan_owned_resources(
     _ACCOUNT_COLS = """
         SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
                a.device_model, a.system_version, a.app_version,
-               a.lang_code, a.system_lang_code,
+               a.lang_code, a.system_lang_code, a.cf_relay_url,
                a.proxy_id, p.proxy_url, p.geo_country
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE

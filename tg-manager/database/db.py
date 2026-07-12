@@ -2919,7 +2919,7 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
         row = await pool.fetchrow(
             """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
-                      a.lang_code, a.system_lang_code,
+                      a.lang_code, a.system_lang_code, a.cf_relay_url,
                       a.proxy_id, p.proxy_url, p.geo_country
                FROM tg_accounts a
                LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
@@ -2931,7 +2931,7 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
         row = await pool.fetchrow(
             """SELECT a.id, a.owner_id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
-                      a.lang_code, a.system_lang_code,
+                      a.lang_code, a.system_lang_code, a.cf_relay_url,
                       a.proxy_id, p.proxy_url, p.geo_country
                FROM tg_accounts a
                LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
