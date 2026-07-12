@@ -167,6 +167,37 @@ def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
         log.warning("_record_proxy_fail: %s", e)
 
 
+def _record_proxy_ok(acc: dict | None, action_type: str, latency_ms: int = 0) -> None:
+    """Записать УСПЕХ прокси (успешный коннект) в infra_memory — симметрично
+    _record_proxy_fail. Без этого success_rate прокси считался только по провалам,
+    и proxy_selector штрафовал рабочие прокси. Non-blocking."""
+    if not acc:
+        return
+    proxy_url = acc.get("proxy_url") or ""
+    if not proxy_url:
+        return
+    try:
+        from services import infra_memory
+
+        infra_memory.record_proxy_op(
+            proxy_url, action_type, success=True, latency_ms=latency_ms
+        )
+    except Exception:
+        pass
+
+
+async def _connect_and_track(client, acc: dict | None, action_type: str) -> None:
+    """Подключить клиента и записать УСПЕХ прокси при удачном коннекте.
+
+    Провалы коннекта ловятся except-блоками вызывающего кода (_record_proxy_fail),
+    поэтому здесь фиксируем только успех — чтобы infra_memory видел оба сигнала
+    и success_rate прокси отражал реальность, а не только сбои. При ошибке коннект
+    пробрасывается наверх без изменений (успех не пишется)."""
+    t0 = time.time()
+    await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+    _record_proxy_ok(acc, action_type, int((time.time() - t0) * 1000))
+
+
 # ── Proxy Intelligence (интеллект прокси) ───────────────────────────────────
 # Автотест, автопереключение, статистика, рекомендации.
 
@@ -225,15 +256,33 @@ def _record_proxy_stat(proxy_url: str, success: bool, latency_ms: int) -> None:
 
 
 def get_proxy_stats(proxy_url: str) -> dict:
-    """Get proxy statistics: success_rate, avg_latency, total_checks."""
+    """Get proxy statistics: success_rate, avg_latency, total_checks.
+
+    Приоритет — реальные операционные данные из infra_memory (успех/провал
+    коннекта в реальных операциях). test_proxy-статистика (_proxy_stats)
+    используется как fallback, если операций по прокси ещё не было."""
+    try:
+        from services import infra_memory
+
+        summary = infra_memory.get_proxy_summary(proxy_url)
+    except Exception:
+        summary = None
+    if summary:
+        return {
+            "success_rate": summary["success_rate"],
+            "avg_latency_ms": summary["avg_latency_ms"],
+            "total_checks": summary["total"],
+            "last_check": summary["last_check"],
+        }
+
     stats = _proxy_stats.get(proxy_url, {})
     total = stats.get("success", 0) + stats.get("fail", 0)
     if total == 0:
         return {"success_rate": 0, "avg_latency_ms": 0, "total_checks": 0}
-    
+
     latencies = stats.get("latencies", [])
     avg_latency = sum(latencies) // len(latencies) if latencies else 0
-    
+
     return {
         "success_rate": round(stats["success"] / total * 100, 1),
         "avg_latency_ms": avg_latency,
@@ -1384,7 +1433,7 @@ async def get_dialogs(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "dialogs")
         from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
         dialogs = []
         _iter = client.iter_dialogs(limit=limit, offset_id=offset)
@@ -1565,7 +1614,7 @@ async def send_message_via_account(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "send_message")
         await asyncio.wait_for(client.send_message(chat_id, text), timeout=_OP_TIMEOUT)
         return True
     except asyncio.TimeoutError:
@@ -1717,7 +1766,7 @@ async def get_account_dialogs_stats(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "dialogs_stats")
         from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
         total = 0
         channels = 0
@@ -2408,7 +2457,7 @@ async def join_channel(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "join")
         ref_kind, ref_value = normalize_telegram_join_ref(invite_or_username)
         if not ref_value:
             return {"error": "Telegram target is empty"}
@@ -2486,7 +2535,7 @@ async def is_premium_account(session_string: str, _acc: dict | None = None) -> b
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "premium_check")
         me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         return bool(getattr(me, "premium", False))
     except asyncio.TimeoutError:
@@ -2524,7 +2573,7 @@ async def send_bot_start(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "bot_start")
         entity = await asyncio.wait_for(client.get_entity(target), timeout=_OP_TIMEOUT)
         text = f"/start {payload}" if payload else "/start"
         await asyncio.wait_for(client.send_message(entity, text), timeout=_OP_TIMEOUT)
@@ -2580,7 +2629,7 @@ async def leave_channel(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "leave")
         entity = await client.get_entity(channel_id)
         await client(LeaveChannelRequest(channel=entity))
         return {"ok": True}
@@ -3407,7 +3456,7 @@ async def post_to_channel(
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        await _connect_and_track(client, _acc, "post")
 
         # Strategy 1: access_hash → direct InputPeerChannel (no API call)
         cid = abs(int(channel_id)) if isinstance(channel_id, (int, str)) else 0

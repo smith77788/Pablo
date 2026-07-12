@@ -213,6 +213,48 @@ def get_proxy_score(proxy_url: str, action_type: str) -> float:
     return _proxy_memory[key].success_rate
 
 
+def get_proxy_summary(proxy_url: str) -> Optional[dict]:
+    """Сводная статистика прокси по всем типам действий (реальные операции).
+
+    Возвращает {success, fail, total, success_rate, avg_latency_ms, last_check}
+    или None, если по прокси ещё нет наблюдений. Используется админ-панелью,
+    чтобы показывать РЕАЛЬНОЕ качество прокси, а не только результаты test_proxy.
+
+    Ключ нормализуется к plaintext (симметрично record_proxy_op/get_proxy_score):
+    на вход может прийти зашифрованный proxy_url из user_proxies.
+    """
+    if not proxy_url:
+        return None
+    from services.token_vault import decrypt_token
+
+    proxy_url = decrypt_token(proxy_url)
+    recs = [r for (url, _), r in _proxy_memory.items() if url == proxy_url]
+    if not recs:
+        return None
+    success = sum(r.successes for r in recs)
+    fail = sum(r.failures for r in recs)
+    total = success + fail
+    if total == 0:
+        return None
+    lat_recs = [r for r in recs if r.avg_latency_ms > 0 and r.successes > 0]
+    avg_latency = (
+        int(sum(r.avg_latency_ms * r.successes for r in lat_recs)
+            / sum(r.successes for r in lat_recs))
+        if lat_recs else 0
+    )
+    last_check = max(
+        (max(r.last_success_at, r.last_failure_at) for r in recs), default=0.0
+    )
+    return {
+        "success": success,
+        "fail": fail,
+        "total": total,
+        "success_rate": round(success / total * 100, 1),
+        "avg_latency_ms": avg_latency,
+        "last_check": last_check,
+    }
+
+
 def get_account_avg_duration(account_id: int, action_type: str) -> Optional[float]:
     """Вернуть среднее время выполнения одного элемента (сек), или None если нет данных.
 
