@@ -36,6 +36,49 @@ python main.py assistant     # или: python -m assistant
 Владелец (Telegram ID `391641532`) вшит админом по умолчанию —
 `assistant/state.py::DEFAULT_ADMIN_ID`.
 
+## Деплой на Railway (бот 24/7)
+
+Ассистент — **отдельный** сервис (не путать с tg-manager, который собирается
+корневым `Dockerfile`). Для него есть свой `assistant.Dockerfile`.
+
+1. Railway → проект → **New Service → GitHub Repo** → этот репозиторий.
+2. Service → **Settings → Build**:
+   - **Dockerfile Path** = `assistant.Dockerfile`
+   - (альтернатива — **Config-as-code Path** = `railway.assistant.json`)
+3. Service → **Variables**: добавить `ASSISTANT_BOT_TOKEN` и `ANTHROPIC_API_KEY`
+   (при желании `ASSISTANT_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`).
+4. (Опц.) **Volume** на путь `/data` — чтобы история чатов и список админов
+   переживали редеплой.
+5. **Deploy**. В логах должно появиться `Assistant bot online: @…`, а владельцу
+   придёт «🟢 Pablo на связи».
+
+Локальный запуск для проверки:
+
+```bash
+export ASSISTANT_BOT_TOKEN=... ANTHROPIC_API_KEY=...
+python main.py assistant
+```
+
+> ⚠️ Сеть некоторых CI/песочниц блокирует `api.telegram.org`. Запускать бота
+> нужно там, где есть доступ к Telegram (Railway или локальная машина).
+
+## Почему бот не падает
+
+Живучесть заложена в трёх уровнях (`assistant/bot.py`):
+
+- **Супервизор** `run()` — оборачивает весь бот в цикл с авто-рестартом и
+  экспоненциальным backoff (до 60 c). Падение конструктора (нет
+  `ANTHROPIC_API_KEY`, нет сети на старте) или любое необработанное исключение
+  → лог + рестарт. Процесс завершается только по Ctrl-C / SIGTERM.
+- **Устойчивый старт** `_handshake()` — `deleteWebhook`/`getMe` повторяются с
+  backoff, пока Telegram не ответит; сетевой сбой на старте не убивает процесс.
+- **Защита цикла опроса** `serve()` — каждая итерация и обработка каждого
+  апдейта в `try/except`; ошибка одного сообщения не роняет цикл, пользователю
+  уходит «что-то пошло не так».
+
+Поверх этого — `railway.json`/`assistant.Dockerfile` с `restartPolicyType:
+ALWAYS`: если контейнер всё же остановится, Railway поднимет его заново.
+
 ## Отключение старых интеграций
 
 Если бот раньше был подключён к другому сервису (webhook или чужой polling):

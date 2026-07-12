@@ -55,14 +55,45 @@ class AssistantBot:
 
     # -- lifecycle -------------------------------------------------------
 
-    def run(self) -> None:
-        tg.reset_old_connections()
-        me = tg.get_me()
-        logger.info("Assistant bot online: @%s (id=%s)", me.get("username"), me.get("id"))
-        self._notify_admins(
-            f"🟢 Pablo на связи (@{me.get('username')}).\n"
-            "Старые подключения к боту отключены. Напиши /help."
-        )
+    def _handshake(self) -> None:
+        """Reset old connections and announce presence.
+
+        Retries forever on transient network/API errors so a hiccup at boot
+        never kills the process — the bot simply keeps trying until Telegram
+        answers.
+        """
+        attempt = 0
+        while True:
+            try:
+                tg.reset_old_connections()
+                me = tg.get_me()
+                logger.info(
+                    "Assistant bot online: @%s (id=%s)",
+                    me.get("username"),
+                    me.get("id"),
+                )
+                self._notify_admins(
+                    f"🟢 Pablo на связи (@{me.get('username')}).\n"
+                    "Старые подключения к боту отключены. Напиши /help."
+                )
+                return
+            except Exception as e:
+                attempt += 1
+                delay = min(60, 2 ** min(attempt, 6))
+                logger.warning(
+                    "Startup handshake failed (attempt %s): %s — retry in %ss",
+                    attempt, e, delay,
+                )
+                time.sleep(delay)
+
+    def serve(self) -> None:
+        """One lifecycle: handshake, then poll forever.
+
+        The poll loop swallows every per-iteration error so it can never exit
+        on its own; the outer supervisor in run() is a second safety net that
+        restarts serve() if this ever returns or raises anyway.
+        """
+        self._handshake()
 
         offset = 0
         while True:
@@ -85,9 +116,14 @@ class AssistantBot:
                 time.sleep(5)
                 continue
 
+            if not isinstance(updates, list):
+                logger.error("Unexpected getUpdates payload: %r", updates)
+                time.sleep(5)
+                continue
+
             for update in updates:
-                offset = update["update_id"] + 1
                 try:
+                    offset = update["update_id"] + 1
                     self._handle_update(update)
                 except Exception:
                     logger.exception("Failed to handle update %s", update.get("update_id"))
@@ -320,8 +356,34 @@ class AssistantBot:
 
 
 def run() -> None:
+    """Supervisor: keep the bot alive no matter what.
+
+    Anything that escapes serve() — a crash while building the bot (missing
+    ANTHROPIC_API_KEY, no network at boot), an unexpected exception in the
+    poll loop — is caught here and the whole thing is restarted with
+    exponential backoff. The process only exits on Ctrl-C / SIGTERM.
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
-    AssistantBot().run()
+
+    backoff = 1
+    while True:
+        started = time.monotonic()
+        try:
+            AssistantBot().serve()
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Assistant bot stopped by signal.")
+            return
+        except Exception:
+            logger.exception("Assistant bot crashed — restarting")
+
+        # A long run means the failure was transient; reset the backoff so a
+        # bot that stayed up for hours restarts instantly, while a boot loop
+        # (missing key/network) backs off up to a minute between attempts.
+        if time.monotonic() - started > 60:
+            backoff = 1
+        logger.warning("Restarting assistant bot in %ss…", backoff)
+        time.sleep(backoff)
+        backoff = min(60, backoff * 2)
