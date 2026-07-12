@@ -1101,7 +1101,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON")
         bot_id = validate_integer(body.get("bot_id"), min_val=1)
-        text = validate_string(body.get("text"), max_len=4096)
+        # Фронт (submitScheduledBroadcast) шлёт message_text/scheduled_at — принимаем
+        # оба контракта (иначе кнопка «Запланировать» отдавала бы 400/404).
+        text = validate_string(body.get("text") or body.get("message_text"), max_len=4096)
         if not bot_id or not text:
             return _err("bot_id and text required")
         if check_sql_suspicious(text):
@@ -1112,7 +1114,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid bot_id")
         schedule = {
             "schedule_minutes": body.get("schedule_minutes"),
-            "scheduled_for": body.get("scheduled_for"),
+            "scheduled_for": body.get("scheduled_for") or body.get("scheduled_at"),
             "segment": body.get("segment"),
             "buttons": body.get("buttons"),
         }
@@ -10517,6 +10519,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/broadcast/{bc_id}/resend", broadcast_resend)
     app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)
     app.router.add_post("/api/miniapp/broadcast/schedule", broadcast_schedule)
+    # Алиас: фронт зовёт множественное /broadcasts/schedule (был 404).
+    app.router.add_post("/api/miniapp/broadcasts/schedule", broadcast_schedule)
     app.router.add_post("/api/miniapp/broadcast/ab_test", broadcast_ab_test)
     app.router.add_get("/api/miniapp/broadcast/{bc_id}/analytics", broadcast_analytics)
     # Channels
@@ -10704,6 +10708,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/platform_users", platform_new_users)
     app.router.add_get("/api/miniapp/platform_users/export", platform_new_users_export)
     app.router.add_post("/api/miniapp/accounts/check", accounts_check)
+    # Алиас: фронт (autoregProCheckAll) зовёт /accounts/check_all (был 404);
+    # accounts_check и так проверяет ВСЕ аккаунты владельца.
+    app.router.add_post("/api/miniapp/accounts/check_all", accounts_check)
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/global_search", global_search)
