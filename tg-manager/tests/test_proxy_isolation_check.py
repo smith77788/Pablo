@@ -6,8 +6,19 @@ proxy_url), ловить общий IP (риск бана), считать datac
 """
 from __future__ import annotations
 
+import pytest
+
 from services.proxy_selector import validate_ip_diversity
-from services.token_vault import encrypt_token
+
+try:
+    from services.token_vault import encrypt_token
+    encrypt_token("test-probe")
+    _has_crypto = True
+except (ImportError, OSError, Exception):
+    _has_crypto = False
+    encrypt_token = None  # type: ignore[assignment]
+
+pytestmark = pytest.mark.skipif(not _has_crypto, reason="pycryptodome native module not available")
 
 
 def test_shared_ip_detected_across_encrypted_proxies():

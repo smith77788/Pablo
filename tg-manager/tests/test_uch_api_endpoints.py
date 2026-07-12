@@ -2181,9 +2181,10 @@ class TestProxyPool:
 
     @pytest.mark.asyncio
     async def test_proxy_pool_stats_db_error(self):
-        from services.proxy_selector import get_proxy_pool_stats
+        from services.proxy_selector import get_proxy_pool_stats, _proxy_pool_stats_cache
+        _proxy_pool_stats_cache.clear()
         pool = FakePool(error=Exception("DB down"))
-        result = await get_proxy_pool_stats(pool, 123)
+        result = await get_proxy_pool_stats(pool, 99999)
         assert result["total"] == 0
 
     @pytest.mark.asyncio

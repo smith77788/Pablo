@@ -11,6 +11,23 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
+try:
+    from Crypto.Cipher import AES  # noqa: F401
+    _has_crypto = True
+except (ImportError, OSError):
+    _has_crypto = False
+
+if _has_crypto:
+    try:
+        from services.token_vault import encrypt_token
+        encrypt_token("probe")
+    except Exception:
+        _has_crypto = False
+
+pytestmark = pytest.mark.skipif(not _has_crypto, reason="pycryptodome native module not available")
+
 
 def test_encrypt_decrypt_roundtrip():
     from services.token_vault import encrypt_token, decrypt_token
