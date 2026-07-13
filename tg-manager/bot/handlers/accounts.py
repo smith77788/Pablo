@@ -141,6 +141,11 @@ class QrLogin2FA(StatesGroup):
     waiting_password = State()  # state data: user_id (implicit from FSM context)
 
 
+class AccountStory(StatesGroup):
+    waiting_media = State()  # state data: acc_id
+    waiting_caption = State()  # state data: acc_id, media_url
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -237,6 +242,14 @@ def _acc_detail_markup(
     kb.button(
         text="🆘 Активы аккаунта", callback_data=AccCb(action="assets", acc_id=acc_id)
     )
+    kb.button(
+        text="📸 Опубликовать Story",
+        callback_data=AccCb(action="post_story", acc_id=acc_id),
+    )
+    kb.button(
+        text="🆘 Апелляция спамблока",
+        callback_data=AccCb(action="spamblock_appeal", acc_id=acc_id),
+    )
     toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
     kb.button(text=toggle_text, callback_data=AccCb(action="toggle", acc_id=acc_id))
     kb.button(text="🗑 Удалить", callback_data=AccCb(action="remove", acc_id=acc_id))
@@ -260,13 +273,21 @@ def _acc_detail_markup(
         callback_data=AccCb(action="op_history", acc_id=acc_id),
     )
     kb.button(text="◀️ Мои аккаунты", callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 2, 2, 2, 1, 2, 3, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1, 2, 3, 1)
     return kb.as_markup()
 
 
 def _cancel_markup():
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def _back_to_acc_markup(acc_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К аккаунту", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.button(text="📱 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -1329,6 +1350,145 @@ async def cb_view_account(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=_acc_detail_markup(callback_data.acc_id, is_active=is_active),
+    )
+
+
+# ── Story publishing / spamblock appeal (паритет с mini-app) ───────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "spamblock_appeal"))
+async def cb_acc_spamblock_appeal(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    """Запросить снятие спамблока через @SpamBot (реабилитация своего аккаунта)."""
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    if not acc.get("session_str"):
+        await callback.answer("Нет доступной сессии аккаунта.", show_alert=True)
+        return
+    await callback.answer("⏳ Обращаюсь к @SpamBot…")
+    await callback.message.edit_text(
+        "🆘 <b>Апелляция спамблока</b>\n\nВедётся диалог со @SpamBot…",
+        parse_mode="HTML",
+    )
+    from services import account_manager
+
+    try:
+        res = await account_manager.appeal_spamblock(acc["session_str"], dict(acc))
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ Ошибка апелляции: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_to_acc_markup(callback_data.acc_id),
+        )
+        return
+
+    _status_map = {
+        "free": "✅ Аккаунт свободен от ограничений!",
+        "still_blocked": "⛔️ Аккаунт всё ещё ограничен.",
+        "appeal_sent": "📨 Апелляция отправлена, ждём решения Telegram.",
+        "no_session": "⚠️ Сессия недоступна.",
+    }
+    head = _status_map.get(res.get("status"), "ℹ️ Готово.")
+    reply = escape((res.get("reply") or "")[:500])
+    await callback.message.edit_text(
+        f"🆘 <b>Апелляция спамблока</b>\n\n{head}\n"
+        f"Шагов пройдено: <b>{res.get('steps', 0)}</b>\n\n"
+        f"<i>Ответ @SpamBot:</i>\n<code>{reply}</code>",
+        parse_mode="HTML",
+        reply_markup=_back_to_acc_markup(callback_data.acc_id),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "post_story"))
+async def cb_acc_post_story_start(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Опубликовать Story на свой аккаунт — шаг 1: ссылка на медиа."""
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await safe_answer(callback)
+    await state.set_state(AccountStory.waiting_media)
+    await state.update_data(acc_id=callback_data.acc_id)
+    await callback.message.edit_text(
+        "📸 <b>Публикация Story</b>\n\n"
+        "Отправьте <b>прямую ссылку</b> на фото или видео (URL):\n"
+        "<code>https://example.com/photo.jpg</code>",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+@router.message(AccountStory.waiting_media)
+async def handle_story_media(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    url = (message.text or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        await message.answer(
+            "❌ Нужна прямая ссылка (http/https) на медиа. Попробуйте ещё раз:",
+            reply_markup=_cancel_markup(),
+        )
+        return
+    await state.update_data(media_url=url)
+    await state.set_state(AccountStory.waiting_caption)
+    await message.answer(
+        "✏️ Введите <b>подпись</b> к истории (или отправьте <code>-</code>, чтобы без подписи):",
+        parse_mode="HTML",
+        reply_markup=_cancel_markup(),
+    )
+
+
+@router.message(AccountStory.waiting_caption)
+async def handle_story_caption(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    data = await state.get_data()
+    await state.clear()
+    acc_id = data.get("acc_id")
+    media_url = data.get("media_url") or ""
+    caption = (message.text or "").strip()
+    if caption == "-":
+        caption = ""
+
+    acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+    if not acc or not acc.get("session_str"):
+        await message.answer(
+            "⚠️ Аккаунт не найден или нет сессии.",
+            reply_markup=_back_to_acc_markup(acc_id or 0),
+        )
+        return
+
+    await message.answer("⏳ Публикую историю…")
+    from services import story_manager
+
+    try:
+        res = await story_manager.post_story(
+            acc["session_str"], media_url, caption=caption, _acc=dict(acc)
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Ошибка публикации: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_to_acc_markup(acc_id or 0),
+        )
+        return
+
+    if res.get("ok") and res.get("status") == "posted":
+        txt = "✅ <b>История опубликована!</b>"
+    elif res.get("status") == "cant_post":
+        txt = ("⚠️ Аккаунт не может публиковать Story "
+               "(нужен Premium или исчерпан лимит).")
+    else:
+        txt = f"❌ Не удалось: <code>{escape(str(res.get('error') or 'ошибка')[:200])}</code>"
+    await message.answer(
+        f"📸 <b>Публикация Story</b>\n\n{txt}",
+        parse_mode="HTML",
+        reply_markup=_back_to_acc_markup(acc_id or 0),
     )
 
 
