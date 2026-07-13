@@ -401,6 +401,7 @@ async def _show_preview(
     kb = InlineKeyboardBuilder()
     if not dry_run and total_channels > 0:
         kb.button(text="✅ Запустить", callback_data=MassPubCb(action="confirm_send"))
+        kb.button(text="🕐 Запланировать", callback_data=MassPubCb(action="schedule_start"))
         kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
     elif not dry_run and total_channels == 0:
         # Нет каналов — не даём запустить пустую операцию (0/0), ведём на импорт
@@ -427,32 +428,28 @@ async def _show_preview(
             log.warning("mass_publish preview edit error: %s", _e)
 
 
-@router.callback_query(MassPubCb.filter(F.action == "confirm_send"))
-async def cb_mpub_confirm_send(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
-) -> None:
-    await callback.answer("⏳ Ставлю в очередь...")
-    data = await state.get_data()
-    await state.clear()
-
+async def _enqueue_mass_publish(
+    pool: asyncpg.Pool, uid: int, data: dict, scheduled_for: str | None = None
+) -> tuple[int, int, str | None, str | None]:
+    """Общая постановка mass_publish (немедленно или отложенно). Возвращает
+    (op_id, total_channels, media_type, media_file_id). scheduled_for — ISO-строка
+    (op_worker уважает scheduled_for); None → немедленно."""
     acc_ids: list[int] = data.get("target_acc_ids", [])
     delay_s: int = data.get("delay_s", 30)
     post_text: str = data.get("post_text", "")
     media_file_id: str | None = data.get("media_file_id")
     media_type: str | None = data.get("media_type")
 
-    # Считаем каналы из managed_channels для total_items
     total_channels = 0
     try:
         row = await pool.fetchrow(
             "SELECT COUNT(*) AS cnt FROM managed_channels "
             "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
-            callback.from_user.id,
-            acc_ids,
+            uid, acc_ids,
         )
         total_channels = row["cnt"] if row else 0
     except Exception as e:
-        log.warning('handler error in cb_mpub_confirm_send: %s', e)
+        log.warning('handler error in _enqueue_mass_publish: %s', e)
 
     from services import operation_bus
 
@@ -465,13 +462,24 @@ async def cb_mpub_confirm_send(
         op_params["media_file_id"] = media_file_id
         op_params["media_type"] = media_type
 
+    op_id = await operation_bus.submit(
+        pool, uid, "mass_publish", op_params,
+        total_items=total_channels, scheduled_for=scheduled_for,
+    )
+    return op_id, total_channels, media_type, media_file_id
+
+
+@router.callback_query(MassPubCb.filter(F.action == "confirm_send"))
+async def cb_mpub_confirm_send(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Ставлю в очередь...")
+    data = await state.get_data()
+    await state.clear()
+
     try:
-        op_id = await operation_bus.submit(
-            pool,
-            callback.from_user.id,
-            "mass_publish",
-            op_params,
-            total_items=total_channels,
+        op_id, total_channels, media_type, media_file_id = await _enqueue_mass_publish(
+            pool, callback.from_user.id, data
         )
         media_note = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
         await callback.message.edit_text(
@@ -491,6 +499,75 @@ async def cb_mpub_confirm_send(
             f"⚠️ Ошибка постановки в очередь: {html.escape(str(exc)[:200])}",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
+        )
+
+
+@router.callback_query(MassPubCb.filter(F.action == "schedule_start"))
+async def cb_mpub_schedule_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Отложенный запуск публикации — запрашиваем дату/время (паритет с mini-app)."""
+    await safe_answer(callback)
+    await state.set_state(MassPublishFSM2.waiting_schedule)
+    await callback.message.edit_text(
+        "🕐 <b>Отложенная публикация</b>\n\n"
+        "Введите дату и время запуска (UTC):\n"
+        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  например <code>25.12.2026 18:30</code>",
+        parse_mode="HTML",
+        reply_markup=_back_menu_kb().as_markup(),
+    )
+
+
+@router.message(MassPublishFSM2.waiting_schedule, F.text)
+async def msg_mpub_schedule_datetime(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    from datetime import datetime, timezone
+
+    raw = (message.text or "").strip()
+    execute_at: datetime | None = None
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m %H:%M"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            if fmt == "%d.%m %H:%M":
+                dt = dt.replace(year=datetime.now(timezone.utc).year)
+            execute_at = dt
+            break
+        except ValueError:
+            continue
+    if not execute_at:
+        await message.answer(
+            "❌ Неверный формат. Пример: <code>25.12.2026 18:30</code>",
+            parse_mode="HTML", reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    if execute_at <= datetime.now(timezone.utc).replace(tzinfo=None):
+        await message.answer(
+            "❌ Время запуска должно быть в будущем. Введите снова:",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    data = await state.get_data()
+    await state.clear()
+    try:
+        op_id, total_channels, media_type, media_file_id = await _enqueue_mass_publish(
+            pool, message.from_user.id, data, scheduled_for=execute_at.isoformat()
+        )
+        media_note = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
+        await message.answer(
+            f"🕐 <b>Публикация запланирована</b>\n\n"
+            f"Запуск: <b>{execute_at.strftime('%d.%m.%Y %H:%M')} UTC</b>\n"
+            f"Каналов: <b>{total_channels}</b>{media_note}\n"
+            f"ID операции: <code>#{op_id}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+    except Exception as exc:
+        log.exception("mass_publish schedule error user=%s: %s", message.from_user.id, exc)
+        await message.answer(
+            f"⚠️ Ошибка планирования: {html.escape(str(exc)[:200])}",
+            parse_mode="HTML", reply_markup=_back_menu_kb().as_markup(),
         )
 
 

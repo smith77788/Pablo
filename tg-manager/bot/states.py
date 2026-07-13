@@ -302,6 +302,7 @@ class MassPublishFSM2(StatesGroup):
     choosing_timing = State()
     previewing = State()
     confirming = State()
+    waiting_schedule = State()  # ввод даты/времени отложенного запуска
 
 
 class BulkBotEditFSM(StatesGroup):
