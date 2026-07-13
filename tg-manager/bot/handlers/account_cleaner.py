@@ -72,6 +72,12 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(
         text="📋 Список чатов аккаунта", callback_data=CleanerCb(action="list_chats")
     )
+    kb.button(
+        text="📭 Прочитать все диалоги", callback_data=CleanerCb(action="read_all")
+    )
+    kb.button(
+        text="🗑 Удалить личные диалоги", callback_data=CleanerCb(action="del_pm")
+    )
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
     kb.adjust(1)
 
@@ -80,7 +86,10 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "Инструменты для сброса аккаунта перед новым назначением:\n"
         "• <b>Выйти из всех чатов</b> — покинуть все группы и каналы\n"
         "• <b>Удалить контакты</b> — очистить список контактов\n"
-        "• <b>Список чатов</b> — просмотр всех чатов аккаунта\n\n"
+        "• <b>Список чатов</b> — просмотр всех чатов аккаунта\n"
+        "• <b>Прочитать все диалоги</b> — пометить непрочитанное прочитанным "
+        "(снижает риск-сигналы аккаунта)\n"
+        "• <b>Удалить личные диалоги</b> — очистить переписки в ЛС\n\n"
         "⚠️ <b>Осторожно:</b> действия необратимы!",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -138,6 +147,122 @@ async def cb_cleaner_del_contacts(callback: CallbackQuery, pool: asyncpg.Pool) -
     kb = await _pick_account_kb(pool, callback.from_user.id, "confirm_del_contacts")
     await callback.message.edit_text(
         "👥 <b>Удалить контакты</b>\n\nВыберите аккаунт:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Прочитать все диалоги / удалить личные диалоги (паритет с mini-app) ─────────
+
+
+@router.callback_query(CleanerCb.filter(F.action == "read_all"))
+async def cb_cleaner_read_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await safe_answer(callback)
+    kb = await _pick_account_kb(pool, callback.from_user.id, "do_read_all")
+    await callback.message.edit_text(
+        "📭 <b>Прочитать все диалоги</b>\n\n"
+        "Пометит непрочитанные чаты аккаунта прочитанными. Выберите аккаунт:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "do_read_all"))
+async def cb_cleaner_do_read_all(
+    callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
+) -> None:
+    """Поставить в очередь read_all_dialogs (фоновая telethon-операция)."""
+    acc_id = callback_data.account_id
+    acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Ставлю в очередь…")
+    from services import operation_bus
+
+    label = acc.get("first_name") or acc["phone"]
+    op_id = await operation_bus.submit(
+        pool, callback.from_user.id, "read_all_dialogs", {"account_id": acc_id}
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+    kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📭 <b>Прочитать все диалоги</b>\n\n"
+        f"Аккаунт: <b>{html.escape(label)}</b>\n"
+        f"🆔 Операция: <b>#{op_id}</b> поставлена в очередь.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "del_pm"))
+async def cb_cleaner_del_pm(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await safe_answer(callback)
+    kb = await _pick_account_kb(pool, callback.from_user.id, "confirm_del_pm")
+    await callback.message.edit_text(
+        "🗑 <b>Удалить личные диалоги</b>\n\n"
+        "Удалит переписки в ЛС аккаунта. Выберите аккаунт:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "confirm_del_pm"))
+async def cb_cleaner_confirm_del_pm(
+    callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
+) -> None:
+    """Подтверждение перед необратимым удалением личных диалогов."""
+    await safe_answer(callback)
+    acc_id = callback_data.account_id
+    acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    label = acc.get("first_name") or acc["phone"]
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="⚠️ Да, удалить личные диалоги",
+        callback_data=CleanerCb(action="do_del_pm", account_id=acc_id),
+    )
+    kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🗑 <b>Удаление личных диалогов</b>\n\n"
+        f"Аккаунт: <b>{html.escape(label)}</b>\n\n"
+        "⚠️ Все переписки в ЛС этого аккаунта будут удалены. Действие "
+        "необратимо. Продолжить?",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "do_del_pm"))
+async def cb_cleaner_do_del_pm(
+    callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
+) -> None:
+    """Поставить в очередь delete_private_dialogs (фоновая telethon-операция)."""
+    acc_id = callback_data.account_id
+    acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Ставлю в очередь…")
+    from services import operation_bus
+
+    label = acc.get("first_name") or acc["phone"]
+    op_id = await operation_bus.submit(
+        pool, callback.from_user.id, "delete_private_dialogs", {"account_id": acc_id}
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+    kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🗑 <b>Удалить личные диалоги</b>\n\n"
+        f"Аккаунт: <b>{html.escape(label)}</b>\n"
+        f"🆔 Операция: <b>#{op_id}</b> поставлена в очередь.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
