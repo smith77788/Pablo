@@ -26,6 +26,10 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+# Сколько health-пингов подряд должен провалить воркер, прежде чем он помечается
+# 'down' и аккаунты с него переезжают. Дебаунс от разовых сетевых блипов.
+_DOWN_THRESHOLD = 2
+
 # CF Worker template (from infra/cf_relay_worker.js)
 WORKER_TEMPLATE = """
 /**
@@ -328,9 +332,25 @@ async def check_pool(pool, owner_id: int, timeout: float = 8.0) -> dict:
 
     results = await asyncio.gather(*[_ping(w["worker_url"]) for w in workers])
     for res in results:
-        await pool.execute(
-            "UPDATE cf_worker_pool SET status=$1 WHERE owner_id=$2 AND worker_url=$3",
-            "active" if res["alive"] else "down", owner_id, res["url"])
+        try:
+            if res["alive"]:
+                # живой → статус active, стрик сбрасываем
+                await pool.execute(
+                    "UPDATE cf_worker_pool SET status='active', fail_streak=0 "
+                    "WHERE owner_id=$1 AND worker_url=$2", owner_id, res["url"])
+            else:
+                # дебаунс: помечаем down только когда стрик достиг порога — иначе
+                # разовый блип дёргал бы аккаунты между воркерами каждый цикл.
+                await pool.execute(
+                    "UPDATE cf_worker_pool SET fail_streak=fail_streak+1, "
+                    "status=CASE WHEN fail_streak+1 >= $3 THEN 'down' ELSE status END "
+                    "WHERE owner_id=$1 AND worker_url=$2",
+                    owner_id, res["url"], _DOWN_THRESHOLD)
+        except Exception:
+            # fail_streak-колонка ещё не примигрировала → без дебаунса
+            await pool.execute(
+                "UPDATE cf_worker_pool SET status=$1 WHERE owner_id=$2 AND worker_url=$3",
+                "active" if res["alive"] else "down", owner_id, res["url"])
     alive = sum(1 for r in results if r["alive"])
     colos = sorted({r.get("colo") for r in results if r.get("colo")})
     ips = sorted({r.get("ip") for r in results if r.get("ip")})

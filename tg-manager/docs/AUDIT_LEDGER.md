@@ -708,3 +708,8 @@ Bot-паритет: новый `bot/handlers/metrics_dashboard.py` — нати�
 Anti-detection: во ВСЕХ раздачах/лечении/мониторе прокси-аккаунты (proxy_id) не трогаются — у них своя изоляция, приоритет прокси в _make_client.
 Верификация: test_cf_pool_fixes +4 (egress-IP; lifecycle-ops; monitor-организм+регистрация; релей-aware audit) → 20/20 (с test_proxy_isolation_check). Python AST (4 файла) + node --check шаблона воркера + node --check всего JS index.html (543K) зелёные.
 Честно: egress-IP через cdn-cgi/trace даёт фактический адрес воркера — теперь уникальность проверяема реально. Но CF может отдавать одинаковый egress-IP разным воркерам одной colo — «уник. IP: N» покажет правду по факту. Живьём против CF из песочницы не гонял.
+
+## tg-manager: CF-пул — закрыты 2 остатка (авто-раздача при добавлении, дебаунс down) — 2026-07-13
+  - Авто-раздача в момент добавления аккаунта (роадмап №2 полностью): db.add_tg_account и session_importer.import_sessions после вставки вызывают sync_relay_assignment(pool, owner_id) — новый аккаунт без прокси получает воркер сразу, не ждёт 30-мин цикл монитора. Хук в try/except: сбой CF-раздачи не роняет добавление/импорт.
+  - Дебаунс «мёртвого» воркера: cf_worker_pool.fail_streak (self-heal ADD COLUMN на старте). check_pool инкрементит стрик на провале health, помечает status='down' только при fail_streak>=_DOWN_THRESHOLD(2); на успехе сбрасывает в 0. Разовый сетевой блип больше не двигает аккаунты между воркерами каждый цикл. Fallback без дебаунса, если колонка не примигрировала.
+Верификация: test_cf_pool_fixes +2 → 22/22. Python AST (4 файла) + node --check шаблона зелёные. Роадмап CF-релея закрыт полностью.

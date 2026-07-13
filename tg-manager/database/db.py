@@ -3060,6 +3060,14 @@ async def add_tg_account(
     acc_id = row["id"]
     # Регистрируем связь телефон→владелец для анти-абуз системы
     await record_phone_link(pool, phone, owner_id)
+    # Новый аккаунт без прокси сразу получает воркер из существующего CF-пула —
+    # изоляция не ждёт 30-мин цикла монитора. Полностью изолировано от основного
+    # потока (любой сбой CF-раздачи не должен ронять добавление аккаунта).
+    try:
+        from services.cf_pool_manager import sync_relay_assignment
+        await sync_relay_assignment(pool, owner_id)
+    except Exception:
+        pass
     return acc_id
 
 

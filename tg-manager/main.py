@@ -502,6 +502,9 @@ async def main() -> None:
         "created_at TIMESTAMPTZ DEFAULT NOW())",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_cf_worker_pool_owner_url "
         "ON cf_worker_pool(owner_id, worker_url)",
+        # fail_streak: дебаунс «мёртвого» воркера — помечаем down только после N
+        # подряд неудачных health-пингов (разовый сетевой блип не двигает аккаунты).
+        "ALTER TABLE cf_worker_pool ADD COLUMN IF NOT EXISTS fail_streak INTEGER DEFAULT 0",
     ):
         try:
             await pool.execute(_ddl)

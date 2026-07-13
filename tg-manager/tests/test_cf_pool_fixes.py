@@ -250,6 +250,30 @@ def test_isolation_audit_is_relay_aware():
     assert "on_relay" in ui and "relay_shared_groups" in ui
 
 
+def test_down_worker_debounced():
+    """Разовый сетевой блип не должен двигать аккаунты: воркер помечается 'down'
+    только после N подряд провалов health (fail_streak)."""
+    cf = _read("services/cf_pool_manager.py")
+    assert "_DOWN_THRESHOLD" in cf
+    seg = cf[cf.index("async def check_pool"):cf.index("async def get_pool_status")]
+    assert "fail_streak=fail_streak+1" in seg
+    assert "fail_streak+1 >= $3" in seg and "fail_streak=0" in seg
+    # колонка гарантируется self-heal на старте
+    m = _read("main.py")
+    assert "ADD COLUMN IF NOT EXISTS fail_streak" in m
+
+
+def test_relay_auto_assigned_on_account_add():
+    """Новый аккаунт без прокси получает релей сразу (обе точки вставки), а не
+    ждёт 30-мин цикл монитора. Хук изолирован (сбой не роняет добавление)."""
+    dbsrc = _read("database/db.py")
+    seg = dbsrc[dbsrc.index("async def add_tg_account"):]
+    seg = seg[:seg.index("return acc_id")+20]
+    assert "sync_relay_assignment" in seg and "except Exception:" in seg
+    imp = _read("services/session_importer.py")
+    assert "sync_relay_assignment" in imp
+
+
 def test_cf_relay_url_column_self_healed():
     """Регресс контактов: 'column a.cf_relay_url does not exist'. Имя schema_v153
     занято двумя агентами → CF-миграция пропускалась. Колонка/таблица должны быть
