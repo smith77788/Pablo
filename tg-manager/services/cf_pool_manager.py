@@ -49,8 +49,18 @@ const DC_IPS = {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // Health-probe: GET /health или / → 200 + colo (для проверки живости и
+    // географического разброса воркеров из приложения). Без апгрейда до WS.
+    if (url.pathname === '/' || url.pathname === '/health') {
+      const colo = (request.cf && request.cf.colo) || null;
+      return new Response(JSON.stringify({ ok: true, colo }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     const dcId = parseInt(url.pathname.split('/').pop());
-    
+
     if (!DC_IPS[dcId]) {
       return new Response('Invalid DC ID', { status: 400 });
     }
@@ -226,15 +236,36 @@ async def deploy_pool(count: int, name_prefix: str, api_token: str, account_id: 
     return {"urls": urls, "errors": errors[:5], "ok": len(urls), "count": count}
 
 
+async def count_relay_targets(pool, owner_id: int) -> dict:
+    """Сколько аккаунтов реально нуждаются в релее (для авто-count деплоя).
+
+    Аккаунт с собственным прокси (proxy_id задан) уже изолирован по IP — релей
+    ему не нужен (_make_client всё равно предпочтёт прокси). Значит воркеры
+    нужны только активным аккаунтам БЕЗ прокси. Возвращает {active, relay_needed}."""
+    active = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+        owner_id) or 0
+    relay_needed = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND proxy_id IS NULL",
+        owner_id) or 0
+    return {"active": int(active), "relay_needed": int(relay_needed)}
+
+
 async def assign_urls_to_accounts(pool, owner_id: int, urls: list) -> dict:
-    """Assign CF Worker URLs to accounts (round-robin)."""
+    """Раздать URL воркеров аккаунтам БЕЗ собственного прокси (round-robin).
+
+    Ключевое (anti-detection): аккаунты с proxy_id НЕ трогаем — у них своя
+    IP-изоляция через прокси, релей им не нужен и только замусорил бы cf_relay_url.
+    При числе воркеров ≥ числа таких аккаунтов раздача выходит 1:1 (уникальный IP)."""
     if not urls:
         return {"error": "No URLs to assign"}
-    
+
     accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+        "SELECT id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND proxy_id IS NULL ORDER BY id",
         owner_id)
-    
+
     assigned = 0
     for i, acc in enumerate(accounts):
         url = urls[i % len(urls)]
@@ -242,7 +273,7 @@ async def assign_urls_to_accounts(pool, owner_id: int, urls: list) -> dict:
             "UPDATE tg_accounts SET cf_relay_url=$1 WHERE id=$2",
             url, acc['id'])
         assigned += 1
-    
+
     # Store URLs in cf_worker_pool
     for url in urls:
         await pool.execute(
@@ -250,8 +281,50 @@ async def assign_urls_to_accounts(pool, owner_id: int, urls: list) -> dict:
                VALUES ($1, $2, 'active')
                ON CONFLICT (owner_id, worker_url) DO NOTHING""",
             owner_id, url)
-    
-    return {"assigned": assigned, "urls": urls}
+
+    unique = len(set(urls))
+    return {"assigned": assigned, "urls": urls,
+            "isolation_1to1": assigned <= unique, "unique_ips": unique}
+
+
+async def check_pool(pool, owner_id: int, timeout: float = 8.0) -> dict:
+    """Пинг каждого воркера (GET /health) — живость + colo (гео edge-точки CF).
+
+    Обновляет cf_worker_pool.status ('active'/'down'). Разные colo → трафик
+    аккаунтов расходится по разным точкам присутствия CF (косвенный индикатор
+    разнообразия egress-IP; полной гарантии уникальности edge-IP CF не даёт)."""
+    import aiohttp
+    workers = await pool.fetch(
+        "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1", owner_id)
+    if not workers:
+        return {"checked": 0, "alive": 0, "colos": [], "results": []}
+
+    async def _ping(worker_url: str) -> dict:
+        url = worker_url.rstrip("/") + "/health"
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+                    if r.status == 200:
+                        try:
+                            j = await r.json()
+                        except Exception:
+                            j = {}
+                        return {"url": worker_url, "alive": True,
+                                "colo": (j or {}).get("colo")}
+                    return {"url": worker_url, "alive": False,
+                            "error": f"HTTP {r.status}"}
+        except Exception as e:
+            return {"url": worker_url, "alive": False, "error": str(e)[:120]}
+
+    results = await asyncio.gather(*[_ping(w["worker_url"]) for w in workers])
+    for res in results:
+        await pool.execute(
+            "UPDATE cf_worker_pool SET status=$1 WHERE owner_id=$2 AND worker_url=$3",
+            "active" if res["alive"] else "down", owner_id, res["url"])
+    alive = sum(1 for r in results if r["alive"])
+    colos = sorted({r.get("colo") for r in results if r.get("colo")})
+    return {"checked": len(results), "alive": alive,
+            "colos": colos, "results": results}
 
 
 async def get_pool_status(pool, owner_id: int) -> dict:
@@ -263,9 +336,12 @@ async def get_pool_status(pool, owner_id: int) -> dict:
            FROM tg_accounts WHERE owner_id=$1 AND cf_relay_url IS NOT NULL
            GROUP BY cf_relay_url""", owner_id)
     
+    counts = await count_relay_targets(pool, owner_id)
     return {
         "workers": [dict(w) for w in workers],
         "accounts_by_url": [dict(a) for a in accounts],
         "total_workers": len(workers),
         "total_accounts_with_relay": sum(a['cnt'] for a in accounts),
+        "active_accounts": counts["active"],
+        "relay_needed": counts["relay_needed"],  # активные без своего прокси
     }

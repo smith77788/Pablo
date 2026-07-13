@@ -160,6 +160,45 @@ def test_deploy_errors_are_surfaced_not_swallowed():
     assert "last_deploy" in ui and "Деплой не удался" in ui
 
 
+def test_deploy_auto_count_by_active_accounts():
+    """count не задан/0/'auto' → деплой по числу аккаунтов, которым нужен релей
+    (активные без своего прокси) — изоляция 1:1 без ручного счёта."""
+    cf = _read("services/cf_pool_manager.py")
+    assert "async def count_relay_targets" in cf
+    seg = cf[cf.index("async def count_relay_targets"):cf.index("async def assign_urls_to_accounts")]
+    assert "proxy_id IS NULL" in seg and "is_active" in seg.lower()
+    api = _read("services/mini_app_api.py")
+    dep = api[api.index("async def cf_pool_deploy"):
+              api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
+    assert "count_relay_targets" in dep
+    assert "'auto'" in dep and "relay_needed" in dep
+    ui = _read("mini_app/index.html")
+    assert "relay_needed" in ui and "cfAutoHint" in ui
+
+
+def test_assignment_skips_proxy_bound_accounts():
+    """Anti-detection: релей раздаётся ТОЛЬКО аккаунтам без своего прокси —
+    proxy_id-аккаунты не трогаем (у них своя IP-изоляция)."""
+    cf = _read("services/cf_pool_manager.py")
+    seg = cf[cf.index("async def assign_urls_to_accounts"):cf.index("async def check_pool")]
+    assert "proxy_id IS NULL" in seg
+    # старая безусловная выборка всех активных убрана
+    assert "WHERE owner_id=$1 AND is_active=TRUE\",\n        owner_id)" not in seg
+
+
+def test_worker_health_and_check_pool():
+    """Воркер отвечает на /health (живость+colo); check_pool пингует все и
+    обновляет статус; есть эндпоинт и кнопка в UI."""
+    cf = _read("services/cf_pool_manager.py")
+    assert "'/health'" in cf and "request.cf" in cf and "colo" in cf
+    assert "async def check_pool" in cf and "/health" in cf
+    api = _read("services/mini_app_api.py")
+    assert "async def cf_pool_check" in api
+    assert 'add_post("/api/miniapp/cf/pool/check", cf_pool_check)' in api
+    ui = _read("mini_app/index.html")
+    assert "checkCfWorkers" in ui and "/api/miniapp/cf/pool/check" in ui
+
+
 def test_cf_relay_url_column_self_healed():
     """Регресс контактов: 'column a.cf_relay_url does not exist'. Имя schema_v153
     занято двумя агентами → CF-миграция пропускалась. Колонка/таблица должны быть

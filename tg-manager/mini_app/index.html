@@ -2846,9 +2846,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         </div>
       </details>
       <div style="display:flex;gap:8px;align-items:center">
-        <input type="number" id="cfPoolCount" value="10" min="1" max="100" class="inp" style="width:80px" title="Сколько воркеров">
+        <input type="number" id="cfPoolCount" value="10" min="1" max="100" class="inp" style="width:80px" title="Сколько воркеров (0/пусто = по числу аккаунтов)">
         <button class="btn btn-p" id="cfDeployBtn" style="flex:1;font-size:13px;padding:9px 6px" onclick="deployCfPool()">☁️ Задеплоить пул</button>
       </div>
+      <div id="cfAutoHint" style="font-size:12px;opacity:.7;margin-top:6px"></div>
+      <button class="btn btn-s" id="cfCheckBtn" style="width:100%;font-size:13px;padding:8px 6px;margin-top:6px" onclick="checkCfWorkers()">🩺 Проверить воркеры</button>
     </div>
     <div class="sec">Мои прокси</div>
     <div class="lst" id="proxyList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -8666,11 +8668,35 @@ async function loadCfPoolStatus() {
     }
     el.innerHTML = (w ? `☁️ Воркеров: <b>${w}</b> · аккаунтов с релеем: <b>${a}</b>` : 'Пул ещё не задеплоен.')
                    + `<br><span style="opacity:.7">${credLine}</span>` + deployLine;
+    // авто-подсказка + префилл поля count по числу аккаунтов, которым нужен релей
+    const need = r.relay_needed, act = r.active_accounts;
+    const hint = document.getElementById('cfAutoHint');
+    if (hint && typeof need === 'number') {
+      const cntEl = document.getElementById('cfPoolCount');
+      // префилл только если пользователь не трогал (=дефолт 10) и есть кому раздать
+      if (cntEl && need > 0 && (cntEl.value==='10' || cntEl.value==='')) cntEl.value = need;
+      hint.textContent = need > 0
+        ? `💡 Рекомендуем ${need} воркер(ов) — по числу аккаунтов без своего прокси (изоляция 1:1). Всего активных: ${act}. Оставьте 0/пусто = авто.`
+        : `Все ${act} активных аккаунтов уже с прокси — релей не требуется.`;
+    }
   } catch(e) { el.textContent = '—'; }
 }
+async function checkCfWorkers() {
+  const btn = document.getElementById('cfCheckBtn');
+  if (btn) { btn.disabled=true; btn.textContent='🩺 Проверяю…'; }
+  try {
+    const r = await api('/api/miniapp/cf/pool/check', {method:'POST'});
+    const colos = (r.colos||[]).length ? ` · гео: ${(r.colos||[]).join(', ')}` : '';
+    toast(`🩺 Живых воркеров: ${r.alive||0}/${r.checked||0}${colos}`);
+    loadCfPoolStatus();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+  finally { if(btn){ btn.disabled=false; btn.textContent='🩺 Проверить воркеры'; } }
+}
 async function deployCfPool() {
-  const count = parseInt(document.getElementById('cfPoolCount').value)||10;
-  if (!await askConfirm(`Задеплоить ${count} Cloudflare Worker(ов) и раздать аккаунтам? Деплой идёт в фоне (~несколько минут для больших пулов).`)) return;
+  const raw = document.getElementById('cfPoolCount').value.trim();
+  const count = raw==='' ? 0 : (parseInt(raw)||0);  // 0/пусто → авто (по числу аккаунтов)
+  const label = count>0 ? `${count}` : 'авто (по числу аккаунтов)';
+  if (!await askConfirm(`Задеплоить ${label} Cloudflare Worker(ов) и раздать аккаунтам без прокси? Деплой идёт в фоне (~несколько минут для больших пулов).`)) return;
   const btn = document.getElementById('cfDeployBtn');
   btn.disabled=true; btn.textContent='☁️ Запускаю…';
   try {

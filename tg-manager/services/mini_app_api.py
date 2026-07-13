@@ -12189,10 +12189,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             data = {}
-        try:
-            count = max(1, min(int(data.get('count', 10)), 100))
-        except (TypeError, ValueError):
-            count = 10
+        raw_count = data.get('count')
+        # count не задан / 'auto' / 0 → по числу аккаунтов, которым реально нужен
+        # релей (активные без своего прокси) → изоляция 1:1 без ручного счёта.
+        if raw_count in (None, '', 'auto', 0, '0'):
+            try:
+                from services.cf_pool_manager import count_relay_targets
+                ct = await count_relay_targets(pool, uid)
+                count = ct["relay_needed"] or ct["active"] or 1
+            except Exception:
+                log.exception("cf auto-count uid=%s", uid)
+                count = 10
+        else:
+            try:
+                count = int(raw_count)
+            except (TypeError, ValueError):
+                count = 10
+        count = max(1, min(count, 100))
         prefix = data.get('name_prefix') or f'tg-relay-{uid}'
         c = await _cf_resolve_creds(uid)
         if not c["api_token"] or not c["account_id"]:
@@ -12226,8 +12239,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         task.add_done_callback(lambda t: _tasks.discard(t))
         return _json_resp({"ok": True, "started": True, "count": count})
 
+    async def cf_pool_check(request: web.Request) -> web.Response:
+        """Пинг всех воркеров (/health) — живость + гео (colo). Аналог «Проверить
+        все» для прокси, но для CF-релея."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.cf_pool_manager import check_pool
+            return _json_resp(await check_pool(pool, uid))
+        except Exception as e:
+            log.exception("cf_pool_check uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
     app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
     app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
+    app.router.add_post("/api/miniapp/cf/pool/check", cf_pool_check)
     app.router.add_post("/api/miniapp/cf/credentials", cf_credentials_save)
 
     # ── Search Ranking Engine ──────────────────────────────────────────────────
