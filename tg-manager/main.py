@@ -102,6 +102,7 @@ from bot.handlers import reg_checker as reg_checker_handler
 from bot.handlers import promo_platform as promo_handler
 from bot.handlers import self_promo as self_promo_handler
 from bot.handlers import global_search as global_search_handler
+from bot.handlers import ai_commenting as ai_commenting_handler
 from bot.handlers import ghost_hub as ghost_hub_handler
 from bot.handlers import content_mesh_hub as content_mesh_handler
 from bot.handlers import clone_adapt_hub as clone_adapt_handler
@@ -382,6 +383,7 @@ async def main() -> None:
     dp.include_router(promo_handler.router)
     dp.include_router(self_promo_handler.router)
     dp.include_router(global_search_handler.router)
+    dp.include_router(ai_commenting_handler.router)
     dp.include_router(ghost_hub_handler.router)
     dp.include_router(content_mesh_handler.router)
     dp.include_router(clone_adapt_handler.router)

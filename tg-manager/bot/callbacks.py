@@ -713,3 +713,10 @@ class GSearchCb(CallbackData, prefix="gsrch"):
     """Глобальный поиск публичных сущностей Telegram (инлайн)."""
 
     action: str   # open|cancel
+
+
+class AiCommentCb(CallbackData, prefix="aic"):
+    """AI-комментирование — контекстные LLM-комментарии под постами."""
+
+    action: str   # open|cancel|tone
+    tone: str = ""
