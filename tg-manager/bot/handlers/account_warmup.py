@@ -362,22 +362,104 @@ async def cb_warmup_start(
     )
 
 
+# Поведенческий профиль прогрева (движок читает profile_type из
+# account_niche_profiles → веса действий). Порядок = индекс в callback.
+_WARMUP_PLAN_ORDER = ("gentle", "standard", "aggressive")
+_WARMUP_PROFILE_LABELS = {
+    "reader": "📖 Читатель",
+    "commenter": "💬 Комментатор",
+    "reactor": "👍 Реакции",
+    "lurker": "🕶 Наблюдатель",
+    "mixed": "🎭 Смешанный",
+}
+
+
+async def _upsert_niche_profile(
+    pool: asyncpg.Pool, owner_id: int, account_id: int,
+    profile_type: str, niche: str = "general",
+) -> None:
+    """Сохранить поведенческий профиль прогрева — движок account_warmer читает
+    profile_type/niche именно отсюда. Зеркалит запись из mini-app (idempotent
+    upsert по account_id). Таблица self-heal'ится на случай лага миграции."""
+    await pool.execute(
+        """CREATE TABLE IF NOT EXISTS account_niche_profiles (
+               account_id      BIGINT PRIMARY KEY,
+               owner_id        BIGINT NOT NULL,
+               niche           TEXT NOT NULL DEFAULT 'general',
+               profile_type    TEXT NOT NULL DEFAULT 'reader',
+               custom_channels TEXT[] DEFAULT '{}',
+               flood_wait_count INT NOT NULL DEFAULT 0,
+               last_flood_at   TIMESTAMPTZ,
+               updated_at      TIMESTAMPTZ DEFAULT NOW()
+           )"""
+    )
+    await pool.execute(
+        """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
+           VALUES($1,$2,$3,$4,now())
+           ON CONFLICT (account_id) DO UPDATE
+           SET niche=$3, profile_type=$4, updated_at=now()""",
+        account_id, owner_id, niche, profile_type,
+    )
+
+
 @router.callback_query(
     WarmupCb.filter(F.action.in_({"plan_gentle", "plan_standard", "plan_aggressive"}))
 )
 async def cb_warmup_create_plan(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
+    """Шаг: выбран режим → предлагаем поведенческий профиль (паритет с mini-app)."""
+    await safe_answer(callback)
+    plan_type = callback_data.action.replace("plan_", "")
+    acc_id = callback_data.account_id
+    plan_idx = _WARMUP_PLAN_ORDER.index(plan_type) if plan_type in _WARMUP_PLAN_ORDER else 1
+
+    kb = InlineKeyboardBuilder()
+    for prof, plabel in _WARMUP_PROFILE_LABELS.items():
+        # page несёт индекс режима, чтобы не плодить 15 отдельных action.
+        kb.button(
+            text=plabel,
+            callback_data=WarmupCb(action=f"prof_{prof}", account_id=acc_id, page=plan_idx),
+        )
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="create_list"))
+    kb.adjust(2, 2, 1, 1)
+    await callback.message.edit_text(
+        f"🎭 <b>Поведенческий профиль прогрева</b>\n\n"
+        f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
+        "Как аккаунт будет вести себя при прогреве:\n"
+        "• <b>Читатель</b> — только читает ленту\n"
+        "• <b>Комментатор</b> — оставляет комментарии\n"
+        "• <b>Реакции</b> — ставит реакции на посты\n"
+        "• <b>Наблюдатель</b> — минимальная активность\n"
+        "• <b>Смешанный</b> — всё понемногу (рекомендуется)",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    WarmupCb.filter(F.action.in_({
+        "prof_reader", "prof_commenter", "prof_reactor", "prof_lurker", "prof_mixed",
+    }))
+)
+async def cb_warmup_pick_profile(
+    callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
+) -> None:
+    """Финал: создать план прогрева + сохранить поведенческий профиль."""
     await safe_answer(callback)
     from services.account_warmer import create_warmup_plan
 
-    plan_type = callback_data.action.replace("plan_", "")
+    profile_type = callback_data.action.replace("prof_", "")
     acc_id = callback_data.account_id
+    plan_idx = callback_data.page
+    plan_type = _WARMUP_PLAN_ORDER[plan_idx] if 0 <= plan_idx < len(_WARMUP_PLAN_ORDER) else "standard"
 
     try:
+        # Профиль пишем ДО плана — движок при первом тике уже читает правильные веса.
+        await _upsert_niche_profile(pool, callback.from_user.id, acc_id, profile_type)
         plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
     except Exception as _e:
-        log.warning('handler error in cb_warmup_create_plan: %s', _e)
+        log.warning('handler error in cb_warmup_pick_profile: %s', _e)
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания плана:</b> {html.escape(str(_e)[:200])}",
             parse_mode="HTML",
@@ -398,6 +480,7 @@ async def cb_warmup_create_plan(
         f"✅ <b>План разогрева создан!</b>\n\n"
         f"Аккаунт: <b>{html.escape(label)}</b>\n"
         f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n"
+        f"Профиль: <b>{_WARMUP_PROFILE_LABELS.get(profile_type, profile_type)}</b>\n"
         f"ID плана: <code>{plan_id}</code>\n\n"
         "Разогрев запускается автоматически раз в сутки.\n"
         "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
