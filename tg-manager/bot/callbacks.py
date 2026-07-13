@@ -720,3 +720,9 @@ class AiCommentCb(CallbackData, prefix="aic"):
 
     action: str   # open|cancel|tone
     tone: str = ""
+
+
+class ComplianceScanCb(CallbackData, prefix="cscan"):
+    """Проверка ресурсов на запрещённую тематику (read-only compliance scan)."""
+
+    action: str   # open|cancel
