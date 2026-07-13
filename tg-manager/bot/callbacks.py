@@ -707,3 +707,9 @@ class SpinCb(CallbackData, prefix="spin"):
 
     action: str   # menu|new|more|expand|cancel
     idx: int = 0  # индекс шаблона (для «ещё пример»)
+
+
+class GSearchCb(CallbackData, prefix="gsrch"):
+    """Глобальный поиск публичных сущностей Telegram (инлайн)."""
+
+    action: str   # open|cancel
