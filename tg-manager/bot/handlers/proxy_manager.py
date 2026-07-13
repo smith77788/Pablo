@@ -49,9 +49,12 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="✅ Проверить + пинг", callback_data=ProxyCb(action="check_all"))
     kb.button(text="🌍 Определить гео", callback_data=ProxyCb(action="detect_geo"))
     kb.button(text="🔍 Проверить уникальность IP", callback_data=ProxyCb(action="check_ip_unique"))
+    kb.button(text="🔄 Ротация IP", callback_data=ProxyCb(action="rotate"))
+    kb.button(text="🚑 Failover на резерв", callback_data=ProxyCb(action="failover"))
+    kb.button(text="🧹 Удалить мёртвые", callback_data=ProxyCb(action="cleanup_dead"))
     kb.button(text="🆓 Бесплатный пул", callback_data=ProxyCb(action="free_pool"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb
 
 
@@ -168,14 +171,27 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         rows = await pool.fetch(
             """SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive,
-                      latency_avg_ms, geo_country, geo_city, success_rate
+                      latency_avg_ms, geo_country, geo_city, success_rate,
+                      COALESCE(is_backup, FALSE) AS is_backup
                FROM user_proxies
                WHERE owner_id=$1
                ORDER BY COALESCE(success_rate, 100) DESC, created_at DESC""",
             user_id,
         )
     except Exception:
-        rows = []
+        # Колонка is_backup могла ещё не примениться (лаг миграции) — не роняем
+        # весь список, а откатываемся на запрос без неё.
+        try:
+            rows = await pool.fetch(
+                """SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive,
+                          latency_avg_ms, geo_country, geo_city, success_rate
+                   FROM user_proxies
+                   WHERE owner_id=$1
+                   ORDER BY COALESCE(success_rate, 100) DESC, created_at DESC""",
+                user_id,
+            )
+        except Exception:
+            rows = []
 
     lines = ["📋 <b>Мои прокси</b>\n"]
     kb = InlineKeyboardBuilder()
@@ -217,13 +233,19 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     )
             except Exception:
                 log_exc_swallow(log, "Не удалось получить статистику качества прокси")
+            _is_backup = bool(row["is_backup"]) if "is_backup" in row.keys() else False
+            _bk_txt = "🔁 Резерв ✓" if _is_backup else "🔁 В резерв"
             kb.button(
-                text=f"🗑 {html.escape(label[:22])}",
+                text=_bk_txt,
+                callback_data=ProxyCb(action="toggle_backup", proxy_id=row["id"]),
+            )
+            kb.button(
+                text=f"🗑 {html.escape(label[:18])}",
                 callback_data=ProxyCb(action="delete", proxy_id=row["id"]),
             )
 
     kb.button(text="◀️ Назад", callback_data=ProxyCb(action="menu"))
-    kb.adjust(1)
+    kb.adjust(2)
 
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
@@ -786,6 +808,143 @@ async def cb_proxy_delete(
         f"🗑 Прокси <code>{label}</code> удалён.",
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
+    )
+
+
+# ── Backup toggle / rotation / failover / cleanup (паритет с mini-app) ──────────
+
+
+@router.callback_query(ProxyCb.filter(F.action == "toggle_backup"))
+async def cb_proxy_toggle_backup(
+    callback: CallbackQuery, callback_data: ProxyCb, pool: asyncpg.Pool
+) -> None:
+    """Пометить/снять прокси как РЕЗЕРВНЫЙ (is_backup) — источник для failover."""
+    if not await _require_proxy_manager(callback, pool):
+        return
+    user_id = callback.from_user.id
+    proxy_id = callback_data.proxy_id
+    try:
+        # Self-heal колонки на случай лага миграции.
+        await pool.execute(
+            "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS is_backup BOOLEAN DEFAULT FALSE"
+        )
+        new_val = await pool.fetchval(
+            "UPDATE user_proxies SET is_backup = NOT COALESCE(is_backup, FALSE) "
+            "WHERE id=$1 AND owner_id=$2 RETURNING is_backup",
+            proxy_id, user_id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"proxy_toggle_backup: {exc}")
+        await callback.answer("Ошибка переключения резерва.", show_alert=True)
+        return
+    if new_val is None:
+        await callback.answer("Прокси не найден.", show_alert=True)
+        return
+    await callback.answer(
+        "🔁 Помечен как резервный" if new_val else "Снят из резерва", show_alert=False
+    )
+    # Перерисовать список с обновлённым состоянием.
+    await cb_proxy_list(callback, pool)
+
+
+@router.callback_query(ProxyCb.filter(F.action == "rotate"))
+async def cb_proxy_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Ротация IP по пулу (anti-detection) — общая реализация с mini-app."""
+    if not await _require_proxy_manager(callback, pool):
+        return
+    await safe_answer(callback)
+    await callback.message.edit_text("🔄 Ротирую назначения прокси…", parse_mode="HTML")
+    from services import proxy_rotation
+    try:
+        res = await proxy_rotation.apply_rotation(pool, callback.from_user.id)
+    except Exception as exc:
+        mark_handled_error(f"proxy_rotate: {exc}")
+        await callback.message.edit_text(
+            f"❌ Ошибка ротации: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
+        )
+        return
+    await callback.message.edit_text(
+        "🔄 <b>Ротация IP завершена</b>\n\n"
+        f"• Переназначено: <b>{res['rotated']}</b>\n"
+        f"• Пропущено (заняты операцией): {res['skipped_busy']}\n"
+        f"• Не хватило прокси в пуле: {res['skipped_no_proxy']}\n"
+        f"• Аккаунтов в группе: {res['accounts']} · Пул: {res['pool']}",
+        parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
+    )
+
+
+@router.callback_query(ProxyCb.filter(F.action == "failover"))
+async def cb_proxy_failover(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Перевести аккаунты с мёртвым прокси на живой резервный (is_backup)."""
+    if not await _require_proxy_manager(callback, pool):
+        return
+    await safe_answer(callback)
+    await callback.message.edit_text(
+        "🚑 Проверяю прокси и перевожу на резерв…", parse_mode="HTML"
+    )
+    from services import proxy_selector
+    try:
+        res = await proxy_selector.failover_dead_proxies(pool, callback.from_user.id)
+    except Exception as exc:
+        mark_handled_error(f"proxy_failover: {exc}")
+        await callback.message.edit_text(
+            f"❌ Ошибка failover: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
+        )
+        return
+    reassigned = res.get("reassigned") or []
+    no_backup = res.get("still_dead_no_backup") or []
+    await callback.message.edit_text(
+        "🚑 <b>Failover завершён</b>\n\n"
+        f"• Проверено назначенных прокси: <b>{res.get('checked', 0)}</b>\n"
+        f"• Живых: {res.get('healthy', 0)}\n"
+        f"• Переведено на резерв: <b>{len(reassigned)}</b>\n"
+        f"• Мёртвых без резерва: {len(no_backup)}\n"
+        f"• Резервных доступно: {res.get('backups_available', 0)} "
+        f"(живых {res.get('backups_healthy', 0)})",
+        parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
+    )
+
+
+@router.callback_query(ProxyCb.filter(F.action == "cleanup_dead"))
+async def cb_proxy_cleanup_dead(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Удалить подтверждённо-мёртвые НЕназначенные прокси (изоляция сохранена)."""
+    if not await _require_proxy_manager(callback, pool):
+        return
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    try:
+        removed = await pool.fetch(
+            """DELETE FROM user_proxies up
+               WHERE up.owner_id=$1 AND up.is_alive IS FALSE
+                 AND NOT EXISTS (
+                     SELECT 1 FROM tg_accounts a
+                     WHERE a.owner_id=$1 AND a.proxy_id=up.id)
+               RETURNING id""",
+            user_id,
+        )
+        skipped = await pool.fetchval(
+            """SELECT COUNT(*) FROM user_proxies up
+               WHERE up.owner_id=$1 AND up.is_alive IS FALSE
+                 AND EXISTS (SELECT 1 FROM tg_accounts a
+                             WHERE a.owner_id=$1 AND a.proxy_id=up.id)""",
+            user_id,
+        ) or 0
+    except Exception as exc:
+        mark_handled_error(f"proxy_cleanup_dead: {exc}")
+        await callback.message.edit_text(
+            f"❌ Ошибка очистки: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
+        )
+        return
+    await callback.message.edit_text(
+        "🧹 <b>Очистка мёртвых прокси</b>\n\n"
+        f"• Удалено: <b>{len(removed)}</b>\n"
+        f"• Пропущено (назначены аккаунтам): {int(skipped)}\n\n"
+        "<i>Назначенные мёртвые не удаляются, чтобы не потерять изоляцию — "
+        "сначала переведите их через 🚑 Failover.</i>",
+        parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
     )
 
 

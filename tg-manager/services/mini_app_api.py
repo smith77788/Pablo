@@ -3952,67 +3952,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        acc_ids = [int(x) for x in (body.get("account_ids") or []) if str(x).strip().isdigit()]
-        pool_ids_in = [int(x) for x in (body.get("proxy_ids") or []) if str(x).strip().isdigit()]
+        acc_ids = body.get("account_ids") or []
+        pool_ids_in = body.get("proxy_ids") or []
         from services import proxy_rotation
         try:
-            async with pool.acquire() as conn:
-                async with conn.transaction():
-                    # 1. Блокируем строки ротируемых аккаунтов (busy-safe против claim).
-                    if acc_ids:
-                        accs = await conn.fetch(
-                            "SELECT id, proxy_id, COALESCE(in_operation,FALSE) AS busy "
-                            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-                            "AND id = ANY($2::bigint[]) FOR UPDATE",
-                            uid, acc_ids)
-                    else:
-                        accs = await conn.fetch(
-                            "SELECT id, proxy_id, COALESCE(in_operation,FALSE) AS busy "
-                            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE FOR UPDATE",
-                            uid)
-                    group_ids = [int(r["id"]) for r in accs]
-                    free = [{"account_id": int(r["id"]), "proxy_id": r["proxy_id"]}
-                            for r in accs if not r["busy"]]
-                    skipped_busy = len(accs) - len(free)
-                    free_ids = [a["account_id"] for a in free]
-
-                    # 2. Пул: владелец + активные; вычесть прокси, занятые ЛЮБЫМ
-                    # не-ротируемым аккаунтом (busy в группе ИЛИ вне группы) — иначе
-                    # два аккаунта окажутся на одном прокси (потеря изоляции).
-                    if pool_ids_in:
-                        prows = await conn.fetch(
-                            "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE "
-                            "AND id = ANY($2::int[])", uid, pool_ids_in)
-                    else:
-                        prows = await conn.fetch(
-                            "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE", uid)
-                    pool_available = [int(r["id"]) for r in prows]
-                    blocked_rows = await conn.fetch(
-                        "SELECT DISTINCT proxy_id FROM tg_accounts "
-                        "WHERE owner_id=$1 AND proxy_id = ANY($2::int[]) "
-                        "AND NOT (id = ANY($3::bigint[]))",
-                        uid, pool_available, free_ids or [0])
-                    blocked = {int(r["proxy_id"]) for r in blocked_rows if r["proxy_id"] is not None}
-                    pool_final = [p for p in pool_available if p not in blocked]
-
-                    # 3. План (чистый, инъективный) + 4. применение с гвардом busy.
-                    result = proxy_rotation.plan_rotation(free, pool_final)
-                    applied = 0
-                    for ch in result["plan"]:
-                        if ch["new"] == ch["old"]:
-                            continue
-                        res = await conn.execute(
-                            "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3 "
-                            "AND COALESCE(in_operation,FALSE)=FALSE",
-                            ch["new"], ch["account_id"], uid)
-                        if isinstance(res, str) and res.endswith(" 1"):
-                            applied += 1
-            return _json_resp({
-                "ok": True, "rotated": applied,
-                "skipped_busy": skipped_busy,
-                "skipped_no_proxy": result["skipped_no_proxy"],
-                "accounts": len(group_ids), "pool": len(pool_final),
-            })
+            # Единая реализация ротации (эффект+транзакция) — общая с ботом.
+            result = await proxy_rotation.apply_rotation(pool, uid, acc_ids, pool_ids_in)
+            return _json_resp(result)
         except Exception as exc:
             log.exception("rotate_proxies uid=%d", uid)
             return _err(str(exc)[:150], 500)

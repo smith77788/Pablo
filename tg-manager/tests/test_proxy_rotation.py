@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import pytest
 
 from services.proxy_rotation import plan_rotation
 
@@ -107,14 +108,94 @@ def test_isolation_holds_across_many_shapes():
 
 
 def test_endpoint_transaction_guard_route_and_ui_wired():
-    api = _read("services/mini_app_api.py")
-    seg = api[api.index("async def rotate_proxies"):api.index("async def reporter_submit")]
-    # безопасность: транзакция + FOR UPDATE + гвард in_operation при апдейте
+    # Эффект/транзакция вынесены в общую apply_rotation (DRY: одна реализация на
+    # оба фронтенда). Гарды изоляции проверяем в НЕЙ, а не в эндпоинте.
+    rot = _read("services/proxy_rotation.py")
+    seg = rot[rot.index("async def apply_rotation"):]
     assert "conn.transaction()" in seg and "FOR UPDATE" in seg
     assert "COALESCE(in_operation,FALSE)=FALSE" in seg
-    assert "proxy_rotation.plan_rotation" in seg
+    assert "plan_rotation(free, pool_final)" in seg
     # резолвер не трогаем — правим только proxy_id
     assert "UPDATE tg_accounts SET proxy_id=" in seg
+    # эндпоинт mini-app вызывает общую реализацию + маршрут + UI на месте
+    api = _read("services/mini_app_api.py")
+    assert "proxy_rotation.apply_rotation(pool, uid" in api
     assert 'add_post("/api/miniapp/proxy/rotate", rotate_proxies)' in api
     ui = _read("mini_app/index.html")
     assert "rotateProxies" in ui and "/api/miniapp/proxy/rotate" in ui
+
+
+def test_bot_proxy_manager_has_parity_handlers():
+    """Паритет: бот тоже умеет rotate / failover / cleanup_dead / toggle_backup."""
+    h = _read("bot/handlers/proxy_manager.py")
+    for act in ("rotate", "failover", "cleanup_dead", "toggle_backup"):
+        assert f'ProxyCb.filter(F.action == "{act}")' in h, f"нет хендлера {act}"
+    # rotate вызывает ОБЩУЮ реализацию, а не дублирует транзакцию
+    assert "proxy_rotation.apply_rotation(pool, callback.from_user.id)" in h
+    assert "proxy_selector.failover_dead_proxies(pool, callback.from_user.id)" in h
+
+
+@pytest.mark.asyncio
+async def test_apply_rotation_effect_via_fake_pool():
+    """apply_rotation реально апдейтит proxy_id простаивающих аккаунтов и
+    пропускает busy (in_operation=TRUE), сохраняя изоляцию."""
+
+    class _Conn:
+        def __init__(self):
+            self.updates = []
+
+        def transaction(self):
+            conn = self
+
+            class _Tx:
+                async def __aenter__(self_):
+                    return conn
+
+                async def __aexit__(self_, *a):
+                    return False
+            return _Tx()
+
+        async def fetch(self, q, *args):
+            if "FROM tg_accounts" in q and "FOR UPDATE" in q:
+                # 2 аккаунта: id=1 простаивает (на прокси 99, вне пула → будет
+                # переназначен), id=2 busy (proxy 20) — его трогать нельзя
+                return [
+                    {"id": 1, "proxy_id": 99, "busy": False},
+                    {"id": 2, "proxy_id": 20, "busy": True},
+                ]
+            if "FROM user_proxies" in q:
+                return [{"id": 10}, {"id": 11}]  # пул: 10, 11
+            if "DISTINCT proxy_id" in q:
+                # прокси, занятые не-ротируемыми (busy id=2 держит 20 — не в пуле)
+                return [{"proxy_id": 20}]
+            return []
+
+        async def execute(self, q, *args):
+            if q.startswith("UPDATE tg_accounts SET proxy_id="):
+                self.updates.append((args[0], args[1]))  # (new_proxy, account_id)
+                return "UPDATE 1"
+            return "UPDATE 0"
+
+    class _Pool:
+        def __init__(self):
+            self.conn = _Conn()
+
+        def acquire(self):
+            conn = self.conn
+
+            class _Acq:
+                async def __aenter__(self_):
+                    return conn
+
+                async def __aexit__(self_, *a):
+                    return False
+            return _Acq()
+
+    from services import proxy_rotation
+
+    pool = _Pool()
+    res = await proxy_rotation.apply_rotation(pool, owner_id=42)
+    # только id=1 ротирован (id=2 busy — пропущен); переназначен на прокси из пула
+    assert res["rotated"] == 1
+    assert res["skipped_busy"] == 1
+    assert pool.conn.updates == [(10, 1)]

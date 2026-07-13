@@ -70,3 +70,80 @@ def plan_rotation(assignments: list[dict], pool_ids: list) -> dict:
         if new_pid != old_pid:
             rotated += 1
     return {"plan": plan, "rotated": rotated, "skipped_no_proxy": skipped}
+
+
+async def apply_rotation(
+    pool,
+    owner_id: int,
+    account_ids: list[int] | None = None,
+    proxy_ids: list[int] | None = None,
+) -> dict:
+    """Применить ротацию назначений прокси в БД (эффект + транзакция).
+
+    Единая реализация для обоих фронтендов (mini-app И бот) — не дублируем
+    деликатную логику изоляции. Все границы безопасности из докстринга модуля
+    обеспечиваются здесь: FOR UPDATE на ротируемых аккаунтах, вычитание прокси
+    занятых не-ротируемыми аккаунтами, guard `in_operation=FALSE` при UPDATE.
+
+    account_ids/proxy_ids — необязательные фильтры (пусто = весь пул владельца).
+    Возвращает {ok, rotated, skipped_busy, skipped_no_proxy, accounts, pool}.
+    """
+    acc_ids = [int(x) for x in (account_ids or []) if str(x).strip().lstrip("-").isdigit()]
+    pool_ids_in = [int(x) for x in (proxy_ids or []) if str(x).strip().lstrip("-").isdigit()]
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # 1. Блокируем строки ротируемых аккаунтов (busy-safe против claim).
+            if acc_ids:
+                accs = await conn.fetch(
+                    "SELECT id, proxy_id, COALESCE(in_operation,FALSE) AS busy "
+                    "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+                    "AND id = ANY($2::bigint[]) FOR UPDATE",
+                    owner_id, acc_ids)
+            else:
+                accs = await conn.fetch(
+                    "SELECT id, proxy_id, COALESCE(in_operation,FALSE) AS busy "
+                    "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE FOR UPDATE",
+                    owner_id)
+            group_ids = [int(r["id"]) for r in accs]
+            free = [{"account_id": int(r["id"]), "proxy_id": r["proxy_id"]}
+                    for r in accs if not r["busy"]]
+            skipped_busy = len(accs) - len(free)
+            free_ids = [a["account_id"] for a in free]
+
+            # 2. Пул: владелец + активные; вычесть прокси, занятые ЛЮБЫМ
+            # не-ротируемым аккаунтом (иначе потеря изоляции).
+            if pool_ids_in:
+                prows = await conn.fetch(
+                    "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE "
+                    "AND id = ANY($2::int[])", owner_id, pool_ids_in)
+            else:
+                prows = await conn.fetch(
+                    "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE", owner_id)
+            pool_available = [int(r["id"]) for r in prows]
+            blocked_rows = await conn.fetch(
+                "SELECT DISTINCT proxy_id FROM tg_accounts "
+                "WHERE owner_id=$1 AND proxy_id = ANY($2::int[]) "
+                "AND NOT (id = ANY($3::bigint[]))",
+                owner_id, pool_available, free_ids or [0])
+            blocked = {int(r["proxy_id"]) for r in blocked_rows if r["proxy_id"] is not None}
+            pool_final = [p for p in pool_available if p not in blocked]
+
+            # 3. План (чистый, инъективный) + 4. применение с гвардом busy.
+            result = plan_rotation(free, pool_final)
+            applied = 0
+            for ch in result["plan"]:
+                if ch["new"] == ch["old"]:
+                    continue
+                res = await conn.execute(
+                    "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3 "
+                    "AND COALESCE(in_operation,FALSE)=FALSE",
+                    ch["new"], ch["account_id"], owner_id)
+                if isinstance(res, str) and res.endswith(" 1"):
+                    applied += 1
+    return {
+        "ok": True, "rotated": applied,
+        "skipped_busy": skipped_busy,
+        "skipped_no_proxy": result["skipped_no_proxy"],
+        "accounts": len(group_ids), "pool": len(pool_final),
+    }
