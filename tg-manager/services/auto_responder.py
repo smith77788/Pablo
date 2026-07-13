@@ -609,15 +609,21 @@ async def _process_bot(
                                 or str(chat_id)
                             )
                             deal_title = f"{title_prefix} — {user_label}"
-                            await pool.execute(
-                                """INSERT INTO crm_deals
-                                       (bot_id, user_id, title, status, created_at)
-                                   VALUES ($1, $2, $3, 'new', NOW())
-                                   ON CONFLICT DO NOTHING""",
-                                bot_id,
-                                chat_id,
-                                deal_title,
+                            # crm_deals owner-scoped (owner_id/title/contact/stage) —
+                            # прежний INSERT bot_id/user_id/status ссылался на
+                            # несуществующие колонки → падал, сделка не создавалась.
+                            _deal_owner = await pool.fetchval(
+                                "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
                             )
+                            if _deal_owner:
+                                await pool.execute(
+                                    """INSERT INTO crm_deals
+                                           (owner_id, title, contact, stage, created_at)
+                                       VALUES ($1, $2, $3, 'new', NOW())""",
+                                    _deal_owner,
+                                    deal_title,
+                                    user_label,
+                                )
                         except Exception as exc:
                             log.warning(
                                 "auto_responder: create_deal failed bot=%d chat=%d: %s",
@@ -985,15 +991,20 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                     )
                 elif rule["action_type"] == "create_deal":
                     title_prefix = rule.get("action_value") or "Реактивация"
-                    await pool.execute(
-                        """INSERT INTO crm_deals
-                               (bot_id, user_id, title, status, created_at)
-                           VALUES ($1, $2, $3, 'new', NOW())
-                           ON CONFLICT DO NOTHING""",
-                        rule["bot_id"],
-                        chat_id,
-                        f"{title_prefix} — id{chat_id}",
+                    # crm_deals owner-scoped — прежний INSERT bot_id/user_id/status
+                    # ссылался на несуществующие колонки → падал.
+                    _deal_owner = await pool.fetchval(
+                        "SELECT added_by FROM managed_bots WHERE bot_id=$1", rule["bot_id"]
                     )
+                    if _deal_owner:
+                        await pool.execute(
+                            """INSERT INTO crm_deals
+                                   (owner_id, title, contact, stage, created_at)
+                               VALUES ($1, $2, $3, 'new', NOW())""",
+                            _deal_owner,
+                            f"{title_prefix} — id{chat_id}",
+                            str(chat_id),
+                        )
                 elif rule["action_type"] == "webhook":
                     url = (rule["action_value"] or "").strip()
                     if url:
