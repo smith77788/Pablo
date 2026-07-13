@@ -31,7 +31,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb
+from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb, MassOpCb
 from services import task_registry as _treg
 from bot.utils.op_helpers import safe_answer
 from bot.states import (
@@ -390,11 +390,14 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
         callback_data=ChanCb(action="bulk_create"),
     )
     # ── Вступление / выход / инвайт
+    # bulk_join/bulk_leave обрабатываются в mass_ops.py под MassOpCb (prefix "mop").
+    # Раньше кнопки эмитили ChanCb ("chan") — префикс не совпадал с хендлером, тап
+    # был мёртвым (dead button с момента мерджа). Ведём на реальные точки входа.
     kb.button(
-        text="🔗 Вступить в каналы (список)", callback_data=ChanCb(action="bulk_join")
+        text="🔗 Вступить в каналы (список)", callback_data=MassOpCb(action="bulk_join")
     )
     kb.button(
-        text="🚪 Выйти из каналов (список)", callback_data=ChanCb(action="bulk_leave")
+        text="🚪 Выйти из каналов (список)", callback_data=MassOpCb(action="bulk_leave")
     )
     kb.button(
         text="👥 Инвайт из контактов", callback_data=ChanCb(action="contact_invite")
