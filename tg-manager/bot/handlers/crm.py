@@ -1,6 +1,7 @@
 """CRM tags, automation rules, deal pipeline and contact management."""
 
 import csv
+import html
 import io
 import logging
 
@@ -58,6 +59,10 @@ class AddDealNote(StatesGroup):
 
 class AddGlobalTag(StatesGroup):
     waiting_name = State()
+
+
+class AddContact(StatesGroup):
+    waiting_info = State()
 
 
 @router.callback_query(CrmCb.filter(F.action == "menu"))
@@ -750,6 +755,113 @@ async def msg_rule_name(
 
 
 # ══════════════════════════════════════════════════════════════════
+# Ручное добавление CRM-контакта (паритет с mini-app crm_contact_create)
+# ══════════════════════════════════════════════════════════════════
+
+
+@router.callback_query(CrmCb.filter(F.action == "contact_add"))
+async def cb_contact_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(AddContact.waiting_info)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=CrmCb(action="dashboard"))
+    await callback.message.edit_text(
+        "👤 <b>Новый контакт</b>\n\n"
+        "Отправьте данные контакта в формате:\n"
+        "<code>Имя | @username | +телефон</code>\n\n"
+        "Любое поле можно пропустить, но хотя бы одно из "
+        "(имя / @username / телефон) обязательно.\n"
+        "Примеры:\n"
+        "<code>Иван Петров | @ivan | +79991234567</code>\n"
+        "<code>@ivan</code>\n"
+        "<code>Иван Петров</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+def _parse_contact_line(raw: str) -> tuple[str | None, str | None, str | None, str | None]:
+    """Разобрать ввод контакта в (first_name, last_name, username, phone).
+
+    Форматы: «Имя | @username | +телефон» (любое поле опционально) ИЛИ один
+    токен — определяем тип по форме (@… → username, цифры/+ → phone, иначе имя).
+    """
+    raw = (raw or "").strip()
+    first_name = last_name = username = phone = None
+    if "|" in raw:
+        parts = [p.strip() for p in raw.split("|")]
+        first_name = parts[0] or None
+        if len(parts) > 1 and parts[1]:
+            username = parts[1].lstrip("@") or None
+        if len(parts) > 2 and parts[2]:
+            phone = parts[2] or None
+    elif raw.startswith("@"):
+        username = raw.lstrip("@") or None
+    elif raw and all(c.isdigit() or c in "+-() " for c in raw):
+        phone = raw
+    elif raw:
+        first_name = raw
+    return first_name, last_name, username, phone
+
+
+@router.message(AddContact.waiting_info, F.text)
+async def msg_contact_info(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await state.clear()
+    first_name, last_name, username, phone = _parse_contact_line(message.text or "")
+
+    if not first_name and not username and not phone:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ В CRM", callback_data=CrmCb(action="dashboard"))
+        await message.answer(
+            "⚠️ Укажите имя, @username или номер телефона.",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # tg_user_id обязателен и UNIQUE(owner_id, tg_user_id) — для ручного контакта
+    # без реального Telegram ID генерируем синтетический (как в mini-app).
+    import random as _rand
+    tg_user_id = _rand.randint(2_000_000_000, 9_000_000_000)
+    owner_id = message.from_user.id
+    try:
+        cid = await pool.fetchval(
+            """INSERT INTO crm_contacts
+               (owner_id, tg_user_id, first_name, last_name, username, phone, tags, notes, source)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+               ON CONFLICT (owner_id, tg_user_id) DO UPDATE
+                 SET first_name=EXCLUDED.first_name,
+                     last_name=EXCLUDED.last_name,
+                     username=EXCLUDED.username,
+                     phone=EXCLUDED.phone,
+                     updated_at=now()
+               RETURNING id""",
+            owner_id, tg_user_id, first_name, last_name, username, phone, [], None,
+        )
+    except Exception as exc:
+        log.warning("crm contact_add uid=%s: %s", owner_id, exc)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ В CRM", callback_data=CrmCb(action="dashboard"))
+        await message.answer(
+            f"⚠️ Не удалось сохранить контакт: {html.escape(str(exc)[:150])}",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    disp = first_name or (f"@{username}" if username else phone)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Ещё контакт", callback_data=CrmCb(action="contact_add"))
+    kb.button(text="◀️ В CRM", callback_data=CrmCb(action="dashboard"))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ <b>Контакт сохранён</b>\n\n"
+        f"{html.escape(str(disp))}\n"
+        f"ID: <code>#{cid}</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
 # CRM DASHBOARD — real counts from DB
 # ══════════════════════════════════════════════════════════════════
 
@@ -758,9 +870,10 @@ def _crm_dashboard_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="💼 Воронка сделок", callback_data=CrmCb(action="pipeline"))
     kb.button(text="➕ Новая сделка", callback_data=CrmCb(action="deal_add"))
+    kb.button(text="👤 Новый контакт", callback_data=CrmCb(action="contact_add"))
     kb.button(text="📥 Импорт CSV", callback_data=CrmCb(action="csv_import_prompt"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(1, 2, 1)
+    kb.adjust(1, 2, 1, 1)
     return kb
 
 
