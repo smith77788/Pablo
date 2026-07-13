@@ -8651,8 +8651,21 @@ async function loadCfPoolStatus() {
     if (c.account_id && !document.getElementById('cfAccountId').value) document.getElementById('cfAccountId').value = c.account_id;
     if (c.subdomain && !document.getElementById('cfSubdomain').value) document.getElementById('cfSubdomain').value = c.subdomain;
     const credLine = c.ready ? '🔑 доступы заданы ✓' : (c.has_token ? '🔑 нет Account ID' : '🔑 доступы не заданы');
+    let deployLine = '';
+    const ld = r.last_deploy;
+    if (ld) {
+      if (ld.running) {
+        deployLine = `<br><span style="color:var(--orange)">⏳ Деплой идёт: ${ld.ok||0}/${ld.count||0}…</span>`;
+      } else if ((ld.errors||[]).length && !ld.ok) {
+        deployLine = `<br><span style="color:var(--red)">⚠️ Деплой не удался (${ld.ok||0}/${ld.count||0}):</span>`
+                   + (ld.errors||[]).slice(0,3).map(e=>`<br><span style="color:var(--red);opacity:.85;font-size:.85em">• ${esc(String(e).substring(0,180))}</span>`).join('');
+      } else if (ld.ok) {
+        deployLine = `<br><span style="color:var(--green)">✅ Задеплоено: ${ld.ok}/${ld.count||0}`
+                   + ((ld.errors||[]).length ? ` (ошибок: ${ld.errors.length})` : '') + `</span>`;
+      }
+    }
     el.innerHTML = (w ? `☁️ Воркеров: <b>${w}</b> · аккаунтов с релеем: <b>${a}</b>` : 'Пул ещё не задеплоен.')
-                   + `<br><span style="opacity:.7">${credLine}</span>`;
+                   + `<br><span style="opacity:.7">${credLine}</span>` + deployLine;
   } catch(e) { el.textContent = '—'; }
 }
 async function deployCfPool() {

@@ -106,6 +106,41 @@ def test_schema_v154_restores_and_indexes():
     assert "UNIQUE INDEX" in s and "cf_worker_pool(owner_id, worker_url)" in s
 
 
+def test_worker_uses_module_format_and_sockets_import():
+    """Воркер использует ES-модули (`export default` + `import ... from
+    "cloudflare:sockets"`). Без импорта connect — ReferenceError в рантайме;
+    залитый сырым PUT application/javascript — SyntaxError на export. Значит:
+    (1) шаблон импортирует connect из cloudflare:sockets;
+    (2) deploy_worker заливает как module-воркер (multipart + main_module)."""
+    cf = _read("services/cf_pool_manager.py")
+    assert 'import { connect } from "cloudflare:sockets";' in cf
+    seg = cf[cf.index("async def deploy_worker"):cf.index("async def deploy_pool")]
+    # module-загрузка, не сырой javascript PUT
+    assert '"main_module": "worker.js"' in seg
+    assert "application/javascript+module" in seg
+    assert "FormData" in seg and '"compatibility_date"' in seg
+    # старый баг (Content-Type: application/javascript на самом PUT) убран
+    assert 'headers = {\n        "Authorization"' not in seg or "application/javascript+module" in seg
+
+
+def test_deploy_errors_are_surfaced_not_swallowed():
+    """«Пустой результат» без причины недопустим: ошибки CF должны доходить до
+    пользователя. deploy_pool возвращает {urls,errors,ok,count}; фон пишет
+    last_deploy; /status отдаёт его; фронт показывает текст ошибки."""
+    cf = _read("services/cf_pool_manager.py")
+    seg = cf[cf.index("async def deploy_pool"):cf.index("async def assign_urls_to_accounts")]
+    assert '"errors"' in seg and '"urls"' in seg and '"ok"' in seg
+    api = _read("services/mini_app_api.py")
+    dep = api[api.index("async def cf_pool_deploy"):
+              api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
+    # результат/ошибки сохраняются в process-local карту, а не глотаются
+    assert '_cf_deploy_last' in dep and 'res.get("errors"' in dep
+    st = api[api.index("async def cf_pool_status"):api.index("async def cf_credentials_save")]
+    assert "_cf_deploy_last" in st and '"last_deploy"' in st
+    ui = _read("mini_app/index.html")
+    assert "last_deploy" in ui and "Деплой не удался" in ui
+
+
 def test_cf_relay_url_column_self_healed():
     """Регресс контактов: 'column a.cf_relay_url does not exist'. Имя schema_v153
     занято двумя агентами → CF-миграция пропускалась. Колонка/таблица должны быть

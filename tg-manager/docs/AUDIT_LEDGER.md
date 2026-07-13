@@ -667,3 +667,17 @@ Bot-паритет: новый `bot/handlers/metrics_dashboard.py` — нати�
   - index.html deployCfPool: на {started} тост «деплой запущен в фоне» + опрос статуса каждые 5с ~1 мин (авто-обновление счётчиков воркеров).
 Верификация: test_cf_pool_fixes расширен (create_task+started в эндпоинте; Semaphore/gather в deploy_pool). Полный tests/ зелёный (exit 0). Python AST + node JS чисто.
 Пользователю: жать «Задеплоить пул» можно снова — ответ придёт мгновенно, воркеры появятся в статусе по мере деплоя. Для 100 воркеров подождать ~1–3 мин; для проверки лучше начать с 10–20.
+
+## tg-manager: CF деплой пула — «пока не увидел результата» (воркеры не создавались, ошибка глоталась) — 2026-07-13
+Симптом: деплой запускается, но воркеров нет и причина не видна — фоновая задача только логировала исключение (`except Exception: log.exception`), пользователь видел пустой статус без объяснения.
+Две настоящие причины сбоя деплоя + невидимость:
+  - WORKER_TEMPLATE использует `export default` и `connect(...)`, но НЕ импортировал connect → рантайм-ReferenceError; и заливался сырым PUT `Content-Type: application/javascript` (service-worker формат) → CF отвергает ES-модуль («Unexpected token export»). Оба → воркер не создаётся/не работает.
+  - Ошибки CF не доходили до UI.
+Исправлено:
+  - WORKER_TEMPLATE: добавлен `import { connect } from "cloudflare:sockets";` (node --check зелёный).
+  - deploy_worker: заливка как module-воркер — multipart FormData с metadata `{main_module: worker.js, compatibility_date}` + часть `application/javascript+module`, вместо сырого PUT. Возвращает (url, error). _enable_workers_dev тоже возвращает (ok, error).
+  - deploy_pool: возвращает {urls, errors[:5], ok, count} — ошибки НЕ глотаются.
+  - cf_pool_deploy: пишет результат/ошибки в process-local `request.app['_cf_deploy_last'][uid]` (running/ok/errors/ts — НЕ переживает рестарт, не шарится между воркерами). cf_pool_status отдаёт `last_deploy`.
+  - index.html loadCfPoolStatus: показывает ⏳ идёт / ✅ задеплоено N/M / ⚠️ ошибки (текст причины от CF).
+Верификация: test_cf_pool_fixes +2 (module-формат+sockets import; ошибки сурфейсятся в deploy_pool/status/UI). Полный tests/test_cf_pool_fixes зелёный (9/9). Python AST + node --check шаблона чисто.
+Честно: живьём против Cloudflare из песочницы не проверить (нужны токен/окружение пользователя) — но теперь при следующем деплое точная причина сбоя CF будет видна в статусе, а формат заливки соответствует module-воркерам CF.

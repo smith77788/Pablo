@@ -12144,6 +12144,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "subdomain": c["subdomain"],
                 "ready": bool(c["has_token"] and c["account_id"]),
             }
+            # последний результат фонового деплоя (running/ok/errors) — чтобы
+            # пользователь видел РЕАЛЬНУЮ причину, а не пустой результат.
+            # process-local: не переживает рестарт, не шарится между воркерами.
+            last = (request.app.get("_cf_deploy_last") or {}).get(uid)
+            if last:
+                status["last_deploy"] = last
             return _json_resp(status)
         except Exception as e:
             log.exception("cf_pool_status uid=%s", uid)
@@ -12176,6 +12182,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         блокируем HTTP-запрос (иначе шлюз рвёт по таймауту → «ответ не JSON/сервис
         недоступен»). Запускаем в ФОНЕ, отвечаем сразу; прогресс — через /status."""
         import asyncio as _asyncio
+        import time as _time
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
@@ -12192,16 +12199,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не заданы доступы Cloudflare (токен + Account ID). "
                         "Впишите их в приложении или в переменных Railway.", 400)
 
+        # process-local карта последнего результата деплоя по uid (для /status).
+        # не переживает рестарт, не шарится между воркерами — только для UX-фидбэка.
+        _last = request.app.setdefault("_cf_deploy_last", {})
+        _last[uid] = {"running": True, "ok": 0, "count": count, "errors": [], "ts": int(_time.time())}
+
         async def _bg_deploy():
             try:
                 from services.cf_pool_manager import deploy_pool, assign_urls_to_accounts
-                urls = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
-                                         subdomain=c["subdomain"])
+                res = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
+                                        subdomain=c["subdomain"])
+                urls = res.get("urls", [])
                 if urls:
                     await assign_urls_to_accounts(pool, uid, urls)
+                _last[uid] = {"running": False, "ok": len(urls), "count": count,
+                              "errors": res.get("errors", []), "ts": int(_time.time())}
                 log.info("cf deploy done uid=%s: %d/%d воркеров", uid, len(urls), count)
-            except Exception:
+            except Exception as e:
                 log.exception("cf background deploy uid=%s", uid)
+                _last[uid] = {"running": False, "ok": 0, "count": count,
+                              "errors": [str(e)[:300]], "ts": int(_time.time())}
 
         task = _asyncio.create_task(_bg_deploy())
         _tasks = request.app.setdefault("_cf_deploy_tasks", set())

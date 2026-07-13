@@ -32,6 +32,8 @@ WORKER_TEMPLATE = """
  * CF Relay Worker — WebSocket → TCP proxy для Telegram DC
  * Auto-deployed by Infragram IP rotation system.
  */
+import { connect } from "cloudflare:sockets";
+
 const DC_IPS = {
   1: "149.154.175.53",
   2: "149.154.175.53",
@@ -119,9 +121,10 @@ async def get_workers_subdomain(api_token: str, account_id: str) -> str:
         return ""
 
 
-async def _enable_workers_dev(name: str, api_token: str, account_id: str) -> bool:
+async def _enable_workers_dev(name: str, api_token: str, account_id: str) -> tuple:
     """Включить *.workers.dev-роут для скрипта (иначе URL отдаёт 404 даже после
-    успешного PUT скрипта — это отдельное действие в CF API)."""
+    успешного PUT скрипта — это отдельное действие в CF API).
+    Возвращает (ok, error)."""
     import aiohttp
     url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
            f"/workers/scripts/{name}/subdomain")
@@ -130,65 +133,93 @@ async def _enable_workers_dev(name: str, api_token: str, account_id: str) -> boo
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json={"enabled": True}) as resp:
                 if resp.status in (200, 201):
-                    return True
-                log.error("enable workers.dev %s: %s", name, await resp.text())
-                return False
+                    return True, None
+                body = (await resp.text())[:300]
+                log.error("enable workers.dev %s: %s %s", name, resp.status, body)
+                return False, f"workers.dev route HTTP {resp.status}: {body}"
     except Exception as e:
         log.error("enable workers.dev %s failed: %s", name, e)
-        return False
+        return False, str(e)
 
 
 async def deploy_worker(name: str, api_token: str, account_id: str,
-                        subdomain: str = "") -> str:
-    """Deploy a single CF Worker, включить workers.dev-роут и вернуть РАБОЧИЙ URL."""
+                        subdomain: str = "") -> tuple:
+    """Deploy a single CF Worker, включить workers.dev-роут и вернуть РАБОЧИЙ URL.
+
+    Возвращает (url, error): при успехе (url, None), при сбое ("", 'текст ошибки CF').
+    Скрипт использует ES-модули (`export default` + `import ... from "cloudflare:sockets"`),
+    поэтому заливается как module-воркер через multipart с metadata.main_module,
+    а НЕ сырым PUT'ом application/javascript (иначе CF трактует его как
+    service-worker формат → 'Uncaught SyntaxError: Unexpected token export')."""
     import aiohttp
 
     if not subdomain:
         subdomain = await get_workers_subdomain(api_token, account_id)
     if not subdomain:
-        log.error("deploy_worker %s: workers.dev subdomain не настроен", name)
-        return ""
+        msg = "workers.dev subdomain не настроен"
+        log.error("deploy_worker %s: %s", name, msg)
+        return "", msg
 
     url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/{name}"
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Content-Type": "application/javascript",
-    }
+    headers = {"Authorization": f"Bearer {api_token}"}
+    metadata = {"main_module": "worker.js", "compatibility_date": "2024-11-01"}
+    form = aiohttp.FormData()
+    form.add_field("metadata", json.dumps(metadata), content_type="application/json")
+    form.add_field("worker.js", WORKER_TEMPLATE, filename="worker.js",
+                   content_type="application/javascript+module")
 
     async with aiohttp.ClientSession() as session:
-        async with session.put(url, headers=headers, data=WORKER_TEMPLATE) as resp:
+        async with session.put(url, headers=headers, data=form) as resp:
             if resp.status not in (200, 201):
-                log.error("Failed to deploy %s: %s", name, await resp.text())
-                return ""
+                body = (await resp.text())[:300]
+                log.error("Failed to deploy %s: %s %s", name, resp.status, body)
+                return "", f"HTTP {resp.status}: {body}"
     # включаем публичный *.workers.dev роут (без этого URL 404-ит)
-    await _enable_workers_dev(name, api_token, account_id)
+    ok, route_err = await _enable_workers_dev(name, api_token, account_id)
+    if not ok:
+        return "", route_err or "не удалось включить workers.dev-роут"
     worker_url = f"https://{name}.{subdomain}.workers.dev"
     log.info("Deployed CF Worker: %s -> %s", name, worker_url)
-    return worker_url
+    return worker_url, None
 
 
 async def deploy_pool(count: int, name_prefix: str, api_token: str, account_id: str,
-                      subdomain: str = "", concurrency: int = 8) -> list:
-    """Deploy multiple CF Workers параллельно (с ограничением одновременности) и
-    вернуть их URL. Последовательный деплой 100 воркеров занимал минуты и вешал
-    HTTP-запрос → таймаут шлюза; поэтому конкурентно + вызывать в фоне."""
+                      subdomain: str = "", concurrency: int = 8) -> dict:
+    """Deploy multiple CF Workers параллельно (с ограничением одновременности).
+    Последовательный деплой 100 воркеров занимал минуты и вешал HTTP-запрос →
+    таймаут шлюза; поэтому конкурентно + вызывать в фоне.
+
+    Возвращает {"urls": [...], "errors": [...до 5...], "ok": N, "count": count}.
+    Ошибки НЕ глотаются — первые несколько отдаём наружу, чтобы пользователь
+    в /status увидел реальную причину сбоя CF, а не пустой результат."""
     if not subdomain:
         subdomain = await get_workers_subdomain(api_token, account_id)
     if not subdomain:
-        log.error("deploy_pool: workers.dev subdomain не настроен — деплой отменён")
-        return []
+        msg = ("workers.dev subdomain не настроен для аккаунта Cloudflare — "
+               "включите Workers в дашборде CF или задайте поддомен")
+        log.error("deploy_pool: %s — деплой отменён", msg)
+        return {"urls": [], "errors": [msg], "ok": 0, "count": count}
     sem = asyncio.Semaphore(max(1, concurrency))
 
-    async def _one(i: int) -> str:
+    async def _one(i: int) -> tuple:
         async with sem:
             return await deploy_worker(f"{name_prefix}-{i}", api_token, account_id,
                                        subdomain=subdomain)
 
     results = await asyncio.gather(*[_one(i) for i in range(1, count + 1)],
                                    return_exceptions=True)
-    urls = [u for u in results if isinstance(u, str) and u]
+    urls, errors = [], []
+    for r in results:
+        if isinstance(r, Exception):
+            errors.append(str(r)[:300])
+            continue
+        u, err = r if isinstance(r, tuple) else (r, None)
+        if u:
+            urls.append(u)
+        elif err:
+            errors.append(err)
     log.info("deploy_pool: %d/%d воркеров успешно", len(urls), count)
-    return urls
+    return {"urls": urls, "errors": errors[:5], "ok": len(urls), "count": count}
 
 
 async def assign_urls_to_accounts(pool, owner_id: int, urls: list) -> dict:
