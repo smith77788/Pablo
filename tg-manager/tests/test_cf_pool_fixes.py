@@ -199,6 +199,57 @@ def test_worker_health_and_check_pool():
     assert "checkCfWorkers" in ui and "/api/miniapp/cf/pool/check" in ui
 
 
+def test_worker_reports_real_egress_ip():
+    """Честная проверка уникальности: воркер /health возвращает РЕАЛЬНЫЙ egress-IP
+    (subrequest к cdn-cgi/trace), check_pool агрегирует уникальные IP."""
+    cf = _read("services/cf_pool_manager.py")
+    assert "cdn-cgi/trace" in cf and "ip=" in cf
+    seg = cf[cf.index("async def check_pool"):cf.index("async def get_pool_status")]
+    assert '"unique_ips"' in seg and '"ips"' in seg
+    ui = _read("mini_app/index.html")
+    assert "unique_ips" in ui
+
+
+def test_pool_lifecycle_ops_exist():
+    """Реконсиляция/удаление/раздача/лечение — полноценный жизненный цикл пула."""
+    cf = _read("services/cf_pool_manager.py")
+    for fn in ("async def delete_worker", "async def clear_pool",
+               "async def reconcile_pool", "async def sync_relay_assignment",
+               "async def heal_dead_relays"):
+        assert fn in cf, fn
+    # deploy делает reconcile (снос старых лишних воркеров)
+    api = _read("services/mini_app_api.py")
+    assert "reconcile_pool" in api
+    for route in ('add_post("/api/miniapp/cf/pool/assign", cf_pool_assign)',
+                  'add_post("/api/miniapp/cf/pool/clear", cf_pool_clear)'):
+        assert route in api, route
+    ui = _read("mini_app/index.html")
+    assert "assignCfRelay" in ui and "clearCfPool" in ui
+
+
+def test_cf_pool_monitor_registered_as_organ():
+    """Монитор пула — фоновый орган (health→heal→sync), зарегистрирован в main.py."""
+    cf = _read("services/cf_pool_manager.py")
+    assert "async def run(" in cf
+    seg = cf[cf.index("async def run("):]
+    assert "check_pool" in seg and "heal_dead_relays" in seg and "sync_relay_assignment" in seg
+    m = _read("main.py")
+    assert "cf_pool_monitor" in m and "_cf_pool_manager.run" in m
+
+
+def test_isolation_audit_is_relay_aware():
+    """Аккаунт на CF-релее — не «голый»: audit отделяет on_relay от naked,
+    ловит слабую изоляцию релея (один воркер на многих)."""
+    ps = _read("services/proxy_selector.py")
+    seg = ps[ps.index("async def audit_proxy_isolation"):ps.index("async def _fetch_backup_proxies")]
+    assert "a.cf_relay_url" in seg
+    assert '"on_relay"' in seg and '"relay_shared_groups"' in seg
+    # «голые» = ни прокси, ни релея
+    assert "not a.get(\"proxy_url\") and not a.get(\"cf_relay_url\")" in seg
+    ui = _read("mini_app/index.html")
+    assert "on_relay" in ui and "relay_shared_groups" in ui
+
+
 def test_cf_relay_url_column_self_healed():
     """Регресс контактов: 'column a.cf_relay_url does not exist'. Имя schema_v153
     занято двумя агентами → CF-миграция пропускалась. Колонка/таблица должны быть

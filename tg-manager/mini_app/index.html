@@ -2850,7 +2850,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <button class="btn btn-p" id="cfDeployBtn" style="flex:1;font-size:13px;padding:9px 6px" onclick="deployCfPool()">☁️ Задеплоить пул</button>
       </div>
       <div id="cfAutoHint" style="font-size:12px;opacity:.7;margin-top:6px"></div>
-      <button class="btn btn-s" id="cfCheckBtn" style="width:100%;font-size:13px;padding:8px 6px;margin-top:6px" onclick="checkCfWorkers()">🩺 Проверить воркеры</button>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn btn-s" id="cfCheckBtn" style="flex:1;font-size:13px;padding:8px 6px" onclick="checkCfWorkers()">🩺 Проверить</button>
+        <button class="btn btn-s" id="cfAssignBtn" style="flex:1;font-size:13px;padding:8px 6px" onclick="assignCfRelay()" title="Раздать пул новым аккаунтам без пересоздания">🔗 Раздать</button>
+        <button class="btn btn-s" id="cfClearBtn" style="flex:1;font-size:13px;padding:8px 6px" onclick="clearCfPool()" title="Снести пул">🗑 Снести</button>
+      </div>
     </div>
     <div class="sec">Мои прокси</div>
     <div class="lst" id="proxyList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -8686,11 +8690,34 @@ async function checkCfWorkers() {
   if (btn) { btn.disabled=true; btn.textContent='🩺 Проверяю…'; }
   try {
     const r = await api('/api/miniapp/cf/pool/check', {method:'POST'});
+    const uniq = typeof r.unique_ips==='number' ? ` · уник. IP: ${r.unique_ips}` : '';
     const colos = (r.colos||[]).length ? ` · гео: ${(r.colos||[]).join(', ')}` : '';
-    toast(`🩺 Живых воркеров: ${r.alive||0}/${r.checked||0}${colos}`);
+    toast(`🩺 Живых: ${r.alive||0}/${r.checked||0}${uniq}${colos}`);
     loadCfPoolStatus();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
-  finally { if(btn){ btn.disabled=false; btn.textContent='🩺 Проверить воркеры'; } }
+  finally { if(btn){ btn.disabled=false; btn.textContent='🩺 Проверить'; } }
+}
+async function assignCfRelay() {
+  const btn = document.getElementById('cfAssignBtn');
+  if (btn) { btn.disabled=true; btn.textContent='🔗 …'; }
+  try {
+    const r = await api('/api/miniapp/cf/pool/assign', {method:'POST'});
+    if (!r.pool_size) toast('Сначала задеплойте пул воркеров');
+    else toast(`🔗 Роздано аккаунтам: ${r.assigned||0} (пул ${r.pool_size})`);
+    loadCfPoolStatus(); loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+  finally { if(btn){ btn.disabled=false; btn.textContent='🔗 Раздать'; } }
+}
+async function clearCfPool() {
+  if (!await askConfirm('Снести весь пул CF Workers и снять релей с аккаунтов? Воркеры удалятся из Cloudflare.')) return;
+  const btn = document.getElementById('cfClearBtn');
+  if (btn) { btn.disabled=true; btn.textContent='🗑 …'; }
+  try {
+    const r = await api('/api/miniapp/cf/pool/clear', {method:'POST'});
+    toast(`🗑 Удалено воркеров: ${r.workers_deleted||0} · снят релей с ${r.accounts_cleared||0} акк.`);
+    loadCfPoolStatus(); loadProxies();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+  finally { if(btn){ btn.disabled=false; btn.textContent='🗑 Снести'; } }
 }
 async function deployCfPool() {
   const raw = document.getElementById('cfPoolCount').value.trim();
@@ -8740,15 +8767,22 @@ async function checkProxyIsolation() {
     const r = await api('/api/miniapp/proxies/isolation_check');
     let h = '';
     if (r.isolation_ok) {
-      h = `<div style="color:var(--green)">✅ Изоляция в порядке: ${r.with_proxy}/${r.total_active} активных аккаунтов на уникальных IP.</div>`;
+      h = `<div style="color:var(--green)">✅ Изоляция в порядке: ${r.with_proxy}/${r.total_active} на уникальных IP прокси${r.on_relay?`, ещё ${r.on_relay} на CF-релее`:''}.</div>`;
     } else {
       if ((r.shared_ip_groups||[]).length) {
         h += `<div style="color:var(--red)">⚠️ Общий IP (риск бана):</div>`;
         h += r.shared_ip_groups.map(g=>`<div>• <code>${esc(g.ip)}</code> — ${g.count} аккаунтов: ${g.account_ids.join(', ')}</div>`).join('');
       }
       if ((r.accounts_without_proxy||[]).length) {
-        h += `<div style="color:var(--orange);margin-top:4px">🔌 Без прокси: ${r.accounts_without_proxy.length} (${r.accounts_without_proxy.slice(0,20).join(', ')})</div>`;
+        h += `<div style="color:var(--orange);margin-top:4px">🔌 Без изоляции (ни прокси, ни релея): ${r.accounts_without_proxy.length} (${r.accounts_without_proxy.slice(0,20).join(', ')})</div>`;
       }
+    }
+    if (typeof r.on_relay==='number' && r.on_relay) {
+      h += `<div style="color:var(--blue,#4a9)">☁️ На CF-релее: ${r.on_relay} аккаунт(ов).</div>`;
+    }
+    if ((r.relay_shared_groups||[]).length) {
+      h += `<div style="color:var(--orange);margin-top:4px">☁️ Один воркер на несколько аккаунтов (слабее изоляция — задеплойте пул ≥ числу аккаунтов):</div>`;
+      h += r.relay_shared_groups.map(g=>`<div>• ${g.count} акк.: ${g.account_ids.slice(0,10).join(', ')}</div>`).join('');
     }
     if ((r.datacenter_warnings||[]).length) {
       h += `<div style="color:var(--orange);margin-top:4px">🏢 Datacenter IP: ${r.datacenter_count}</div>`;

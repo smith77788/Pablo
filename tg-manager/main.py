@@ -703,6 +703,8 @@ async def main() -> None:
         asyncio.create_task(_resilient("account_shield", _account_shield.run, pool, bot))
         asyncio.create_task(_resilient("stars_optimizer", _stars_optimizer.run, pool, bot))
         asyncio.create_task(_resilient("audience_dna", _audience_dna.run, pool, bot))
+        from services import cf_pool_manager as _cf_pool_manager
+        asyncio.create_task(_resilient("cf_pool_monitor", _cf_pool_manager.run, pool, bot))
         # Докатить рассылки, оборванные предыдущим рестартом (status running/pending).
         # broadcaster.run пропускает уже доставленных через delivery log — без дублей.
         from services import broadcaster as _broadcaster

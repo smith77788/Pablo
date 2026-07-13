@@ -12219,12 +12219,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
         async def _bg_deploy():
             try:
-                from services.cf_pool_manager import deploy_pool, assign_urls_to_accounts
+                from services.cf_pool_manager import (deploy_pool,
+                    assign_urls_to_accounts, reconcile_pool)
                 res = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
                                         subdomain=c["subdomain"])
                 urls = res.get("urls", [])
                 if urls:
                     await assign_urls_to_accounts(pool, uid, urls)
+                    # снести воркеры, которых больше нет в наборе (старый больший пул)
+                    try:
+                        await reconcile_pool(pool, uid, urls, c["api_token"],
+                                             c["account_id"])
+                    except Exception:
+                        log.exception("cf reconcile uid=%s", uid)
                 _last[uid] = {"running": False, "ok": len(urls), "count": count,
                               "errors": res.get("errors", []), "ts": int(_time.time())}
                 log.info("cf deploy done uid=%s: %d/%d воркеров", uid, len(urls), count)
@@ -12240,8 +12247,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "started": True, "count": count})
 
     async def cf_pool_check(request: web.Request) -> web.Response:
-        """Пинг всех воркеров (/health) — живость + гео (colo). Аналог «Проверить
-        все» для прокси, но для CF-релея."""
+        """Пинг всех воркеров (/health) — живость + гео (colo) + реальные egress-IP.
+        Аналог «Проверить все» для прокси, но для CF-релея."""
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
@@ -12251,9 +12258,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("cf_pool_check uid=%s", uid)
             return _err(str(e)[:150], 500)
 
+    async def cf_pool_assign(request: web.Request) -> web.Response:
+        """Раздать существующий пул аккаунтам без релея (напр. добавленным после
+        деплоя) — без пересоздания воркеров. Прокси-аккаунты не трогаются."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.cf_pool_manager import sync_relay_assignment
+            return _json_resp(await sync_relay_assignment(pool, uid))
+        except Exception as e:
+            log.exception("cf_pool_assign uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def cf_pool_clear(request: web.Request) -> web.Response:
+        """Снести пул: удалить воркеры в CF, очистить БД, снять cf_relay_url."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.cf_pool_manager import clear_pool
+            c = await _cf_resolve_creds(uid)
+            return _json_resp(await clear_pool(pool, uid, c["api_token"],
+                                               c["account_id"]))
+        except Exception as e:
+            log.exception("cf_pool_clear uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
     app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
     app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
     app.router.add_post("/api/miniapp/cf/pool/check", cf_pool_check)
+    app.router.add_post("/api/miniapp/cf/pool/assign", cf_pool_assign)
+    app.router.add_post("/api/miniapp/cf/pool/clear", cf_pool_clear)
     app.router.add_post("/api/miniapp/cf/credentials", cf_credentials_save)
 
     # ── Search Ranking Engine ──────────────────────────────────────────────────

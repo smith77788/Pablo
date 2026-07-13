@@ -50,11 +50,19 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // Health-probe: GET /health или / → 200 + colo (для проверки живости и
-    // географического разброса воркеров из приложения). Без апгрейда до WS.
+    // Health-probe: GET /health или / → 200 + colo + РЕАЛЬНЫЙ egress-IP воркера
+    // (через subrequest к cdn-cgi/trace — ip= в ответе = исходящий IP воркера).
+    // Так приложение видит фактические IP, а не только точку присутствия.
     if (url.pathname === '/' || url.pathname === '/health') {
       const colo = (request.cf && request.cf.colo) || null;
-      return new Response(JSON.stringify({ ok: true, colo }), {
+      let ip = null;
+      try {
+        const t = await fetch('https://www.cloudflare.com/cdn-cgi/trace');
+        const txt = await t.text();
+        const m = txt.match(/^ip=(.+)$/m);
+        if (m) ip = m[1].trim();
+      } catch (e) {}
+      return new Response(JSON.stringify({ ok: true, colo, ip }), {
         headers: { 'content-type': 'application/json' },
       });
     }
@@ -297,7 +305,8 @@ async def check_pool(pool, owner_id: int, timeout: float = 8.0) -> dict:
     workers = await pool.fetch(
         "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1", owner_id)
     if not workers:
-        return {"checked": 0, "alive": 0, "colos": [], "results": []}
+        return {"checked": 0, "alive": 0, "colos": [], "ips": [],
+                "unique_ips": 0, "results": []}
 
     async def _ping(worker_url: str) -> dict:
         url = worker_url.rstrip("/") + "/health"
@@ -310,7 +319,8 @@ async def check_pool(pool, owner_id: int, timeout: float = 8.0) -> dict:
                         except Exception:
                             j = {}
                         return {"url": worker_url, "alive": True,
-                                "colo": (j or {}).get("colo")}
+                                "colo": (j or {}).get("colo"),
+                                "ip": (j or {}).get("ip")}
                     return {"url": worker_url, "alive": False,
                             "error": f"HTTP {r.status}"}
         except Exception as e:
@@ -323,8 +333,10 @@ async def check_pool(pool, owner_id: int, timeout: float = 8.0) -> dict:
             "active" if res["alive"] else "down", owner_id, res["url"])
     alive = sum(1 for r in results if r["alive"])
     colos = sorted({r.get("colo") for r in results if r.get("colo")})
+    ips = sorted({r.get("ip") for r in results if r.get("ip")})
     return {"checked": len(results), "alive": alive,
-            "colos": colos, "results": results}
+            "colos": colos, "ips": ips, "unique_ips": len(ips),
+            "results": results}
 
 
 async def get_pool_status(pool, owner_id: int) -> dict:
@@ -345,3 +357,176 @@ async def get_pool_status(pool, owner_id: int) -> dict:
         "active_accounts": counts["active"],
         "relay_needed": counts["relay_needed"],  # активные без своего прокси
     }
+
+
+def _worker_name_from_url(worker_url: str) -> str:
+    """https://{name}.{subdomain}.workers.dev → name (для DELETE через CF API)."""
+    try:
+        host = worker_url.split("//", 1)[-1].split("/", 1)[0]
+        return host.split(".", 1)[0]
+    except Exception:
+        return ""
+
+
+async def delete_worker(name: str, api_token: str, account_id: str) -> bool:
+    """Удалить CF-воркер (скрипт) через CF API. Идемпотентно: 404 — тоже успех."""
+    import aiohttp
+    if not name:
+        return False
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+           f"/workers/scripts/{name}")
+    headers = {"Authorization": f"Bearer {api_token}"}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.delete(url, headers=headers) as r:
+                if r.status in (200, 204, 404):
+                    return True
+                log.error("delete_worker %s: %s %s", name, r.status,
+                          (await r.text())[:200])
+                return False
+    except Exception as e:
+        log.error("delete_worker %s failed: %s", name, e)
+        return False
+
+
+async def clear_pool(pool, owner_id: int, api_token: str = "",
+                     account_id: str = "") -> dict:
+    """Снести пул владельца: удалить воркеры в CF (если заданы доступы), очистить
+    cf_worker_pool и снять cf_relay_url с аккаунтов. Прокси-аккаунты не затрагиваются
+    (у них cf_relay_url и так пуст)."""
+    workers = await pool.fetch(
+        "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1", owner_id)
+    deleted = 0
+    if api_token and account_id:
+        for w in workers:
+            name = _worker_name_from_url(w["worker_url"])
+            if name and await delete_worker(name, api_token, account_id):
+                deleted += 1
+    await pool.execute("DELETE FROM cf_worker_pool WHERE owner_id=$1", owner_id)
+    cleared = await pool.fetchval(
+        "WITH u AS (UPDATE tg_accounts SET cf_relay_url=NULL "
+        "WHERE owner_id=$1 AND cf_relay_url IS NOT NULL RETURNING 1) "
+        "SELECT COUNT(*) FROM u", owner_id)
+    return {"workers_deleted": deleted, "db_workers_removed": len(workers),
+            "accounts_cleared": int(cleared or 0)}
+
+
+async def reconcile_pool(pool, owner_id: int, keep_urls: list,
+                         api_token: str = "", account_id: str = "") -> int:
+    """Удалить воркеры, которых больше нет в актуальном наборе (keep_urls): из CF
+    и из cf_worker_pool. Возвращает число снятых. Без доступов — только чистит БД."""
+    rows = await pool.fetch(
+        "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1", owner_id)
+    keep = set(keep_urls)
+    stale = [r["worker_url"] for r in rows if r["worker_url"] not in keep]
+    removed = 0
+    for url in stale:
+        if api_token and account_id:
+            await delete_worker(_worker_name_from_url(url), api_token, account_id)
+        await pool.execute(
+            "DELETE FROM cf_worker_pool WHERE owner_id=$1 AND worker_url=$2",
+            owner_id, url)
+        removed += 1
+    return removed
+
+
+async def sync_relay_assignment(pool, owner_id: int) -> dict:
+    """Раздать существующий пул воркеров аккаунтам, которым нужен релей, но которые
+    его ещё не получили (напр. добавленные ПОСЛЕ деплоя). Прокси-аккаунты не трогаем.
+
+    Живой аналог «органа»: держит покрытие релеем в тонусе без передеплоя.
+    Возвращает {assigned, pool_size, naked_remaining}."""
+    urls = [r["worker_url"] for r in await pool.fetch(
+        "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1 "
+        "AND status <> 'down' ORDER BY worker_url", owner_id)]
+    if not urls:
+        return {"assigned": 0, "pool_size": 0, "naked_remaining": None}
+    naked = await pool.fetch(
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "AND proxy_id IS NULL AND cf_relay_url IS NULL ORDER BY id", owner_id)
+    # текущая загрузка воркеров (для равномерной раздачи новичкам)
+    load_rows = await pool.fetch(
+        "SELECT cf_relay_url, COUNT(*) c FROM tg_accounts WHERE owner_id=$1 "
+        "AND cf_relay_url IS NOT NULL GROUP BY cf_relay_url", owner_id)
+    load = {u: 0 for u in urls}
+    for r in load_rows:
+        if r["cf_relay_url"] in load:
+            load[r["cf_relay_url"]] = r["c"]
+    assigned = 0
+    for acc in naked:
+        url = min(urls, key=lambda u: load[u])  # наименее загруженный воркер
+        await pool.execute("UPDATE tg_accounts SET cf_relay_url=$1 WHERE id=$2",
+                           url, acc["id"])
+        load[url] += 1
+        assigned += 1
+    return {"assigned": assigned, "pool_size": len(urls),
+            "naked_remaining": 0 if assigned == len(naked) else len(naked) - assigned}
+
+
+async def heal_dead_relays(pool, owner_id: int) -> dict:
+    """Перевести аккаунты с МЁРТВОГО воркера на живой (аналог failover прокси).
+
+    Мёртвые = cf_worker_pool.status='down'. Аккаунты, чей cf_relay_url указывает на
+    down-воркер, переназначаются на наименее загруженный живой. Прокси-аккаунты не
+    трогаем. Возвращает {reassigned, dead_workers, live_workers}."""
+    live = [r["worker_url"] for r in await pool.fetch(
+        "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1 "
+        "AND status='active' ORDER BY worker_url", owner_id)]
+    dead = [r["worker_url"] for r in await pool.fetch(
+        "SELECT worker_url FROM cf_worker_pool WHERE owner_id=$1 "
+        "AND status='down'", owner_id)]
+    if not live or not dead:
+        return {"reassigned": 0, "dead_workers": len(dead), "live_workers": len(live)}
+    load_rows = await pool.fetch(
+        "SELECT cf_relay_url, COUNT(*) c FROM tg_accounts WHERE owner_id=$1 "
+        "AND cf_relay_url = ANY($2::text[]) GROUP BY cf_relay_url", owner_id, live)
+    load = {u: 0 for u in live}
+    for r in load_rows:
+        load[r["cf_relay_url"]] = r["c"]
+    stranded = await pool.fetch(
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "AND proxy_id IS NULL AND cf_relay_url = ANY($2::text[]) ORDER BY id",
+        owner_id, dead)
+    reassigned = 0
+    for acc in stranded:
+        url = min(live, key=lambda u: load[u])
+        await pool.execute("UPDATE tg_accounts SET cf_relay_url=$1 WHERE id=$2",
+                           url, acc["id"])
+        load[url] += 1
+        reassigned += 1
+    return {"reassigned": reassigned, "dead_workers": len(dead),
+            "live_workers": len(live)}
+
+
+async def run(pool, bot=None, *, interval_min: float = 30.0) -> None:
+    """Фоновый монитор CF-пула (регистрируется в main.py как _resilient).
+
+    Каждые interval_min: по каждому владельцу с воркерами — health-check, перевод
+    аккаунтов с мёртвых воркеров на живые (heal_dead_relays), доназначение релея
+    новым «голым» аккаунтам (sync_relay_assignment). Держит IP-изоляцию живой без
+    ручного вмешательства — как орган, а не разовая кнопка.
+    process-local таймер, не переживает рестарт (перезапустится сам с задержкой)."""
+    log.info("cf_pool monitor: started (interval=%gmin)", interval_min)
+    await asyncio.sleep(180)  # дать системе прогреться
+    while True:
+        try:
+            owners = await pool.fetch(
+                "SELECT DISTINCT owner_id FROM cf_worker_pool")
+            for row in owners:
+                oid = row["owner_id"]
+                try:
+                    chk = await check_pool(pool, oid)
+                    healed = await heal_dead_relays(pool, oid)
+                    synced = await sync_relay_assignment(pool, oid)
+                    if healed.get("reassigned") or synced.get("assigned"):
+                        log.info("cf_pool monitor owner=%s: alive=%d/%d healed=%d "
+                                 "synced=%d", oid, chk.get("alive", 0),
+                                 chk.get("checked", 0), healed["reassigned"],
+                                 synced["assigned"])
+                except Exception as e:
+                    log.warning("cf_pool monitor owner=%s: %s", oid, e)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("cf_pool monitor loop error: %s", e, exc_info=True)
+        await asyncio.sleep(interval_min * 60)

@@ -242,29 +242,48 @@ async def audit_proxy_isolation(pool, owner_id: int, max_per_ip: int = 1) -> dic
     proxy_url зашифрован — extract_ip_from_proxy расшифровывает внутри.
     """
     rows = await pool.fetch(
-        "SELECT a.id, a.phone, p.proxy_url "
+        "SELECT a.id, a.phone, a.cf_relay_url, p.proxy_url "
         "FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         "WHERE a.owner_id = $1 AND a.is_active = TRUE",
         owner_id,
     )
     accounts = [dict(r) for r in rows]
-    diversity = validate_ip_diversity(accounts, max_per_ip=max_per_ip)
-    no_proxy = [r["id"] for r in accounts if not r.get("proxy_url")]
+    # Изоляция по прокси считается только для аккаунтов с прокси; аккаунты на
+    # CF-релее покрыты отдельным механизмом (edge-IP), их не считаем «голыми».
+    with_proxy = [a for a in accounts if a.get("proxy_url")]
+    on_relay = [a["id"] for a in accounts
+                if not a.get("proxy_url") and a.get("cf_relay_url")]
+    naked = [a["id"] for a in accounts
+             if not a.get("proxy_url") and not a.get("cf_relay_url")]
+    diversity = validate_ip_diversity(with_proxy, max_per_ip=max_per_ip)
     shared = {
         ip: ids for ip, ids in diversity["ip_usage"].items() if len(ids) > max_per_ip
     }
+    # Слабая изоляция релея: один воркер на >max_per_ip аккаунтов (round-robin при
+    # нехватке воркеров). Это предупреждение, а не блокер (edge-IP всё равно не Railway).
+    relay_usage: dict[str, list] = {}
+    for a in accounts:
+        if not a.get("proxy_url") and a.get("cf_relay_url"):
+            relay_usage.setdefault(a["cf_relay_url"], []).append(a["id"])
+    relay_shared = {u: ids for u, ids in relay_usage.items() if len(ids) > max_per_ip}
     return {
         "total_active": len(accounts),
-        "with_proxy": len(accounts) - len(no_proxy),
-        "accounts_without_proxy": no_proxy,
+        "with_proxy": len(with_proxy),
+        "on_relay": len(on_relay),
+        "accounts_on_relay": on_relay,
+        "accounts_without_proxy": naked,  # реально «голые» (ни прокси, ни релея)
         "shared_ip_groups": [
             {"ip": ip, "account_ids": ids, "count": len(ids)}
             for ip, ids in sorted(shared.items(), key=lambda kv: -len(kv[1]))
         ],
+        "relay_shared_groups": [
+            {"url": u, "account_ids": ids, "count": len(ids)}
+            for u, ids in sorted(relay_shared.items(), key=lambda kv: -len(kv[1]))
+        ],
         "datacenter_warnings": diversity["datacenter_warnings"],
         "datacenter_count": diversity["datacenter_count"],
-        "isolation_ok": not shared and not no_proxy,
+        "isolation_ok": not shared and not naked,
     }
 
 
