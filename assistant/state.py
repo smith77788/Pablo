@@ -10,8 +10,10 @@ import json
 import os
 from pathlib import Path
 
+from assistant.ai_chat import default_model
+
 DEFAULT_ADMIN_ID = 391641532  # владелец
-DEFAULT_MODEL = "claude-opus-4-8"
+DEFAULT_MODEL = default_model()  # OpenRouter model id (env OPENROUTER_MODEL or Claude)
 
 STATE_DIR = Path(os.environ.get("ASSISTANT_STATE_DIR", "data/assistant"))
 STATE_FILE = STATE_DIR / "state.json"

@@ -15,17 +15,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY tg-manager/ .
 
 # ---------------------------------------------------------------------------
-# Additive: personal assistant bot (Pablo) — fully isolated under /app/pablo
-# with its own virtualenv so it can't touch tg-manager's dependencies.
+# Additive: personal assistant bot — fully isolated under /app/pablo with its
+# own virtualenv so it can't touch tg-manager's dependencies. It only needs
+# httpx + python-dotenv (talks to OpenRouter over plain HTTP).
 # ---------------------------------------------------------------------------
-COPY requirements.txt /app/pablo/requirements.txt
+COPY assistant/requirements.txt /app/pablo/requirements.txt
 RUN python -m venv /app/pablo/.venv \
     && /app/pablo/.venv/bin/pip install --no-cache-dir -r /app/pablo/requirements.txt
-COPY orchestrator.py /app/pablo/
 COPY assistant/ /app/pablo/assistant/
-COPY agents/ /app/pablo/agents/
-COPY tools/ /app/pablo/tools/
-COPY database/ /app/pablo/database/
 
 # Run tg-manager (foreground) + assistant (background, self-restarting).
 COPY start-all.sh /app/start-all.sh
