@@ -176,9 +176,14 @@ def recommended_delay(account_id: int, action_type: str = "default") -> float:
     cooldown_tail = max(0.0, seconds_until_ready(account_id))
     if cooldown_tail > 0:
         base = max(base, min(cooldown_tail + 15.0, cooldown_tail * 1.15))
-    multiplier = 1.0 + (state.risk_score * 1.5)
-    if state.consecutive_floods >= 2:
-        multiplier += min(1.5, state.consecutive_floods * 0.25)
+    # Затухание штрафа по времени (read-only): record_flood обещает в
+    # комментарии "decays over time", но кода не было — risk_score/
+    # consecutive_floods убывали ТОЛЬКО через record_success, который пишется
+    # лишь для части op-типов. Для остальных штраф держался до рестарта.
+    eff_risk, eff_floods = _decayed_flood_penalty(state)
+    multiplier = 1.0 + (eff_risk * 1.5)
+    if eff_floods >= 2:
+        multiplier += min(1.5, eff_floods * 0.25)
     # Глобальный ML-темп: если по флоту растут флуды/баны — замедляем реальные
     # операции, а не только показываем множитель в админке. Для action_type,
     # совпадающего со словарём op_type (напр. "strike"), учитывается точечно,
@@ -227,6 +232,27 @@ def min_trust_for_action(action_type: str = "default") -> float:
 def account_rank_score(account_id: int, trust_score: object) -> float:
     """Lower is better: in-memory risk minus normalized trust weight."""
     return get_account_state(account_id).risk_score - normalize_trust_score(trust_score)
+
+
+def _decayed_flood_penalty(state) -> tuple[float, float]:
+    """Эффективные (risk_score, consecutive_floods) с затуханием по времени.
+
+    Штраф после флуда убывал только через record_success, который вызывается
+    лишь для части op-типов — иначе аккаунт держал завышенную задержку до
+    рестарта. Здесь применяем time-decay ко времени с последнего флуда:
+    risk_score — полураспад ~30 мин, consecutive_floods — −1 за каждые 15 мин.
+    Read-only: состояние не мутируем (жёсткий cooldown_until не трогаем, он
+    истекает сам). last_flood_at — monotonic (см. record_flood)."""
+    risk = state.risk_score
+    floods = state.consecutive_floods
+    if state.last_flood_at > 0 and (risk > 0 or floods > 0):
+        age = time.monotonic() - state.last_flood_at
+        if age > 0:
+            import math
+
+            risk = risk * math.pow(0.5, age / 1800.0)
+            floods = max(0, floods - int(age // 900))
+    return risk, floods
 
 
 def _recency_penalty(last_used: object, now_ts: float, *, max_penalty: float = 0.08,
