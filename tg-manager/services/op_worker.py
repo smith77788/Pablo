@@ -2572,6 +2572,16 @@ async def _exec_bulk_join_inner(
             )
             skipped_by_limit += 1
             continue
+        # Риск-пульс (Волна S/1B, fail-open): аккаунт с недавним СЕРЬЁЗНЫМ
+        # ограничением не трогаем в массовой операции — уводим от риска повторного
+        # бана. Нет сигнала/ошибка → работаем как раньше (не блокируем ядро).
+        if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+            log.info(
+                "bulk_join: аккаунт %s в карантине (недавнее ограничение), пропуск",
+                acc_dict.get("phone"),
+            )
+            skipped_by_limit += 1
+            continue
         for i, link in enumerate(links):
             if await _is_cancelled(pool, op_id):
                 return {

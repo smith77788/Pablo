@@ -595,3 +595,98 @@ def format_account_report(account_ids: list[int], action_type: str) -> str:
             lines.append(f"acc:{acc_id} [░░░░░] нет данных")
 
     return "\n".join(lines)
+
+
+# ── Единый риск-пульс аккаунта (Волна S/1B: кровоток иммунных сигналов) ────────
+# Сводит РАЗРОЗНЕННЫЕ иммунные сигналы (restriction_events, account_flood_log)
+# в один «пульс», который читают нервная (op_worker) и кровеносная (account_manager)
+# системы ПЕРЕД действием. Продюсеры не меняются — агрегируем на чтении поверх
+# уже существующих таблиц. Всё DB-based (в отличие от in-memory кэша выше).
+
+async def is_account_quarantined(pool, account_id: int, *, days: int = 3) -> bool:
+    """Fail-open: True только при недавнем СЕРЬЁЗНОМ ограничении (critical severity
+    или event_type про ban/block/restrict) за последние `days` суток.
+
+    Fail-open — принципиально: любая ошибка/отсутствие сигнала → False (НЕ блокируем).
+    Anti-detection ядро не должно вставать из-за отсутствия данных пульса —
+    карантин только при явно подтверждённом ограничении.
+    """
+    if not pool or not account_id:
+        return False
+    try:
+        n = await pool.fetchval(
+            "SELECT COUNT(*) FROM restriction_events "
+            "WHERE account_id=$1 AND created_at > NOW() - make_interval(days => $2) "
+            "AND (severity='critical' OR event_type ILIKE '%ban%' "
+            "OR event_type ILIKE '%block%' OR event_type ILIKE '%restrict%')",
+            account_id, days)
+        return bool(n and n > 0)
+    except Exception:
+        return False
+
+
+async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
+    """Риск-пульс всех активных аккаунтов владельца — единый сигнал здоровья.
+
+    Агрегирует поверх иммунных таблиц (read-only, продюсеры не трогаем):
+      - restriction_events: critical/ban/block/restrict → карантин; warning → риск;
+      - account_flood_log: частые флуд-ожидания → риск.
+    score 0..1 (1 = здоров). status: quarantine|at_risk|healthy.
+    Возвращает {accounts:[...], summary:{healthy, at_risk, quarantine, total}}.
+    """
+    empty = {"accounts": [], "summary": {"healthy": 0, "at_risk": 0,
+                                         "quarantine": 0, "total": 0}}
+    if not pool or not owner_id:
+        return empty
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT a.id, a.phone,
+              (SELECT COUNT(*) FROM restriction_events r
+                 WHERE r.account_id=a.id
+                   AND r.created_at > NOW() - make_interval(days => $2)) AS restrictions,
+              (SELECT COUNT(*) FROM restriction_events r
+                 WHERE r.account_id=a.id
+                   AND r.created_at > NOW() - make_interval(days => $2)
+                   AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
+                        OR r.event_type ILIKE '%block%'
+                        OR r.event_type ILIKE '%restrict%')) AS severe,
+              (SELECT COUNT(*) FROM account_flood_log f
+                 WHERE f.account_id=a.id
+                   AND f.created_at > NOW() - make_interval(days => $2)) AS floods
+            FROM tg_accounts a
+            WHERE a.owner_id=$1 AND a.is_active=TRUE
+            ORDER BY a.id
+            """, owner_id, days)
+    except Exception as e:
+        log.warning("get_account_health owner=%s: %s", owner_id, e)
+        return empty
+
+    accounts = []
+    healthy = at_risk = quarantine = 0
+    for r in rows:
+        severe = int(r["severe"] or 0)
+        restr = int(r["restrictions"] or 0)
+        floods = int(r["floods"] or 0)
+        if severe:
+            status, score = "quarantine", 0.2
+            quarantine += 1
+        elif restr or floods >= 3:
+            status, score = "at_risk", 0.5
+            at_risk += 1
+        elif floods:
+            status, score = "at_risk", 0.7
+            at_risk += 1
+        else:
+            status, score = "healthy", 1.0
+            healthy += 1
+        accounts.append({
+            "account_id": r["id"], "phone": r["phone"],
+            "status": status, "score": score,
+            "restrictions": restr, "floods": floods,
+        })
+    # худшие — вперёд (для приборного щитка)
+    accounts.sort(key=lambda a: a["score"])
+    return {"accounts": accounts,
+            "summary": {"healthy": healthy, "at_risk": at_risk,
+                        "quarantine": quarantine, "total": len(accounts)}}

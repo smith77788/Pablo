@@ -10988,9 +10988,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "top_channels": top_channels,
                 "recent_activity": recent_activity,
                 "range": rng,
+                # Пульс организма: здоровье аккаунтов (иммунные сигналы). fail-soft.
+                "account_health": await _account_health_summary(uid),
             })
         except Exception as e:
             log.exception("dashboard_realtime uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def _account_health_summary(uid: int) -> dict:
+        """Сводка риск-пульса для дашборда (fail-soft: ошибка → нули)."""
+        try:
+            from services.infra_memory import get_account_health
+            return (await get_account_health(pool, uid))["summary"]
+        except Exception:
+            return {"healthy": 0, "at_risk": 0, "quarantine": 0, "total": 0}
+
+    async def accounts_health(request: web.Request) -> web.Response:
+        """Единый риск-пульс аккаунтов владельца (иммунные сигналы → один сигнал)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.infra_memory import get_account_health
+            return _json_resp(await get_account_health(pool, uid))
+        except Exception as e:
+            log.exception("accounts_health uid=%s", uid)
             return _err(str(e)[:150], 500)
 
     async def audience_analytics(request: web.Request) -> web.Response:
@@ -11303,6 +11325,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
     app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
+    app.router.add_get("/api/miniapp/accounts/health", accounts_health)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/networks", networks_list)
     app.router.add_post("/api/miniapp/networks", network_create_plural)

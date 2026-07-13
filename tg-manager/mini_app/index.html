@@ -5122,6 +5122,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-posts" style="color:var(--green)">—</div><div class="kpi-chip-lbl">📝 Посты</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">📱 Аккаунты</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Ауд. +7д</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-health" style="color:var(--green)">—</div><div class="kpi-chip-lbl">💓 Здоровье</div></div>
     </div>
     <div class="seg" id="dashTimeSeg">
       <div class="seg-opt on" onclick="switchDashRange('24h',this)">24ч</div>
@@ -15878,6 +15879,14 @@ async function loadDashboard() {
     document.getElementById('dk-posts').textContent = num(d.total_posts || 0);
     document.getElementById('dk-views').textContent = num(d.total_accounts || 0);
     document.getElementById('dk-growth').textContent = (d.growth_7d != null && d.growth_7d > 0 ? '+' : '') + num(d.growth_7d || 0);
+    // Пульс организма: здоровые/риск/карантин (иммунные сигналы аккаунтов)
+    const h = d.account_health || {}, hEl = document.getElementById('dk-health');
+    if (hEl) {
+      const risk = (h.at_risk || 0) + (h.quarantine || 0);
+      hEl.textContent = `${num(h.healthy || 0)}${risk ? ' / ⚠' + num(risk) : ''}`;
+      hEl.style.color = h.quarantine ? 'var(--red)' : (h.at_risk ? 'var(--orange)' : 'var(--green)');
+      hEl.title = `Здоровы: ${h.healthy||0} · риск: ${h.at_risk||0} · карантин: ${h.quarantine||0}`;
+    }
 
     renderDashLineChart('dashSubsChart', 'dashSubsEmpty', d.subs_history || [], 'var(--blue)');
     renderDashLineChart('dashViewsChart', 'dashViewsEmpty', d.views_history || [], 'var(--orange)');

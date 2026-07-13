@@ -1,0 +1,86 @@
+"""Волна S/1B: единый риск-пульс аккаунта — кровоток иммунных сигналов.
+
+Иммунные органы (shadowban/anomaly/flood/drift) писали каждый в свою таблицу; не
+было единого сигнала, который нервная (op_worker) и кожа (dashboard) читают ПЕРЕД
+действием. get_account_health агрегирует их поверх существующих таблиц (read-only,
+продюсеры не трогаем); is_account_quarantined — fail-open рефлекс.
+
+Ключевое свойство безопасности: рефлекс FAIL-OPEN — нет сигнала/ошибка → НЕ
+блокируем (anti-detection ядро не должно вставать из-за отсутствия данных пульса).
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+
+from services.infra_memory import is_account_quarantined, get_account_health
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read(rel: str) -> str:
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+class _FakePool:
+    def __init__(self, rows=None, val=None, raise_=False):
+        self._rows = rows or []
+        self._val = val
+        self._raise = raise_
+
+    async def fetch(self, q, *a):
+        if self._raise:
+            raise RuntimeError("boom")
+        return self._rows
+
+    async def fetchval(self, q, *a):
+        if self._raise:
+            raise RuntimeError("boom")
+        return self._val
+
+
+def test_quarantine_is_fail_open():
+    async def _run():
+        # нет пула / ошибка БД / нет сигнала → НЕ карантин (fail-open)
+        assert await is_account_quarantined(None, 1) is False
+        assert await is_account_quarantined(_FakePool(raise_=True), 1) is False
+        assert await is_account_quarantined(_FakePool(val=0), 1) is False
+        # подтверждённое серьёзное ограничение → карантин
+        assert await is_account_quarantined(_FakePool(val=2), 1) is True
+    asyncio.run(_run())
+
+
+def test_health_scoring_and_summary():
+    async def _run():
+        rows = [
+            {"id": 1, "phone": "a", "restrictions": 0, "severe": 0, "floods": 0},
+            {"id": 2, "phone": "b", "restrictions": 0, "severe": 1, "floods": 0},
+            {"id": 3, "phone": "c", "restrictions": 2, "severe": 0, "floods": 0},
+            {"id": 4, "phone": "d", "restrictions": 0, "severe": 0, "floods": 1},
+        ]
+        r = await get_account_health(_FakePool(rows=rows), 99)
+        assert r["summary"] == {"healthy": 1, "at_risk": 2, "quarantine": 1, "total": 4}
+        assert r["accounts"][0]["status"] == "quarantine"  # худшие вперёд
+        # ошибка БД → пустой пульс, не исключение
+        empty = await get_account_health(_FakePool(raise_=True), 99)
+        assert empty["summary"]["total"] == 0
+    asyncio.run(_run())
+
+
+def test_reflex_wired_into_op_worker():
+    """Рефлекс подключён в горячий путь массовой операции (bulk_join)."""
+    ow = _read("services/op_worker.py")
+    assert "is_account_quarantined" in ow
+    # именно fail-open вызов через уже импортированный алиас _infra_mem
+    assert "_infra_mem.is_account_quarantined(pool" in ow
+
+
+def test_pulse_surfaced_in_api_and_ui():
+    """Пульс виден: эндпоинт + инъекция в dashboard + плитка «Здоровье»."""
+    api = _read("services/mini_app_api.py")
+    assert "async def accounts_health" in api
+    assert 'add_get("/api/miniapp/accounts/health", accounts_health)' in api
+    assert '"account_health": await _account_health_summary' in api
+    ui = _read("mini_app/index.html")
+    assert "dk-health" in ui and "account_health" in ui
