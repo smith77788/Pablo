@@ -123,6 +123,25 @@ def test_worker_uses_module_format_and_sockets_import():
     assert 'headers = {\n        "Authorization"' not in seg or "application/javascript+module" in seg
 
 
+def test_worker_dc_ips_match_canonical():
+    """Критично (anti-detection): DC-IP в воркере обязаны совпадать с каноном
+    account_manager. auth_key DC-специфичен — роут на чужой DC-IP = аккаунт
+    молча не подключается. Прежний шаблон роутил DC2/DC3→IP DC1, DC4→IP DC5."""
+    import re
+    cf = _read("services/cf_pool_manager.py")
+    am = _read("services/account_manager.py")
+    # канон берём из первого DC_IPS в account_manager (строки 1..5)
+    canon = {"1": "149.154.175.53", "2": "149.154.167.51",
+             "3": "149.154.175.100", "4": "149.154.167.91", "5": "91.108.56.130"}
+    for dc, ip in canon.items():
+        assert ip in am, f"канон DC{dc} {ip} пропал из account_manager"
+        # в JS-шаблоне: `  N: "ip",`
+        assert re.search(rf'\b{dc}:\s*"{re.escape(ip)}"', cf), \
+            f"воркер DC{dc} должен указывать на {ip}"
+    # старый неверный маппинг (DC2→175.53) убран
+    assert not re.search(r'\b2:\s*"149\.154\.175\.53"', cf)
+
+
 def test_deploy_errors_are_surfaced_not_swallowed():
     """«Пустой результат» без причины недопустим: ошибки CF должны доходить до
     пользователя. deploy_pool возвращает {urls,errors,ok,count}; фон пишет
