@@ -168,6 +168,26 @@ def _circuit_breaker_status(owner_id: int) -> dict:
     return {"status": "open", "failures": state.get("failures", 0), "cooldown_remaining_s": remaining}
 
 
+async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: int) -> None:
+    """Вернуть операцию в очередь при открытой цепи — с отложенным повтором.
+
+    Поллер атомарно ставит операции status='running' ДО запуска задачи. Если
+    цепь открыта, задача выходит, но операция осталась бы 'running' до stale-
+    watchdog (60 мин) — держа фантомный слот параллельности владельца и блокируя
+    его другие операции, хотя cooldown цепи всего 30 мин. Поэтому возвращаем в
+    'pending' с scheduled_for = now()+cooldown+буфер: повтор ровно после cooldown,
+    без busy-loop (кандидаты уважают scheduled_for) и без фантомного слота."""
+    defer = max(int(cooldown_s), 0) + 5
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='pending', started_at=NULL, "
+        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
+        op_id,
+        float(defer),
+        log_ctx=f"[circuit_release op={op_id}]",
+    )
+
+
 # ── Адаптивный темп по времени суток + ML ─────────────────────────────────────
 # Система учитывает время суток, день недели и историю флудов/банов (ML-движок)
 # для оптимальных задержек между действиями.
@@ -1125,10 +1145,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     # Circuit breaker: skip if owner is in cooldown
     if _circuit_breaker_is_open(owner_id):
         status = _circuit_breaker_status(owner_id)
+        remaining = status.get("cooldown_remaining_s", 0) or 0
         log.warning(
             "op_worker: circuit breaker OPEN for owner=%d op=%d — pausing %ds",
-            owner_id, op_id, status.get("cooldown_remaining_s", 0),
+            owner_id, op_id, remaining,
         )
+        # Вернуть операцию в очередь с отложенным повтором, иначе она зависнет
+        # в 'running' до stale-watchdog (60 мин) и займёт слот параллельности.
+        try:
+            await _release_op_for_circuit(pool, op_id, remaining)
+        except Exception:
+            log_exc_swallow(log, "op_worker: circuit release failed op=%d", op_id)
         async with _active_lock:
             _active_op_ids.discard(op_id)
         return
