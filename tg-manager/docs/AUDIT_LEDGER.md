@@ -658,3 +658,12 @@ Bot-паритет: новый `bot/handlers/metrics_dashboard.py` — нати�
 Причина (мой баг): в db.set_cf_credentials я применял JSONB-операторы (COALESCE(settings_json,'{}'::jsonb) || jsonb_build_object(...)), а platform_users.settings_json — TEXT-колонка (хранит JSON строкой; get_proxy_policy/остальной код читают через json.loads и пишут json.dumps). COALESCE(text, jsonb) → несовместимые типы.
 Исправлено: переписал на устоявшийся паттерн (как mini_app_api settings save) — read settings_json → json.loads → merge cf в Python (сохраняя прочие ключи и существующий token_enc, если новый токен пуст) → json.dumps → UPDATE ... SET settings_json=$2 строкой. get_cf_credentials уже читал и строку, и dict.
 Верификация: test_cf_pool_fixes +1 (в UPDATE нет jsonb_build_object/::jsonb; есть json.loads+json.dumps(settings)+SET settings_json=$2). Полный tests/ зелёный (exit 0). Python AST чисто.
+
+## tg-manager: CF деплой пула — «ответ не JSON / сервис недоступен» (таймаут шлюза) — 2026-07-11
+Скрин: доступы сохранились (доступы заданы ✓), но «Задеплоить пул» (count=100) → тосты «Ответ сервера не является JSON» + «Сервис временно недоступен». Это 502/503: cf_pool_deploy деплоил 100 воркеров СИНХРОННО в HTTP-запросе (100×2 запроса к CF API подряд, минуты) → Railway/прокси рвёт долгий запрос по health-check → не-JSON ответ.
+Исправлено:
+  - cf_pool_deploy: деплой запускается в ФОНЕ (asyncio.create_task, ссылка в request.app['_cf_deploy_tasks'] чтобы не собрал GC), ответ сразу {ok, started, count}. Count зажат 1..100. Прогресс — через /cf/pool/status.
+  - deploy_pool: конкурентный деплой (asyncio.Semaphore(8) + gather) вместо последовательного — фон завершается кратно быстрее.
+  - index.html deployCfPool: на {started} тост «деплой запущен в фоне» + опрос статуса каждые 5с ~1 мин (авто-обновление счётчиков воркеров).
+Верификация: test_cf_pool_fixes расширен (create_task+started в эндпоинте; Semaphore/gather в deploy_pool). Полный tests/ зелёный (exit 0). Python AST + node JS чисто.
+Пользователю: жать «Задеплоить пул» можно снова — ответ придёт мгновенно, воркеры появятся в статусе по мере деплоя. Для 100 воркеров подождать ~1–3 мин; для проверки лучше начать с 10–20.

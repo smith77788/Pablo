@@ -8657,12 +8657,18 @@ async function loadCfPoolStatus() {
 }
 async function deployCfPool() {
   const count = parseInt(document.getElementById('cfPoolCount').value)||10;
-  if (!await askConfirm(`Задеплоить ${count} Cloudflare Worker(ов) и раздать аккаунтам? Нужны CF_API_TOKEN и CF_ACCOUNT_ID в Railway.`)) return;
+  if (!await askConfirm(`Задеплоить ${count} Cloudflare Worker(ов) и раздать аккаунтам? Деплой идёт в фоне (~несколько минут для больших пулов).`)) return;
   const btn = document.getElementById('cfDeployBtn');
-  btn.disabled=true; btn.textContent='☁️ Деплою…';
+  btn.disabled=true; btn.textContent='☁️ Запускаю…';
   try {
     const r = await api('/api/miniapp/cf/pool/deploy', {method:'POST', body: JSON.stringify({count, name_prefix:'tg-relay'})});
-    toast(`✅ Задеплоено, назначено аккаунтам: ${r.assigned||0}`);
+    if (r.started) {
+      toast(`☁️ Деплой ${r.count} воркеров запущен в фоне — статус обновится сам`);
+      // опрашиваем статус ~1 минуту, пока фоновый деплой идёт
+      let n=0; const iv=setInterval(()=>{ loadCfPoolStatus(); if(++n>=12) clearInterval(iv); }, 5000);
+    } else {
+      toast(`✅ Назначено аккаунтам: ${r.assigned||0}`);
+    }
     loadCfPoolStatus(); loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
   finally { btn.disabled=false; btn.textContent='☁️ Задеплоить пул'; }

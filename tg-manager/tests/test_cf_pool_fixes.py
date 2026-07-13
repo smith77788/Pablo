@@ -51,8 +51,14 @@ def test_cf_pool_ui_button_wired():
     assert 'add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)' in api
     assert 'add_get("/api/miniapp/cf/pool/status", cf_pool_status)' in api
     # хендлеры делают реальную работу (не заглушки)
-    seg = api[api.index("async def cf_pool_deploy"):api.index("async def cf_pool_deploy") + 1200]
+    seg = api[api.index("async def cf_pool_deploy"):
+              api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
     assert "deploy_pool" in seg and "assign_urls_to_accounts" in seg
+    # деплой в ФОНЕ (иначе 100 воркеров синхронно → таймаут шлюза → «ответ не JSON»)
+    assert "create_task" in seg and '"started": True' in seg
+    # deploy_pool конкурентен (Semaphore/gather), а не последователен
+    cf = _read("services/cf_pool_manager.py")
+    assert "asyncio.Semaphore" in cf and "asyncio.gather" in cf
 
 
 def test_set_cf_credentials_no_jsonb_ops_on_text_column():

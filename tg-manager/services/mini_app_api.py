@@ -12172,26 +12172,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e)[:150], 500)
 
     async def cf_pool_deploy(request: web.Request) -> web.Response:
+        """Деплой пула CF Workers. Долгая операция (N×2 запросов к CF API) → НЕ
+        блокируем HTTP-запрос (иначе шлюз рвёт по таймауту → «ответ не JSON/сервис
+        недоступен»). Запускаем в ФОНЕ, отвечаем сразу; прогресс — через /status."""
+        import asyncio as _asyncio
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             data = await request.json()
-            count = int(data.get('count', 5))
-            prefix = data.get('name_prefix', f'tg-relay-{uid}')
-            c = await _cf_resolve_creds(uid)
-            if not c["api_token"] or not c["account_id"]:
-                return _err("Не заданы доступы Cloudflare (токен + Account ID). "
-                            "Впишите их в приложении или в переменных Railway.", 400)
-            from services.cf_pool_manager import deploy_pool, assign_urls_to_accounts
-            urls = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
-                                     subdomain=c["subdomain"])
-            if urls:
-                result = await assign_urls_to_accounts(pool, uid, urls)
-                return _json_resp({"ok": True, **result})
-            return _err("Воркеры не задеплоились — проверьте токен/поддомен Cloudflare", 500)
-        except Exception as e:
-            log.exception("cf_pool_deploy uid=%s", uid)
-            return _err(str(e), 500)
+        except Exception:
+            data = {}
+        try:
+            count = max(1, min(int(data.get('count', 10)), 100))
+        except (TypeError, ValueError):
+            count = 10
+        prefix = data.get('name_prefix') or f'tg-relay-{uid}'
+        c = await _cf_resolve_creds(uid)
+        if not c["api_token"] or not c["account_id"]:
+            return _err("Не заданы доступы Cloudflare (токен + Account ID). "
+                        "Впишите их в приложении или в переменных Railway.", 400)
+
+        async def _bg_deploy():
+            try:
+                from services.cf_pool_manager import deploy_pool, assign_urls_to_accounts
+                urls = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
+                                         subdomain=c["subdomain"])
+                if urls:
+                    await assign_urls_to_accounts(pool, uid, urls)
+                log.info("cf deploy done uid=%s: %d/%d воркеров", uid, len(urls), count)
+            except Exception:
+                log.exception("cf background deploy uid=%s", uid)
+
+        task = _asyncio.create_task(_bg_deploy())
+        _tasks = request.app.setdefault("_cf_deploy_tasks", set())
+        _tasks.add(task)
+        task.add_done_callback(lambda t: _tasks.discard(t))
+        return _json_resp({"ok": True, "started": True, "count": count})
 
     app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
     app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)

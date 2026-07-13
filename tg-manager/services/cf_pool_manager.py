@@ -168,22 +168,26 @@ async def deploy_worker(name: str, api_token: str, account_id: str,
 
 
 async def deploy_pool(count: int, name_prefix: str, api_token: str, account_id: str,
-                      subdomain: str = "") -> list:
-    """Deploy multiple CF Workers and return their URLs."""
+                      subdomain: str = "", concurrency: int = 8) -> list:
+    """Deploy multiple CF Workers параллельно (с ограничением одновременности) и
+    вернуть их URL. Последовательный деплой 100 воркеров занимал минуты и вешал
+    HTTP-запрос → таймаут шлюза; поэтому конкурентно + вызывать в фоне."""
     if not subdomain:
         subdomain = await get_workers_subdomain(api_token, account_id)
     if not subdomain:
         log.error("deploy_pool: workers.dev subdomain не настроен — деплой отменён")
         return []
-    urls = []
-    for i in range(1, count + 1):
-        name = f"{name_prefix}-{i}"
-        url = await deploy_worker(name, api_token, account_id, subdomain=subdomain)
-        if url:
-            urls.append(url)
-            log.info("Deployed %d/%d: %s", i, count, url)
-        else:
-            log.error("Failed to deploy %d/%d: %s", i, count, name)
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(i: int) -> str:
+        async with sem:
+            return await deploy_worker(f"{name_prefix}-{i}", api_token, account_id,
+                                       subdomain=subdomain)
+
+    results = await asyncio.gather(*[_one(i) for i in range(1, count + 1)],
+                                   return_exceptions=True)
+    urls = [u for u in results if isinstance(u, str) and u]
+    log.info("deploy_pool: %d/%d воркеров успешно", len(urls), count)
     return urls
 
 
