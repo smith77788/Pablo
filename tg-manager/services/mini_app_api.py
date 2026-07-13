@@ -1032,50 +1032,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bc_id = int(request.match_info["bc_id"])
         except (KeyError, ValueError):
             return _err("bad broadcast id", 400)
-        # Исходная рассылка должна принадлежать пользователю (created_by).
-        src = await _safe_fetchrow(pool,
-            "SELECT id, bot_id, message_text, created_by FROM broadcasts WHERE id=$1", bc_id)
-        if not src or int(src.get("created_by") or 0) != uid:
-            return _err("Рассылка не найдена", 404)
-        bot_id_int = int(src["bot_id"])
-        # Владение ботом (double-check).
-        bot_row = await _safe_fetchrow(pool,
-            "SELECT bot_id, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-            bot_id_int, uid)
-        if not bot_row:
-            return _err("Бот не найден", 404)
-        text = (src.get("message_text") or "").strip()
-        if not text:
-            return _err("У исходной рассылки нет текста", 400)
-        # Недоставленные = активные подписчики, которых НЕТ в delivery_log исходной.
-        rows = await _safe_fetch(pool,
-            """SELECT bu.user_id FROM bot_users bu
-               WHERE bu.bot_id=$1 AND bu.is_active=true
-                 AND NOT EXISTS (
-                     SELECT 1 FROM broadcast_delivery_log dl
-                     WHERE dl.broadcast_id=$2 AND dl.user_id=bu.user_id)""",
-            bot_id_int, bc_id)
-        undelivered = [int(r["user_id"]) for r in (rows or [])]
-        if not undelivered:
-            return _err("Все активные подписчики уже получили рассылку", 400)
-        total = len(undelivered)
-        try:
-            row = await pool.fetchrow(
-                "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) "
-                "VALUES($1,$2,$3,'pending',$4) RETURNING id",
-                bot_id_int, text, total, uid)
-            new_bc = row["id"]
-            label = f"Повтор недоставленным: {text[:40]}…" if len(text) > 40 else f"Повтор: {text[:60]}"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"bot_id": bot_id_int, "broadcast_id": new_bc,
-                                  "text": text, "user_ids": undelivered}),
-                total, label)
-            return _json_resp({"ok": True, "broadcast_id": new_bc, "op_id": op_id, "total_users": total})
-        except Exception:
-            log.exception("broadcast_resend bc=%d uid=%d", bc_id, uid)
-            return _err("Не удалось создать повторную рассылку", 500)
+        # Единая реализация (общая с ботом) — не дублируем логику недоставленных.
+        from services import broadcaster
+        res = await broadcaster.resend_undelivered(pool, uid, bc_id)
+        if not res.get("ok"):
+            return _err(res.get("error", "Ошибка"), res.get("code", 400))
+        return _json_resp(res)
 
     async def broadcasts_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)

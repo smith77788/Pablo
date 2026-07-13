@@ -433,6 +433,12 @@ def broadcast_detail(
                 action="bc_stat", bot_id=bot_id, broadcast_id=done_bc_id
             ),
         )
+        kb.button(
+            text="↻ Отправить недоставленным",
+            callback_data=BroadcastCb(
+                action="resend", bot_id=bot_id, broadcast_id=done_bc_id
+            ),
+        )
     kb.button(
         text="◀️ К истории", callback_data=BroadcastCb(action="status", bot_id=bot_id)
     )

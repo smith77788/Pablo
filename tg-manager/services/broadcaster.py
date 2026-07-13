@@ -631,6 +631,76 @@ async def mass_broadcast_with_scheduling(
     }
 
 
+async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> dict:
+    """Повторная рассылка ТОЛЬКО недоставленным получателям исходной рассылки.
+
+    Недоставленные = активные подписчики бота, которых нет в broadcast_delivery_log
+    исходной рассылки. Единая реализация для mini-app и бота. Скоупится по
+    created_by/added_by (владелец). Возвращает {ok, broadcast_id, op_id, total_users}
+    или {ok: False, error, code}.
+    """
+    async def _sfrow(q, *a):
+        try:
+            r = await pool.fetchrow(q, *a)
+            return dict(r) if r else None
+        except Exception as e:
+            logger.warning("resend_undelivered fetchrow: %s", e)
+            return None
+
+    src = await _sfrow(
+        "SELECT id, bot_id, message_text, created_by FROM broadcasts WHERE id=$1",
+        bc_id,
+    )
+    if not src or int(src.get("created_by") or 0) != owner_id:
+        return {"ok": False, "error": "Рассылка не найдена", "code": 404}
+    bot_id_int = int(src["bot_id"])
+    bot_row = await _sfrow(
+        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id_int, owner_id,
+    )
+    if not bot_row:
+        return {"ok": False, "error": "Бот не найден", "code": 404}
+    text = (src.get("message_text") or "").strip()
+    if not text:
+        return {"ok": False, "error": "У исходной рассылки нет текста", "code": 400}
+    try:
+        rows = await pool.fetch(
+            """SELECT bu.user_id FROM bot_users bu
+               WHERE bu.bot_id=$1 AND bu.is_active=true
+                 AND NOT EXISTS (
+                     SELECT 1 FROM broadcast_delivery_log dl
+                     WHERE dl.broadcast_id=$2 AND dl.user_id=bu.user_id)""",
+            bot_id_int, bc_id,
+        )
+    except Exception as e:
+        logger.warning("resend_undelivered fetch undelivered: %s", e)
+        rows = []
+    undelivered = [int(r["user_id"]) for r in (rows or [])]
+    if not undelivered:
+        return {"ok": False,
+                "error": "Все активные подписчики уже получили рассылку", "code": 400}
+    total = len(undelivered)
+    import json as _json
+    try:
+        row = await pool.fetchrow(
+            "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) "
+            "VALUES($1,$2,$3,'pending',$4) RETURNING id",
+            bot_id_int, text, total, owner_id)
+        new_bc = row["id"]
+        label = (f"Повтор недоставленным: {text[:40]}…"
+                 if len(text) > 40 else f"Повтор: {text[:60]}")
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
+            owner_id, _json.dumps({"bot_id": bot_id_int, "broadcast_id": new_bc,
+                                   "text": text, "user_ids": undelivered}),
+            total, label)
+        return {"ok": True, "broadcast_id": new_bc, "op_id": op_id, "total_users": total}
+    except Exception:
+        logger.exception("resend_undelivered bc=%d uid=%d", bc_id, owner_id)
+        return {"ok": False, "error": "Не удалось создать повторную рассылку", "code": 500}
+
+
 async def ab_test_broadcast(
     pool: asyncpg.Pool,
     owner_id: int,

@@ -454,8 +454,39 @@ async def cb_detail(
         reply_markup=broadcast_detail(
             callback_data.bot_id,
             running_bc_id=bc["id"] if bc["status"] == "running" else None,
-            done_bc_id=bc["id"] if bc["status"] == "done" else None,
+            # partial/done → доступен повтор недоставленным
+            done_bc_id=bc["id"] if bc["status"] in ("done", "partial") else None,
         ),
+    )
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "resend"))
+async def cb_broadcast_resend(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
+    """Повтор рассылки недоставленным получателям (паритет с mini-app)."""
+    await callback.answer("⏳ Готовлю повтор…")
+    from services import broadcaster
+
+    res = await broadcaster.resend_undelivered(
+        pool, callback.from_user.id, callback_data.broadcast_id
+    )
+    if not res.get("ok"):
+        await callback.message.edit_text(
+            f"⚠️ {res.get('error', 'Не удалось создать повтор')}",
+            reply_markup=broadcast_detail(
+                callback_data.bot_id, done_bc_id=callback_data.broadcast_id
+            ),
+        )
+        return
+    await callback.message.edit_text(
+        f"↻ <b>Повторная рассылка создана</b>\n\n"
+        f"Недоставленным получателям: <b>{res['total_users']}</b>\n"
+        f"Новая рассылка: <code>#{res['broadcast_id']}</code>\n"
+        f"Операция: <code>#{res['op_id']}</code>\n\n"
+        f"<i>Прогресс: 📊 История рассылок.</i>",
+        parse_mode="HTML",
+        reply_markup=broadcast_detail(callback_data.bot_id),
     )
 
 
