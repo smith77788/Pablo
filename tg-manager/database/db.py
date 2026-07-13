@@ -1013,15 +1013,24 @@ async def update_template(
 
 
 async def create_scheduled(
-    pool: asyncpg.Pool, bot_id: int, text: str, execute_at, created_by: int
+    pool: asyncpg.Pool, bot_id: int, text: str, execute_at, created_by: int,
+    repeat_interval_min: int = 0,
 ) -> int:
+    """Создать отложенную рассылку. repeat_interval_min>0 → повторяемая: после
+    исполнения reschedule_if_recurring создаёт следующее вхождение через интервал."""
+    try:
+        repeat_interval_min = max(0, int(repeat_interval_min or 0))
+    except (TypeError, ValueError):
+        repeat_interval_min = 0
     return await pool.fetchval(
-        """INSERT INTO scheduled_broadcasts (bot_id, message_text, execute_at, created_by)
-           VALUES ($1,$2,$3,$4) RETURNING id""",
+        """INSERT INTO scheduled_broadcasts
+               (bot_id, message_text, execute_at, created_by, repeat_interval_min)
+           VALUES ($1,$2,$3,$4,$5) RETURNING id""",
         bot_id,
         text,
         execute_at,
         created_by,
+        repeat_interval_min,
     )
 
 

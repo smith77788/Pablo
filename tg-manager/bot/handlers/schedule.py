@@ -159,15 +159,82 @@ async def msg_schedule_datetime(
         )
         return
 
-    text = data["text"]
-    await state.clear()
-
-    schedule_id = await db.create_scheduled(
-        pool, bot_id, text, execute_at, message.from_user.id
-    )
+    # Переходим к выбору повторяемости (once / hourly / 12h / daily / weekly).
+    await state.update_data(execute_at=execute_at.isoformat())
+    await state.set_state(ScheduleBroadcast.waiting_repeat)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="1️⃣ Один раз", callback_data=ScheduleCb(action="rep_once", bot_id=bot_id))
+    kb.button(text="⏱ Каждый час", callback_data=ScheduleCb(action="rep_hourly", bot_id=bot_id))
+    kb.button(text="🕛 Каждые 12ч", callback_data=ScheduleCb(action="rep_12h", bot_id=bot_id))
+    kb.button(text="📅 Ежедневно", callback_data=ScheduleCb(action="rep_daily", bot_id=bot_id))
+    kb.button(text="🗓 Еженедельно", callback_data=ScheduleCb(action="rep_weekly", bot_id=bot_id))
+    kb.button(text="❌ Отмена", callback_data=ScheduleCb(action="menu", bot_id=bot_id))
+    kb.adjust(1, 2, 2, 1)
     await message.answer(
+        f"🔁 <b>Повторять рассылку?</b>\n\n"
+        f"🕐 Первый запуск: <b>{execute_at.strftime('%d.%m.%Y %H:%M')} UTC</b>\n\n"
+        "Выберите периодичность:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+_REPEAT_INTERVALS = {
+    "rep_once": 0,
+    "rep_hourly": 60,
+    "rep_12h": 720,
+    "rep_daily": 1440,
+    "rep_weekly": 10080,
+}
+_REPEAT_LABELS = {
+    0: "один раз",
+    60: "каждый час",
+    720: "каждые 12 часов",
+    1440: "ежедневно",
+    10080: "еженедельно",
+}
+
+
+@router.callback_query(
+    ScheduleBroadcast.waiting_repeat,
+    ScheduleCb.filter(F.action.in_(set(_REPEAT_INTERVALS.keys()))),
+)
+async def cb_schedule_repeat(
+    callback: CallbackQuery, callback_data: ScheduleCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Финальный шаг: создать (возможно повторяемую) отложенную рассылку."""
+    await safe_answer(callback)
+    data = await state.get_data()
+    await state.clear()
+    bot_id = callback_data.bot_id
+    text = data.get("text") or ""
+    raw_dt = data.get("execute_at")
+    if not text or not raw_dt:
+        await callback.message.edit_text(
+            "❌ Сессия истекла, начните заново.", reply_markup=back_to_bot(bot_id)
+        )
+        return
+    try:
+        execute_at = datetime.fromisoformat(raw_dt)
+    except ValueError:
+        await callback.message.edit_text(
+            "❌ Ошибка даты, начните заново.", reply_markup=back_to_bot(bot_id)
+        )
+        return
+
+    interval = _REPEAT_INTERVALS.get(callback_data.action, 0)
+    schedule_id = await db.create_scheduled(
+        pool, bot_id, text, execute_at, callback.from_user.id,
+        repeat_interval_min=interval,
+    )
+    repeat_line = (
+        f"🔁 Повтор: <b>{_REPEAT_LABELS.get(interval, str(interval) + ' мин')}</b>\n"
+        if interval else ""
+    )
+    await callback.message.edit_text(
         f"✅ Рассылка запланирована!\n\n"
         f"🕐 Время: <b>{execute_at.strftime('%d.%m.%Y %H:%M')} UTC</b>\n"
+        f"{repeat_line}"
         f"ID: <code>#{schedule_id}</code>",
         parse_mode="HTML",
         reply_markup=back_to_bot(bot_id),

@@ -84,6 +84,7 @@ class EditTemplate(StatesGroup):
 class ScheduleBroadcast(StatesGroup):
     waiting_message = State()
     waiting_datetime = State()
+    waiting_repeat = State()
 
 
 class ImportBots(StatesGroup):
