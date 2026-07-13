@@ -83,3 +83,16 @@ def test_schema_v154_restores_and_indexes():
     assert "auto_reoptimize" in s
     # уникальный индекс под ON CONFLICT(owner_id, worker_url)
     assert "UNIQUE INDEX" in s and "cf_worker_pool(owner_id, worker_url)" in s
+
+
+def test_cf_relay_url_column_self_healed():
+    """Регресс контактов: 'column a.cf_relay_url does not exist'. Имя schema_v153
+    занято двумя агентами → CF-миграция пропускалась. Колонка/таблица должны быть
+    гарантированы (1) self-heal в main.py на старте, (2) само-содержащимся v154."""
+    m = _read("main.py")
+    assert "ADD COLUMN IF NOT EXISTS cf_relay_url TEXT" in m  # self-heal на старте
+    assert "CREATE TABLE IF NOT EXISTS cf_worker_pool" in m
+    v = _read("schema_v154.sql")
+    # v154 само-содержащийся: колонка+таблица создаются ДО индекса, не зависят от v153
+    assert "ADD COLUMN IF NOT EXISTS cf_relay_url" in v
+    assert v.index("CREATE TABLE IF NOT EXISTS cf_worker_pool") < v.index("uq_cf_worker_pool_owner_url")

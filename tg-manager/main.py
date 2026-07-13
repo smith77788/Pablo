@@ -485,6 +485,19 @@ async def main() -> None:
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS app_version TEXT",
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS lang_code TEXT",
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS system_lang_code TEXT",
+        # CF relay (schema_v153): имя файла v153 было занято двумя агентами, из-за чего
+        # раннер миграций пропускал CF-версию (тот же basename уже 'ok') → колонки не
+        # было, а get_account_for_telethon/_ACCOUNT_COLS её селектят → падал ВЕСЬ путь
+        # загрузки аккаунта (синк контактов «column a.cf_relay_url does not exist»).
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cf_relay_url TEXT",
+        # cf_worker_pool + уникальный индекс (для деплоя CF-пула) — по той же причине.
+        "CREATE TABLE IF NOT EXISTS cf_worker_pool ("
+        "id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, worker_url TEXT NOT NULL, "
+        "region TEXT DEFAULT 'auto', status TEXT DEFAULT 'active', "
+        "assigned_accounts INTEGER DEFAULT 0, last_used_at TIMESTAMPTZ, "
+        "created_at TIMESTAMPTZ DEFAULT NOW())",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_cf_worker_pool_owner_url "
+        "ON cf_worker_pool(owner_id, worker_url)",
     ):
         try:
             await pool.execute(_ddl)
