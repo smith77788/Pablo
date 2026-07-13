@@ -55,6 +55,21 @@ def test_cf_pool_ui_button_wired():
     assert "deploy_pool" in seg and "assign_urls_to_accounts" in seg
 
 
+def test_set_cf_credentials_no_jsonb_ops_on_text_column():
+    """settings_json — text-колонка (JSON-строка). set_cf_credentials должен мержить
+    в Python и писать строкой, НЕ jsonb-операторами (иначе 'COALESCE types text and
+    jsonb cannot be matched' — реальный сбой сохранения доступов)."""
+    dbsrc = _read("database/db.py")
+    seg = dbsrc[dbsrc.index("async def set_cf_credentials"):dbsrc.index("async def get_cf_credentials")]
+    # старый баг убран из САМОГО UPDATE (в поясняющем комментарии ::jsonb допустим)
+    assert "jsonb_build_object" not in seg
+    upd = seg[seg.index("UPDATE platform_users SET settings_json"):]
+    assert "::jsonb" not in upd[:200]
+    # правильный паттерн: read → merge(Python) → dumps → write строкой
+    assert "_json.loads" in seg and "_json.dumps(settings)" in seg
+    assert "SET settings_json=$2" in seg
+
+
 def test_cf_credentials_in_app_no_railway():
     """Доступы CF можно вписать в приложении (шифр в БД), Railway не обязателен."""
     dbsrc = _read("database/db.py")

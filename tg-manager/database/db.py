@@ -2905,19 +2905,26 @@ async def set_cf_credentials(pool, owner_id: int, api_token: str | None,
     существующий (можно менять только account_id/subdomain). Merge, не clobber."""
     import json as _json
     from services.token_vault import encrypt_token
-    cf: dict = {
-        "account_id": (account_id or "").strip(),
-        "subdomain": (subdomain or "").strip().replace(".workers.dev", ""),
-    }
+    # settings_json хранится как JSON-СТРОКА (text-колонка) — мержим в Python и
+    # пишем строкой, как остальной код (mini_app_api settings save). JSONB-операторы
+    # (||, ->, ::jsonb) тут падали «COALESCE types text and jsonb cannot be matched».
+    raw = await pool.fetchval(
+        "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    try:
+        settings = raw if isinstance(raw, dict) else (_json.loads(raw) if raw else {})
+    except Exception:
+        settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
+    cf = settings.get("cf") if isinstance(settings.get("cf"), dict) else {}
+    cf["account_id"] = (account_id or "").strip()
+    cf["subdomain"] = (subdomain or "").strip().replace(".workers.dev", "")
     if api_token and api_token.strip():
         cf["token_enc"] = encrypt_token(api_token.strip())
+    settings["cf"] = cf
     await pool.execute(
-        """UPDATE platform_users
-           SET settings_json = COALESCE(settings_json,'{}'::jsonb)
-               || jsonb_build_object('cf',
-                    COALESCE(settings_json->'cf','{}'::jsonb) || $2::jsonb)
-           WHERE user_id=$1""",
-        owner_id, _json.dumps(cf))
+        "UPDATE platform_users SET settings_json=$2 WHERE user_id=$1",
+        owner_id, _json.dumps(settings))
 
 
 async def get_cf_credentials(pool, owner_id: int) -> dict | None:
