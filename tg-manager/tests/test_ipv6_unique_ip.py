@@ -51,10 +51,26 @@ def test_make_client_wires_ipv6_priority_over_relay():
     assert '_IPV6_SUBNET = _os.getenv("IPV6_SUBNET"' in am
     seg = am[am.index("has_bound_proxy = bool(proxy)"):am.index("return TelegramClient")]
     # IPv6 выбирается ДО ветки CF-релея (приоритет — реальный уникальный IP)
-    assert seg.index("_IPV6_SUBNET and _acc_id") < seg.index("relay_url:")
+    assert seg.index("if not has_bound_proxy and _subnet and _acc_id") < seg.index("elif not has_bound_proxy and relay_url")
     assert "local_addr = _v6" in seg and "use_ipv6 = True" in seg
-    # gated: только без bound-прокси и при заданной подсети
-    assert "not has_bound_proxy and _IPV6_SUBNET and _acc_id" in seg
+    # подсеть: пер-владелец (приложение) перекрывает env
+    assert 'device.get("ipv6_subnet")' in seg and "_OWNER_IPV6_SUBNET.get" in seg and "_IPV6_SUBNET" in seg
+    # per-owner конфиг реально доходит: get_account_for_telethon + db-функции
+    db = _read("database/db.py")
+    assert "async def set_ipv6_subnet" in db and "async def get_ipv6_subnet" in db
+    assert 'd["ipv6_subnet"] = await get_ipv6_subnet' in db
+
+
+def test_ipv6_configurable_in_app():
+    """Пользователь настраивает всё сам: эндпоинты транспорта + панель IPv6 в UI."""
+    api = _read("services/mini_app_api.py")
+    assert "async def transport_get" in api and "async def transport_ipv6_save" in api
+    assert 'add_get("/api/miniapp/transport", transport_get)' in api
+    assert 'add_post("/api/miniapp/transport/ipv6", transport_ipv6_save)' in api
+    ui = _read("mini_app/index.html")
+    assert "saveIpv6Subnet" in ui and "loadTransport" in ui
+    assert "ipv6Subnet" in ui and "Способ получения IP" in ui
     # zero-risk: kwargs добавляются только когда IPv6 активен
+    am = _read("services/account_manager.py")
     tail = am[am.index("_extra_kwargs = {}"):am.index("StringSession(session_string)")]
     assert "if local_addr is not None:" in tail

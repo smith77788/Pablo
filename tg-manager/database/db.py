@@ -2927,6 +2927,59 @@ async def set_cf_credentials(pool, owner_id: int, api_token: str | None,
         owner_id, _json.dumps(settings))
 
 
+async def set_ipv6_subnet(pool, owner_id: int, subnet: str) -> str:
+    """Сохранить IPv6-подсеть владельца (settings_json.ipv6_subnet) для уникального
+    IP на аккаунт без прокси. '' = выключить. Валидирует, что это IPv6-сеть.
+    Возвращает нормализованную подсеть. Обновляет и in-memory кэш account_manager."""
+    import json as _json
+    subnet = (subnet or "").strip()
+    if subnet:
+        import ipaddress
+        net = ipaddress.ip_network(subnet, strict=False)  # бросит при неверном
+        if net.version != 6:
+            raise ValueError("Нужна IPv6-подсеть (напр. 2a01:4f8:abcd::/64)")
+        if net.num_addresses <= 2:
+            raise ValueError("Подсеть слишком мала — нужна хотя бы /126, а лучше /64")
+        subnet = str(net)
+    raw = await pool.fetchval(
+        "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    try:
+        settings = raw if isinstance(raw, dict) else (_json.loads(raw) if raw else {})
+    except Exception:
+        settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
+    settings["ipv6_subnet"] = subnet
+    await pool.execute(
+        "UPDATE platform_users SET settings_json=$2 WHERE user_id=$1",
+        owner_id, _json.dumps(settings))
+    try:
+        from services import account_manager
+        account_manager.set_owner_ipv6_subnet(owner_id, subnet)
+    except Exception:
+        pass
+    return subnet
+
+
+async def get_ipv6_subnet(pool, owner_id: int | None) -> str:
+    """IPv6-подсеть владельца из settings_json (или '' если не задана)."""
+    if not owner_id:
+        return ""
+    import json as _json
+    try:
+        raw = await pool.fetchval(
+            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    try:
+        data = raw if isinstance(raw, dict) else _json.loads(raw)
+        return ((data or {}).get("ipv6_subnet") or "").strip()
+    except Exception:
+        return ""
+
+
 async def get_cf_credentials(pool, owner_id: int) -> dict | None:
     """Достать доступы Cloudflare владельца (токен расшифрован). None если нет строки."""
     import json as _json
@@ -3002,6 +3055,8 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
         return None
     d = dict(row)
     d["proxy_policy"] = await get_proxy_policy(pool, d.get("owner_id"))
+    # Пер-владелец IPv6-подсеть (уникальный IP на аккаунт без прокси) — в _make_client.
+    d["ipv6_subnet"] = await get_ipv6_subnet(pool, d.get("owner_id"))
     return d
 
 

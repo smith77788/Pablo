@@ -887,3 +887,12 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - Требование к хосту (в docs/UNIQUE_IP_IPV6.md): routed IPv6-подсеть (/64,/48) + AnyIP (ip -6 route add local <subnet> dev lo; ip_nonlocal_bind=1). Railway с shared-IPv6 без делегированного блока НЕ подойдёт — нужен VPS/dedic с IPv6 (Hetzner/OVH/Contabo). Тогда каждый аккаунт без прокси ходит со своего IPv6.
 Приоритет транспорта: bound-прокси → свой IPv6 → CF-релей → пул SOCKS5/прямое.
 Проверено: test_ipv6_unique_ip (2) — маппинг уникален/детерминирован на 1000 акк., валидный IPv6, edge-cases→None; исходник _make_client: IPv6 до релея, gated, zero-risk kwargs. Telethon в песочнице нет (use_ipv6/local_addr — штатные params 1.x), но при выключенном режиме вызов идентичен прежнему. AST зелёно.
+
+## tg-manager: настройка IP/транспорта пользователем сам (IPv6 in-app) — 2026-07-14
+Просьба: дать пользователю выбирать и настраивать всё самому. Сделано:
+  - db.set_ipv6_subnet/get_ipv6_subnet (platform_users.settings_json.ipv6_subnet, валидация IPv6-сети). set_ipv6_subnet обновляет и in-memory кэш account_manager.
+  - get_account_for_telethon добавляет d["ipv6_subnet"] (пер-владелец доходит до _make_client, переживает рестарт для основного пути).
+  - account_manager: _OWNER_IPV6_SUBNET кэш + set_owner_ipv6_subnet; _make_client берёт подсеть device.ipv6_subnet → кэш → env _IPV6_SUBNET. IPv6 в приоритете над CF-релеем.
+  - Эндпоинты: GET /api/miniapp/transport (текущий режим+приоритет), POST /api/miniapp/transport/ipv6 (сохранить/выключить подсеть, 400 при неверной).
+  - UI: панель «🌐 Способ получения IP» — объясняет приоритет (прокси→IPv6→CF→прямое), плюсы/минусы каждого; свёрнутая настройка своего IPv6 (ввод CIDR + сохранить). Статус показывает текущий режим для аккаунтов без прокси.
+Проверено: test_ipv6_unique_ip (3: маппинг, проводка _make_client+db, in-app конфиг) + CF-связки. Python AST (db/account_manager/mini_app_api) + node --check всего JS зелёно.

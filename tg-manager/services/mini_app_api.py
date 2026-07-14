@@ -12339,12 +12339,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("cf_pool_clear uid=%s", uid)
             return _err(str(e)[:150], 500)
 
+    async def transport_get(request: web.Request) -> web.Response:
+        """Текущий способ получения IP на аккаунт: прокси / IPv6 / CF-релей / прямое.
+        Отдаёт что задано и какой приоритет реально сработает."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from database import db
+            n_proxies = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+                uid) or 0)
+            n_bound = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+                "AND proxy_id IS NOT NULL", uid) or 0)
+            ipv6 = await db.get_ipv6_subnet(pool, uid)
+            c = await _cf_resolve_creds(uid)
+            cf_ready = bool(c["has_token"] and c["account_id"])
+            # приоритет для аккаунта без своего прокси
+            if ipv6:
+                default_mode = "ipv6"
+            elif cf_ready:
+                default_mode = "cf_relay"
+            else:
+                default_mode = "direct"
+            return _json_resp({
+                "proxies": n_proxies, "accounts_with_proxy": n_bound,
+                "ipv6_subnet": ipv6, "cf_ready": cf_ready,
+                "default_mode_for_naked": default_mode,
+            })
+        except Exception as e:
+            log.exception("transport_get uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def transport_ipv6_save(request: web.Request) -> web.Response:
+        """Сохранить/выключить IPv6-подсеть владельца (уникальный IP без прокси).
+        body: {subnet: '2a01:...::/64' | ''}. Пустая = выключить."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        try:
+            from database import db
+            norm = await db.set_ipv6_subnet(pool, uid, data.get("subnet") or "")
+            return _json_resp({"ok": True, "ipv6_subnet": norm})
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception as e:
+            log.exception("transport_ipv6_save uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
     app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
     app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
     app.router.add_post("/api/miniapp/cf/pool/check", cf_pool_check)
     app.router.add_post("/api/miniapp/cf/pool/assign", cf_pool_assign)
     app.router.add_post("/api/miniapp/cf/pool/clear", cf_pool_clear)
     app.router.add_post("/api/miniapp/cf/credentials", cf_credentials_save)
+    app.router.add_get("/api/miniapp/transport", transport_get)
+    app.router.add_post("/api/miniapp/transport/ipv6", transport_ipv6_save)
 
     # ── Search Ranking Engine ──────────────────────────────────────────────────
     async def ranking_track(request: web.Request) -> web.Response:

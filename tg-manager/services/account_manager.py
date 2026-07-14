@@ -133,6 +133,21 @@ _OP_TIMEOUT = 45
 # (нулевое изменение поведения).
 _IPV6_SUBNET = _os.getenv("IPV6_SUBNET", "").strip()
 
+# Пер-владелец IPv6-подсеть, заданная в приложении (перекрывает env). Кэш в памяти
+# (обновляется при сохранении настроек), + читается из БД в get_account_for_telethon.
+_OWNER_IPV6_SUBNET: dict[int, str] = {}
+
+
+def set_owner_ipv6_subnet(owner_id: int | None, subnet: str | None) -> None:
+    """Обновить in-memory IPv6-подсеть владельца (вызывается при сохранении в БД)."""
+    if owner_id is None:
+        return
+    s = (subnet or "").strip()
+    if s:
+        _OWNER_IPV6_SUBNET[int(owner_id)] = s
+    else:
+        _OWNER_IPV6_SUBNET.pop(int(owner_id), None)
+
 
 def _account_ipv6(account_id: int, subnet_cidr: str) -> str | None:
     """Детерминированно вернуть УНИКАЛЬНЫЙ IPv6 аккаунта из подсети (или None).
@@ -800,11 +815,21 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     use_ipv6 = False
     _acc_id = device.get("id") if device else None
 
-    if not has_bound_proxy and _IPV6_SUBNET and _acc_id:
+    # Подсеть: сначала пер-владелец из приложения (device/кэш), иначе глобальный env.
+    _owner_id = device.get("owner_id") if device else None
+    _subnet = ""
+    if device:
+        _subnet = (device.get("ipv6_subnet") or "").strip()
+    if not _subnet and _owner_id is not None:
+        _subnet = _OWNER_IPV6_SUBNET.get(int(_owner_id), "")
+    if not _subnet:
+        _subnet = _IPV6_SUBNET
+
+    if not has_bound_proxy and _subnet and _acc_id:
         # ПРИОРИТЕТ над CF-релеем: IPv6 даёт РЕАЛЬНО уникальный IP на аккаунт
         # (у CF-релея общий edge-IP на пул). Прямое obfuscated-подключение к
         # IPv6-DC Telegram с bind на свой адрес.
-        _v6 = _account_ipv6(int(_acc_id), _IPV6_SUBNET)
+        _v6 = _account_ipv6(int(_acc_id), _subnet)
         if _v6:
             local_addr = _v6
             use_ipv6 = True
