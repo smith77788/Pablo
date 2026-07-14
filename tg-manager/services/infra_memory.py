@@ -641,7 +641,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
     try:
         rows = await pool.fetch(
             """
-            SELECT a.id, a.phone,
+            SELECT a.id, a.phone, COALESCE(a.acc_status,'active') AS acc_status,
               (SELECT COUNT(*) FROM restriction_events r
                  WHERE r.account_id=a.id
                    AND r.created_at > NOW() - make_interval(days => $2)) AS restrictions,
@@ -668,10 +668,15 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         severe = int(r["severe"] or 0)
         restr = int(r["restrictions"] or 0)
         floods = int(r["floods"] or 0)
-        if severe:
+        acc_status = (r["acc_status"] or "active").lower()
+        # acc_status тоже сигнал здоровья (его ставят warmer/recovery/op_worker):
+        # banned/session_expired → карантин; cooldown/warming → риск.
+        status_bad = acc_status in ("banned", "session_expired", "deleted")
+        status_risk = acc_status in ("cooldown", "warming", "restricted", "flood")
+        if severe or status_bad:
             status, score = "quarantine", 0.2
             quarantine += 1
-        elif restr or floods >= 3:
+        elif restr or floods >= 3 or status_risk:
             status, score = "at_risk", 0.5
             at_risk += 1
         elif floods:
@@ -682,7 +687,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             healthy += 1
         accounts.append({
             "account_id": r["id"], "phone": r["phone"],
-            "status": status, "score": score,
+            "status": status, "score": score, "acc_status": acc_status,
             "restrictions": restr, "floods": floods,
         })
     # худшие — вперёд (для приборного щитка)

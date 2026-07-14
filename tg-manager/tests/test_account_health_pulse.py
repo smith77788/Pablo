@@ -54,10 +54,10 @@ def test_quarantine_is_fail_open():
 def test_health_scoring_and_summary():
     async def _run():
         rows = [
-            {"id": 1, "phone": "a", "restrictions": 0, "severe": 0, "floods": 0},
-            {"id": 2, "phone": "b", "restrictions": 0, "severe": 1, "floods": 0},
-            {"id": 3, "phone": "c", "restrictions": 2, "severe": 0, "floods": 0},
-            {"id": 4, "phone": "d", "restrictions": 0, "severe": 0, "floods": 1},
+            {"id": 1, "phone": "a", "acc_status": "active", "restrictions": 0, "severe": 0, "floods": 0},
+            {"id": 2, "phone": "b", "acc_status": "active", "restrictions": 0, "severe": 1, "floods": 0},
+            {"id": 3, "phone": "c", "acc_status": "active", "restrictions": 2, "severe": 0, "floods": 0},
+            {"id": 4, "phone": "d", "acc_status": "active", "restrictions": 0, "severe": 0, "floods": 1},
         ]
         r = await get_account_health(_FakePool(rows=rows), 99)
         assert r["summary"] == {"healthy": 1, "at_risk": 2, "quarantine": 1, "total": 4}
@@ -68,12 +68,40 @@ def test_health_scoring_and_summary():
     asyncio.run(_run())
 
 
+def test_acc_status_folds_into_health():
+    """acc_status тоже сигнал: banned→карантин, cooldown/warming→риск (read-only)."""
+    async def _run():
+        rows = [
+            {"id": 1, "phone": "a", "acc_status": "active", "restrictions": 0, "severe": 0, "floods": 0},
+            {"id": 2, "phone": "b", "acc_status": "banned", "restrictions": 0, "severe": 0, "floods": 0},
+            {"id": 3, "phone": "c", "acc_status": "warming", "restrictions": 0, "severe": 0, "floods": 0},
+        ]
+        r = await get_account_health(_FakePool(rows=rows), 99)
+        assert r["summary"] == {"healthy": 1, "at_risk": 1, "quarantine": 1, "total": 3}
+    asyncio.run(_run())
+
+
 def test_reflex_wired_into_op_worker():
-    """Рефлекс подключён в горячий путь массовой операции (bulk_join)."""
+    """Рефлекс подключён в горячие пути массовых операций (bulk_join + bulk_leave)."""
     ow = _read("services/op_worker.py")
     assert "is_account_quarantined" in ow
     # именно fail-open вызов через уже импортированный алиас _infra_mem
     assert "_infra_mem.is_account_quarantined(pool" in ow
+    # покрыты оба массовых пути по каналам
+    assert ow.count("_infra_mem.is_account_quarantined(pool") >= 2
+    assert "bulk_leave: аккаунт %s в карантине" in ow
+
+
+def test_operation_bus_supports_label():
+    """Волна S/1A: шина умеет писать label — миграция прямых INSERT (которые
+    писали label) на operation_bus.submit больше не теряет метку."""
+    ob = _read("services/operation_bus.py")
+    seg = ob[ob.index("async def submit"):]
+    assert "label: Optional[str] = None" in seg
+    # label реально пишется в INSERT (а не только принимается)
+    ins = seg[seg.index("INSERT INTO operation_queue"):seg.index("RETURNING id")]
+    assert "label" in ins
+    assert "op_label = label or meta.get(\"description\")" in seg
 
 
 def test_pulse_surfaced_in_api_and_ui():

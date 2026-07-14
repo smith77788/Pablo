@@ -422,6 +422,7 @@ async def submit(
     scheduled_for: Optional[str] = None,
     template_id: Optional[int] = None,
     max_retries: Optional[int] = None,
+    label: Optional[str] = None,
 ) -> int:
     """Поставить операцию в очередь. Возвращает op_id.
 
@@ -434,6 +435,9 @@ async def submit(
       scheduled_for — ISO timestamp запуска (NULL = немедленно)
       template_id  — id шаблона (если применимо)
       max_retries  — переопределить количество повторов (None = из OP_REGISTRY)
+      label        — человекочитаемая метка операции в очереди (None = описание
+                     из OP_REGISTRY). Нужна, чтобы миграция прямых INSERT на шину
+                     не теряла label, который они писали (см. Волна S/1A).
 
     Raises:
       ValueError — если op_type не зарегистрирован в OP_REGISTRY
@@ -445,6 +449,7 @@ async def submit(
 
     meta = OP_REGISTRY[op_type]
     retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
+    op_label = label or meta.get("description") or op_type
 
     params_json = json.dumps(params, ensure_ascii=False)
 
@@ -452,10 +457,10 @@ async def submit(
         """INSERT INTO operation_queue
                (owner_id, op_type, status, params,
                 total_items, done_items,
-                scheduled_for, template_id, max_retries, created_at)
+                scheduled_for, template_id, max_retries, label, created_at)
            VALUES ($1, $2, 'pending', $3::jsonb,
                    $4, 0,
-                   $5::timestamptz, $6, $7, NOW())
+                   $5::timestamptz, $6, $7, $8, NOW())
            RETURNING id""",
         owner_id,
         op_type,
@@ -464,6 +469,7 @@ async def submit(
         scheduled_for,
         template_id,
         retries,
+        op_label,
     )
     op_id: int = row["id"]
     log.info(

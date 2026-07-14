@@ -2885,6 +2885,14 @@ async def _exec_bulk_leave(
             )
             skipped_by_limit += 1
             continue
+        # Риск-пульс (Волна S/1B, fail-open): карантинный аккаунт не трогаем.
+        if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+            log.info(
+                "bulk_leave: аккаунт %s в карантине (недавнее ограничение), пропуск",
+                acc_dict.get("phone"),
+            )
+            skipped_by_limit += 1
+            continue
         for i, channel in enumerate(channels):
             if await _is_cancelled(pool, op_id):
                 await release_accounts(used_acc_ids)
