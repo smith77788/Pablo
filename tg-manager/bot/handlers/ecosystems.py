@@ -328,13 +328,36 @@ async def cb_eco_view(
     kb.button(text="♻️ Клон", callback_data=EcoCb(action="clone_start", eco_id=eco_id))
     kb.button(text="🏭 Фабрика", callback_data=EcoCb(action="factory", eco_id=eco_id))
     kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
+    _am = await _eb.is_auto_manage_enabled(pool, eco_id, callback.from_user.id)
+    kb.button(
+        text=f"🤖 Автоуправление: {'ВКЛ' if _am else 'ВЫКЛ'}",
+        callback_data=EcoCb(action="toggle_automanage", eco_id=eco_id),
+    )
     kb.button(text="🗄 Архивировать", callback_data=EcoCb(action="archive_ask", eco_id=eco_id))
     kb.button(text="🔄 Обновить", callback_data=EcoCb(action="view", eco_id=eco_id))
     kb.button(text="◀️ Назад", callback_data=EcoCb(action="menu"))
-    kb.adjust(3, 2, 2, 2, 2, 1, 1, 2)
+    kb.adjust(3, 2, 2, 2, 2, 1, 1, 1, 2)
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=kb.as_markup()
     )
+
+
+@router.callback_query(EcoCb.filter(F.action == "toggle_automanage"))
+async def cb_eco_toggle_automanage(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Переключить авто-управление экосистемой (opt-in, Tier-1 4B)."""
+    from services import ecosystem_brain as _eb
+
+    eco_id = callback_data.eco_id
+    cur = await _eb.is_auto_manage_enabled(pool, eco_id, callback.from_user.id)
+    ok = await _eb.set_auto_manage(pool, eco_id, callback.from_user.id, not cur)
+    if not ok:
+        await callback.answer("❌ Экосистема не найдена", show_alert=True)
+        return
+    # Перерисовать карточку — cb_eco_view сам ответит на callback и покажет
+    # обновлённую кнопку (ВКЛ/ВЫКЛ). Отдельный answer тут вызвал бы double-answer.
+    await cb_eco_view(callback, callback_data, pool, state)
 
 
 # ── Ecosystem Factory Hub ────────────────────────────────────────────────────

@@ -2077,25 +2077,103 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
 
 # ── Auto-Management ───────────────────────────────────────────────────────────
 
-async def auto_add_channels(pool: asyncpg.Pool, owner_id: int, ecosystem_id: int) -> dict:
-    new_channels = await pool.fetch(
-        """SELECT id, username FROM tg_channels 
-           WHERE owner_id=$1 AND id NOT IN 
-             (SELECT channel_id FROM ecosystem_channels WHERE ecosystem_id=$2)
-           AND created_at > NOW() - INTERVAL '7 days'""",
-        owner_id, ecosystem_id,
+async def auto_add_channels(pool: asyncpg.Pool, owner_id: int, ecosystem_id: int,
+                            recent_days: int = 7) -> dict:
+    """Авто-добавить недавно заведённые каналы владельца в экосистему (4B).
+
+    ВАЖНО: канонический источник членов-каналов — managed_channels.channel_id,
+    а членство хранится в ecosystem_members (object_type='channel'), что читает
+    get_members и весь UI. Прежняя версия писала в ecosystem_channels — таблицу,
+    которую НИКТО кроме мёртвых auto_*-функций не читает → фича была фиктивной.
+    Здесь используем реальный путь через add_member (owner-scoped, идемпотентно).
+    """
+    candidates = await pool.fetch(
+        """SELECT DISTINCT mc.channel_id
+           FROM managed_channels mc
+           WHERE mc.owner_id = $1
+             AND mc.added_at > NOW() - ($3 || ' days')::INTERVAL
+             AND NOT EXISTS (
+                 SELECT 1 FROM ecosystem_members em
+                 WHERE em.ecosystem_id = $2
+                   AND em.object_type = 'channel'
+                   AND em.object_id = mc.channel_id
+             )""",
+        owner_id, ecosystem_id, recent_days,
     )
     added = 0
-    for ch in new_channels:
-        try:
-            await pool.execute(
-                "INSERT INTO ecosystem_channels (ecosystem_id, channel_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                ecosystem_id, ch["id"],
-            )
+    for ch in candidates:
+        if await add_member(pool, ecosystem_id, owner_id, "channel", ch["channel_id"]):
             added += 1
-        except Exception as e:
-            log.warning("auto_add_channels: failed for ch=%d: %s", ch["id"], e)
-    return {"added": added, "total_new": len(new_channels)}
+    return {"added": added, "total_new": len(candidates)}
+
+
+# ── Auto-Management (opt-in) — Tier-1 4B ──────────────────────────────────────
+# Флаг включения хранится в ecosystems.meta.auto_manage (без миграции схемы).
+# По умолчанию ВЫКЛ → нулевое изменение поведения, пока владелец не включит.
+_AUTO_MANAGE_INTERVAL = 6 * 3600  # раз в 6 часов
+
+
+async def set_auto_manage(
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int, enabled: bool
+) -> bool:
+    """Включить/выключить авто-управление экосистемой. Owner-scoped.
+
+    Возвращает True если экосистема найдена и обновлена (принадлежит владельцу)."""
+    res = await pool.execute(
+        "UPDATE ecosystems "
+        "SET meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{auto_manage}', to_jsonb($3::bool)), "
+        "    updated_at = now() "
+        "WHERE id = $1 AND owner_id = $2",
+        ecosystem_id, owner_id, enabled,
+    )
+    try:
+        return int(str(res).split()[-1]) > 0
+    except (ValueError, IndexError):
+        return False
+
+
+async def is_auto_manage_enabled(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) -> bool:
+    """Проверить, включено ли авто-управление (owner-scoped)."""
+    row = await pool.fetchrow(
+        "SELECT COALESCE(meta->>'auto_manage', '') AS am "
+        "FROM ecosystems WHERE id=$1 AND owner_id=$2",
+        ecosystem_id, owner_id,
+    )
+    return bool(row) and row["am"] == "true"
+
+
+async def run_auto_management(pool: asyncpg.Pool, bot) -> None:
+    """Фоновый цикл авто-управления экосистемами (opt-in, Tier-1 4B).
+
+    In-memory state: нет — источник истины в БД, безопасно между воркерами.
+    Раз в 6ч для экосистем с meta.auto_manage=true добавляет недавно заведённые
+    каналы владельца (auto_add_channels, канонический путь ecosystem_members).
+    Удаление мёртвых каналов и автопостинг сознательно НЕ включены: managed_channels
+    не имеет надёжного сигнала активности, а автопостинг создаёт операции — это
+    отдельное решение по объёму (см. AUDIT_LEDGER)."""
+    log.info("ecosystem auto_management: loop started (interval=6h, opt-in)")
+    await asyncio.sleep(300)  # дать боту прогреться перед первым проходом
+    while True:
+        try:
+            ecos = await pool.fetch(
+                "SELECT id, owner_id, name FROM ecosystems "
+                "WHERE status='active' AND COALESCE(meta->>'auto_manage','')='true'"
+            )
+            for e in ecos:
+                try:
+                    res = await auto_add_channels(pool, e["owner_id"], e["id"])
+                    if res.get("added"):
+                        log.info(
+                            "auto_management: eco=%d owner=%d +%d новых каналов",
+                            e["id"], e["owner_id"], res["added"],
+                        )
+                except Exception as ie:
+                    log_exc_swallow(log, f"auto_management eco={e['id']}: {ie}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as ex:
+            log.warning("auto_management loop error: %s", ex, exc_info=True)
+        await asyncio.sleep(_AUTO_MANAGE_INTERVAL)
 
 
 async def auto_remove_dead_channels(pool: asyncpg.Pool, ecosystem_id: int, inactive_days: int = 30) -> dict:

@@ -154,6 +154,7 @@ from services import ecosystem_copilot
 from services import db_maintenance
 from services import recovery_engine
 from services import anomaly_detector
+from services import ecosystem_brain
 from services import proxy_scraper
 from services import activity_logger
 from services import promo_scheduler
@@ -658,6 +659,9 @@ async def main() -> None:
         )
         asyncio.create_task(_resilient("activity_logger", activity_logger.run, pool))
         asyncio.create_task(_resilient("drift_detector", drift_detector.run, pool, bot))
+        asyncio.create_task(
+            _resilient("ecosystem_auto_management", ecosystem_brain.run_auto_management, pool, bot)
+        )
         asyncio.create_task(
             _resilient("infra_memory", infra_memory.run_flush_loop, pool)
         )
