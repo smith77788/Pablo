@@ -289,15 +289,21 @@ async def msg_inviter_acc_count(
     per_acc = max(1, (total_users + use - 1) // use)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить", callback_data=InviterCb(action="confirm"))
+    # Темп = пауза между батчами. Инвайт — самая баноопасная операция, поэтому
+    # выбор скорости обязателен (медленный безопаснее для аккаунтов).
+    kb.button(text="🐢 Медленно (безопасно)", callback_data=InviterCb(action="confirm", item="slow"))
+    kb.button(text="🚶 Обычно", callback_data=InviterCb(action="confirm", item="normal"))
+    kb.button(text="🐇 Быстро (риск)", callback_data=InviterCb(action="confirm", item="fast"))
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
-    kb.adjust(2)
+    kb.adjust(1, 2, 1)
     await message.answer(
-        "👥 <b>Инвайтер — подтверждение</b>\n\n"
+        "👥 <b>Инвайтер — выбор темпа</b>\n\n"
         f"🎯 Группа: <code>{html.escape(group)}</code>\n"
         f"📋 Источник: {html.escape(source_label)}\n"
         f"🔑 Аккаунтов: <b>{use}</b>\n"
-        f"📊 ~{per_acc} пользователей на аккаунт",
+        f"📊 ~{per_acc} пользователей на аккаунт\n\n"
+        "⚠️ <i>Инвайт — самая баноопасная операция. «Медленно» "
+        "снижает риск ограничений аккаунтов.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -307,11 +313,13 @@ async def msg_inviter_acc_count(
 
 @router.callback_query(InviterCb.filter(F.action == "confirm"))
 async def cb_inviter_confirm(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     data = await state.get_data()
     await state.clear()
     owner_id = callback.from_user.id
+    # Темп из выбранной кнопки (slow/normal/fast); дефолт — normal.
+    pace = callback_data.item if callback_data.item in ("slow", "normal", "fast") else "normal"
     acc_count = data.get("acc_count", 1)
     group = data.get("group", "")
     source_type = data.get("source_type", "manual")
@@ -368,7 +376,13 @@ async def cb_inviter_confirm(
         "user_refs": user_refs,
         "phones": phones,
         "batch_size": 5,
+        # Ban-safety: темп из выбора пользователя (пауза между батчами) +
+        # консервативный потолок инвайтов на аккаунт за прогон (50 — широко
+        # принятый безопасный дневной предел; защищает аккаунты от овер-инвайта).
+        "pace": pace,
+        "per_account_limit": 50,
     }
+    _pace_ru = {"slow": "🐢 медленно", "normal": "🚶 обычно", "fast": "🐇 быстро"}[pace]
     label = f"Инвайтер: {group} ← {total_users} пользователей × {len(account_ids)} акк."
     op_id = await pool.fetchval(
         "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
@@ -386,6 +400,7 @@ async def cb_inviter_confirm(
         f"🆔 Операция: <b>#{op_id}</b>\n"
         f"🎯 Группа: <code>{html.escape(group)}</code>\n"
         f"👥 Пользователей: <b>{total_users}</b>\n"
-        f"🔑 Аккаунтов: <b>{len(account_ids)}</b>",
+        f"🔑 Аккаунтов: <b>{len(account_ids)}</b>\n"
+        f"⏱ Темп: <b>{_pace_ru}</b> · лимит <b>50</b>/акк за прогон",
         kb.as_markup(),
     )
