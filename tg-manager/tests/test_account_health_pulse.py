@@ -95,6 +95,20 @@ def test_low_trust_folds_into_health():
     asyncio.run(_run())
 
 
+def test_pulse_folds_all_five_signals():
+    """Единый пульс сводит ВСЕ сигналы: restriction_events + acc_status + flood +
+    trust_score + in-memory account_health.health_score."""
+    src = _read("services/infra_memory.py")
+    seg = src[src.index("async def get_account_health"):]
+    assert "restriction_events" in seg
+    assert 'acc_status' in seg
+    assert "account_flood_log" in seg
+    assert "trust_score" in seg
+    assert "account_health" in seg and "health_score" in seg
+    # health<10 → карантин, <30 → риск
+    assert "hscore < 10.0" in seg and "hscore < 30.0" in seg
+
+
 def test_reflex_wired_into_op_worker():
     """Рефлекс подключён в горячие пути массовых операций (bulk_join + bulk_leave)."""
     ow = _read("services/op_worker.py")

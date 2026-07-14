@@ -2655,11 +2655,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not ids:
             return _err("Нет аккаунтов для проверки", 400)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'check_accounts_health','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"account_ids": ids, "check_spambot": True}),
-                len(ids), f"Проверка {len(ids)} аккаунтов",
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "check_accounts_health",
+                {"account_ids": ids, "check_spambot": True},
+                total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов",
             )
             return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
         except Exception as exc:
@@ -2767,18 +2767,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         n = len(ids)
         try:
             if op == "check":
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,'check_accounts_health','pending',$2,$3,$4) RETURNING id",
-                    uid, _json.dumps({"account_ids": ids, "check_spambot": True}), n,
-                    f"Проверка {n} аккаунтов")
+                from services import operation_bus as _obus
+                op_id = await _obus.submit(
+                    pool, uid, "check_accounts_health",
+                    {"account_ids": ids, "check_spambot": True},
+                    total_items=n, label=f"Проверка {n} аккаунтов")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             if op == "scan":
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,'scan_owned_resources','pending',$2,$3,$4) RETURNING id",
-                    uid, _json.dumps({"account_ids": ids}), n,
-                    f"Скан ресурсов: {n} акк.")
+                from services import operation_bus as _obus
+                op_id = await _obus.submit(
+                    pool, uid, "scan_owned_resources", {"account_ids": ids},
+                    total_items=n, label=f"Скан ресурсов: {n} акк.")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             if op == "set_stage":
                 # Пере­мещение в CRM-статус — чистое DB-действие, без очереди/Telethon.
@@ -3567,11 +3566,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not owns:
             return _err("Аккаунт не найден", 404)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'check_accounts_health','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"account_ids": [acc_id], "check_spambot": True}),
-                "Проверка аккаунта")
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "check_accounts_health",
+                {"account_ids": [acc_id], "check_spambot": True},
+                total_items=1, label="Проверка аккаунта")
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception as exc:
             log.exception("account_check_one uid=%d acc=%d", uid, acc_id)
@@ -3892,12 +3891,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нет активных аккаунтов", 400)
         try:
             label = f"Проверка на запрещёнку: {len(resources)} ресурсов"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'compliance_scan','pending',$2,$3,$4) RETURNING id",
-                uid,
-                _json.dumps({"resources": resources, "per_resource_limit": per_limit, "acc_count": acc_count}),
-                len(resources), label)
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "compliance_scan",
+                {"resources": resources, "per_resource_limit": per_limit, "acc_count": acc_count},
+                total_items=len(resources), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "resources": len(resources)})
         except Exception as exc:
             log.exception("compliance_scan_submit uid=%d", uid)

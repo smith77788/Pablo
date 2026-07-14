@@ -681,10 +681,19 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         except (TypeError, ValueError):
             trust = 1.0
         low_trust = trust < 0.4
-        if severe or status_bad:
+        # Последний разрозненный орган — in-memory account_health.health_score
+        # (0..100, у неизвестных = 100). Сводим и его в единый пульс: <10 = мёртв
+        # (карантин), <30 = риск. process-local (может быть пустым на свежем воркере
+        # → 100 = нейтрально, никогда не флагает ложно).
+        try:
+            from services import account_health as _ah
+            hscore = float(_ah.get_health(r["id"]).health_score)
+        except Exception:
+            hscore = 100.0
+        if severe or status_bad or hscore < 10.0:
             status, score = "quarantine", 0.2
             quarantine += 1
-        elif restr or floods >= 3 or status_risk or low_trust:
+        elif restr or floods >= 3 or status_risk or low_trust or hscore < 30.0:
             status, score = "at_risk", min(0.5, trust)
             at_risk += 1
         elif floods:
