@@ -4689,6 +4689,36 @@ async def _exec_strike(
     if not target:
         return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
 
+    # ── Anti-detection (3A): не бить одну цель повторно в короткий интервал ────
+    # Повторные удары по одной цели за короткое время — детекшн-паттерн и лишний
+    # износ аккаунтов. is_strike_allowed матчит strike_history.target по тому же
+    # значению, что пишется после удара (r.target == сырой target). Настраивается
+    # min_restrike_hours (default 4ч), сознательный повтор — params.force=True.
+    if not params.get("force"):
+        try:
+            _min_restrike_h = int(params.get("min_restrike_hours", 4))
+        except (ValueError, TypeError):
+            _min_restrike_h = 4
+        if _min_restrike_h > 0:
+            from services.strike_engine import is_strike_allowed
+
+            if not await is_strike_allowed(pool, target, _min_restrike_h):
+                log.info(
+                    "_exec_strike op=%d: target=%s атакована в последние %dч — пропуск (anti-detect)",
+                    op_id, target, _min_restrike_h,
+                )
+                return {
+                    "status": "done",
+                    "ok": 0,
+                    "failed": 0,
+                    "skipped": True,
+                    "summary": (
+                        f"⏳ Цель <code>{target}</code> уже атакована в последние "
+                        f"{_min_restrike_h}ч — повтор пропущен для анти-детекции "
+                        f"и защиты аккаунтов. Для сознательного повтора включите force."
+                    ),
+                }
+
     # ── Загрузить аккаунты через resource_selector (flood-aware + cooldown) ───
     raw_accounts = await resource_selector.select_all_active(
         pool,
