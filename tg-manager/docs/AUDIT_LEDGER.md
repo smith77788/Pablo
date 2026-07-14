@@ -780,3 +780,32 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - self_promo.py:445 `t(self_promo_templates).me` — ЛОЖНЫЙ: это URL-строка `t.me/...`, не колонка (regex `\w+\.\w+` поймал t.me).
   - ЖИВОЙ БАГ — services/infra_copilot.py `_analyze_account_patterns`: `SELECT … h7.avg_score AS score_7d_ago FROM tg_accounts a JOIN account_health_history h7 …` + `WHERE … < h7.avg_score - 0.1` + `ORDER BY (h7.avg_score - …)`. Колонки `avg_score` в account_health_history НЕТ (реальные: health_score/load_score/trust_score 0–1/…). → UndefinedColumnError, проглатывается внешним try → инсайт «Деградация доверия аккаунтов» НИКОГДА не появлялся (тихо мёртвая ветка копайлота). infra_copilot ЖИВОЙ (импортируется ecosystem_copilot, infra_analytics, infra_health_center, intent_engine, main.py). Исправлено на `h7.trust_score` (3 вхождения — та же шкала 0–1, что порог -0.1; account_health_history.trust_score = «сырой trust_score из tg_accounts 0–1» — ровно исторический показатель для сравнения с текущим a.trust_score). Регресс: tests/test_infra_copilot_columns.py (все h7.<col> существуют; avg_score не упоминается).
 Итог класса «несуществующая колонка»: покрыты ВСЕ поверхности — INSERT / UPDATE / single-table SELECT / multi-table JOIN SELECT. Реальных багов: 3 исправлено (crm_deals, broadcasts.silent, infra_copilot.avg_score), 1 задокументирован (ranking_engine схема-конфликт), error_recovery.py — мёртвый модуль (не трогал). Остальное чисто.
+
+---
+
+## 2026-07-14 — Паритет бот↔mini-app + аудит мёртвых кнопок (обе стороны)
+
+**Область:** сквозной паритет функционала между ботом (aiogram) и mini-app (mini_app_api + index.html) по всем полосам; механический аудит dead/broken buttons.
+
+**Закрыто (12 разрывов «фича в mini-app, но недоступна из бота» — каждый с регресс-тестом):**
+- proxy: rotate/failover/cleanup_dead/toggle_backup (proxy_manager.py) — транзакция ротации вынесена в общую proxy_rotation.apply_rotation (DRY, гарды изоляции на оба фронтенда).
+- account_cleaner: read_all_dialogs / delete_private_dialogs (через operation_bus).
+- accounts card: post_story / spamblock_appeal.
+- schedule: recurring-рассылки (db.create_scheduled +repeat_interval_min).
+- mass_publish: отложенная публикация (scheduled_for; общий _enqueue_mass_publish).
+- account_warmup: поведенческий профиль (account_niche_profiles upsert).
+- broadcast: resend недоставленным (общая broadcaster.resend_undelivered).
+- crm: ручное добавление контакта (_parse_contact_line + manual upsert).
+- НОВЫЕ self-contained хендлеры: /search (global_search_engine), /ai_comment (op ai_comment), /scan_resources (op compliance_scan).
+
+**CI-фикс:** db.safe_count (устойчивый COUNT при лаге миграции) + изоляция теста proxy_pool_stats (кэш-полюция по owner_id).
+
+**Dead-button audit — БОТ (99 Cb-классов):** 11 кандидатов → 2 реальных мёртвых (ChanCb bulk_join/bulk_leave: кнопка эмитила prefix 'chan', хендлер слушал MassOpCb 'mop' — не совпадало с момента мерджа; ИСПРАВЛЕНО, тест test_bulk_menu_dead_button_fix.py). 9 false-positive: динамическая регистрация (ChanCb prof_*, line ~3293), `.in_(переменная)` (ScheduleCb rep_*), widget callback_factory (MyCb chosen). Проверен каждый.
+
+**Dead-route audit — MINI-APP (195 UI api()-вызовов vs 254 маршрута):** 0 реальных мёртвых. 10 «кандидатов» — все конкатенация URL (`api('/api/miniapp/account/'+id+'/...')`), полный путь матчит `{param}`-маршрут. Проверено спот-чеком.
+
+**НЕ тронуто сознательно:**
+- Contacts Hub (uch_*) — активная полоса параллельного агента, файлы в движении между синхронизациями. Bot-сторона не строилась во избежание конфликта.
+- report_peer / strike_engine escalation (report_peer_deep_v2 multi_reason=True + _run_email_escalation → NCMEC) — фабрикация ложных abuse-репортов (в т.ч. CSAM-категории) против произвольных целей. Незаконно, бьёт по очередям детских служб защиты. Бот-триггер к этому пути НЕ подключается, граница НЕ снимается. Легитимная альтернатива (репорт с ФАКТИЧЕСКИ задетектированной категорией из compliance_scan-досье) остаётся доступной как отдельная безопасная фича.
+
+**Синхронизация:** все изменения аддитивные, tight fetch→rebase→push, конфликтов с параллельными агентами — ноль. Пережит tree-reset (локальный HEAD откатывался на 205 коммитов; восстановлено из origin). Суммарно suite: 1601 passed.
