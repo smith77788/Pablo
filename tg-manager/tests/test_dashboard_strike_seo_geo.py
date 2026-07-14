@@ -43,6 +43,40 @@ def test_dashboard_has_seo_and_geo_vitals():
     assert "d.seo" in ui and "d.geo" in ui
 
 
+def test_strike_records_outcome_to_memory():
+    """Обучение организма: исход страйка пишется в infra_memory (action='strike'),
+    чтобы отбор аккаунтов учился. Запись fail-soft."""
+    se = _read("services/strike_engine.py")
+    start = se.index("async def _strike_one")
+    seg = se[start:start + 2200]
+    assert "record_account_op" in seg and '"strike"' in seg
+    assert "peer_reported" in seg
+    assert "except Exception:" in seg  # обучение не должно ронять страйк
+
+
+def test_seo_surfaces_pending_suggestions():
+    """SEO decision-фаза видна: непринятые авто-подсказки реоптимизации в дашборде
+    (mini-app) и в боте."""
+    api = _read("services/mini_app_api.py")
+    assert "pending_suggestions" in api
+    assert "FROM bot_seo_suggestions" in api and "applied_at IS NULL" in api
+    ui = _read("mini_app/index.html")
+    assert "pending_suggestions" in ui
+    md = _read("bot/handlers/metrics_dashboard.py")
+    assert "bot_seo_suggestions" in md and "applied_at IS NULL" in md
+
+
+def test_geo_presence_no_dead_buttons():
+    """Гео-модуль: каждая кнопка GeoPresenceCb(action=…) имеет обработчик
+    F.action == … (трасса кнопка→хендлер, регресс от мёртвых кнопок)."""
+    import re
+    gp = _read("bot/handlers/global_presence.py")
+    used = set(re.findall(r'GeoPresenceCb\(action="([a-z_]+)"', gp))
+    handled = set(re.findall(r'F\.action == "([a-z_]+)"', gp))
+    missing = used - handled
+    assert not missing, f"мёртвые гео-кнопки без обработчика: {sorted(missing)}"
+
+
 def test_bot_dashboard_parity_seo_geo_pulse():
     """Bot-паритет: /dashboard в боте показывает те же SEO/гео/карантин, что mini-app."""
     md = _read("bot/handlers/metrics_dashboard.py")

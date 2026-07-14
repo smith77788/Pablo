@@ -15892,7 +15892,11 @@ async function loadDashboard() {
     // SEO + гео приборы (реальные данные ranking-петли и планов присутствия)
     const seo = d.seo || {}, geo = d.geo || {};
     const seoEl = document.getElementById('dk-seo');
-    if (seoEl) seoEl.textContent = num(seo.tracked_keywords || 0);
+    if (seoEl) {
+      const ps = seo.pending_suggestions || 0;
+      seoEl.textContent = num(seo.tracked_keywords || 0) + (ps ? ' · 💡' + num(ps) : '');
+      seoEl.title = `Ключей на отслеживании: ${seo.tracked_keywords||0}${ps ? ` · непринятых SEO-подсказок: ${ps}` : ''}`;
+    }
     const geoEl = document.getElementById('dk-geo');
     if (geoEl) {
       geoEl.textContent = num(geo.plans || 0);

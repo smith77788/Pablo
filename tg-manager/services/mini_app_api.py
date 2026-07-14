@@ -10999,14 +10999,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e)[:150], 500)
 
     async def _seo_vitals(uid: int) -> dict:
-        """SEO-орган: сколько ключей на отслеживании (данные ranking-петли)."""
+        """SEO-орган: ключи на отслеживании + непринятые авто-подсказки реоптимизации
+        (выход decision-фазы ranking-петли: ranking_checker→bot_reoptimizer)."""
+        out = {"tracked_keywords": 0, "pending_suggestions": 0}
         try:
-            n = await _safe_fetchval(pool,
+            out["tracked_keywords"] = int(await _safe_fetchval(pool,
                 "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
-                uid)
-            return {"tracked_keywords": int(n or 0)}
+                uid) or 0)
         except Exception:
-            return {"tracked_keywords": 0}
+            pass
+        try:
+            out["pending_suggestions"] = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM bot_seo_suggestions "
+                "WHERE owner_id=$1 AND applied_at IS NULL", uid) or 0)
+        except Exception:
+            pass
+        return out
 
     async def _geo_vitals(uid: int) -> dict:
         """Гео-орган: планы глобального присутствия (draft/running/done)."""

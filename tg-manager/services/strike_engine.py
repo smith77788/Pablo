@@ -3912,7 +3912,7 @@ async def mass_report(
             ) -> dict:
                 async with sem:
                     try:
-                        return await account_manager.report_peer_deep_v2(
+                        _res = await account_manager.report_peer_deep_v2(
                             acc["session_str"],
                             target.lstrip("@"),
                             reason,
@@ -3932,7 +3932,19 @@ async def mass_report(
                             _acc=acc,
                         )
                     except Exception as e:
-                        return {"peer_reported": False, "error": str(e)[:100]}
+                        _res = {"peer_reported": False, "error": str(e)[:100]}
+                    # Обучение организма: исход страйка → infra_memory, чтобы отбор
+                    # аккаунтов учился (rank_accounts_by_memory для action='strike').
+                    try:
+                        from services import infra_memory as _im2
+                        if acc.get("id"):
+                            _im2.record_account_op(
+                                acc["id"], "strike",
+                                bool(_res.get("peer_reported")),
+                                _res.get("error"))
+                    except Exception:
+                        pass
+                    return _res
 
             tasks = [
                 _strike_one(acc, txt, w_num) for acc, txt in zip(wave, texts)

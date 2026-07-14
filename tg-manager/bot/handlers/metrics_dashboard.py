@@ -80,9 +80,17 @@ async def _build_dashboard(pool: asyncpg.Pool, owner_id: int) -> tuple[str, obje
         pulse = (await get_account_health(pool, owner_id))["summary"]
     except Exception:
         pulse = {}
+    try:
+        seo_sugg = await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_seo_suggestions "
+            "WHERE owner_id=$1 AND applied_at IS NULL", owner_id) or 0
+    except Exception:
+        seo_sugg = 0
     _extra = []
     if seo_kw:
-        _extra.append(f"🔍 SEO-слова: {int(seo_kw)}")
+        _extra.append(
+            f"🔍 SEO-слова: {int(seo_kw)}"
+            + (f" · 💡{int(seo_sugg)} подсказ." if seo_sugg else ""))
     if geo_plans:
         _extra.append(f"🌍 Гео-планы: {int(geo_plans)}")
     if pulse.get("quarantine"):
