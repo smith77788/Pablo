@@ -15,6 +15,45 @@ log = logging.getLogger(__name__)
 _SYNC_CONCURRENCY = 6
 
 
+def classify_session_error(emsg: str) -> tuple[str, str]:
+    """Классифицировать ошибку Telethon в понятную русскую причину + acc_status.
+
+    Возвращает (friendly_ru, status): status ∈ {'dead','expired','flood','net',''}.
+    'dead' — сессия необратимо инвалидирована (AUTH_KEY_DUPLICATED, deactivated) →
+    аккаунт деактивируем. 'expired' — ключ не признан сервером (AuthKeyUnregistered,
+    revoked): нужен релог, но НЕ деактивируем жёстко — при системном сбое (напр.
+    релей маршрутит не на тот DC) все аккаунты падают одинаково, и глушить их все
+    нельзя. '' — прочее (не деактивируем).
+
+    Сырой английский текст исключения Telethon пользователю показывать нельзя —
+    именно это утекало на экран «Синхронизация контактов — детали по аккаунтам».
+    """
+    low = (emsg or "").lower()
+    if "auth_key_duplicated" in low or "two different ip" in low:
+        return ("сессия инвалидирована Telegram (использовалась с двух IP) — "
+                "переавторизуйте аккаунт; при работе через прокси не подключайте "
+                "сессию с другого IP", "dead")
+    if "deactivated" in low:
+        return ("аккаунт удалён/деактивирован Telegram — восстановление невозможно",
+                "dead")
+    if ("authorization key" in low or "auth_key_unregistered" in low
+            or "doesn't know about the authorization" in low
+            or "session_revoked" in low or "session revoked" in low
+            or "session_expired" in low or "session has expired" in low
+            or "auth key" in low):
+        return ("сессия недействительна — Telegram не знает этот ключ авторизации. "
+                "Нужен релог аккаунта в разделе «Аккаунты». Если аккаунт работает "
+                "через CF-релей — проверьте, что пул задеплоен с актуальными "
+                "настройками (передеплойте пул).", "expired")
+    if "flood" in low:
+        return ("временное ограничение Telegram (flood wait) — повторите позже",
+                "flood")
+    if "proxy" in low or "connect" in low or "timeout" in low or "network" in low:
+        return ("не удалось подключиться (прокси/сеть) — проверьте прокси аккаунта",
+                "net")
+    return (f"ошибка: {(emsg or '')[:140]}", "")
+
+
 async def sync_account(pool, owner_id: int, account_id: int) -> dict:
     from database.db import get_account_for_telethon
     from services import account_manager
@@ -89,27 +128,28 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
         duration_ms = int((time.monotonic() - started) * 1000)
         emsg = str(e)
         log.warning('contacts_hub sync_account failed acc=%s: %s', account_id, emsg)
-        # AUTH_KEY_DUPLICATED: сессия использовалась с двух IP одновременно и
-        # Telegram её НЕОБРАТИМО инвалидировал (напр. коннект не с того IP, что у
-        # прокси аккаунта). Помечаем аккаунт как требующий переавторизации, чтобы
-        # это было видно и он не участвовал дальше, и даём внятную причину.
-        low = emsg.lower()
-        if 'auth_key_duplicated' in low or 'two different ip' in low:
-            try:
+        # Классифицируем в понятную русскую причину — сырой английский текст
+        # Telethon (напр. AuthKeyUnregistered «server doesn't know about the
+        # authorization key») пользователю показывать нельзя.
+        friendly, status = classify_session_error(emsg)
+        try:
+            if status == 'dead':
+                # необратимо (AUTH_KEY_DUPLICATED / deactivated) → деактивируем
                 await pool.execute(
                     "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired', "
-                    "status_reason=$2 WHERE id=$1",
-                    account_id,
-                    'AUTH_KEY_DUPLICATED: сессия использовалась с двух IP — нужна переавторизация')
-            except Exception:
-                pass
-            friendly = ('сессия инвалидирована Telegram (использовалась с двух IP) — '
-                        'переавторизуйте аккаунт; при работе через прокси не подключайте '
-                        'сессию с другого IP')
-            await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, friendly[:200])
-            return {'error': friendly, 'synced': 0}
-        await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, emsg[:200])
-        return {'error': emsg[:200], 'synced': 0}
+                    "status_reason=$2 WHERE id=$1", account_id, friendly[:200])
+            elif status == 'expired':
+                # ключ не признан: помечаем как требующий релога (СИГНАЛ, попадёт в
+                # пульс здоровья и раздел «Аккаунты»), но НЕ глушим is_active — при
+                # системном сбое (релей не на тот DC) падают все аккаунты одинаково,
+                # деактивировать их все нельзя.
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status='session_expired', "
+                    "status_reason=$2 WHERE id=$1", account_id, friendly[:200])
+        except Exception:
+            pass
+        await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, friendly[:200])
+        return {'error': friendly, 'synced': 0}
 
 
 async def sync_all_accounts(pool, owner_id: int) -> dict:

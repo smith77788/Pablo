@@ -833,3 +833,12 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - ГЕО трасса (dead-button audit): все 30 действий GeoPresenceCb(action=…) в global_presence.py имеют обработчик F.action==… — мёртвых кнопок НЕТ. Закреплено регресс-тестом (used-handled==∅).
   - ПАРИТЕТ: бот /dashboard дополнен SEO-подсказками (те же источники, что mini-app).
 Проверено: test_dashboard_strike_seo_geo расширен (+strike-memory, +seo-suggestions, +geo-dead-buttons) → 36/36 связок. Python AST (3) + node --check всего JS index.html зелёные. Живой прод не гонял.
+
+## tg-manager: контакты — сырой английский AuthKeyUnregistered утекал на экран (скрин) — 2026-07-14
+Скрин «Синхронизация контактов — детали по аккаунтам»: по КАЖДОМУ аккаунту (Елена/Серёжа/Юля/Кристина) сырой текст Telethon «The server claims it doesn't know about the authorization key…». Причина: sync_account ловил только AUTH_KEY_DUPLICATED, а AuthKeyUnregisteredError падал в `return {'error': emsg[:200]}` → сырой английский пользователю.
+Исправлено: classify_session_error(emsg) → (понятная русская причина, status ∈ dead/expired/flood/net/''). sync_account:
+  - 'dead' (AUTH_KEY_DUPLICATED / deactivated) → is_active=FALSE + acc_status='session_expired' (как было).
+  - 'expired' (AuthKeyUnregistered/revoked/expired) → acc_status='session_expired' + status_reason, но БЕЗ is_active=FALSE. Осознанно: 4 аккаунта падают ОДИНАКОВО = вероятен системный сбой (CF-релей маршрутит не на тот DC), глушить все нельзя. Сообщение подсказывает релог + проверить/передеплоить пул.
+  - транзиентные (flood/net) — не трогаем статус.
+Организм: session_expired автоматически всплывает в пульсе 💓 Здоровье (acc_status уже учитывается get_account_health) — флагнутые аккаунты видны на дашборде без доп. проводки.
+Проверено: test_contacts_sync_error_classify (4, вкл. дословный текст со скрина → status=expired, без утечки english) + связки 35/35. Python AST + отсутствие zero-width/nbsp символов подтверждено.
