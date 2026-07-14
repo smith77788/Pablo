@@ -87,9 +87,10 @@ def test_reflex_wired_into_op_worker():
     assert "is_account_quarantined" in ow
     # именно fail-open вызов через уже импортированный алиас _infra_mem
     assert "_infra_mem.is_account_quarantined(pool" in ow
-    # покрыты оба массовых пути по каналам
-    assert ow.count("_infra_mem.is_account_quarantined(pool") >= 2
+    # покрыты массовые пути: join + leave + publish
+    assert ow.count("_infra_mem.is_account_quarantined(pool") >= 3
     assert "bulk_leave: аккаунт %s в карантине" in ow
+    assert "_exec_mass_publish op=%d: пропущено %d аккаунтов в карантине" in ow
 
 
 def test_operation_bus_supports_label():

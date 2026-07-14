@@ -2047,6 +2047,22 @@ async def _exec_mass_publish(
             f"_exec_mass_publish op={op_id}: health check failed, using all accounts",
         )
 
+    # Риск-пульс (Волна S/1B, fail-open): дополнительно отсеиваем аккаунты с
+    # недавним СЕРЬЁЗНЫМ ограничением (restriction_events) — второй иммунный
+    # сигнал помимо account_health.health_score. Публикация с флагнутого аккаунта
+    # = быстрый бан. Пустой результат НЕ обнуляет операцию (лучше рискнуть).
+    try:
+        _kept = []
+        for _acc in accounts_rows:
+            if not await _infra_mem.is_account_quarantined(pool, _acc["id"]):
+                _kept.append(_acc)
+        if _kept and len(_kept) != len(accounts_rows):
+            log.info("_exec_mass_publish op=%d: пропущено %d аккаунтов в карантине",
+                     op_id, len(accounts_rows) - len(_kept))
+            accounts_rows = _kept
+    except Exception:
+        log_exc_swallow(log, f"_exec_mass_publish op={op_id}: quarantine check failed")
+
     acc_ids = [a["id"] for a in accounts_rows]
     chan_filter = (
         "AND mc.channel_id = ANY($3::bigint[])" if explicit_channel_ids else ""
