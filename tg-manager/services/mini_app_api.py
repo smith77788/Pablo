@@ -10988,12 +10988,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "top_channels": top_channels,
                 "recent_activity": recent_activity,
                 "range": rng,
-                # Пульс организма: здоровье аккаунтов (иммунные сигналы). fail-soft.
+                # Приборный щиток организма: пульс здоровья + SEO + гео (реальные,
+                # fail-soft — сбой любого органа не роняет дашборд).
                 "account_health": await _account_health_summary(uid),
+                "seo": await _seo_vitals(uid),
+                "geo": await _geo_vitals(uid),
             })
         except Exception as e:
             log.exception("dashboard_realtime uid=%s", uid)
             return _err(str(e)[:150], 500)
+
+    async def _seo_vitals(uid: int) -> dict:
+        """SEO-орган: сколько ключей на отслеживании (данные ranking-петли)."""
+        try:
+            n = await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
+                uid)
+            return {"tracked_keywords": int(n or 0)}
+        except Exception:
+            return {"tracked_keywords": 0}
+
+    async def _geo_vitals(uid: int) -> dict:
+        """Гео-орган: планы глобального присутствия (draft/running/done)."""
+        try:
+            row = await _safe_fetchrow(pool,
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE status='done') AS done, "
+                "COUNT(*) FILTER (WHERE status='running') AS running "
+                "FROM global_presence_plans WHERE owner_id=$1", uid)
+            return {"plans": int(row["total"]) if row else 0,
+                    "done": int(row["done"]) if row else 0,
+                    "running": int(row["running"]) if row else 0}
+        except Exception:
+            return {"plans": 0, "done": 0, "running": 0}
 
     async def _account_health_summary(uid: int) -> dict:
         """Сводка риск-пульса для дашборда (fail-soft: ошибка → нули)."""

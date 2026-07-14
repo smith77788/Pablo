@@ -63,6 +63,33 @@ async def _build_dashboard(pool: asyncpg.Pool, owner_id: int) -> tuple[str, obje
            if health.get('accounts_at_risk') else "")
         + "\n"
     )
+    # Паритет с приложением: SEO/гео/пульс карантина (реальные, fail-soft)
+    try:
+        seo_kw = await pool.fetchval(
+            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
+            owner_id) or 0
+    except Exception:
+        seo_kw = 0
+    try:
+        geo_plans = await pool.fetchval(
+            "SELECT COUNT(*) FROM global_presence_plans WHERE owner_id=$1", owner_id) or 0
+    except Exception:
+        geo_plans = 0
+    try:
+        from services.infra_memory import get_account_health
+        pulse = (await get_account_health(pool, owner_id))["summary"]
+    except Exception:
+        pulse = {}
+    _extra = []
+    if seo_kw:
+        _extra.append(f"🔍 SEO-слова: {int(seo_kw)}")
+    if geo_plans:
+        _extra.append(f"🌍 Гео-планы: {int(geo_plans)}")
+    if pulse.get("quarantine"):
+        _extra.append(f"🚧 карантин: {int(pulse['quarantine'])}")
+    if _extra:
+        text += " · ".join(_extra) + "\n"
+
     rev = stats.get("revenue_30d_usd")
     if rev:
         text += f"💰 <b>Доход 30д:</b> ${float(rev):.2f}\n"

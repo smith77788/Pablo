@@ -3850,6 +3850,22 @@ async def mass_report(
     if not viable_accounts:
         return {"results": [], "summary": "Все аккаунты в кулдауне/недоступны", "total_reports": 0}
 
+    # Риск-пульс (Волна S/1B, fail-open): не бросаем в бой аккаунты с недавним
+    # серьёзным ограничением — бережём их от добивания (репортить с уже флагнутого
+    # аккаунта = быстрый бан). Ошибка/нет сигнала → оставляем как было. Если после
+    # фильтра никого не осталось — НЕ обнуляем операцию (лучше рискнуть, чем no-op).
+    try:
+        from services import infra_memory as _im
+        _healthy = []
+        for _a in viable_accounts:
+            if _a.get("id") and await _im.is_account_quarantined(pool, _a["id"]):
+                continue
+            _healthy.append(_a)
+        if _healthy:
+            viable_accounts = _healthy
+    except Exception:
+        pass
+
     # Разбивка аккаунтов по волнам
     waves = plan_waves(viable_accounts, num_waves=2)
 

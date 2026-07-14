@@ -5123,6 +5123,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-views" style="color:var(--orange)">—</div><div class="kpi-chip-lbl">📱 Аккаунты</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-growth" style="color:var(--teal)">—</div><div class="kpi-chip-lbl">📈 Ауд. +7д</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" id="dk-health" style="color:var(--green)">—</div><div class="kpi-chip-lbl">💓 Здоровье</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-seo" style="color:var(--blue)">—</div><div class="kpi-chip-lbl">🔍 SEO-слова</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" id="dk-geo" style="color:var(--purple)">—</div><div class="kpi-chip-lbl">🌍 Гео-планы</div></div>
     </div>
     <div class="seg" id="dashTimeSeg">
       <div class="seg-opt on" onclick="switchDashRange('24h',this)">24ч</div>
@@ -15886,6 +15888,15 @@ async function loadDashboard() {
       hEl.textContent = `${num(h.healthy || 0)}${risk ? ' / ⚠' + num(risk) : ''}`;
       hEl.style.color = h.quarantine ? 'var(--red)' : (h.at_risk ? 'var(--orange)' : 'var(--green)');
       hEl.title = `Здоровы: ${h.healthy||0} · риск: ${h.at_risk||0} · карантин: ${h.quarantine||0}`;
+    }
+    // SEO + гео приборы (реальные данные ranking-петли и планов присутствия)
+    const seo = d.seo || {}, geo = d.geo || {};
+    const seoEl = document.getElementById('dk-seo');
+    if (seoEl) seoEl.textContent = num(seo.tracked_keywords || 0);
+    const geoEl = document.getElementById('dk-geo');
+    if (geoEl) {
+      geoEl.textContent = num(geo.plans || 0);
+      geoEl.title = `Планы: ${geo.plans||0} · выполнено: ${geo.done||0} · идёт: ${geo.running||0}`;
     }
 
     renderDashLineChart('dashSubsChart', 'dashSubsEmpty', d.subs_history || [], 'var(--blue)');

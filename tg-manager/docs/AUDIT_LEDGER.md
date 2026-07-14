@@ -761,3 +761,12 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - Волна S/1A инфраструктура: operation_bus.submit получил optional label (пишется в operation_queue.label, дефолт = OP_REGISTRY.description). Прямые INSERT в обход шины писали label — теперь миграция на submit НЕ теряет метку. Колонка operation_queue.label есть (schema_v126). Предпосылка для будущей миграции обходов (ratchet стоит).
   - Пульс обогащён acc_status (read-only): banned/session_expired/deleted → карантин; cooldown/warming/restricted/flood → риск. Пульс теперь согласован со статус-словарём, который ставят warmer/recovery/op_worker — иммунный сигнал + операционный статус в одном.
 Проверено: test_account_health_pulse расширен (+acc_status, +bus label, +2 рефлекса), 30/30 связок (pulse/ratchet/CF/isolation). Python AST (3 файла) зелёно. Живой прод не гонял (нет доступа), логика — на fake-pool.
+
+## tg-manager: проход по 5 направлениям (Strike/SEO/Dashboard/Гео/паритет) как организм — 2026-07-14
+Все направления связаны пульсом/реальными данными (не изолированные фичи):
+  - STRIKE + пульс (organism reflex): strike_engine.mass_report после preflight отсеивает карантинные аккаунты (is_account_quarantined, fail-open) — не репортим с уже флагнутого аккаунта (быстрый бан). Если фильтр опустошает список — НЕ обнуляем операцию (лучше рискнуть, чем no-op).
+  - SEO (surface петли): SEO-петля perception→decision→action уже была (ranking_checker → auto_reoptimize → bot_reoptimizer). Вывел её данные наружу: _seo_vitals (tracked_keywords active) в дашборд.
+  - DASHBOARD = приборный щиток организма: dashboard_realtime отдаёт account_health (пульс) + seo + geo (реальные, owner-scoped, fail-soft — сбой органа не роняет дашборд). Плитки 💓 Здоровье / 🔍 SEO-слова / 🌍 Гео-планы.
+  - ГЕО presence: _geo_vitals (global_presence_plans total/done/running) в дашборд — гео-орган виден в общем пульсе.
+  - ПАРИТЕТ бот↔mini-app: bot /dashboard (metrics_dashboard) дополнен теми же SEO/гео/карантин-строками — цифры из тех же источников, что в приложении.
+Проверено: test_dashboard_strike_seo_geo (3) + связки 30/30 (pulse/CF/ratchet). Python AST (3 файла) + node --check всего JS index.html зелёные. Живой прод не гонял (нет доступа).
