@@ -18,9 +18,10 @@ import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Текущий факт на 2026-07-13 (services/ + bot/, без самой шины). Двигать только
-# ВНИЗ по мере миграции прямых вставок на operation_bus.submit().
-BASELINE = 55
+# Текущий факт (services/ + bot/, без самой шины). Двигать только ВНИЗ по мере
+# миграции прямых вставок на operation_bus.submit().
+# История: 55 → 54 (мигрирован bot/handlers/boost.py, Волна S/1A).
+BASELINE = 54
 
 # operation_bus сам содержит эталонные вставки (реализация шины) — это не обход.
 _ALLOW = {"services/operation_bus.py"}
@@ -39,7 +40,13 @@ def _count_direct_inserts() -> dict[str, int]:
                 if rel in _ALLOW:
                     continue
                 with open(path, encoding="utf-8") as f:
-                    n = len(re.findall(r"INSERT INTO operation_queue", f.read()))
+                    # Считаем только в НЕ-комментариях: пояснение вида «прямой INSERT
+                    # INTO operation_queue убран» не должно накручивать счётчик.
+                    n = sum(
+                        len(re.findall(r"INSERT INTO operation_queue", line))
+                        for line in f
+                        if not line.lstrip().startswith("#")
+                    )
                 if n:
                     counts[rel] = n
     return counts

@@ -656,20 +656,13 @@ async def cb_boost_confirm(
         await callback.answer("⚠️ Неизвестный тип накрутки", show_alert=True)
         return
 
-    import json
-    if op_type in ("boost_subscribers", "boost_bot_starts"):
-        # Новые op_type ставятся в очередь через operation_bus — прямой INSERT
-        # в новых handler'ах запрещён (AGENT_SYNC.md).
-        from services import operation_bus
-        op_id = await operation_bus.submit(
-            pool, owner_id, op_type, params, total_items=total_items
-        )
-    else:
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
-            owner_id, op_type, json.dumps(params), total_items, label,
-        )
+    # Все типы накрутки ставятся через operation_bus — единая нервная система
+    # (ретраи/аудит/проверка тарифа). Шина теперь поддерживает label, поэтому
+    # прямая вставка в очередь убрана (Волна S/1A).
+    from services import operation_bus
+    op_id = await operation_bus.submit(
+        pool, owner_id, op_type, params, total_items=total_items, label=label
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))

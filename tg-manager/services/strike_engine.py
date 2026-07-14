@@ -3866,6 +3866,18 @@ async def mass_report(
     except Exception:
         pass
 
+    # Отбор с учётом ОБУЧЕНИЯ: аккаунты с лучшей историей страйков — вперёд
+    # (_strike_one пишет исход в infra_memory; здесь читаем score для action='strike').
+    # Сортировка стабильна и score по умолчанию нейтральный (0.5) → при отсутствии
+    # данных сохраняется исходный порядок по trust_score. Ошибка → без реордера.
+    try:
+        from services import infra_memory as _im
+        viable_accounts.sort(
+            key=lambda a: _im.get_account_score(a.get("id"), "strike"),
+            reverse=True)
+    except Exception:
+        pass
+
     # Разбивка аккаунтов по волнам
     waves = plan_waves(viable_accounts, num_waves=2)
 

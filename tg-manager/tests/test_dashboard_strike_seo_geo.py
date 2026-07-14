@@ -54,6 +54,27 @@ def test_strike_records_outcome_to_memory():
     assert "except Exception:" in seg  # обучение не должно ронять страйк
 
 
+def test_strike_orders_by_learned_memory():
+    """Замыкание цикла обучения: mass_report сортирует аккаунты по memory-score
+    action='strike' (лучшие — вперёд). Стабильно/fail-open (score=0.5 по умолч.)."""
+    se = _read("services/strike_engine.py")
+    # реордер идёт ПОСЛЕ карантин-фильтра, до разбивки по волнам
+    seg = se[se.index("viable_accounts = preflight_accounts"):]
+    seg = seg[:3500]
+    assert "get_account_score" in seg and '"strike"' in seg
+    assert "viable_accounts.sort" in seg
+
+
+def test_boost_migrated_to_bus():
+    """Волна S/1A: boost.py больше не делает прямой INSERT в очередь — только
+    через operation_bus.submit(label=…)."""
+    b = _read("bot/handlers/boost.py")
+    # нет прямой вставки в коде (в комментарии — не считается)
+    code_lines = [ln for ln in b.splitlines() if not ln.lstrip().startswith("#")]
+    assert not any("INSERT INTO operation_queue" in ln for ln in code_lines)
+    assert "operation_bus.submit(" in b and "label=label" in b
+
+
 def test_seo_surfaces_pending_suggestions():
     """SEO decision-фаза видна: непринятые авто-подсказки реоптимизации в дашборде
     (mini-app) и в боте."""

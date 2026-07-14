@@ -842,3 +842,8 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - транзиентные (flood/net) — не трогаем статус.
 Организм: session_expired автоматически всплывает в пульсе 💓 Здоровье (acc_status уже учитывается get_account_health) — флагнутые аккаунты видны на дашборде без доп. проводки.
 Проверено: test_contacts_sync_error_classify (4, вкл. дословный текст со скрина → status=expired, без утечки english) + связки 35/35. Python AST + отсутствие zero-width/nbsp символов подтверждено.
+
+## tg-manager: роадмап — миграция boost на шину (1A) + отбор страйка по обученной памяти — 2026-07-14
+  - Волна S/1A: bot/handlers/boost.py мигрирован с прямого INSERT INTO operation_queue на operation_bus.submit(label=…) — теперь ВСЕ типы накрутки (views/reactions/stories/subscribers/bot_starts) идут через шину (ретраи/аудит/тариф). label сохранён (шина научилась ранее). Храповик: BASELINE 55→54. Счётчик храповика ужесточён — не считает совпадения в комментариях (пояснение «прямой INSERT…убран» больше не накручивает).
+  - Strike обучение → использование (замкнут цикл): mass_report сортирует viable_accounts по infra_memory.get_account_score(id,'strike') (лучшие исполнители вперёд). _strike_one пишет исход → здесь читаем. Сортировка стабильна, score=0.5 по умолч. → при отсутствии данных сохраняется исходный порядок по trust_score. Fail-open.
+Проверено: test_dashboard_strike_seo_geo +2 (strike-ordering, boost-migrated), ratchet обновлён → 39/39 связок. Python AST (3) зелёно. boost.py без json-остатков (AST + нет json. usages).
