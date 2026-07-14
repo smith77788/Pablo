@@ -283,7 +283,10 @@ async def audit_proxy_isolation(pool, owner_id: int, max_per_ip: int = 1) -> dic
         ],
         "datacenter_warnings": diversity["datacenter_warnings"],
         "datacenter_count": diversity["datacenter_count"],
-        "isolation_ok": not shared and not naked,
+        # Изоляция «в порядке» ТОЛЬКО когда нет общих IP прокси и нет голых. Аккаунты
+        # на CF-релее НЕ считаются изолированными: Cloudflare отдаёт общий edge-IP на
+        # весь пул (эмпирически подтверждено — «уник. IP: 1»), это не 1:1 на аккаунт.
+        "isolation_ok": not shared and not naked and not on_relay,
     }
 
 

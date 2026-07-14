@@ -2834,7 +2834,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:8px">☁️ Уникальный IP без прокси (Cloudflare)</div>
     <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
-      <div style="font-size:12px;opacity:.7;margin-bottom:8px">Каждому аккаунту — свой Cloudflare Worker (свой edge-IP), бесплатно вместо платных прокси. Доступы можно вписать прямо здесь — Railway не нужен.</div>
+      <div style="font-size:12px;opacity:.7;margin-bottom:8px">Трафик аккаунтов идёт через Cloudflare (edge-IP CDN, <b>не</b> датацентр Railway) — Telegram мягче к CDN-адресам. ⚠️ Важно: Cloudflare отдаёт <b>общий</b> IP на весь пул, это <b>НЕ</b> уникальный IP на аккаунт. Для строгой изоляции 1:1 нужны прокси (раздел «Мои прокси»). Проверить фактическое число IP — кнопка «🩺 Проверить».</div>
       <div id="cfPoolStatus" style="font-size:13px;margin-bottom:8px;opacity:.85">—</div>
       <details id="cfCredsBox" style="margin-bottom:8px">
         <summary style="font-size:13px;cursor:pointer;opacity:.85">🔑 Доступы Cloudflare</summary>
@@ -8683,7 +8683,7 @@ async function loadCfPoolStatus() {
       // префилл только если пользователь не трогал (=дефолт 10) и есть кому раздать
       if (cntEl && need > 0 && (cntEl.value==='10' || cntEl.value==='')) cntEl.value = need;
       hint.textContent = need > 0
-        ? `💡 Рекомендуем ${need} воркер(ов) — по числу аккаунтов без своего прокси (изоляция 1:1). Всего активных: ${act}. Оставьте 0/пусто = авто.`
+        ? `💡 Рекомендуем ${need} воркер(ов) — по числу аккаунтов без прокси. Всего активных: ${act}. Оставьте 0/пусто = авто. ⚠️ Cloudflare даёт общий IP на пул (не 1:1) — для уникального IP на аккаунт нужны прокси.`
         : `Все ${act} активных аккаунтов уже с прокси — релей не требуется.`;
     }
   } catch(e) { el.textContent = '—'; }
@@ -8696,6 +8696,11 @@ async function checkCfWorkers() {
     const uniq = typeof r.unique_ips==='number' ? ` · уник. IP: ${r.unique_ips}` : '';
     const colos = (r.colos||[]).length ? ` · гео: ${(r.colos||[]).join(', ')}` : '';
     toast(`🩺 Живых: ${r.alive||0}/${r.checked||0}${uniq}${colos}`);
+    // Честно предупреждаем: если Cloudflare отдаёт мало уникальных IP на много
+    // воркеров — это НЕ изоляция (все аккаунты на общем IP = риск бана).
+    if (typeof r.unique_ips==='number' && r.alive>1 && r.unique_ips<=1) {
+      setTimeout(()=>toast('⚠️ Cloudflare отдаёт 1 общий IP на весь пул — это НЕ уникальный IP на аккаунт. Для изоляции 1:1 используйте прокси.'), 1500);
+    }
     loadCfPoolStatus();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
   finally { if(btn){ btn.disabled=false; btn.textContent='🩺 Проверить'; } }
@@ -8781,7 +8786,7 @@ async function checkProxyIsolation() {
       }
     }
     if (typeof r.on_relay==='number' && r.on_relay) {
-      h += `<div style="color:var(--blue,#4a9)">☁️ На CF-релее: ${r.on_relay} аккаунт(ов).</div>`;
+      h += `<div style="color:var(--orange)">☁️ На CF-релее: ${r.on_relay} аккаунт(ов) — Cloudflare даёт <b>общий</b> IP на пул, это <b>не</b> уникальный IP на аккаунт. Считать изолированными нельзя; для 1:1 — прокси.</div>`;
     }
     if ((r.relay_shared_groups||[]).length) {
       h += `<div style="color:var(--orange);margin-top:4px">☁️ Один воркер на несколько аккаунтов (слабее изоляция — задеплойте пул ≥ числу аккаунтов):</div>`;
