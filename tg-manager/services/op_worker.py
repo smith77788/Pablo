@@ -7453,6 +7453,18 @@ async def _exec_mass_invite(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Риск-пульс (Волна S/1B + M, fail-open): инвайт с флагнутого аккаунта = быстрый
+    # бан. Отсеиваем карантинные; пустой результат НЕ обнуляет операцию.
+    try:
+        _kept = [a for a in accounts
+                 if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+        if _kept and len(_kept) != len(accounts):
+            log.info("mass_invite op=%d: пропущено %d аккаунтов в карантине",
+                     op_id, len(accounts) - len(_kept))
+            accounts = _kept
+    except Exception:
+        log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
+
     total_ok, total_fail = 0, 0
     all_users = list(user_refs)
     all_phones = list(phones)

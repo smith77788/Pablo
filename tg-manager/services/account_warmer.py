@@ -1118,6 +1118,10 @@ async def _run_daily_warmup_impl(
             "banned",
             "spamblock",
             "deactivated",
+            # session_expired — сессия мертва (напр. AuthKeyUnregistered при синке
+            # контактов): разогрев бессмыслен, коннект всё равно упадёт. Иммунный
+            # сигнал → метаболизм (Волна I): не жжём циклы на дохлую сессию.
+            "session_expired",
         ):
             log.info(
                 "warmup: acc=%d статус=%s — пропуск разогрева",

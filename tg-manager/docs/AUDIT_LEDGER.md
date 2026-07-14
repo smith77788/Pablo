@@ -863,3 +863,8 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - Волна S/1B ЗАВЕРШЕНА (единый пульс): get_account_health свёл ПОСЛЕДНИЙ разрозненный орган — in-memory account_health.health_score (0..100; <10→карантин, <30→риск; у неизвестных=100 нейтр., process-local не флагает ложно). Теперь пульс = restriction_events + acc_status + flood + trust_score + health_score. Все органы могут читать один сигнал вместо 5. Циклического импорта нет (account_health не тянет infra_memory).
   - Волна S/1A: мигрированы 5 ИДЕМПОТЕНТНЫХ scan/check-вставок в mini_app_api (check_accounts_health ×3, scan_owned_resources, compliance_scan) на operation_bus.submit(label=…). Выбраны намеренно самые безопасные (ретрай скана/проверки безвреден). Храповик 49→44 (mini_app_api 44→39). Осн. массу mini_app_api оставил как контролируемый legacy — храповик держит от новых обходов; массовая миграция 650KB-файла без живого прогона = высокий риск/низкая ценность (эндпоинты уже работают).
 Проверено: test_account_health_pulse +fold-all-5, ratchet 44, связки 41/41. Python AST (infra_memory/mini_app_api) зелёно.
+
+## tg-manager: Волны M+I — рефлекс в mass_invite + warmer пропускает session_expired — 2026-07-14
+  - Волна M: _exec_mass_invite отсеивает карантинные аккаунты (is_account_quarantined, fail-open, пустой не обнуляет). Теперь ВСЕ массовые отправители уважают пульс: join+leave+publish+invite+strike.
+  - Волна I (иммунитет→метаболизм): account_warmer пропускает acc_status='session_expired' (дохлую сессию греть бессмысленно — коннект упадёт). Иммунный сигнал из синка контактов → warmer не жжёт циклы.
+Проверено: test_account_health_pulse рефлекс≥4 + warmer-skip → зелёно.

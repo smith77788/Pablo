@@ -115,10 +115,11 @@ def test_reflex_wired_into_op_worker():
     assert "is_account_quarantined" in ow
     # именно fail-open вызов через уже импортированный алиас _infra_mem
     assert "_infra_mem.is_account_quarantined(pool" in ow
-    # покрыты массовые пути: join + leave + publish
-    assert ow.count("_infra_mem.is_account_quarantined(pool") >= 3
+    # покрыты массовые отправители: join + leave + publish + invite
+    assert ow.count("_infra_mem.is_account_quarantined(pool") >= 4
     assert "bulk_leave: аккаунт %s в карантине" in ow
     assert "_exec_mass_publish op=%d: пропущено %d аккаунтов в карантине" in ow
+    assert "mass_invite op=%d: пропущено %d аккаунтов в карантине" in ow
 
 
 def test_operation_bus_supports_label():
@@ -131,6 +132,14 @@ def test_operation_bus_supports_label():
     ins = seg[seg.index("INSERT INTO operation_queue"):seg.index("RETURNING id")]
     assert "label" in ins
     assert "op_label = label or meta.get(\"description\")" in seg
+
+
+def test_warmer_skips_session_expired():
+    """Волна I (иммунитет→метаболизм): разогрев пропускает session_expired —
+    дохлую сессию греть бессмысленно (коннект упадёт)."""
+    aw = _read("services/account_warmer.py")
+    seg = aw[aw.index('"banned",'):aw.index("пропуск разогрева")]
+    assert '"session_expired",' in seg
 
 
 def test_pulse_surfaced_in_api_and_ui():
