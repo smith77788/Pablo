@@ -599,27 +599,29 @@ async def mass_broadcast_with_scheduling(
             )
             broadcast_id = row["id"]
             _op_params["broadcast_id"] = broadcast_id
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-                owner_id, _json.dumps(_op_params), total, label,
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, owner_id, "run_broadcast", _op_params,
+                total_items=total, label=label,
             )
         except Exception as exc:
             logger.exception("mass_broadcast_with_scheduling insert uid=%d", owner_id)
             return {"ok": False, "error": str(exc)[:200]}
     else:
         label = f"⏰ {label}"
+        from services import operation_bus
         if scheduled_for_iso:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
-                "VALUES($1,'run_broadcast','pending',$2,$3,$4,$5::timestamptz) RETURNING id",
-                owner_id, _json.dumps(_op_params), total, label, scheduled_for_iso,
+            op_id = await operation_bus.submit(
+                pool, owner_id, "run_broadcast", _op_params,
+                total_items=total, label=label, scheduled_for=scheduled_for_iso,
             )
         else:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
-                "VALUES($1,'run_broadcast','pending',$2,$3,$4, now() + ($5 || ' minutes')::interval) RETURNING id",
-                owner_id, _json.dumps(_op_params), total, label, str(schedule_minutes),
+            from datetime import timezone as _tz, timedelta as _td
+            _sched_iso = (datetime.now(_tz.utc)
+                          + _td(minutes=float(schedule_minutes))).isoformat()
+            op_id = await operation_bus.submit(
+                pool, owner_id, "run_broadcast", _op_params,
+                total_items=total, label=label, scheduled_for=_sched_iso,
             )
 
     return {
@@ -689,12 +691,12 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
         new_bc = row["id"]
         label = (f"Повтор недоставленным: {text[:40]}…"
                  if len(text) > 40 else f"Повтор: {text[:60]}")
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-            owner_id, _json.dumps({"bot_id": bot_id_int, "broadcast_id": new_bc,
-                                   "text": text, "user_ids": undelivered}),
-            total, label)
+        from services import operation_bus
+        op_id = await operation_bus.submit(
+            pool, owner_id, "run_broadcast",
+            {"bot_id": bot_id_int, "broadcast_id": new_bc,
+             "text": text, "user_ids": undelivered},
+            total_items=total, label=label)
         return {"ok": True, "broadcast_id": new_bc, "op_id": op_id, "total_users": total}
     except Exception:
         logger.exception("resend_undelivered bc=%d uid=%d", bc_id, owner_id)
@@ -764,11 +766,10 @@ async def ab_test_broadcast(
             )
             bc_id = row["id"]
             _op_params = {"bot_id": bot_id, "text": text, "broadcast_id": bc_id, "user_ids": chunk}
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-                owner_id, _json.dumps(_op_params), len(chunk),
-                f"A/B вариант {idx + 1}: {text[:30]}",
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, owner_id, "run_broadcast", _op_params,
+                total_items=len(chunk), label=f"A/B вариант {idx + 1}: {text[:30]}",
             )
             results.append({"variant_index": idx, "broadcast_id": bc_id, "op_id": op_id, "users": len(chunk)})
         except Exception as exc:

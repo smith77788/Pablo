@@ -642,6 +642,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         rows = await pool.fetch(
             """
             SELECT a.id, a.phone, COALESCE(a.acc_status,'active') AS acc_status,
+              a.trust_score,
               (SELECT COUNT(*) FROM restriction_events r
                  WHERE r.account_id=a.id
                    AND r.created_at > NOW() - make_interval(days => $2)) AS restrictions,
@@ -673,21 +674,29 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         # banned/session_expired → карантин; cooldown/warming → риск.
         status_bad = acc_status in ("banned", "session_expired", "deleted")
         status_risk = acc_status in ("cooldown", "warming", "restricted", "flood")
+        # trust_score (0..1, ставится trust_engine): низкий траст — тоже риск.
+        # Единый пульс сводит restriction_events + acc_status + flood + trust.
+        try:
+            trust = float(r["trust_score"]) if r["trust_score"] is not None else 1.0
+        except (TypeError, ValueError):
+            trust = 1.0
+        low_trust = trust < 0.4
         if severe or status_bad:
             status, score = "quarantine", 0.2
             quarantine += 1
-        elif restr or floods >= 3 or status_risk:
-            status, score = "at_risk", 0.5
+        elif restr or floods >= 3 or status_risk or low_trust:
+            status, score = "at_risk", min(0.5, trust)
             at_risk += 1
         elif floods:
             status, score = "at_risk", 0.7
             at_risk += 1
         else:
-            status, score = "healthy", 1.0
+            status, score = "healthy", round(min(1.0, 0.7 + trust * 0.3), 3)
             healthy += 1
         accounts.append({
             "account_id": r["id"], "phone": r["phone"],
             "status": status, "score": score, "acc_status": acc_status,
+            "trust_score": round(trust, 3),
             "restrictions": restr, "floods": floods,
         })
     # худшие — вперёд (для приборного щитка)
