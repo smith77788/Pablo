@@ -65,7 +65,10 @@ def test_op_endpoint_route_and_ui_wired():
     assert "ReportPeerRequest" not in seg and "send_message" not in seg
     api = _read("services/mini_app_api.py")
     assert "async def compliance_scan_submit" in api
-    assert "'compliance_scan','pending'" in api
+    # Эндпоинт ставит op через operation_bus (рефактор с сырого INSERT на bus).
+    _seg = api[api.index("async def compliance_scan_submit"):]
+    _seg = _seg[:_seg.index("async def ", 10)]
+    assert ".submit(" in _seg and '"compliance_scan"' in _seg
     assert 'add_post("/api/miniapp/compliance_scan", compliance_scan_submit)' in api
     ui = _read("mini_app/index.html")
     assert "submitComplianceScan" in ui and "/api/miniapp/compliance_scan" in ui

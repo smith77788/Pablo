@@ -53,7 +53,19 @@ class _Pool:
 
 
 @pytest.mark.asyncio
-async def test_resend_creates_op_for_undelivered():
+async def test_resend_creates_op_for_undelivered(monkeypatch):
+    # resend_undelivered ставит run_broadcast через operation_bus.submit —
+    # мокаем bus и проверяем op_type + params (user_ids недоставленных).
+    from services import operation_bus
+
+    captured = {}
+
+    async def _fake_submit(pool, owner_id, op_type, params, *, total_items=0, **kw):
+        captured.update(op_type=op_type, params=params, total_items=total_items)
+        return 888
+
+    monkeypatch.setattr(operation_bus, "submit", _fake_submit)
+
     pool = _Pool(
         src={"id": 1, "bot_id": 10, "message_text": "hi", "created_by": 42},
         bot={"bot_id": 10},
@@ -64,11 +76,10 @@ async def test_resend_creates_op_for_undelivered():
     assert res["total_users"] == 3
     assert res["broadcast_id"] == 777
     assert res["op_id"] == 888
-    # op_type run_broadcast + user_ids реально долетают
-    import json
-    op_params = json.loads(pool.inserted_op[1])
-    assert op_params["user_ids"] == [100, 101, 102]
-    assert op_params["bot_id"] == 10
+    # op_type run_broadcast + user_ids недоставленных реально долетают до bus
+    assert captured["op_type"] == "run_broadcast"
+    assert captured["params"]["user_ids"] == [100, 101, 102]
+    assert captured["params"]["bot_id"] == 10
 
 
 @pytest.mark.asyncio
