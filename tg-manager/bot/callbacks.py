@@ -726,3 +726,10 @@ class ComplianceScanCb(CallbackData, prefix="cscan"):
     """Проверка ресурсов на запрещённую тематику (read-only compliance scan)."""
 
     action: str   # open|cancel
+
+
+class ContactsHubCb(CallbackData, prefix="chub"):
+    """Contacts Hub — единый реестр контактов (unified_contacts)."""
+
+    action: str   # menu|stats|search|smart_tags|graph|fav
+    cid: str = ""  # UUID контакта (для fav-toggle)
