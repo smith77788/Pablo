@@ -366,9 +366,20 @@ async def failover_dead_proxies(pool, owner_id: int) -> dict:
             *(_probe_with_sem(b) for b in backups),
             return_exceptions=True,
         )
+        # Дедуп резервных по IP: два резервных прокси с ОДНИМ egress-IP нельзя
+        # раздать разным аккаунтам — иначе два аккаунта окажутся на одном IP
+        # (нарушение изоляции, самый дорогой класс багов — баны). _probe_with_sem
+        # сверяет IP только с ОСНОВНЫМИ прокси; коллизии backup↔backup ловим здесь.
+        _seen_backup_ips: set[str] = set()
         for r in probe_results:
-            if isinstance(r, dict) and r is not None:
-                healthy_backups.append(r)
+            if not (isinstance(r, dict) and r is not None):
+                continue
+            ip = r.get("ip")
+            if ip and ip in _seen_backup_ips:
+                continue  # дубль IP среди резервных — пропускаем
+            if ip:
+                _seen_backup_ips.add(ip)
+            healthy_backups.append(r)
     result["backups_healthy"] = len(healthy_backups)
 
     # Кэш проб основных прокси по proxy_id (несколько аккаунтов могут делить прокси).

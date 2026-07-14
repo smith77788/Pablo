@@ -127,3 +127,58 @@ def test_route_and_engine_wired():
     assert 'app.router.add_post("/api/miniapp/proxy/failover", proxy_failover)' in src
     assert 'app.router.add_post("/api/miniapp/proxy/{proxy_id}/backup", proxy_toggle_backup)' in src
     assert hasattr(ps, "failover_dead_proxies")
+
+
+def test_two_backups_same_ip_only_one_reassigned_isolation():
+    """ИЗОЛЯЦИЯ: два резервных прокси с ОДНИМ egress-IP не должны быть
+    назначены разным аккаунтам (иначе два аккаунта на одном IP → баны).
+    Два мёртвых аккаунта, два живых резерва с общим IP → только ОДНА переназначка."""
+    accounts = [
+        {"account_id": 1, "proxy_id": 10, "proxy_url": "socks5://dead1"},
+        {"account_id": 2, "proxy_id": 11, "proxy_url": "socks5://dead2"},
+    ]
+    backups = [
+        {"id": 20, "proxy_url": "socks5://backupA"},
+        {"id": 21, "proxy_url": "socks5://backupB"},
+    ]
+    pool = _FakePool(accounts, backups)
+    probe, ip = _make_patches(
+        {"socks5://dead1": False, "socks5://dead2": False,
+         "socks5://backupA": True, "socks5://backupB": True},
+        # ОБА резерва отдают один и тот же egress-IP 9.9.9.9
+        {"socks5://dead1": "1.1.1.1", "socks5://dead2": "2.2.2.2",
+         "socks5://backupA": "9.9.9.9", "socks5://backupB": "9.9.9.9"},
+    )
+    with patch.object(ps, "probe_proxy", probe), patch.object(ps, "extract_ip_from_proxy", ip):
+        res = _run(ps.failover_dead_proxies(pool, owner_id=99))
+    # дедуп по IP: только один резерв считается «здоровым» и раздаётся
+    assert res["backups_healthy"] == 1, res
+    assert len(res["reassigned"]) == 1, res
+    assert res["still_dead_no_backup"] == [2], res
+    # ровно один UPDATE proxy_id — второй аккаунт НЕ получил тот же IP
+    upd = [q for q, _ in pool.executed if "UPDATE tg_accounts SET proxy_id" in q]
+    assert len(upd) == 1, pool.executed
+
+
+def test_two_backups_distinct_ip_both_reassigned():
+    """Контроль: два резерва с РАЗНЫМИ IP — оба валидны, оба раздаются."""
+    accounts = [
+        {"account_id": 1, "proxy_id": 10, "proxy_url": "socks5://dead1"},
+        {"account_id": 2, "proxy_id": 11, "proxy_url": "socks5://dead2"},
+    ]
+    backups = [
+        {"id": 20, "proxy_url": "socks5://backupA"},
+        {"id": 21, "proxy_url": "socks5://backupB"},
+    ]
+    pool = _FakePool(accounts, backups)
+    probe, ip = _make_patches(
+        {"socks5://dead1": False, "socks5://dead2": False,
+         "socks5://backupA": True, "socks5://backupB": True},
+        {"socks5://dead1": "1.1.1.1", "socks5://dead2": "2.2.2.2",
+         "socks5://backupA": "9.9.9.9", "socks5://backupB": "8.8.8.8"},
+    )
+    with patch.object(ps, "probe_proxy", probe), patch.object(ps, "extract_ip_from_proxy", ip):
+        res = _run(ps.failover_dead_proxies(pool, owner_id=99))
+    assert res["backups_healthy"] == 2, res
+    assert len(res["reassigned"]) == 2, res
+    assert res["still_dead_no_backup"] == [], res
