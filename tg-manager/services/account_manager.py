@@ -120,6 +120,38 @@ _pending_qr: dict[int, tuple] = {}
 _CONNECT_TIMEOUT = 30
 # Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
 _OP_TIMEOUT = 45
+
+# ── Уникальный IPv6 на аккаунт БЕЗ прокси ─────────────────────────────────────
+# Реальная (в отличие от CF-релея с общим edge-IP) изоляция: если хосту
+# маршрутизирована IPv6-подсеть (/64, /48 — миллиарды адресов), привязываем
+# ИСХОДЯЩИЙ сокет каждого аккаунта к СВОЕМУ адресу из неё (local_addr + use_ipv6).
+# Telegram видит уникальный IP на аккаунт без покупки прокси и без CF.
+#
+# Требование к хосту (иначе bind упадёт): подсеть должна быть routed на сервер и
+# включён AnyIP, напр.:  ip -6 route add local <subnet> dev lo
+# На Railway routed /64 обычно нет — нужен VPS/dedic с IPv6-блоком. Пусто = выкл
+# (нулевое изменение поведения).
+_IPV6_SUBNET = _os.getenv("IPV6_SUBNET", "").strip()
+
+
+def _account_ipv6(account_id: int, subnet_cidr: str) -> str | None:
+    """Детерминированно вернуть УНИКАЛЬНЫЙ IPv6 аккаунта из подсети (или None).
+
+    account_id → фиксированный адрес: один аккаунт всегда с одного IP (стабильный
+    exit, без AUTH_KEY-рассинхрона), разные аккаунты — с разных. Не выдаёт
+    network/anycast-нулевой адрес."""
+    if not subnet_cidr or not account_id:
+        return None
+    try:
+        import ipaddress
+        net = ipaddress.ip_network(subnet_cidr, strict=False)
+        if net.version != 6 or net.num_addresses <= 2:
+            return None
+        offset = (int(account_id) % (net.num_addresses - 2)) + 1
+        return str(net[offset])
+    except Exception as e:
+        log.warning("_account_ipv6(%s, %s) failed: %s", account_id, subnet_cidr, e)
+        return None
 _TELEGRAM_MAX_MUTE_UNTIL = datetime.fromtimestamp(2_147_483_647, tz=timezone.utc)
 
 _TG_INVITE_RE = re.compile(
@@ -762,7 +794,27 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     if device:
         acc_relay = str(device.get("cf_relay_url") or "").strip()
     relay_url = acc_relay or CF_RELAY_URL
-    if not has_bound_proxy and relay_url:
+
+    # local_addr/use_ipv6 — привязка исходящего сокета к своему IPv6 аккаунта.
+    local_addr = None
+    use_ipv6 = False
+    _acc_id = device.get("id") if device else None
+
+    if not has_bound_proxy and _IPV6_SUBNET and _acc_id:
+        # ПРИОРИТЕТ над CF-релеем: IPv6 даёт РЕАЛЬНО уникальный IP на аккаунт
+        # (у CF-релея общий edge-IP на пул). Прямое obfuscated-подключение к
+        # IPv6-DC Telegram с bind на свой адрес.
+        _v6 = _account_ipv6(int(_acc_id), _IPV6_SUBNET)
+        if _v6:
+            local_addr = _v6
+            use_ipv6 = True
+            connection_cls = ConnectionTcpObfuscated
+            effective_proxy = None
+            log.debug("acc=%s → уникальный IPv6 %s (без прокси)", _acc_id, _v6)
+
+    if local_addr is not None:
+        pass  # транспорт уже выбран (IPv6 direct)
+    elif not has_bound_proxy and relay_url:
         from services.cf_relay import make_cf_relay_connection as _make_relay
         connection_cls = _make_relay(relay_url)
         effective_proxy = None  # relay сам маршрутизирует
@@ -774,6 +826,13 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
             pool_url = _get_pool_proxy_url()
             proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
+
+    _extra_kwargs = {}
+    if local_addr is not None:
+        # Только когда IPv6 реально активен — иначе вызов идентичен прежнему
+        # (нулевой риск для существующего поведения/старых версий Telethon).
+        _extra_kwargs["use_ipv6"] = use_ipv6
+        _extra_kwargs["local_addr"] = local_addr
 
     return TelegramClient(
         StringSession(session_string),
@@ -790,6 +849,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         flood_sleep_threshold=0,
         proxy=effective_proxy,
         connection=connection_cls,
+        **_extra_kwargs,
     )
 
 

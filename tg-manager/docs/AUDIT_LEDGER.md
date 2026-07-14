@@ -879,3 +879,11 @@ Anti-detection: во ВСЕХ раздачах/лечении/мониторе �
   - Бэкенд: audit_proxy_isolation.isolation_ok = not shared and not naked AND not on_relay — «изоляция в порядке» больше не горит зелёным, пока аккаунты на общем IP релея.
 Проверено: test_cf_relay_honesty (2) + test_proxy_isolation_check + test_cf_pool_fixes зелёно. node --check всего JS. Функция релея сохранена (CDN-IP польза), но подана честно.
 Также в этом заходе: Волна M (mass_invite рефлекс), Волна I (warmer пропускает session_expired).
+
+## tg-manager: РЕАЛЬНЫЙ уникальный IP на аккаунт без прокси — IPv6 source rotation — 2026-07-14
+Требование пользователя: реально иметь уникальный IP на аккаунт, НЕ используя прокси и НЕ несколько CF-аккаунтов. Честно: CF Workers это дать не могут (общий egress-IP, подтверждено «уник. IP: 1»). Настоящее решение — IPv6 source-address rotation:
+  - _account_ipv6(account_id, subnet): детерминированный маппинг account_id → уникальный IPv6 из маршрутизируемой подсети (валидный, не network-нулевой, один аккаунт=один адрес).
+  - _make_client: при заданном env IPV6_SUBNET и отсутствии bound-прокси — прямое obfuscated-подключение с local_addr=<ipv6> + use_ipv6=True. ПРИОРИТЕТ над CF-релеем (реальный уник. IP > общий edge-IP). kwargs добавляются ТОЛЬКО когда IPv6 активен → нулевой риск/идентичный вызов при выключенном (пустой IPV6_SUBNET по умолчанию).
+  - Требование к хосту (в docs/UNIQUE_IP_IPV6.md): routed IPv6-подсеть (/64,/48) + AnyIP (ip -6 route add local <subnet> dev lo; ip_nonlocal_bind=1). Railway с shared-IPv6 без делегированного блока НЕ подойдёт — нужен VPS/dedic с IPv6 (Hetzner/OVH/Contabo). Тогда каждый аккаунт без прокси ходит со своего IPv6.
+Приоритет транспорта: bound-прокси → свой IPv6 → CF-релей → пул SOCKS5/прямое.
+Проверено: test_ipv6_unique_ip (2) — маппинг уникален/детерминирован на 1000 акк., валидный IPv6, edge-cases→None; исходник _make_client: IPv6 до релея, gated, zero-risk kwargs. Telethon в песочнице нет (use_ipv6/local_addr — штатные params 1.x), но при выключенном режиме вызов идентичен прежнему. AST зелёно.
