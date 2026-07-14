@@ -159,7 +159,7 @@ async def _analyze_account_patterns(
         degraded = await pool.fetch(
             """SELECT a.id, COALESCE(a.first_name, a.phone, 'id'||a.id::text) AS label,
                       a.trust_score,
-                      h7.avg_score AS score_7d_ago
+                      h7.trust_score AS score_7d_ago
                FROM tg_accounts a
                JOIN account_health_history h7
                  ON h7.account_id = a.id
@@ -167,8 +167,8 @@ async def _analyze_account_patterns(
                     AND h7.recorded_at > NOW() - INTERVAL '8 days'
                WHERE a.owner_id = $1
                  AND a.is_active = TRUE
-                 AND COALESCE(a.trust_score, 1.0) < h7.avg_score - 0.1
-               ORDER BY (h7.avg_score - COALESCE(a.trust_score, 1.0)) DESC
+                 AND COALESCE(a.trust_score, 1.0) < h7.trust_score - 0.1
+               ORDER BY (h7.trust_score - COALESCE(a.trust_score, 1.0)) DESC
                LIMIT 5""",
             owner_id,
         )
