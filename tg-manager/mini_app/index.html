@@ -1007,6 +1007,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- ⚡ Быстрые действия (всегда наверху) -->
     <div class="sec" style="color:var(--accent)">⚡ Быстрые действия</div>
     <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openCmdCenter()">
+        <div class="mgmt-tile-ico">📊</div>
+        <div class="mgmt-tile-lbl">Командный центр</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openNewUsers()">
         <div class="mgmt-tile-ico">🆕</div>
         <div class="mgmt-tile-lbl">Новые подписчики</div>
@@ -16136,5 +16141,6 @@ function downloadBlob(content, filename, type) {
      хелперы (push/txt/esc/api/toast/empty), которые к этому моменту уже
      определены. -->
 <script src="screens/spintax.js"></script>
+<script src="screens/cmdcenter.js"></script>
 </body>
 </html>

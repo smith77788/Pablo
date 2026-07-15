@@ -633,6 +633,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         stats["ops_failed"] = int(r["ops_failed"] or 0)
         return _json_resp(stats)
 
+    async def dashboard_visual(request: web.Request) -> web.Response:
+        """Данные визуального дашборда (командный центр): аккаунты по статусам,
+        здоровье прокси-пула, поток операций за 7 дней, распределение health.
+        Один запрос — все метрики (для SVG-графиков на клиенте). Скоуп по owner_id."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        _q = {
+            "acc_by_status": _safe_fetch(pool,
+                """SELECT COALESCE(acc_status,'active') AS st, COUNT(*) AS c
+                   FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE
+                   GROUP BY COALESCE(acc_status,'active')""", uid),
+            "proxies": _safe_fetchrow(pool,
+                """SELECT COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE is_alive IS TRUE) AS alive,
+                          COUNT(*) FILTER (WHERE is_alive IS FALSE) AS dead,
+                          COUNT(*) FILTER (WHERE COALESCE(is_backup,FALSE)) AS backup,
+                          COUNT(*) FILTER (WHERE EXISTS (
+                              SELECT 1 FROM tg_accounts a
+                              WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id)) AS assigned
+                   FROM user_proxies WHERE owner_id=$1""", uid),
+            "ops7d": _safe_fetch(pool,
+                """SELECT to_char(date_trunc('day', created_at),'MM-DD') AS day,
+                          COUNT(*) FILTER (WHERE status='done') AS done,
+                          COUNT(*) FILTER (WHERE status='failed') AS failed
+                   FROM operation_queue
+                   WHERE owner_id=$1 AND created_at > now() - INTERVAL '7 days'
+                   GROUP BY 1 ORDER BY 1""", uid),
+            "ops_now": _safe_fetchrow(pool,
+                """SELECT COUNT(*) FILTER (WHERE status='running') AS running,
+                          COUNT(*) FILTER (WHERE status='pending') AS pending
+                   FROM operation_queue WHERE owner_id=$1""", uid),
+            "health": _safe_fetchrow(pool,
+                """SELECT ROUND(AVG(COALESCE(trust_score,50)))::int AS avg,
+                          COUNT(*) FILTER (WHERE COALESCE(trust_score,50) >= 70) AS good,
+                          COUNT(*) FILTER (WHERE COALESCE(trust_score,50) BETWEEN 40 AND 69) AS warn,
+                          COUNT(*) FILTER (WHERE COALESCE(trust_score,50) < 40) AS bad
+                   FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""", uid),
+        }
+        _keys = list(_q.keys())
+        _res = await asyncio.gather(*_q.values(), return_exceptions=True)
+        r = {k: (None if isinstance(v, Exception) else v) for k, v in zip(_keys, _res)}
+        prx = r.get("proxies") or {}
+        opn = r.get("ops_now") or {}
+        hl = r.get("health") or {}
+        return _json_resp({
+            "ok": True,
+            "accounts": [{"status": row["st"], "count": int(row["c"])}
+                         for row in (r.get("acc_by_status") or [])],
+            "proxies": {k: int(prx.get(k) or 0)
+                        for k in ("total", "alive", "dead", "backup", "assigned")},
+            "ops7d": [{"day": row["day"], "done": int(row["done"]), "failed": int(row["failed"])}
+                      for row in (r.get("ops7d") or [])],
+            "ops_now": {"running": int(opn.get("running") or 0),
+                        "pending": int(opn.get("pending") or 0)},
+            "health": {"avg": int(hl.get("avg") or 0), "good": int(hl.get("good") or 0),
+                       "warn": int(hl.get("warn") or 0), "bad": int(hl.get("bad") or 0)},
+        })
+
     # ── Bots ─────────────────────────────────────────────────────────────────
 
     @_cached_user()
@@ -10420,6 +10479,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
     app.router.add_post("/api/miniapp/auth", auth)
     app.router.add_get("/api/miniapp/dashboard", dashboard)
+    app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     # Bots
     app.router.add_get("/api/miniapp/bots", bots)
     app.router.add_post("/api/miniapp/bot/add", bot_add)
