@@ -938,3 +938,12 @@ CLAUDE.md отмечал ключевое ограничение: «в песо�
 Параллельный агент независимо построил тот же Enterprise-UX «Что делать дальше» (services/next_actions.py + /api/miniapp/next_actions + copilot на главном) — богаче моего наброска (add-account/failed-ops/invite/proxy/dead-proxy/warmup/broadcast/funnel/auto-responder/ecosystem). Синхронное решение: свой дубль (services/suggestions.py + nbaCard) ОТКАТИЛ (reset к origin), чтобы не было двух одинаковых карточек. Вместо конкуренции — ДОБАВИЛ недостающее критичное правило в ИХ модуль:
   - build_suggestions: подсказка «relog_expired» (priority 94) при acc_status='session_expired' — прямо связано с багом AuthKeyUnregistered при синке контактов (все аккаунты требовали релога, а подсказки не было). _gather_state добирает acc_expired.
 Проверено: их test_next_actions +1 (relog при session_expired; нет истёкших → нет подсказки) → 18/18. AST чисто.
+
+## tg-manager: верифицирован инвариант «краш операции → освобождение аккаунтов» + guard-тест — 2026-07-14
+Этап 5 (падения операций): проверил жизненный цикл op_worker._run_op_task на утечку in_operation при краше. ВЕРДИКТ: инвариант держится несколькими механизмами (не баг):
+  - except → operation_queue.status='failed' + record_account_op(fail) + circuit breaker.
+  - finally → release_operation_accounts(op_id) (снимает in_operation=FALSE по _operation_account_locks[op_id]) + _active_op_ids.discard (освобождает слот параллельности).
+  - _claim_available_accounts(op_id, …) регистрирует взятые аккаунты под op_id (safety-net finally их поймает).
+  - Исполнители, берущие аккаунты через mark_accounts_in_use (strike, warmer), имеют СВОЙ finally с release_accounts.
+  - reset_stale_in_operation на старте (страховка от жёсткого kill) + stale-watchdog для 'running'.
+Инвариант был БЕЗ теста → добавлен tests/test_op_lifecycle_invariant.py (4: crash→release+failed+слот; release сбрасывает флаг; claim регистрирует под op_id; startup-reset есть). Ничего не менял в коде (нет дефекта) — зафиксировал знание, чтобы будущие сессии не переисследовали, и сторожу от регресса.
