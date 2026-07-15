@@ -389,6 +389,21 @@ def security_middleware() -> Callable:
         except web.HTTPException:
             raise
         except Exception:
+            # Необработанное исключение в хендлере: без этого aiohttp вернёт
+            # HTML-страницу 500 с трейсбеком, а мини-апп ждёт JSON и спотыкается
+            # на парсинге — пользователь видит «сломанную» ошибку вместо
+            # понятного сообщения. Логируем с трейсом и отдаём чистый JSON.
+            log.exception("unhandled error in handler for %s %s", request.method, request.path)
+            if request.path.startswith("/api/"):
+                return web.Response(
+                    text='{"error": "Внутренняя ошибка сервера. Попробуйте ещё раз."}',
+                    content_type="application/json",
+                    status=500,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    },
+                )
             raise
 
         # Add security headers

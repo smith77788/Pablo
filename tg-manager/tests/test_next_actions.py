@@ -165,8 +165,7 @@ class _FakePool:
         return self._ops
 
 
-def test_compute_next_actions_end_to_end():
-    import asyncio
+async def test_compute_next_actions_end_to_end():
     from services.next_actions import compute_next_actions
 
     pool = _FakePool(
@@ -189,9 +188,7 @@ def test_compute_next_actions_end_to_end():
         },
         [{"op_type": "parse_audience", "status": "done"}],
     )
-    actions = asyncio.get_event_loop().run_until_complete(
-        compute_next_actions(pool, 123, limit=5)
-    )
+    actions = await compute_next_actions(pool, 123, limit=5)
     assert 1 <= len(actions) <= 5
     ids = [a["id"] for a in actions]
     assert len(ids) == len(set(ids))
