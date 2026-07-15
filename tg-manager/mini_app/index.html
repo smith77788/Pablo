@@ -464,6 +464,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .copilot-cta{font-size:12px;font-weight:600;color:var(--accent)}
 .copilot-x{position:absolute;top:7px;right:9px;font-size:12px;color:var(--hint);opacity:.55;padding:3px 5px;line-height:1;border-radius:8px}
 .copilot-x:active{opacity:1;background:var(--bg)}
+/* Часто используемые разделы */
+.freq-row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.freq-row::-webkit-scrollbar{display:none}
+.freq-chip{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:74px;max-width:92px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:9px 8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s}
+.freq-chip:active{transform:scale(.93);opacity:.75}
+.freq-chip-ico{font-size:19px;line-height:1;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,rgba(91,141,239,.12),rgba(176,123,232,.08))}
+.freq-chip-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
 /* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
 @media (prefers-color-scheme: dark){
@@ -548,6 +555,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div><div class="qa-tile-val" id="qa-ops">—</div></div>
       <div class="qa-tile" onclick="openContacts()"><div class="qa-tile-ico">📇</div><div class="qa-tile-lbl">Контакты</div><div class="qa-tile-val" id="qa-contacts">—</div></div>
       <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div><div class="qa-tile-val" style="color:var(--blue)">→</div></div>
+    </div>
+    <!-- Часто используемые (персонально, по реальным кликам) -->
+    <div id="freqWrap" style="display:none">
+      <div class="sec-row" style="margin-top:4px">
+        <div class="sec">⭐ Часто используемые</div>
+        <span class="sec-btn" onclick="clearFrequent()">Очистить</span>
+      </div>
+      <div class="freq-row" id="freqList"></div>
     </div>
     <!-- Activity chart -->
     <div class="sec-row" style="margin-top:8px">
@@ -5687,6 +5702,7 @@ async function loadHome() {
     if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
   loadNextActions();
+  renderFrequent();
 }
 
 // ── Copilot: контекстные подсказки «Что делать дальше» ──────────────
@@ -5751,6 +5767,104 @@ async function loadNextActions(force) {
     renderNextActions(d.actions||[]);
   } catch(_) { /* копайлот вспомогательный — молча скрываем при ошибке */ }
 }
+
+// ── Часто используемые разделы (персонально, по реальным кликам) ─────
+// Учёт локальный (localStorage) — без роста схемы БД и без серверных запросов.
+// Воспроизведение действия — БЕЗ eval (CSP запрещает 'unsafe-eval'): парсим
+// имя функции и простые аргументы (строки/числа/null/bool) из onclick-строки.
+const _FREQ_KEY = 'infragram_usage';
+// Действия, которые не выносим в «частые» (навигация верхнего уровня и т.п.).
+const _FREQ_SKIP = new Set(['goTab', 'navGo', 'openDrawer', 'closeDrawer', 'back', 'loadHome']);
+
+function _freqLoad() {
+  try { return JSON.parse(localStorage.getItem(_FREQ_KEY) || '{}') || {}; }
+  catch(_) { return {}; }
+}
+function _freqSave(m) {
+  try { localStorage.setItem(_FREQ_KEY, JSON.stringify(m)); } catch(_) {}
+}
+function _fnNameOf(onclick) {
+  const mm = /^\s*([a-zA-Z_$][\w$]*)\s*\(/.exec(onclick || '');
+  return mm ? mm[1] : null;
+}
+function trackUsage(onclick, label, icon) {
+  onclick = (onclick || '').trim();
+  const fn = _fnNameOf(onclick);
+  if (!fn || _FREQ_SKIP.has(fn) || typeof window[fn] !== 'function') return;
+  label = (label || '').trim();
+  if (!label) return;
+  const m = _freqLoad();
+  const e = m[onclick] || { label, icon: icon || '⚡', count: 0 };
+  e.count++; e.last = Date.now(); e.label = label; if (icon) e.icon = icon;
+  m[onclick] = e;
+  _freqSave(m);
+}
+// Разбор аргументов простого вызова: 'a', 42, null, true — без eval.
+function _parseArgs(argStr) {
+  const out = [];
+  argStr = (argStr || '').trim();
+  if (!argStr) return out;
+  // Простой сплит по запятым верхнего уровня (аргументы примитивны).
+  argStr.split(',').forEach(raw => {
+    const t = raw.trim();
+    if (t === '') return;
+    if ((t[0] === "'" && t[t.length-1] === "'") || (t[0] === '"' && t[t.length-1] === '"')) {
+      out.push(t.slice(1, -1));
+    } else if (t === 'null') { out.push(null); }
+    else if (t === 'true') { out.push(true); }
+    else if (t === 'false') { out.push(false); }
+    else if (/^-?\d+(\.\d+)?$/.test(t)) { out.push(Number(t)); }
+    else { out.push(t); } // fallback — строка как есть
+  });
+  return out;
+}
+function replayAction(onclick) {
+  const fn = _fnNameOf(onclick);
+  if (!fn || typeof window[fn] !== 'function') { toast('Раздел недоступен'); return; }
+  const am = /\((.*)\)\s*;?\s*$/.exec(onclick);
+  const args = am ? _parseArgs(am[1]) : [];
+  try { window[fn].apply(window, args); }
+  catch(e) { try { toast('Не удалось открыть раздел'); } catch(_){} }
+}
+function renderFrequent() {
+  const wrap = document.getElementById('freqWrap');
+  const list = document.getElementById('freqList');
+  if (!wrap || !list) return;
+  const m = _freqLoad();
+  const items = Object.entries(m)
+    .map(([onclick, e]) => ({ onclick, ...e }))
+    .filter(x => x.count >= 2)                       // нужен реальный сигнал
+    .sort((a, b) => (b.count - a.count) || ((b.last||0) - (a.last||0)))
+    .slice(0, 8);
+  if (items.length < 3) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = items.map(x => `
+    <div class="freq-chip" onclick='replayAction(${JSON.stringify(x.onclick)})'>
+      <div class="freq-chip-ico">${x.icon || '⚡'}</div>
+      <div class="freq-chip-lbl">${esc(x.label)}</div>
+    </div>`).join('');
+  try { modernizeIcons(list); } catch(_) {}
+}
+function clearFrequent() {
+  try { localStorage.removeItem(_FREQ_KEY); } catch(_) {}
+  renderFrequent();
+  toast('Список очищен');
+}
+// Единый делегированный слушатель: ловит клики по плиткам каталога и
+// быстрым действиям, чтобы запоминать реально используемые разделы.
+document.addEventListener('click', function(ev) {
+  try {
+    const tile = ev.target.closest && ev.target.closest('.mgmt-tile, .qa-tile');
+    if (!tile) return;
+    const onclick = tile.getAttribute('onclick');
+    if (!onclick) return;
+    const lbl = tile.querySelector('.mgmt-tile-lbl, .qa-tile-lbl');
+    const ico = tile.querySelector('.mgmt-tile-ico, .qa-tile-ico');
+    const label = lbl ? lbl.textContent : '';
+    const icon = ico ? (ico.dataset.emoji || ico.textContent || '⚡') : '⚡';
+    trackUsage(onclick, label, icon);
+  } catch(_) {}
+}, true);
 
 function renderCards(d) {
   // KPI scroll row
