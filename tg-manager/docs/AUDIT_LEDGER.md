@@ -929,3 +929,7 @@ CLAUDE.md отмечал ключевое ограничение: «в песо�
   - Волна M: dm_engine.run_campaign отсеивает карантинные аккаунты из acc_cycle (is_account_quarantined, fail-open, пустой не обнуляет). Покрытие рефлекса пульса ЗАВЕРШЕНО по всем массовым отправителям: join+leave+publish+invite+strike+dm.
   - Волна S/1A: мигрированы 5 идемпотентных scan/check-вставок mini_app_api (phone_check, gift_scan, reg_check, ad_intel_scan, parse_audience) на operation_bus.submit(label). Ретрай скана/проверки безвреден. Храповик 44→39 (mini_app_api 34).
 Проверено: test_dm_reflex_wave_m (2) + ratchet 39 + связки. Python AST (dm_engine/mini_app_api) зелёно.
+
+## tg-manager: Волна S/1A — ещё 4 миграции шины (идемпотентные set-операции) — 2026-07-14
+Мигрированы 4 идемпотентные «set»-вставки mini_app_api на operation_bus.submit(label): bulk_set_profile, promote_all_admins ×2, bulk_seo_apply. Ретрай безвреден (повторный set тех же значений; registry max_retries ≤ прежнего колоночного дефолта 3 → не больше дублей). Храповик 39→35 (mini_app_api 30). Осталось в mini_app_api 30 — контролируемый legacy (неидемпотентные create/clone мигрирую отдельными аккуратными порциями).
+Проверено: ratchet 35 + связки зелёно. Python AST mini_app_api чисто.

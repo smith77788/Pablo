@@ -2390,11 +2390,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
         label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'bulk_set_profile','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps(params), len(account_ids), label,
-            )
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "bulk_set_profile", params,
+                total_items=len(account_ids), label=label)
         except Exception as exc:
             log.exception("profile_setter_submit insert uid=%d", uid)
             return _err(str(exc), 500)
@@ -3197,10 +3196,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("У канала нет привязанного аккаунта (создателя)", 400)
         params = {"channel_id": ch_id, "owner_acc_id": int(ch["acc_id"])}
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'promote_all_admins','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps(params), "Назначение админов")
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "promote_all_admins", params,
+                total_items=1, label="Назначение админов")
             return _json_resp({"ok": True, "op_id": op_id})
         except Exception as exc:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
@@ -3264,12 +3263,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if op == "promote":
                 op_ids = []
                 for c in chans:
-                    oid = await pool.fetchval(
-                        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                        "VALUES($1,'promote_all_admins','pending',$2,1,$3) RETURNING id",
-                        uid, _json.dumps({"channel_id": int(c["channel_id"]),
-                                          "owner_acc_id": int(c["acc_id"])}),
-                        f"Админы: {c.get('title') or c['channel_id']}")
+                    from services import operation_bus as _obus
+                    oid = await _obus.submit(
+                        pool, uid, "promote_all_admins",
+                        {"channel_id": int(c["channel_id"]),
+                         "owner_acc_id": int(c["acc_id"])},
+                        total_items=1,
+                        label=f"Админы: {c.get('title') or c['channel_id']}")
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
             return _err("Неизвестная операция", 400)
@@ -4176,11 +4176,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         chan_ids = [int(r["channel_id"]) for r in (rows or [])]
         if not chan_ids:
             return _err("Нет каналов с SEO-предложениями для применения", 400)
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-            "VALUES($1,'bulk_seo_apply','pending',$2,$3,$4) RETURNING id",
-            uid, _json.dumps({"channel_ids": chan_ids}), len(chan_ids),
-            f"SEO по сетке: {len(chan_ids)} каналов")
+        from services import operation_bus as _obus
+        op_id = await _obus.submit(
+            pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids},
+            total_items=len(chan_ids), label=f"SEO по сетке: {len(chan_ids)} каналов")
         return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
 
     async def seo_apply_bot(request: web.Request) -> web.Response:
