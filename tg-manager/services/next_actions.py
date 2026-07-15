@@ -68,6 +68,12 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
             "AND proxy_id IS NULL",
             uid,
         ),
+        "acc_expired": _fv(
+            pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=true "
+            "AND acc_status='session_expired'",
+            uid,
+        ),
         "proxies_total": _fv(
             pool, "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid
         ),
@@ -219,6 +225,24 @@ def build_suggestions(state: dict) -> list[dict]:
                 "cta": "Открыть инвайт",
                 "nav": None,
                 "fn": "openMassInvite",
+            }
+        )
+
+    # 2.5. Сессии устарели (AuthKeyUnregistered при синке контактов и т.п.) — релог.
+    #      Критично: пока не переавторизовать, операции с этими аккаунтами падают.
+    if state.get("acc_expired", 0) > 0:
+        n = state["acc_expired"]
+        s.append(
+            {
+                "id": "relog_expired",
+                "priority": 94,
+                "icon": "🔑",
+                "title": f"Переавторизуйте {n} аккаунт(ов)",
+                "reason": "Сессии устарели — Telegram не признаёт ключ авторизации. "
+                "Пока не сделаете релог, операции с этими аккаунтами будут падать.",
+                "cta": "Открыть аккаунты",
+                "nav": "accounts",
+                "fn": None,
             }
         )
 

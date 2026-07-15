@@ -933,3 +933,8 @@ CLAUDE.md отмечал ключевое ограничение: «в песо�
 ## tg-manager: Волна S/1A — ещё 4 миграции шины (идемпотентные set-операции) — 2026-07-14
 Мигрированы 4 идемпотентные «set»-вставки mini_app_api на operation_bus.submit(label): bulk_set_profile, promote_all_admins ×2, bulk_seo_apply. Ретрай безвреден (повторный set тех же значений; registry max_retries ≤ прежнего колоночного дефолта 3 → не больше дублей). Храповик 39→35 (mini_app_api 30). Осталось в mini_app_api 30 — контролируемый legacy (неидемпотентные create/clone мигрирую отдельными аккуратными порциями).
 Проверено: ratchet 35 + связки зелёно. Python AST mini_app_api чисто.
+
+## tg-manager: Next-Best-Action — вклад правила «релог» (не дубль) — 2026-07-14
+Параллельный агент независимо построил тот же Enterprise-UX «Что делать дальше» (services/next_actions.py + /api/miniapp/next_actions + copilot на главном) — богаче моего наброска (add-account/failed-ops/invite/proxy/dead-proxy/warmup/broadcast/funnel/auto-responder/ecosystem). Синхронное решение: свой дубль (services/suggestions.py + nbaCard) ОТКАТИЛ (reset к origin), чтобы не было двух одинаковых карточек. Вместо конкуренции — ДОБАВИЛ недостающее критичное правило в ИХ модуль:
+  - build_suggestions: подсказка «relog_expired» (priority 94) при acc_status='session_expired' — прямо связано с багом AuthKeyUnregistered при синке контактов (все аккаунты требовали релога, а подсказки не было). _gather_state добирает acc_expired.
+Проверено: их test_next_actions +1 (relog при session_expired; нет истёкших → нет подсказки) → 18/18. AST чисто.
