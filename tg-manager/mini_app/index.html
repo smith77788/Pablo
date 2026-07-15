@@ -1048,11 +1048,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Основное</div>
     <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Ядро работы: дашборд, боты, аккаунты, каналы, рассылки.</div>
     <div class="mgmt-grid">
-      <div class="mgmt-tile" onclick="openNewUsers()">
-        <div class="mgmt-tile-ico">🆕</div>
-        <div class="mgmt-tile-lbl">Новые подписчики</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
       <div class="mgmt-tile" onclick="openDiag()">
         <div class="mgmt-tile-ico">🩺</div>
         <div class="mgmt-tile-lbl">Диагностика</div>
@@ -5820,16 +5815,21 @@ function renderBots() {
   if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Подключите бота по токену от @BotFather',{label:'➕ Добавить бота',fn:'openBotAddModal()'}); return; }
   wrap.className = 'bot-cards';
   wrap.innerHTML = BOTS.map(b=>{
-    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-    const initials = (b.first_name||name).replace('@','').slice(0,2).toUpperCase();
+    // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
+    // строкой (раньше выводился только @username, имя не было видно вовсе).
+    const name = b.first_name || (b.username?'@'+b.username:'Бот #'+b.bot_id);
+    const handle = (b.first_name && b.username) ? '@'+b.username : '';
+    const initials = (b.first_name||b.username||'Бот').replace('@','').slice(0,2).toUpperCase();
     const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
     const active = b.is_active;
     const subs = b.subscriber_count||0;
     const sel = BOT_SEL.has(b.bot_id);
+    const handleHtml = handle ? `<div class="bot-card-lbl" style="margin-top:-2px;opacity:.75">${esc(handle)}</div>` : '';
     if (BOT_SEL_MODE) {
       return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id})">
         <div class="bot-card-ava" style="background:${grad}">${initials}</div>
         <div class="bot-card-name">${esc(name)}</div>
+        ${handleHtml}
         <div class="bot-card-subs">${num(subs)}</div>
         <div class="bot-card-lbl">подписчиков</div>
         <span class="badge ${sel?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${sel?'✓ Выбран':'Выбрать'}</span>
@@ -5839,6 +5839,7 @@ function renderBots() {
       <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
+      ${handleHtml}
       <div class="bot-card-subs">${num(subs)}</div>
       <div class="bot-card-lbl">подписчиков</div>
       <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
