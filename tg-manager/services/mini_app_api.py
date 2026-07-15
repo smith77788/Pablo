@@ -10932,6 +10932,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def next_actions(request: web.Request) -> web.Response:
+        """Copilot «Что делать дальше» — контекстные подсказки следующего шага
+        на реальном состоянии владельца (аккаунты/прокси/операции/боты/аудитория)
+        и его последних операциях. Каждая подсказка несёт ссылку в нужный раздел
+        мини-аппа, чтобы не искать его вручную."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import next_actions as _na
+            try:
+                limit = int(request.query.get("limit", "5"))
+            except (TypeError, ValueError):
+                limit = 5
+            limit = max(1, min(limit, 8))
+            actions = await _na.compute_next_actions(pool, uid, limit=limit)
+            return _json_resp({"actions": actions})
+        except Exception as e:
+            # Копайлот — вспомогательный: его сбой не должен ломать главный экран.
+            log.warning("next_actions endpoint failed uid=%s: %s", uid, e)
+            return _json_resp({"actions": []})
+
     async def dashboard_realtime(request: web.Request) -> web.Response:
         """Analytics Dashboard — операторская сводка на РЕАЛЬНЫХ данных, которые
         система собирает: аккаунты, каналы, аудитория ботов, операции + дневные
@@ -11421,6 +11443,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
     app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
+    app.router.add_get("/api/miniapp/next_actions", next_actions)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/networks", networks_list)

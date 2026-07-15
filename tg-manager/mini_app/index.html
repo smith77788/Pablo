@@ -454,6 +454,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .qa-tile-ico svg{width:22px;height:22px;display:block}
 .qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2}
 .qa-tile-val{font-size:16px;font-weight:700;margin-top:1px}
+/* Copilot «Что делать дальше» */
+.copilot-card{display:flex;align-items:flex-start;gap:11px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-lg);padding:12px 12px 12px 13px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s;position:relative}
+.copilot-card:active{transform:scale(.985);opacity:.85}
+.copilot-ico{font-size:20px;line-height:1;flex-shrink:0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,rgba(91,141,239,.14),rgba(176,123,232,.1))}
+.copilot-body{flex:1;min-width:0}
+.copilot-title{font-size:14px;font-weight:700;line-height:1.25;margin-bottom:2px}
+.copilot-reason{font-size:12px;color:var(--hint);line-height:1.35;margin-bottom:5px}
+.copilot-cta{font-size:12px;font-weight:600;color:var(--accent)}
+.copilot-x{position:absolute;top:7px;right:9px;font-size:12px;color:var(--hint);opacity:.55;padding:3px 5px;line-height:1;border-radius:8px}
+.copilot-x:active{opacity:1;background:var(--bg)}
 
 /* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
 @media (prefers-color-scheme: dark){
@@ -519,6 +529,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Operation Progress -->
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
+    </div>
+    <!-- Copilot: что делать дальше (контекстные подсказки) -->
+    <div id="copilotWrap" style="display:none;margin:12px 16px 0">
+      <div class="sec-row" style="margin:0 0 8px">
+        <div class="sec" style="margin:0">🧭 Что делать дальше</div>
+        <span class="sec-btn" onclick="loadNextActions(true)">Обновить</span>
+      </div>
+      <div id="copilotList"></div>
     </div>
     <!-- Quick actions -->
     <div class="sec">Быстрые действия</div>
@@ -5668,6 +5686,70 @@ async function loadHome() {
   } catch(e) {
     if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
+  loadNextActions();
+}
+
+// ── Copilot: контекстные подсказки «Что делать дальше» ──────────────
+// Открывает нужный раздел по подсказке: вкладка (nav) или глобальная
+// функция открытия экрана (fn). Пользователю не нужно искать раздел сам.
+function copilotOpen(nav, fn) {
+  try {
+    if (nav) { goTab(nav); }
+    else if (fn && typeof window[fn] === 'function') { window[fn](); }
+    else { toast('Раздел недоступен'); }
+  } catch(e) { try { toast('Не удалось открыть раздел'); } catch(_){} }
+}
+
+// «Отложить» — клиентское, на сутки, по id подсказки (без роста схемы БД).
+function copilotDismissed() {
+  try {
+    const raw = localStorage.getItem('infragram_copilot_dismiss');
+    if (!raw) return {};
+    const obj = JSON.parse(raw); const now = Date.now(); let changed = false;
+    for (const k in obj) { if (obj[k] < now) { delete obj[k]; changed = true; } }
+    if (changed) localStorage.setItem('infragram_copilot_dismiss', JSON.stringify(obj));
+    return obj;
+  } catch(_) { return {}; }
+}
+function copilotDismiss(id) {
+  try {
+    const obj = copilotDismissed();
+    obj[id] = Date.now() + 24*3600*1000;
+    localStorage.setItem('infragram_copilot_dismiss', JSON.stringify(obj));
+  } catch(_) {}
+  loadNextActions();
+}
+
+function renderNextActions(actions) {
+  const wrap = document.getElementById('copilotWrap');
+  const list = document.getElementById('copilotList');
+  if (!wrap || !list) return;
+  const dismissed = copilotDismissed();
+  const items = (actions||[]).filter(a => !dismissed[a.id]);
+  if (!items.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = items.map(a => `
+    <div class="copilot-card" onclick="copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'})">
+      <div class="copilot-ico">${a.icon||'💡'}</div>
+      <div class="copilot-body">
+        <div class="copilot-title">${esc(a.title||'')}</div>
+        <div class="copilot-reason">${esc(a.reason||'')}</div>
+        <div class="copilot-cta">${esc(a.cta||'Открыть')} →</div>
+      </div>
+      <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить">✕</div>
+    </div>`).join('');
+}
+
+async function loadNextActions(force) {
+  if (!force) {
+    const c = getCached('infragram_cache_nextact');
+    if (c) renderNextActions(c);
+  }
+  try {
+    const d = await api('/api/miniapp/next_actions');
+    setCache('infragram_cache_nextact', d.actions||[]);
+    renderNextActions(d.actions||[]);
+  } catch(_) { /* копайлот вспомогательный — молча скрываем при ошибке */ }
 }
 
 function renderCards(d) {
