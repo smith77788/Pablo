@@ -37,7 +37,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #content{flex:1;overflow:hidden;position:relative}
 
 /* ─── Screens ───────────────────────────────────────────────── */
-.screen{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;background:var(--bg)}
+.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:none;background:var(--bg)}
 .screen.show{display:block;animation:fadeIn .2s var(--ease)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px)}
