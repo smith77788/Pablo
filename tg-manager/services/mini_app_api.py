@@ -335,6 +335,18 @@ async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args) -> dict | None:
         return None
 
 
+async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args):
+    """Скалярный fetchval с проглатыванием ошибки (→ None). Использовался в 7
+    местах (дашборд/аудитория/статы), но НЕ был определён в этом модуле (только в
+    op_worker) → NameError валил эндпоинты аналитики/аудитории в 500 («name
+    '_safe_fetchval' is not defined»)."""
+    try:
+        return await pool.fetchval(query, *args)
+    except Exception as e:
+        log.warning("_safe_fetchval error: %s | query=%.120s", e, query)
+        return None
+
+
 def _dna_to_dict(dna: Any) -> dict:
     """Serialize an AudienceDNA dataclass instance to a JSON-friendly dict."""
     return {
