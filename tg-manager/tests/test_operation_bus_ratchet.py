@@ -20,9 +20,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Текущий факт (services/ + bot/, без самой шины). Двигать только ВНИЗ по мере
 # миграции прямых вставок на operation_bus.submit().
-# История: 55 → 54 (boost) → 49 (broadcaster ×5) → 44 (mini_app_api scan/check ×5),
-# Волна S/1A. Двигать только ВНИЗ.
-BASELINE = 44
+# История: 55 → 54 (boost) → 49 (broadcaster ×5) → 44 (mini_app_api scan/check ×5)
+# → 39 (mini_app_api phone/gift/reg/ad-intel/parse ×5), Волна S/1A. Только ВНИЗ.
+BASELINE = 39
 
 # operation_bus сам содержит эталонные вставки (реализация шины) — это не обход.
 _ALLOW = {"services/operation_bus.py"}

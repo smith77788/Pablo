@@ -4626,11 +4626,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         phones = phones[:500]
         try:
             label = f"Проверка {len(phones)} номеров"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'phone_check','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"phones": phones}), len(phones), label,
-            )
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "phone_check", {"phones": phones},
+                total_items=len(phones), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(phones)})
         except Exception as exc:
             log.exception("phone_check_submit uid=%d", uid)
@@ -4909,11 +4908,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             label = "Сканирование подарков во всех аккаунтах"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'gift_scan','pending','{}',1,$2) RETURNING id",
-                uid, label,
-            )
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "gift_scan", {}, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
             log.exception("gift_scan_submit uid=%d", uid)
@@ -5306,11 +5303,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите цель проверки", 400)
         try:
             label = f"Проверка даты регистрации: {target}"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'reg_check','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"target": target}), label,
-            )
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "reg_check", {"target": target}, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
             log.exception("reg_check_submit uid=%d", uid)
@@ -6104,11 +6099,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         import json as _json
         label = f"Ad Intel scan @{channel}"
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'ad_intel_scan','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"channel": channel}), label,
-            )
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "ad_intel_scan", {"channel": channel},
+                total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
             log.exception("ad_intel_add_channel uid=%d", uid)
@@ -6781,14 +6775,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         _win = f", {days_back}д" if parse_type in ("active", "comments") else ""
         label = f"Парсинг {parse_type} из @{source_ref} (до {limit}{_win})"
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'parse_audience','pending',$2,$3,$4) RETURNING id",
-                uid,
-                _json.dumps({"source_ref": source_ref, "parse_type": parse_type,
-                             "limit": limit, "days_back": days_back}),
-                limit, label,
-            )
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "parse_audience",
+                {"source_ref": source_ref, "parse_type": parse_type,
+                 "limit": limit, "days_back": days_back},
+                total_items=limit, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except Exception as exc:
             log.exception("submit_parse_job uid=%d", uid)

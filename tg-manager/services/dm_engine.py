@@ -474,6 +474,20 @@ async def run_campaign(
             log_exc_swallow(log, "dm_engine: per-account daily preload failed")
 
     acc_cycle = list(accounts)
+    # Риск-пульс (Волна S/1B + M, fail-open): DM с флагнутого аккаунта = быстрый бан.
+    # Отсеиваем карантинные; если фильтр опустошает — НЕ обнуляем (лучше рискнуть).
+    try:
+        from services import infra_memory as _im
+        _kept = []
+        for _a in acc_cycle:
+            if not await _im.is_account_quarantined(pool, _a["id"]):
+                _kept.append(_a)
+        if _kept and len(_kept) != len(acc_cycle):
+            log.info("dm_engine campaign=%s: пропущено %d аккаунтов в карантине",
+                     campaign_id, len(acc_cycle) - len(_kept))
+            acc_cycle = _kept
+    except Exception:
+        log_exc_swallow(log, "dm_engine: quarantine filter failed")
     acc_idx = 0
     sent = 0
     failed = 0
