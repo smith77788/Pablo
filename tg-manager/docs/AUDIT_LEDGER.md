@@ -1025,3 +1025,15 @@ is_active=FALSE, а тут аккаунт остаётся включённым.
 Проверено: test_cooldown_selfheal (3: активное окно=риск/истёкшее=здоров; sweep
 таргетит только истёкший cooldown; fail-soft на ошибке БД) + пульс 9 + surfaced 4
 → 16/16. Python AST account_monitor/infra_memory чисто.
+
+## tg-manager: кровеносная — показать причину сбоя аккаунта (status_reason) — 2026-07-16
+op_worker писал в tg_accounts.status_reason машинную причину («network/proxy
+failure (join): …», «session_expired …»), но НИ API, ни UI её не отдавали —
+пользователь не понимал, почему подключённый аккаунт не работает («нету
+информации»). Теперь account_detail (admin+owner SELECT) тянет status_reason, а UI
+humanize-ит (accReasonHuman): прокси/сеть → «проверьте/смените прокси»; flood →
+«дайте отдохнуть»; auth/session → «нужна переавторизация»; ban/restrict → «аккаунт
+ограничен». Причина встроена в health-баннер, а если баннер риска не сработал
+(активный кулдаун/session_expired) — показывается отдельной строкой «Последний сбой».
+Проверено: test_account_status_reason (3) + surfaced 4 → 7/7. AST mini_app_api +
+node --check index.html чисто.

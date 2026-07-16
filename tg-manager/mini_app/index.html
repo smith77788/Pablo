@@ -7104,6 +7104,22 @@ async function openAccount(accId) {
   }
 }
 
+// Машинная причина проблемы (status_reason от op_worker) → человекочитаемо + путь
+// к фиксу. Отвечает на «почему аккаунт не работает», когда он вроде подключён.
+function accReasonHuman(raw) {
+  if (!raw) return '';
+  const s = String(raw).toLowerCase();
+  if (s.includes('proxy') || s.includes('network') || s.includes('connect') || s.includes('timeout'))
+    return '🌐 Проблема с прокси или сетью — проверьте/смените прокси аккаунта.';
+  if (s.includes('flood'))
+    return '⏳ Слишком частые действия (FloodWait) — дайте аккаунту отдохнуть.';
+  if (s.includes('auth') || s.includes('session') || s.includes('unregist') || s.includes('unauthorized'))
+    return '🔑 Сессия недействительна — нужна переавторизация (в боте: Аккаунты → Переавторизатор).';
+  if (s.includes('ban') || s.includes('block') || s.includes('restrict') || s.includes('spam'))
+    return '🚫 Аккаунт ограничен Telegram — снизьте активность, дайте отлежаться.';
+  return 'ℹ️ ' + raw;
+}
+
 function buildAccDetail(d) {
   const a = d.account||{};
   const caps = d.capabilities||{};
@@ -7130,6 +7146,7 @@ function buildAccDetail(d) {
   if (a.stage && ACC_STAGES[a.stage]) statusBadge += ' '+stageBadge(a.stage);
 
   // Почему «активный» аккаунт не работает: риск-пульс объясняет паузу и путь к фиксу.
+  const reasonHuman = accReasonHuman(a.status_reason);
   let healthBanner = '';
   const _h = d.health;
   if (_h && (_h.status==='quarantine' || _h.status==='at_risk') && a.is_active
@@ -7143,7 +7160,14 @@ function buildAccDetail(d) {
     healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:${q?'rgba(239,68,68,.10)':'rgba(245,158,11,.10)'};font-size:13px;line-height:1.4;color:var(--hint)">
       ${q?'🛑 <b>Аккаунт на паузе</b>':'⚠️ <b>Аккаунт под риском</b>'} — массовые операции его ${q?'пропускают':'берегут'}, чтобы не поймать бан.<br>
       <span style="opacity:.8">Причина: ${esc(why)}.</span><br>
+      ${reasonHuman?`<span style="opacity:.8">Последний сбой: ${esc(reasonHuman)}</span><br>`:''}
       <span style="opacity:.8">${q?'Дайте аккаунту отлежаться (3+ дней без действий) или запустите щадящий прогрев — пульс снимет паузу автоматически.':'Снизьте нагрузку и запустите прогрев — риск спадёт сам.'}</span>
+    </div>`;
+  } else if (reasonHuman && a.acc_status!=='ok' && a.acc_status!=='active') {
+    // Баннер риска не сработал (напр. активный кулдаун / session_expired), но есть
+    // машинная причина последнего сбоя — всё равно показать «почему не работает».
+    healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:rgba(245,158,11,.10);font-size:13px;line-height:1.4;color:var(--hint)">
+      <b>Последний сбой аккаунта:</b> ${esc(reasonHuman)}
     </div>`;
   }
 

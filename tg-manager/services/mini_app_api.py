@@ -1460,7 +1460,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           is_active, added_at, last_used,
                           COALESCE(trust_score, 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          cooldown_until, cluster, stage
+                          status_reason, cooldown_until, cluster, stage
                    FROM tg_accounts WHERE id=$1""", acc_id)
         else:
             acc = await _safe_fetchrow(pool,
@@ -1468,7 +1468,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           is_active, added_at, last_used,
                           COALESCE(trust_score, 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          cooldown_until, cluster, stage
+                          status_reason, cooldown_until, cluster, stage
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Account not found", 404)
