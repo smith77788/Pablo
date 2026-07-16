@@ -160,6 +160,36 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
         log.debug("account_monitor: stuck ops check error: %s", exc)
 
 
+async def _heal_expired_cooldowns(pool: asyncpg.Pool) -> None:
+    """Пассивный само-heal: снять acc_status='cooldown' → 'active', когда
+    cooldown_until истёк.
+
+    op_worker при сетевом/прокси-сбое ставит acc_status='cooldown' +
+    cooldown_until (обычно +15 мин), но НИЧТО не возвращало статус в 'active'
+    после истечения окна: reactivate-запрос в check_accounts_health бьёт только
+    по is_active=FALSE, а здесь аккаунт остаётся включённым. В итоге один
+    FloodWait 15 минут назад держал аккаунт в «⚠️ Под риском» бесконечно (пульс
+    считает 'cooldown' риском), пока пользователь не запустит проверку вручную.
+
+    Организм должен заживать сам: как только окно кулдауна прошло — статус
+    чистый. Только 'cooldown' (транзиентный статус от op_worker); 'warming'/
+    'banned'/'session_expired' не трогаем.
+    """
+    try:
+        res = await pool.execute(
+            """UPDATE tg_accounts
+               SET acc_status='active', status_reason=NULL
+               WHERE acc_status='cooldown'
+                 AND is_active=TRUE
+                 AND (cooldown_until IS NULL OR cooldown_until <= NOW())""",
+        )
+        n = int(str(res).rsplit(" ", 1)[-1]) if str(res).rsplit(" ", 1)[-1].isdigit() else 0
+        if n:
+            log.info("account_monitor: self-heal — снят истёкший кулдаун с %d аккаунтов", n)
+    except Exception as exc:
+        log.debug("account_monitor: heal_expired_cooldowns error: %s", exc)
+
+
 async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
     """Ping Telegram for accounts whose session hasn't been verified recently.
 
@@ -296,6 +326,9 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         try:
             await _check_and_alert(pool, bot)
             await _check_low_trust(pool, bot)
+            # Само-heal: снять истёкшие кулдауны (дёшево, каждый цикл) — иначе
+            # один давний FloodWait держит аккаунт в «Под риском» навсегда.
+            await _heal_expired_cooldowns(pool)
             # Check for stuck operations every 3 cycles (every 3 hours)
             if cycle % 3 == 0:
                 await _recover_stuck_operations(pool, bot)

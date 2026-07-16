@@ -643,6 +643,10 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             """
             SELECT a.id, a.phone, COALESCE(a.acc_status,'active') AS acc_status,
               a.trust_score,
+              -- истёк ли кулдаун: acc_status='cooldown' с прошедшим окном НЕ риск
+              -- (само-heal в account_monitor чистит статус, но здесь окно закрываем
+              -- сразу, чтобы UI не держал «Под риском» до следующего цикла монитора)
+              (a.cooldown_until IS NOT NULL AND a.cooldown_until > NOW()) AS cd_active,
               (SELECT COUNT(*) FROM restriction_events r
                  WHERE r.account_id=a.id
                    AND r.created_at > NOW() - make_interval(days => $2)) AS restrictions,
@@ -673,7 +677,11 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         # acc_status тоже сигнал здоровья (его ставят warmer/recovery/op_worker):
         # banned/session_expired → карантин; cooldown/warming → риск.
         status_bad = acc_status in ("banned", "session_expired", "deleted")
-        status_risk = acc_status in ("cooldown", "warming", "restricted", "flood")
+        status_risk = acc_status in ("warming", "restricted", "flood")
+        # 'cooldown' — риск ТОЛЬКО пока окно кулдауна не истекло (иначе давний
+        # FloodWait держал бы «Под риском» бесконечно до heal-цикла монитора).
+        if acc_status == "cooldown" and r.get("cd_active"):
+            status_risk = True
         # trust_score (0..1, ставится trust_engine): низкий траст — тоже риск.
         # Единый пульс сводит restriction_events + acc_status + flood + trust.
         try:

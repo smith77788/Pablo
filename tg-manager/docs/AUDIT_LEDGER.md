@@ -1007,3 +1007,21 @@ dashboard.js, openSpintax в screens/spintax.js — my первичный ска
 Проверено: test_catalog_no_dup_modules (3: нет одной-функции-под-двумя-именами;
 все плитки определены с учётом screens/*.js; два дашборда — разные имена) + прежние
 7+4 → 14/14. node --check index.html + dashboard.js чисто.
+
+## tg-manager: иммунная система — само-heal истёкших кулдаунов — 2026-07-16
+Найден staleness-баг в пульсе: op_worker при сетевом/прокси-сбое ставит
+acc_status='cooldown' + cooldown_until(+15мин), но НИЧТО не возвращало статус в
+'active' после окна — reactivate в check_accounts_health бьёт только по
+is_active=FALSE, а тут аккаунт остаётся включённым. Итог: один FloodWait 15 минут
+назад держал аккаунт в «⚠️ Под риском» бесконечно (пульс считает 'cooldown'
+риском), пока пользователь не запустит проверку вручную. Организм не заживал сам.
+Фикс двухслойный:
+  1. get_account_health: 'cooldown' — риск ТОЛЬКО пока cd_active (cooldown_until >
+     NOW()). Истёкшее окно → healthy сразу (UI не врёт до цикла монитора).
+  2. account_monitor._heal_expired_cooldowns: каждый цикл чистит persisted-статус
+     'cooldown'→'active' (status_reason=NULL) где cooldown_until истёк и
+     is_active=TRUE. Только 'cooldown' (транзиент op_worker); warming/banned/
+     session_expired не трогаем. Fail-soft.
+Проверено: test_cooldown_selfheal (3: активное окно=риск/истёкшее=здоров; sweep
+таргетит только истёкший cooldown; fail-soft на ошибке БД) + пульс 9 + surfaced 4
+→ 16/16. Python AST account_monitor/infra_memory чисто.
