@@ -357,6 +357,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "build_ecosystem",
+                "apply": "Создать из каналов",
                 "priority": 52,
                 "icon": "🌐",
                 "title": f"Объедините {state['channels']} каналов в экосистему",

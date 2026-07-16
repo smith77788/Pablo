@@ -1099,3 +1099,17 @@ ratchet соблюдён). DRY: ядра _warmup_bulk_core/_check_all_proxies_co
 Регресс: tests/test_next_actions_apply.py (3: skip mass_publish, JSON-params, empty)
 + apply-метки в test_next_actions.py (2). Проверено в render-харнессе: кнопка
 рендерится, клик шлёт POST {id}, тост с результатом, 0 JS-ошибок.
+
+## tg-manager: Copilot one-click — покрытие завершено (+экосистема) — 2026-07-16
+Расширение «применить в один клик» на все подсказки с БЕЗОПАСНЫМ smart-default:
+добавлен build_ecosystem → авто-создание экосистемы из каналов владельца
+(_build_ecosystem_core: create_ecosystem + add_member(object_type='channel') —
+канонический ecosystem_members, не параллельная ecosystem_channels; только
+группировка в БД, без Telegram-действий, обратимо). Итоговое покрытие one-click:
+warmup×2, replace_dead_proxies, review_failed_ops, check_account_health,
+build_ecosystem. Осознанно БЕЗ one-click (честно оставлены навигацией):
+assign_proxies — затрагивает прокси-изоляцию (высокорисковый слой по CLAUDE.md,
+без реальной БД инварианты не проверить); invite/broadcast/funnel/autoresponder/
+collect_audience/add_first_account/relog — требуют пользовательского ввода
+(текст/цель/креды), автодефолта нет. Регресс: test_next_actions_apply.py
+(+2 ecosystem: создание+добавление каналов, пустой список) + apply-метки. 1701 passed.

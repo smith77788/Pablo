@@ -66,3 +66,55 @@ async def test_retry_empty(monkeypatch):
     monkeypatch.setattr(obus, "submit", fake_submit)
     res = await _retry_failed_ops_core(_Pool([]), uid=1)
     assert res == {"ok": True, "retried": 0, "skipped": 0}
+
+
+async def test_build_ecosystem_core_creates_and_adds_channels(monkeypatch):
+    import services.ecosystem_brain as eb
+    from services.mini_app_api import _build_ecosystem_core
+
+    created = {}
+    added = []
+
+    async def fake_create(pool, owner_id, name, **kw):
+        created["name"] = name
+        created["owner"] = owner_id
+        return 77
+
+    async def fake_add(pool, eco_id, owner_id, object_type, object_id, role="member"):
+        added.append((eco_id, object_type, object_id))
+        return True
+
+    monkeypatch.setattr(eb, "create_ecosystem", fake_create)
+    monkeypatch.setattr(eb, "add_member", fake_add)
+
+    class P:
+        async def fetch(self, q, *a):
+            return [{"channel_id": 10}, {"channel_id": 20}, {"channel_id": 30}]
+
+    res = await _build_ecosystem_core(P(), uid=5)
+    assert res["ecosystem_id"] == 77
+    assert res["channels"] == 3
+    assert created["owner"] == 5
+    assert added == [(77, "channel", 10), (77, "channel", 20), (77, "channel", 30)]
+
+
+async def test_build_ecosystem_core_no_channels(monkeypatch):
+    import services.ecosystem_brain as eb
+    from services.mini_app_api import _build_ecosystem_core
+
+    async def fake_create(pool, owner_id, name, **kw):
+        return 1
+
+    async def fake_add(*a, **k):
+        raise AssertionError("add_member не должен вызываться без каналов")
+
+    monkeypatch.setattr(eb, "create_ecosystem", fake_create)
+    monkeypatch.setattr(eb, "add_member", fake_add)
+
+    class P:
+        async def fetch(self, q, *a):
+            return []
+
+    res = await _build_ecosystem_core(P(), uid=5)
+    assert res["channels"] == 0
+    assert res["ecosystem_id"] == 1

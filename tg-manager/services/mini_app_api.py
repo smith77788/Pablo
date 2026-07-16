@@ -523,6 +523,29 @@ async def _retry_failed_ops_core(pool: asyncpg.Pool, uid: int, hours: int = 24) 
     return {"ok": True, "retried": retried, "skipped": skipped}
 
 
+async def _build_ecosystem_core(pool: asyncpg.Pool, uid: int) -> dict:
+    """Авто-создать экосистему из каналов владельца: одна экосистема + все каналы
+    как участники (канонический путь — ecosystem_members через add_member, не
+    параллельная ecosystem_channels; см. AUDIT_LEDGER). Только группировка в БД,
+    без Telegram-действий, обратимо (можно удалить)."""
+    rows = await _safe_fetch(pool,
+        "SELECT channel_id FROM managed_channels WHERE owner_id=$1 AND channel_id IS NOT NULL LIMIT 500",
+        uid)
+    ch_ids = [int(r["channel_id"]) for r in (rows or [])]
+    from services import ecosystem_brain as _eb
+    eco_id = await _eb.create_ecosystem(
+        pool, uid, "Моя экосистема",
+        description="Создана автоматически из ваших каналов", ecosystem_type="custom")
+    added = 0
+    for cid in ch_ids:
+        try:
+            await _eb.add_member(pool, eco_id, uid, "channel", cid)
+            added += 1
+        except Exception as e:
+            log.debug("build_ecosystem add_member cid=%s: %s", cid, e)
+    return {"ok": True, "ecosystem_id": eco_id, "channels": added}
+
+
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
@@ -11091,6 +11114,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 if r.get("skipped"):
                     msg += f" (массовых публикаций пропущено: {r['skipped']} — повторите точечно из карточки)"
                 return _json_resp({"ok": True, "message": msg})
+
+            if action_id == "build_ecosystem":
+                r = await _build_ecosystem_core(pool, uid)
+                return _json_resp({"ok": True,
+                    "message": f"Экосистема создана из {r.get('channels', 0)} каналов"})
 
             if action_id == "check_account_health":
                 rows = await _safe_fetch(pool,

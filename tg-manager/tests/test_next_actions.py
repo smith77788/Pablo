@@ -291,3 +291,12 @@ def test_apply_absent_on_navigation_only_suggestions():
     assert "apply" not in next(x for x in empty if x["id"] == "add_first_account")
     inv = build_suggestions(_base(parsed_recent=50))
     assert "apply" not in next(x for x in inv if x["id"] == "invite_parsed_audience")
+
+
+def test_build_ecosystem_has_apply():
+    sugs = build_suggestions(_base(channels=3, ecosystems=0))
+    e = next(x for x in sugs if x["id"] == "build_ecosystem")
+    assert e.get("apply") == "Создать из каналов"
+    # assign_proxies остаётся навигацией (изоляция — не для авто-применения)
+    p = build_suggestions(_base(acc_no_proxy=2))
+    assert "apply" not in next(x for x in p if x["id"] == "assign_proxies")
