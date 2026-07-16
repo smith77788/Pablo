@@ -1819,11 +1819,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad op_id", 400)
         row = await _safe_fetchrow(pool,
             "SELECT id, op_type, status, label, total_items, done_items, error_msg, "
-            "(result->>'summary') AS summary "
+            "created_at, finished_at, (result->>'summary') AS summary "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)
-        return _json_resp(dict(row))
+        d = dict(row)
+        # ISO для фронта (детали операции: Создано/Завершено)
+        for _k in ("created_at", "finished_at"):
+            if d.get(_k) is not None and hasattr(d[_k], "isoformat"):
+                d[_k] = d[_k].isoformat()
+        return _json_resp(d)
 
     async def operation_log(request: web.Request) -> web.Response:
         """Пошаговый лог одной операции (per-target: канал/бот/аккаунт → статус).

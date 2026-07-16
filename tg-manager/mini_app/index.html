@@ -5591,29 +5591,38 @@ function buildDrawer() {
    ['broadcasts','📨','Рассылки'],['more','🧩','Все функции']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
-  // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки).
-  //    Меню всегда полное и синхронно с каталогом функций, без дублирования списка.
+  // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки), НО
+  //    без дублей: верхние вкладки (Дашборд/Боты/Аккаунты/Рассылки/Все функции)
+  //    и повторяющиеся ярлыки не выводятся повторно; секция «Быстрые действия»
+  //    пропускается целиком (она дублирует навигацию и живёт на главном).
   const more = document.getElementById('s-more');
   if (more) {
+    const seen = new Set(['дашборд','боты','аккаунты','рассылки','все функции']);
+    const _norm = s => (s||'').toLowerCase().replace(/\s+/g,' ').trim();
     more.querySelectorAll('.sec').forEach(sec=>{
+      const secName = _norm(sec.textContent);
+      if (secName.includes('быстрые действия')) return;  // дубль навигации
       let grid = sec.nextElementSibling;
       while (grid && !grid.classList.contains('mgmt-grid')) grid = grid.nextElementSibling;
       if (!grid) return;
       const tiles = grid.querySelectorAll('.mgmt-tile');
       if (!tiles.length) return;
-      html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>`;
+      let items = '';
       tiles.forEach(tile=>{
-        const icoEl = tile.querySelector('.mgmt-tile-ico');
-        // dataset.emoji переживает модернизацию иконок в SVG (textContent пустеет)
-        const ico = (icoEl && (icoEl.dataset.emoji || icoEl.textContent||'').trim()) || '•';
         const lbl = ((tile.querySelector('.mgmt-tile-lbl')||{}).textContent||'').trim();
         if (!lbl) return;
+        const key = _norm(lbl);
+        if (seen.has(key)) return;   // уже есть выше — не дублируем
+        seen.add(key);
+        const icoEl = tile.querySelector('.mgmt-tile-ico');
+        const ico = (icoEl && (icoEl.dataset.emoji || icoEl.textContent||'').trim()) || '•';
         const handler = (tile.getAttribute('onclick')||'').replace(/"/g,'&quot;');
         const desc = MODULE_DESCS[lbl] || '';
         if (desc && !tile.title) tile.title = desc;  // tooltip на плитке каталога
         const descHtml = desc ? `<span style="font-size:11px;opacity:.55;font-weight:400;line-height:1.25">${esc(desc)}</span>` : '';
-        html += `<div class="nav-item" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span style="display:flex;flex-direction:column;min-width:0;gap:1px"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
+        items += `<div class="nav-item" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span style="display:flex;flex-direction:column;min-width:0;gap:1px"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
       });
+      if (items) html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>` + items;  // категорию — только если есть непустые пункты
     });
   }
   body.innerHTML = html;
@@ -7764,10 +7773,10 @@ async function openOpDetail(opId) {
   txt('opdetTitle','Операция #'+opId);
   txt('opdetBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/operations?status=running&limit=500');
-    const ops = d.operations||[];
-    const o = ops.find(x=>x.id===opId);
-    if (!o) { txt('opdetBody',empty('⚙️','Операция не найдена')); return; }
+    // Берём операцию ПО ID (любой статус) — раньше искали только среди running,
+    // из-за чего завершённые/упавшие операции показывали «не найдена».
+    const o = await api('/api/miniapp/operation/'+opId).catch(()=>null);
+    if (!o || !o.id) { txt('opdetBody',empty('⚙️','Операция не найдена')); return; }
     const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
     const [bc,bl]=stb(o.status);
     const logs = await api('/api/miniapp/operation/'+opId+'/log').catch(()=>({logs:[]}));

@@ -62,6 +62,58 @@ def test_poll_op_result_helper_exists():
     )
 
 
+def test_operation_status_returns_timestamps():
+    """Детали операции показывают Создано/Завершено — SELECT обязан тянуть
+    created_at и finished_at и отдавать их в ISO (иначе поля пустые в UI)."""
+    src = _api_src()
+    m = re.search(r"async def operation_status\(.*?\n(.*?)async def ", src, re.DOTALL)
+    assert m, "operation_status handler not found"
+    body = m.group(1)
+    assert "created_at" in body and "finished_at" in body, (
+        "operation_status должен возвращать created_at/finished_at для деталей операции"
+    )
+    # ISO-конвертация для фронта (new Date(...) не парсит datetime без isoformat)
+    assert "isoformat" in body, "timestamps должны конвертироваться в ISO"
+
+
+def test_open_op_detail_fetches_by_id():
+    """Регрессия «Операция #N не найдена»: openOpDetail должен брать операцию ПО
+    ID (любой статус), а не сканировать только список running — иначе
+    завершённые/упавшие операции показывали «не найдена»."""
+    html = _index_html()
+    m = re.search(
+        r"async function openOpDetail\(.*?\n(.*?)\nasync function ", html, re.DOTALL
+    )
+    assert m, "openOpDetail не найдена"
+    body = m.group(1)
+    assert "/api/miniapp/operation/'+opId" in body, (
+        "openOpDetail должна запрашивать операцию по id, а не список"
+    )
+    assert "status=running&limit=500" not in body, (
+        "openOpDetail не должна сканировать только running (баг «не найдена»)"
+    )
+
+
+def test_build_drawer_dedupes_nav():
+    """Регрессия «много дублей / несколько дашбордов» в меню: buildDrawer не
+    выводит повторно верхние вкладки, дедупит ярлыки и пропускает «Быстрые
+    действия» (дубль навигации), не плодит пустые категории."""
+    html = _index_html()
+    m = re.search(
+        r"function buildDrawer\(\)\s*\{(.*?)\n\}", html, re.DOTALL
+    )
+    assert m, "buildDrawer не найдена"
+    body = m.group(1)
+    # верхние вкладки засеяны в set, чтобы каталог их не повторял
+    assert "const seen = new Set(" in body and "'дашборд'" in body, (
+        "buildDrawer должна засеивать seen верхними вкладками"
+    )
+    assert "seen.has(key)" in body, "buildDrawer должна дедупить плитки по ярлыку"
+    assert "быстрые действия" in body, (
+        "buildDrawer должна пропускать секцию «Быстрые действия» (дубль навигации)"
+    )
+
+
 def test_single_item_callers_wire_poll_op_result():
     html = _index_html()
     # Каждый единичный enqueue-колбэк обязан подключить pollOpResult, иначе тихий провал
