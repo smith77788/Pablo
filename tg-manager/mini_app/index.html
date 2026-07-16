@@ -5375,13 +5375,23 @@ function openSSE() {
   };
 }
 
+let _hadOpProgress = false;
 function renderOpProgress(items) {
   const el = document.getElementById('opProgress');
   if (!el) return;
   if (!items.length) {
     el.style.display = 'none';
+    // Переход «были активные операции → стало пусто» = операция завершилась.
+    // Обновляем контекст сразу (копайлот + частые), не дожидаясь перезагрузки —
+    // «после каждого действия система понимает контекст».
+    if (_hadOpProgress) {
+      _hadOpProgress = false;
+      try { loadNextActions(true); } catch(_) {}
+      try { renderFrequent(); } catch(_) {}
+    }
     return;
   }
+  _hadOpProgress = true;
   el.style.display = 'block';
   el.innerHTML = items.map(op => {
     const bar = '█'.repeat(Math.floor(op.pct/10)) + '░'.repeat(10 - Math.floor(op.pct/10));
