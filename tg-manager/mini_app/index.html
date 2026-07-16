@@ -6960,6 +6960,11 @@ function renderAccounts(list) {
     else if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
     else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
     else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
+    // Риск-пульс: аккаунт «активен и подключён», но иммунная система держит его
+    // в карантине/риске и операции его пропускают → показываем РЕАЛЬНОЕ состояние,
+    // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
+    else if (a.health_status==='quarantine') { status='🛑 На паузе'; cls='b-rd'; ava_cls='ava-red'; }
+    else if (a.health_status==='at_risk') { status='⚠️ Под риском'; cls='b-or'; ava_cls='ava-orange'; }
     else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
@@ -7124,6 +7129,24 @@ function buildAccDetail(d) {
   if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(245,158,11,.18);color:var(--orange)">⭐ Premium</span>';
   if (a.stage && ACC_STAGES[a.stage]) statusBadge += ' '+stageBadge(a.stage);
 
+  // Почему «активный» аккаунт не работает: риск-пульс объясняет паузу и путь к фиксу.
+  let healthBanner = '';
+  const _h = d.health;
+  if (_h && (_h.status==='quarantine' || _h.status==='at_risk') && a.is_active
+      && a.acc_status!=='banned' && a.acc_status!=='session_expired') {
+    const q = _h.status==='quarantine';
+    const parts = [];
+    if (_h.restrictions) parts.push(`ограничений за неделю: ${_h.restrictions}`);
+    if (_h.floods) parts.push(`FloodWait: ${_h.floods}`);
+    if (_h.trust_score!=null && _h.trust_score<0.4) parts.push(`низкий траст: ${Math.round(_h.trust_score*100)}%`);
+    const why = parts.length ? parts.join(' · ') : 'иммунная система зафиксировала риск';
+    healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:${q?'rgba(239,68,68,.10)':'rgba(245,158,11,.10)'};font-size:13px;line-height:1.4;color:var(--hint)">
+      ${q?'🛑 <b>Аккаунт на паузе</b>':'⚠️ <b>Аккаунт под риском</b>'} — массовые операции его ${q?'пропускают':'берегут'}, чтобы не поймать бан.<br>
+      <span style="opacity:.8">Причина: ${esc(why)}.</span><br>
+      <span style="opacity:.8">${q?'Дайте аккаунту отлежаться (3+ дней без действий) или запустите щадящий прогрев — пульс снимет паузу автоматически.':'Снизьте нагрузку и запустите прогрев — риск спадёт сам.'}</span>
+    </div>`;
+  }
+
   const warmupHtml = `
     <div class="sec" style="margin-top:8px">Прогрев аккаунта</div>
     <div class="lst">
@@ -7188,6 +7211,7 @@ function buildAccDetail(d) {
       ${a.username?`<div class="profile-sub">@${esc(a.username)}</div>`:''}
       <div class="profile-badges">${statusBadge}</div>
     </div>
+    ${healthBanner}
 
     <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>

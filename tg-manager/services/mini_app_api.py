@@ -1372,6 +1372,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             f"SELECT COUNT(*) FROM tg_accounts WHERE {where}", *args)
         filtered_total = int(filtered_total or 0)
 
+        # Единый риск-пульс поверх сырого acc_status: аккаунт может быть is_active
+        # («Активен» в UI), но иммунная система (restriction_events/flood/trust/
+        # health_score) держит его в карантине/риске — и операции его тихо
+        # пропускают (is_account_quarantined fail-open). Без этого пользователь
+        # видит «Активен», а действия по нему не идут («аккаунты не работают,
+        # хотя активны»). Мержим health_status в каждую строку (owner-scoped;
+        # для admin межтенантного просмотра пропускаем — health по своим).
+        rows = [dict(r) for r in (rows or [])]
+        if not admin and rows:
+            try:
+                from services.infra_memory import get_account_health
+                _hp = await get_account_health(pool, uid)
+                _hmap = {a["account_id"]: a for a in _hp.get("accounts", [])}
+                for r in rows:
+                    h = _hmap.get(r["id"])
+                    if h:
+                        r["health_status"] = h["status"]          # quarantine|at_risk|healthy
+                        r["health_score"] = h["score"]
+                        r["restrictions"] = h.get("restrictions", 0)
+                        r["floods"] = h.get("floods", 0)
+            except Exception as _e:  # fail-soft: пульс не должен ронять список
+                log.debug("accounts health merge owner=%s: %s", uid, _e)
+
         # Серверная агрегация KPI (глобальные счётчики, не срез). Админ — по всей
         # платформе, обычный пользователь — по своим аккаунтам.
         if admin:
@@ -1462,11 +1485,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """SELECT op_type, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
                ORDER BY created_at DESC LIMIT 8""", uid)
+        # Риск-пульс аккаунта — объясняет «активен, но операции его пропускают»
+        # (тот же единый сигнал, что и в списке; owner-scoped, fail-soft).
+        health = None
+        if not admin:
+            try:
+                from services.infra_memory import get_account_health
+                _hp = await get_account_health(pool, uid)
+                health = next((a for a in _hp.get("accounts", [])
+                               if a["account_id"] == acc_id), None)
+            except Exception as _e:
+                log.debug("account_detail health owner=%s acc=%s: %s", uid, acc_id, _e)
         return _json_resp({
             "account": acc,
             "capabilities": caps,
             "warmup": warmup,
             "recent_ops": recent_ops,
+            "health": health,
         })
 
     async def accounts_export(request: web.Request) -> web.Response:

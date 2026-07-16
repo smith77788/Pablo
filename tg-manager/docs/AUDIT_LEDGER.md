@@ -972,3 +972,21 @@ CLAUDE.md отмечал ключевое ограничение: «в песо�
 Проверено: test_miniapp_operation_status +3 (timestamps, fetch-by-id, дедуп меню) → 7/7;
 ratchet 35 + operation_log_route + next_actions зелёно. Python AST mini_app_api + node --check
 инлайн-JS index.html чисто.
+
+## tg-manager: фикс по скриншотам — «аккаунты не работают, хотя активны» — 2026-07-16
+Корень: список/деталь аккаунта показывали статус по сырому acc_status. Аккаунт
+is_active + acc_status='ok' рисовался «Активен», но единый риск-пульс
+(infra_memory.get_account_health: restriction_events + flood + trust + in-memory
+health_score) держал его в quarantine/at_risk — и массовые операции его ТИХО
+пропускали (is_account_quarantined, fail-open). Отсюда «активны и подключены, но
+не работают».
+Фикс (пульс уже существовал — просто не доходил до UI):
+  - accounts endpoint (owner-scoped, не admin): мерж get_account_health в каждую
+    строку → health_status/health_score/restrictions/floods. Fail-soft.
+  - account_detail: возвращает health этого аккаунта.
+  - Список: активный, но карантинный аккаунт → «🛑 На паузе»; at_risk → «⚠️ Под
+    риском» (вместо ложного «Активен»).
+  - Деталь: баннер объясняет ПОЧЕМУ (ограничения/флуд/траст) и путь к снятию
+    паузы (отлежаться 3+ дней / щадящий прогрев — пульс снимает сам).
+Проверено: test_account_health_surfaced (4) + test_account_health_pulse (9) → 13/13.
+Python AST mini_app_api + node --check инлайн-JS index.html чисто.
