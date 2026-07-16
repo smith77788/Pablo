@@ -271,3 +271,23 @@ def test_fallback_health_suppressed_when_other_suggestion_exists():
     ids = _ids(sugs)
     assert "review_failed_ops" in ids
     assert "check_account_health" not in ids  # fallback только когда иначе пусто
+
+
+def test_apply_labels_present_on_actionable_suggestions():
+    # Подсказки с безопасным действием в один клик несут поле apply.
+    failed = build_suggestions(_base(ops_failed_24h=2))
+    assert next(x for x in failed if x["id"] == "review_failed_ops").get("apply")
+    dead = build_suggestions(_base(proxies_dead=1))
+    assert next(x for x in dead if x["id"] == "replace_dead_proxies").get("apply")
+    warm = build_suggestions(_base(acc_low_trust=2))
+    assert next(x for x in warm if x["id"] == "warmup_cold_accounts").get("apply")
+    health = build_suggestions(_base())
+    assert next(x for x in health if x["id"] == "check_account_health").get("apply")
+
+
+def test_apply_absent_on_navigation_only_suggestions():
+    # Подсказки, требующие ручного ввода, НЕ имеют apply (нельзя применить в клик).
+    empty = build_suggestions(_base(acc_active=0, bots=0, funnels=0, auto_rules=0))
+    assert "apply" not in next(x for x in empty if x["id"] == "add_first_account")
+    inv = build_suggestions(_base(parsed_recent=50))
+    assert "apply" not in next(x for x in inv if x["id"] == "invite_parsed_audience")

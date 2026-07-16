@@ -398,6 +398,131 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
     }
 
 
+# ── Ядра массовых действий (переиспользуются эндпоинтами и Copilot-apply) ──────
+# Вынесены на уровень модуля, чтобы «применить в один клик» из подсказок и
+# существующие эндпоинты вызывали одну и ту же проверенную логику (DRY).
+
+async def _warmup_bulk_core(
+    pool: asyncpg.Pool,
+    uid: int,
+    plan_type: str = "standard",
+    profile_type: str = "mixed",
+    niche: str = "general",
+) -> dict:
+    """Массовый прогрев: планы для ВСЕХ подходящих аккаунтов (активные, с сессией,
+    без активного плана). Фоновый run_warmup_loop подхватит новые active-планы."""
+    from services.account_warmer import WARMUP_PROFILES, WARMUP_NICHES
+
+    plan_type = (plan_type or "standard").strip()
+    if plan_type not in ("gentle", "standard", "aggressive"):
+        plan_type = "standard"
+    profile_type = (profile_type or "mixed").strip().lower()
+    if profile_type not in WARMUP_PROFILES:
+        profile_type = "mixed"
+    niche = (niche or "general").strip().lower()
+    if niche not in WARMUP_NICHES:
+        niche = "general"
+    days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
+    actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
+    target_days = days_map[plan_type]
+    daily_actions = actions_map[plan_type]
+
+    rows = await _safe_fetch(pool,
+        """SELECT a.id FROM tg_accounts a
+           WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
+             AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
+             AND NOT EXISTS (
+                 SELECT 1 FROM account_warmup_plans wp
+                 WHERE wp.account_id=a.id AND wp.status='active')
+           LIMIT 500""", uid)
+    acc_ids = [int(r["id"]) for r in (rows or [])]
+    if not acc_ids:
+        return {"ok": True, "started": 0,
+                "note": "Нет подходящих аккаунтов (все уже греются или недоступны)"}
+    await pool.execute(
+        """CREATE TABLE IF NOT EXISTS account_niche_profiles (
+               account_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL,
+               niche TEXT NOT NULL DEFAULT 'general', profile_type TEXT NOT NULL DEFAULT 'reader',
+               custom_channels TEXT[] DEFAULT '{}', flood_wait_count INT NOT NULL DEFAULT 0,
+               last_flood_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())"""
+    )
+    started = 0
+    for acc_id in acc_ids:
+        await pool.execute(
+            """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
+               VALUES($1,$2,$3,$4,now())
+               ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()""",
+            acc_id, uid, niche, profile_type)
+        await pool.execute(
+            """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
+               VALUES($1,$2,$3,$4,$5)
+               ON CONFLICT (account_id) DO UPDATE
+               SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
+            uid, acc_id, plan_type, target_days, daily_actions)
+        started += 1
+    return {"ok": True, "started": started, "plan_type": plan_type,
+            "profile_type": profile_type, "niche": niche}
+
+
+async def _check_all_proxies_core(pool: asyncpg.Pool, uid: int) -> dict:
+    """Проверить все прокси владельца (ограниченная конкурентность)."""
+    rows = await _safe_fetch(pool,
+        "SELECT id, proxy_url FROM user_proxies WHERE owner_id=$1 LIMIT 200", uid)
+    if not rows:
+        return {"ok": True, "checked": 0, "alive": 0}
+    from services.proxy_selector import probe_proxy
+    sem = asyncio.Semaphore(10)
+
+    async def _one(r):
+        async with sem:
+            res = await probe_proxy(r["proxy_url"])
+            alive = bool(res.get("ok"))
+            try:
+                await pool.execute(
+                    "UPDATE user_proxies SET is_alive=$1, last_check=now() WHERE id=$2 AND owner_id=$3",
+                    alive, r["id"], uid)
+            except Exception as e:
+                log.debug("check_all_proxies persist: %s", e)
+            return alive
+
+    results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
+    alive = sum(1 for x in results if x is True)
+    return {"ok": True, "checked": len(rows), "alive": alive}
+
+
+async def _retry_failed_ops_core(pool: asyncpg.Pool, uid: int, hours: int = 24) -> dict:
+    """Перезапустить упавшие операции владельца за последние `hours` часов —
+    через operation_bus (единые аудит/ретраи/проверка тарифа, а не прямой INSERT).
+    mass_publish пропускаем: его безопасный повтор (только упавшие каналы) делается
+    точечно из карточки операции, иначе успешные каналы получили бы дубли поста."""
+    rows = await _safe_fetch(pool,
+        """SELECT op_type, params, label, total_items FROM operation_queue
+           WHERE owner_id=$1 AND status='failed'
+             AND created_at > NOW() - ($2 * INTERVAL '1 hour')
+           ORDER BY created_at DESC LIMIT 100""", uid, hours)
+    from services import operation_bus as _obus
+    retried, skipped = 0, 0
+    for r in (rows or []):
+        if r["op_type"] == "mass_publish":
+            skipped += 1
+            continue
+        params = r["params"]
+        if isinstance(params, str):
+            try:
+                params = _json.loads(params or "{}")
+            except (TypeError, ValueError):
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+        try:
+            await _obus.submit(pool, uid, r["op_type"], params,
+                               total_items=int(r["total_items"] or 0), label=r["label"])
+            retried += 1
+        except Exception as e:
+            log.debug("retry_failed_ops op_type=%s: %s", r["op_type"], e)
+    return {"ok": True, "retried": retried, "skipped": skipped}
+
+
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
@@ -5706,57 +5831,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        from services.account_warmer import WARMUP_PROFILES, WARMUP_NICHES
-        plan_type = (body.get("plan_type") or "standard").strip()
-        if plan_type not in ("gentle", "standard", "aggressive"):
-            plan_type = "standard"
-        profile_type = (body.get("profile_type") or "mixed").strip().lower()
-        if profile_type not in WARMUP_PROFILES:
-            profile_type = "mixed"
-        niche = (body.get("niche") or "general").strip().lower()
-        if niche not in WARMUP_NICHES:
-            niche = "general"
-        days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
-        actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
-        target_days = days_map[plan_type]
-        daily_actions = actions_map[plan_type]
-
-        # Подходящие: активные, с сессией, без уже активного плана прогрева.
-        rows = await _safe_fetch(pool,
-            """SELECT a.id FROM tg_accounts a
-               WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-                 AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
-                 AND NOT EXISTS (
-                     SELECT 1 FROM account_warmup_plans wp
-                     WHERE wp.account_id=a.id AND wp.status='active')
-               LIMIT 500""", uid)
-        acc_ids = [int(r["id"]) for r in (rows or [])]
-        if not acc_ids:
-            return _json_resp({"ok": True, "started": 0, "note": "Нет подходящих аккаунтов (все уже греются или недоступны)"})
-        started = 0
         try:
-            await pool.execute(
-                """CREATE TABLE IF NOT EXISTS account_niche_profiles (
-                       account_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL,
-                       niche TEXT NOT NULL DEFAULT 'general', profile_type TEXT NOT NULL DEFAULT 'reader',
-                       custom_channels TEXT[] DEFAULT '{}', flood_wait_count INT NOT NULL DEFAULT 0,
-                       last_flood_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())"""
+            result = await _warmup_bulk_core(
+                pool, uid,
+                plan_type=body.get("plan_type") or "standard",
+                profile_type=body.get("profile_type") or "mixed",
+                niche=body.get("niche") or "general",
             )
-            for acc_id in acc_ids:
-                await pool.execute(
-                    """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
-                       VALUES($1,$2,$3,$4,now())
-                       ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()""",
-                    acc_id, uid, niche, profile_type)
-                await pool.execute(
-                    """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-                       VALUES($1,$2,$3,$4,$5)
-                       ON CONFLICT (account_id) DO UPDATE
-                       SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
-                    uid, acc_id, plan_type, target_days, daily_actions)
-                started += 1
-            return _json_resp({"ok": True, "started": started, "plan_type": plan_type,
-                               "profile_type": profile_type, "niche": niche})
+            return _json_resp(result)
         except Exception as exc:
             log.exception("warmup_bulk_start uid=%d", uid)
             return _err(str(exc), 500)
@@ -8273,26 +8355,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            "SELECT id, proxy_url FROM user_proxies WHERE owner_id=$1 LIMIT 200", uid)
-        if not rows:
-            return _json_resp({"ok": True, "checked": 0, "alive": 0})
-        from services.proxy_selector import probe_proxy
-        sem = asyncio.Semaphore(10)
-        async def _one(r):
-            async with sem:
-                res = await probe_proxy(r["proxy_url"])
-                alive = bool(res.get("ok"))
-                try:
-                    await pool.execute(
-                        "UPDATE user_proxies SET is_alive=$1, last_check=now() WHERE id=$2 AND owner_id=$3",
-                        alive, r["id"], uid)
-                except Exception:
-                    log_exc_swallow(log, "check_all_proxies persist")
-                return alive
-        results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
-        alive = sum(1 for x in results if x is True)
-        return _json_resp({"ok": True, "checked": len(rows), "alive": alive})
+        return _json_resp(await _check_all_proxies_core(pool, uid))
 
     async def import_proxies(request: web.Request) -> web.Response:
         """Массовый импорт прокси: вставленный список (по одному на строку)."""
@@ -10998,6 +11061,56 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.warning("next_actions endpoint failed uid=%s: %s", uid, e)
             return _json_resp({"actions": []})
 
+    async def next_actions_apply(request: web.Request) -> web.Response:
+        """Применить подсказку Copilot в один клик. Клиент присылает только `id`
+        подсказки — сервер сам решает, какое безопасное owner-scoped действие
+        выполнить (защита от вызова произвольных операций с клиента)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        action_id = (body.get("id") or "").strip()
+        try:
+            if action_id in ("warmup_cold_accounts", "warmup_after_register"):
+                r = await _warmup_bulk_core(pool, uid)
+                if r.get("started"):
+                    return _json_resp({"ok": True, "message": f"Прогрев запущен для {r['started']} аккаунтов"})
+                return _json_resp({"ok": True, "message": r.get("note") or "Нет подходящих аккаунтов"})
+
+            if action_id == "replace_dead_proxies":
+                r = await _check_all_proxies_core(pool, uid)
+                return _json_resp({"ok": True,
+                    "message": f"Проверено прокси: {r.get('checked', 0)}, живых: {r.get('alive', 0)}"})
+
+            if action_id == "review_failed_ops":
+                r = await _retry_failed_ops_core(pool, uid)
+                msg = f"Перезапущено операций: {r.get('retried', 0)}"
+                if r.get("skipped"):
+                    msg += f" (массовых публикаций пропущено: {r['skipped']} — повторите точечно из карточки)"
+                return _json_resp({"ok": True, "message": msg})
+
+            if action_id == "check_account_health":
+                rows = await _safe_fetch(pool,
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid)
+                ids = [int(r["id"]) for r in (rows or [])]
+                if not ids:
+                    return _json_resp({"ok": True, "message": "Нет активных аккаунтов для проверки"})
+                from services import operation_bus as _obus
+                op_id = await _obus.submit(
+                    pool, uid, "check_accounts_health",
+                    {"account_ids": ids, "check_spambot": True},
+                    total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов")
+                return _json_resp({"ok": True, "op_id": op_id,
+                    "message": f"Проверка здоровья запущена для {len(ids)} аккаунтов"})
+
+            return _err("Для этой подсказки нет действия в один клик", 400)
+        except Exception as e:
+            log.exception("next_actions_apply id=%s uid=%s", action_id, uid)
+            return _err("Не удалось применить действие", 500)
+
     async def dashboard_realtime(request: web.Request) -> web.Response:
         """Analytics Dashboard — операторская сводка на РЕАЛЬНЫХ данных, которые
         система собирает: аккаунты, каналы, аудитория ботов, операции + дневные
@@ -11488,6 +11601,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
     app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
     app.router.add_get("/api/miniapp/next_actions", next_actions)
+    app.router.add_post("/api/miniapp/next_actions/apply", next_actions_apply)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/networks", networks_list)

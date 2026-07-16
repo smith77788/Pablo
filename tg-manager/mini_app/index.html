@@ -462,6 +462,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .copilot-title{font-size:14px;font-weight:700;line-height:1.25;margin-bottom:2px}
 .copilot-reason{font-size:12px;color:var(--hint);line-height:1.35;margin-bottom:5px}
 .copilot-cta{font-size:12px;font-weight:600;color:var(--accent)}
+.copilot-actions{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
+.copilot-apply{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
+.copilot-apply:active{transform:scale(.95)}
+.copilot-apply:disabled{opacity:.6}
 .copilot-x{position:absolute;top:7px;right:9px;font-size:12px;color:var(--hint);opacity:.55;padding:3px 5px;line-height:1;border-radius:8px}
 .copilot-x:active{opacity:1;background:var(--bg)}
 /* Часто используемые разделы */
@@ -5763,16 +5767,44 @@ function renderNextActions(actions) {
   const items = (actions||[]).filter(a => !dismissed[a.id]);
   if (!items.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
   wrap.style.display = 'block';
-  list.innerHTML = items.map(a => `
-    <div class="copilot-card" onclick="copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'})">
+  list.innerHTML = items.map(a => {
+    const navArg = `copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'})`;
+    const hasApply = !!a.apply;
+    // Есть действие в один клик → primary-кнопка «применить» + ссылка «открыть»
+    // (для ручного контроля). Нет — вся карточка ведёт в раздел, как раньше.
+    const footer = hasApply
+      ? `<div class="copilot-actions">
+           <button class="copilot-apply" onclick="event.stopPropagation();copilotApply('${a.id}',this)">⚡ ${esc(a.apply)}</button>
+           <span class="copilot-cta" onclick="event.stopPropagation();${navArg}">${esc(a.cta||'Открыть')} →</span>
+         </div>`
+      : `<div class="copilot-cta">${esc(a.cta||'Открыть')} →</div>`;
+    const cardClick = hasApply ? '' : ` onclick="${navArg}"`;
+    return `<div class="copilot-card"${cardClick}>
       <div class="copilot-ico">${a.icon||'💡'}</div>
       <div class="copilot-body">
         <div class="copilot-title">${esc(a.title||'')}</div>
         <div class="copilot-reason">${esc(a.reason||'')}</div>
-        <div class="copilot-cta">${esc(a.cta||'Открыть')} →</div>
+        ${footer}
       </div>
       <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить">✕</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+// Применить подсказку в один клик (сервер сам решает безопасное действие по id).
+async function copilotApply(id, btn) {
+  if (btn) { btn.dataset._t = btn.textContent; btn.disabled = true; btn.textContent = '⏳…'; }
+  try {
+    const r = await api('/api/miniapp/next_actions/apply', {method:'POST', body:JSON.stringify({id})});
+    toast('✅ ' + (r.message || 'Готово'));
+    try { tg.HapticFeedback?.notificationOccurred('success'); } catch(_){}
+    loadNextActions(true);                 // состояние изменилось — обновляем подсказки
+    setTimeout(()=>{ try{ loadHome(); }catch(_){} }, 400);  // и KPI
+  } catch(e) {
+    toast('❌ ' + (e.message || 'Не удалось применить'));
+    try { tg.HapticFeedback?.notificationOccurred('error'); } catch(_){}
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._t || 'Применить'; }
+  }
 }
 
 async function loadNextActions(force) {

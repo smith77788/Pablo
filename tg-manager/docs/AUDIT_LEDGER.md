@@ -1082,3 +1082,20 @@ saveFormPrefs/loadFormPrefs/applyFormPrefs (настройки полей по �
 Хелперы готовы к подключению к другим формам (mass-invite, boost, dm-composer) — при
 следующем заходе. Проверено в render-харнессе (парсер: настройки да/источник нет, тогл
 поля «дней» ок; рассылка: сохранение→восстановление len=29→очистка; сегмент; 0 JS-ошибок).
+
+## tg-manager: Copilot — «применить в один клик» (не только текст) — 2026-07-16
+Жалоба: подсказки «Что делать дальше» давали лишь текст+переход, без применения в
+один клик. Добавлено безопасное one-click-действие для подсказок, где это уместно:
+warmup_cold_accounts/warmup_after_register → массовый прогрев; replace_dead_proxies
+→ проверка всех прокси; review_failed_ops → перезапуск упавших (mass_publish
+пропускается — иначе дубли постов); check_account_health → enqueue проверки здоровья.
+Дизайн безопасности: клиент шлёт только id подсказки, сервер сам решает действие
+(POST /api/miniapp/next_actions/apply) — нельзя вызвать произвольную операцию с клиента.
+Все действия owner-scoped. Retry идёт ЧЕРЕЗ operation_bus.submit (не прямой INSERT —
+ratchet соблюдён). DRY: ядра _warmup_bulk_core/_check_all_proxies_core вынесены на
+уровень модуля, эндпоинты warmup/bulk_start и proxies/check_all стали тонкими
+обёртками (поведение сохранено — 1698 passed). UI: primary-кнопка «⚡ применить» +
+ссылка «открыть» (ручной контроль) + поле apply в подсказке (next_actions.py).
+Регресс: tests/test_next_actions_apply.py (3: skip mass_publish, JSON-params, empty)
++ apply-метки в test_next_actions.py (2). Проверено в render-харнессе: кнопка
+рендерится, клик шлёт POST {id}, тост с результатом, 0 JS-ошибок.

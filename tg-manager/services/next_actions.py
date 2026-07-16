@@ -199,6 +199,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "review_failed_ops",
+                "apply": "Перезапустить упавшие",
                 "priority": 96,
                 "icon": "❌",
                 "title": f"Разберите {n} упавших операций за сутки",
@@ -269,6 +270,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "replace_dead_proxies",
+                "apply": "Проверить все прокси",
                 "priority": 83,
                 "icon": "🔌",
                 "title": f"{n} прокси не отвечают",
@@ -286,6 +288,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "warmup_cold_accounts",
+                "apply": "Прогреть все",
                 "priority": 78,
                 "icon": "🔥",
                 "title": f"Прогрейте {n} рисковых аккаунтов",
@@ -397,6 +400,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "warmup_after_register",
+                "apply": "Прогреть все",
                 "priority": 76,
                 "icon": "🔥",
                 "title": "Прогрейте новые аккаунты",
@@ -436,6 +440,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "check_account_health",
+                "apply": "Проверить здоровье",
                 "priority": 20,
                 "icon": "💚",
                 "title": "Проверьте здоровье аккаунтов",
