@@ -1072,12 +1072,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
         <div class="mgmt-tile-ico">🏭</div>
-        <div class="mgmt-tile-lbl">Создать ботов</div>
+        <div class="mgmt-tile-lbl">Фабрика ботов</div>
         <div class="mgmt-tile-val" id="m-botfactory-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openChannelFactory()">
         <div class="mgmt-tile-ico">📢</div>
-        <div class="mgmt-tile-lbl">Создать каналы</div>
+        <div class="mgmt-tile-lbl">Фабрика каналов</div>
         <div class="mgmt-tile-val"></div>
       </div>
     </div>
@@ -1154,7 +1154,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="mgmt-tile" onclick="openMassPub()">
         <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Массопубликация</div>
+        <div class="mgmt-tile-lbl">Массовая публикация</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
@@ -1321,7 +1321,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="mgmt-tile" onclick="openAnalyticsDashboard()">
         <div class="mgmt-tile-ico">📈</div>
-        <div class="mgmt-tile-lbl">Дашборд</div>
+        <div class="mgmt-tile-lbl">Дашборд метрик</div>
         <div class="mgmt-tile-val" id="m-anadash-val"></div>
       </div>
     </div>
@@ -5557,7 +5557,7 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
-  'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дэшборд здоровья':'Здоровье аккаунтов и риски бана',
+  'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дашборд метрик':'Реалтайм-метрики: аудитория, рост, посты','Дэшборд здоровья':'Здоровье аккаунтов и риски бана',
   'Боты':'Ваши Telegram-боты: настройка, рассылки, статистика','Аккаунты':'Telegram-аккаунты (сессии): вход, статус, прокси/IP',
   'Каналы':'Ваши каналы и массовые действия по ним','Рассылки':'Массовые сообщения аудитории ботов','Рассылка':'Массовое сообщение аудитории бота',
   'Расписание':'Отложенные и повторяющиеся рассылки','A/B Тесты':'Сравнение вариантов рассылки по отклику',
