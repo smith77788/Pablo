@@ -211,3 +211,63 @@ def test_relog_expired_sessions_suggested():
     # нет истёкших → нет подсказки
     r2 = build_suggestions({"acc_active": 5, "acc_expired": 0, "recent_ops": []})
     assert not [x for x in r2 if x["id"] == "relog_expired"]
+
+
+def test_warmup_after_register_context_chain():
+    # Недавно регистрировали аккаунты, trust ещё не просел → контекст-прогрев.
+    sugs = build_suggestions(
+        _base(acc_low_trust=0, recent_ops=[{"op_type": "auto_register", "status": "done"}])
+    )
+    ids = _ids(sugs)
+    assert "warmup_after_register" in ids
+    # не дублируем обычный warmup
+    assert "warmup_cold_accounts" not in ids
+
+
+def test_warmup_after_register_suppressed_when_low_trust():
+    # Если trust уже просел — показываем обычный warmup, не контекстный (без дубля).
+    sugs = build_suggestions(
+        _base(acc_low_trust=3, recent_ops=[{"op_type": "auto_register", "status": "done"}])
+    )
+    ids = _ids(sugs)
+    assert "warmup_cold_accounts" in ids
+    assert "warmup_after_register" not in ids
+
+
+def test_engage_after_invite_context_chain():
+    sugs = build_suggestions(
+        _base(recent_ops=[{"op_type": "mass_invite", "status": "done"}])
+    )
+    assert "engage_after_invite" in _ids(sugs)
+
+
+def test_engage_after_invite_not_duplicating_reach_subscribers():
+    # Когда уже есть reach_subscribers (боты+подписчики без кампании) — контекст
+    # engage не добавляем, чтобы не было двух карточек про рассылку.
+    sugs = build_suggestions(
+        _base(subscribers=300, dm_running=0,
+              recent_ops=[{"op_type": "mass_invite", "status": "done"}])
+    )
+    ids = _ids(sugs)
+    assert "reach_subscribers" in ids
+    assert "engage_after_invite" not in ids
+
+
+def test_fallback_health_for_active_but_quiet_user():
+    # Всё настроено, срочного нет → активный пользователь всё равно видит шаг.
+    sugs = build_suggestions(_base())  # accounts=3, funnels=1, rules=1, subs=0
+    assert "check_account_health" in _ids(sugs)
+
+
+def test_fallback_health_not_shown_for_empty_account():
+    sugs = build_suggestions(_base(acc_active=0, bots=0, funnels=0, auto_rules=0))
+    ids = _ids(sugs)
+    assert "check_account_health" not in ids
+    assert "add_first_account" in ids
+
+
+def test_fallback_health_suppressed_when_other_suggestion_exists():
+    sugs = build_suggestions(_base(ops_failed_24h=2))
+    ids = _ids(sugs)
+    assert "review_failed_ops" in ids
+    assert "check_account_health" not in ids  # fallback только когда иначе пусто
