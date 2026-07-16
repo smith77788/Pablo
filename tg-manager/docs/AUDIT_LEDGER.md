@@ -20,6 +20,10 @@
 
 ---
 
+## НАЙДЕНО, НЕ ИСПРАВЛЕНО (риск/объём) — channels-list ecosystem-ветка — 2026-07-12
+Файл: `mini_app_api.py` ~1242 и ~1259 (эндпоинт списка каналов + счётчик). Ветка «каналы из экосистем пользователя» имеет ДВА бага: (1) читает мёртвую `ecosystem_channels` (никто не пишет — см. 4A/4B) вместо `ecosystem_members (object_type='channel', object_id=channel_id)`; (2) сравнивает `managed_channels.id` (SERIAL PK) c `ec.channel_id` (Telegram BIGINT) — `id IN (SELECT ec.channel_id ...)` — типы/семантика не совпадают, ветка не дала бы результата даже с данными. Корректно: `channel_id IN (SELECT em.object_id FROM ecosystem_members em JOIN ecosystems e ... WHERE em.object_type='channel' AND (e.owner_id=$1 OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)))`.
+Почему не исправлено сейчас: сложный shared-запрос (DISTINCT/OR/JOIN, дублируется в SELECT и COUNT) в горячем файле, активно правится параллельными сессиями; эффект узкий (свои каналы через `owner_id=$1` видны; страдает только показ ЧУЖИХ экосистемных каналов участнику). Правка вслепую нарушила бы «без конфликтов» + WORKING_STANDARD (проверить все сценарии). Фиксить отдельным сфокусированным заходом с реальной БД.
+
 ## МОДУЛЬ Ecosystem Brain — 4A анализ пересечения аудитории (мёртвая таблица на чтении) — 2026-07-12
 Проверено: эндпоинт `mini_app_api.ecosystem_overlaps` → `analyze_audience_overlap`. Owner-scope и корректность самой функции.
 Найдено: `analyze_audience_overlap` корректна (читает `channel_members`, считает попарные пересечения). Owner-check `eco_id` есть. НО эндпоинт брал список каналов из `ecosystem_channels` — той же мёртвой таблицы (см. запись 4B), куда никто не пишет → `ch_ids` всегда пуст → функция не вызывается → эндпоинт ВСЕГДА отдаёт `{"overlaps": {}}`. Фича 4A «анализ пересечения аудитории» мертва на стороне чтения (тот же класс, что 4B, но на wired-эндпоинте).
