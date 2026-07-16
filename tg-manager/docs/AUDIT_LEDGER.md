@@ -20,6 +20,11 @@
 
 ---
 
+## МОДУЛЬ Ecosystem Brain — 4A анализ пересечения аудитории (мёртвая таблица на чтении) — 2026-07-12
+Проверено: эндпоинт `mini_app_api.ecosystem_overlaps` → `analyze_audience_overlap`. Owner-scope и корректность самой функции.
+Найдено: `analyze_audience_overlap` корректна (читает `channel_members`, считает попарные пересечения). Owner-check `eco_id` есть. НО эндпоинт брал список каналов из `ecosystem_channels` — той же мёртвой таблицы (см. запись 4B), куда никто не пишет → `ch_ids` всегда пуст → функция не вызывается → эндпоинт ВСЕГДА отдаёт `{"overlaps": {}}`. Фича 4A «анализ пересечения аудитории» мертва на стороне чтения (тот же класс, что 4B, но на wired-эндпоинте).
+Исправлено: да. Эндпоинт читает членов из `ecosystem_members` (object_type='channel') — реальной таблицы членства. Регресс `tests/test_ecosystem_overlap.py` (3): корректность overlap, guard <2 каналов, проверка что эндпоинт читает ecosystem_members а не ecosystem_channels. Осталось (бэклог): `balance_content`/`auto_post_scheduling` тоже читают `ecosystem_channels` (не wired) — при подключении переводить на ecosystem_members.
+
 ## МОДУЛЬ Ecosystem Brain — Auto-Management: автодобавление каналов (Tier-1 4B) — 2026-07-12
 Проверено: auto-* функции автоуправления (`auto_add_channels`, `auto_remove_dead_channels`, `auto_post_scheduling`, `balance_content`, `discover_channel_relationships`) — все 0 call-sites. Ключевая проверка: в ТУ ли таблицу они пишут, что читает система.
 Найдено: **фиктивная фича** — `auto_add_channels`/`auto_remove_dead_channels`/`auto_post_scheduling` работают с `ecosystem_channels` (8 использований, все внутри этих же мёртвых функций), а РЕАЛЬНОЕ членство — `ecosystem_members` (60 использований; `get_members`+весь UI читают её; канонический источник каналов — `managed_channels.channel_id`, добавление через `add_member(object_type='channel')`). Подключение как есть = запись в мёртвую параллельную таблицу → каналы не появились бы в экосистеме (ровно ловушка CLAUDE.md #1/#3). Плюс `managed_channels` не имеет сигнала активности (только added_at) → надёжного «мёртвого» детектора для auto-remove нет.

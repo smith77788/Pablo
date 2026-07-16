@@ -10921,8 +10921,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 )
                 if not owns:
                     return _err("not found", 404)
+                # Реальное членство каналов — ecosystem_members (object_type='channel').
+                # Прежде читалось из ecosystem_channels — мёртвой таблицы, куда никто
+                # не пишет → ch_ids всегда пуст → overlap всегда {} (фича 4A мертва).
                 ch_rows = await pool.fetch(
-                    "SELECT channel_id FROM ecosystem_channels WHERE ecosystem_id=$1", int(eco_id)
+                    "SELECT object_id AS channel_id FROM ecosystem_members "
+                    "WHERE ecosystem_id=$1 AND object_type='channel'", int(eco_id)
                 )
                 ch_ids = [r["channel_id"] for r in ch_rows]
                 if ch_ids:
