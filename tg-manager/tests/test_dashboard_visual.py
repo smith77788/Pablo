@@ -41,8 +41,9 @@ def test_frontend_screen_registered_and_included():
     assert os.path.exists(os.path.join(ROOT, "mini_app/screens/cmdcenter.js"))
     html = _read("mini_app/index.html")
     assert '<script src="screens/cmdcenter.js"></script>' in html
-    # nav-плитка ведёт на дашборд
-    assert 'onclick="openCmdCenter()"' in html
+    # openCmdCenter теперь запускается из вкладки «Все дашборды» единого
+    # дашборда (dashboard.js), а не отдельной плиткой в index.html
+    assert "openCmdCenter" in _read("mini_app/screens/dashboard.js")
 
 
 def test_frontend_render_logic_present():
