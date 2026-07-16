@@ -5885,6 +5885,35 @@ document.addEventListener('click', function(ev) {
   } catch(_) {}
 }, true);
 
+// ── Персистентность форм: настройки и черновики (localStorage) ───────
+// Убирает повторный ввод часто одинаковых значений и не теряет набранный
+// текст при закрытии/ошибке/навигации. Клиентское, без роста схемы БД.
+const _FP_KEY = 'infragram_formprefs';
+function _fpAll() { try { return JSON.parse(localStorage.getItem(_FP_KEY) || '{}') || {}; } catch(_) { return {}; } }
+function saveFormPrefs(key, obj) {
+  try { const a = _fpAll(); a[key] = Object.assign({}, a[key] || {}, obj); localStorage.setItem(_FP_KEY, JSON.stringify(a)); } catch(_) {}
+}
+function loadFormPrefs(key) { return _fpAll()[key] || {}; }
+// Применяет сохранённые значения к полям по карте {prefKey: elementId}.
+// Чекбоксы — по .checked, остальные — по .value.
+function applyFormPrefs(key, map) {
+  const p = loadFormPrefs(key);
+  for (const k in map) {
+    if (p[k] == null) continue;
+    const el = document.getElementById(map[k]); if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!p[k]; else el.value = p[k];
+  }
+}
+// Черновики свободного текста (напр. текст рассылки) — по ключу.
+function saveDraft(key, text) {
+  try {
+    if (text && text.trim()) localStorage.setItem('infragram_draft_' + key, text);
+    else localStorage.removeItem('infragram_draft_' + key);
+  } catch(_) {}
+}
+function loadDraft(key) { try { return localStorage.getItem('infragram_draft_' + key) || ''; } catch(_) { return ''; } }
+function clearDraft(key) { try { localStorage.removeItem('infragram_draft_' + key); } catch(_) {} }
+
 function renderCards(d) {
   // KPI scroll row
   const healthColor = (d.acc_health||100)>=80?'var(--green)':(d.acc_health||100)>=50?'var(--orange)':'var(--red)';
@@ -7615,6 +7644,7 @@ function openBcastPick() {
   document.getElementById('bcastBtn').disabled=false;
   document.getElementById('bcastBtn').textContent='📢 Отправить';
   updateBcastRecip();
+  _restoreBcastForm();
   document.getElementById('bcastMbg').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
 }
@@ -7632,6 +7662,7 @@ function openBcastForBot(botId, botName, recipCount) {
   document.getElementById('bcastBtn').disabled=false;
   document.getElementById('bcastBtn').textContent='📢 Отправить';
   updateBcastRecip();
+  _restoreBcastForm();
   document.getElementById('bcastMbg').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
 }
@@ -7654,7 +7685,22 @@ function updateBcastRecip() {
 
 document.getElementById('bcastText').addEventListener('input', function(){
   document.getElementById('bcastLen').textContent = this.value.length;
+  saveDraft('bcast', this.value);  // не теряем набранный текст
 });
+
+// Восстанавливает несохранённый черновик рассылки и последний сегмент.
+function _restoreBcastForm() {
+  applyFormPrefs('bcast', {segment:'bcastSegment'});
+  const d = loadDraft('bcast');
+  if (d) {
+    const ta = document.getElementById('bcastText');
+    if (ta && !ta.value) {
+      ta.value = d;
+      const len = document.getElementById('bcastLen'); if (len) len.textContent = d.length;
+      try { toast('📝 Восстановлен черновик'); } catch(_){}
+    }
+  }
+}
 
 document.getElementById('bcastBot').addEventListener('change', updateBcastRecip);
 
@@ -7705,6 +7751,8 @@ async function sendBcast() {
     if (segment !== 'all') payload.segment = segment;
     if (schedMin > 0) payload.schedule_minutes = schedMin;
     const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
+    clearDraft('bcast');                       // отправлено — черновик больше не нужен
+    saveFormPrefs('bcast', {segment});         // запоминаем выбранный сегмент
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');
     toast(schedMin>0 ? `⏰ Рассылка запланирована (${schedLabel.toLowerCase()}) · ${num(d.total_users)} получателей`
@@ -12942,6 +12990,9 @@ function openParserModal() {
   document.getElementById('parserType').value='members';
   document.getElementById('parserDays').value='30';
   document.getElementById('parserErr').textContent='';
+  // Восстанавливаем последние настройки (тип/лимит/дни), но не источник —
+  // источник обычно каждый раз новый.
+  applyFormPrefs('parser', {type:'parserType', limit:'parserLimit', days:'parserDays'});
   parserTypeToggle();
   document.getElementById('parserMbg').classList.add('show');
 }
@@ -12966,6 +13017,12 @@ async function submitParser() {
       limit: parseInt(document.getElementById('parserLimit').value)||500,
       days_back: parseInt(document.getElementById('parserDays').value)||30,
     })});
+    // Запоминаем использованные настройки для следующего запуска.
+    saveFormPrefs('parser', {
+      type: document.getElementById('parserType').value,
+      limit: document.getElementById('parserLimit').value,
+      days: document.getElementById('parserDays').value,
+    });
     closeParserModal();
     toast(`✅ Парсинг поставлен в очередь (#${r.op_id})`);
     loadParserRuns();
