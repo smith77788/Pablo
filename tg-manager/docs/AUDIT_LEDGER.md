@@ -1037,3 +1037,35 @@ humanize-ит (accReasonHuman): прокси/сеть → «проверьте/�
 (активный кулдаун/session_expired) — показывается отдельной строкой «Последний сбой».
 Проверено: test_account_status_reason (3) + surfaced 4 → 7/7. AST mini_app_api +
 node --check index.html чисто.
+
+## tg-manager: умный UX — Copilot «Что делать дальше» + частые разделы — 2026-07-16
+Жалоба пользователей (ТЗ): система не предлагает следующий шаг на основе прошлых
+действий, приходится искать раздел и прыгать между разделами; у настроенного
+аккаунта не предлагает дальнейшие возможности.
+Сделано (все проверены — тесты + Playwright render-харнесс, 0 JS-ошибок, без
+h-overflow):
+  1. services/next_actions.py — движок контекстных подсказок на РЕАЛЬНОМ состоянии
+     владельца (аккаунты/прокси/операции/боты/подписчики/воронки/авто-ответы/
+     экосистемы/собранная аудитория) + контекст последних op_type из
+     operation_queue. Приоритезация, дедуп, каждая подсказка ведёт прямо в раздел
+     (вкладка nav|глобальная fn открытия). Контекст-цепочки: parse→invite,
+     register→warmup, invite→broadcast; fallback check_account_health для активного
+     без срочных задач (копайлот больше не пуст у настроенного аккаунта). Fail-soft:
+     сбой копайлота не роняет главный экран. Ничего не пишет в БД.
+  2. GET /api/miniapp/next_actions (mini_app_api). Панель «🧭 Что делать дальше» на
+     главном (index.html) + deep-link + «отложить» на сутки (localStorage).
+  3. Панель «⭐ Часто используемые» — учёт реальных кликов по .mgmt-tile/.qa-tile в
+     localStorage, топ-8 (порог ≥2), replay БЕЗ eval (CSP запрещает 'unsafe-eval':
+     парсим имя функции и простые аргументы из onclick).
+  4. Авто-обновление копайлота+частых при завершении операции (переход op_progress
+     непусто→пусто в SSE), один раз на переход.
+Регресс: tests/test_next_actions.py (25), tests/test_security_middleware.py (4).
+Найдено попутно (проверено, чисто — НЕ баг): валидация ввода в mini_app_api уже
+надёжна — все int(request.match_info[...]) обёрнуты в try/except→400, все
+int(request.query...) имеют fallback (offset→0, days→30). Класс «битый ввод роняет
+запрос 500» практически отсутствует. Индексы горячих путей главной (operation_queue
+(owner_id,status), tg_accounts(owner_id,is_active/acc_status), user_proxies(owner_id),
+bot_users(bot_id,is_active), parsed_audiences(owner_id)) — покрыты.
+Исправлено (баг): security_middleware ловил Exception и делал голый raise (no-op) —
+необработанное исключение уходило клиенту HTML-страницей 500 с трейсбеком, мини-апп
+парсит как JSON и спотыкался. Теперь на /api/ → лог с трейсом + чистый JSON 500.
