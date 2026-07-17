@@ -542,12 +542,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
     </div>
     <!-- Copilot: что делать дальше (контекстные подсказки) -->
-    <div id="copilotWrap" style="display:none;margin:12px 16px 0">
+    <div id="copilotWrap" class="copilot-wrap" style="display:none;margin:12px 16px 0">
       <div class="sec-row" style="margin:0 0 8px">
         <div class="sec" style="margin:0">🧭 Что делать дальше</div>
         <span class="sec-btn" onclick="loadNextActions(true)">Обновить</span>
       </div>
-      <div id="copilotList"></div>
+      <div id="copilotList" class="copilot-list"></div>
     </div>
     <!-- Quick actions -->
     <div class="sec">Быстрые действия</div>
@@ -641,6 +641,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
   </div>
   <div class="sb" id="botsBody">
+    <div class="copilot-wrap" style="display:none;margin:0 0 10px">
+      <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
+      <div class="copilot-list"></div>
+    </div>
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1;font-size:13px;padding:10px 6px">📢 Рассылка</button>
@@ -723,6 +727,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><div class="hdr-user" id="acc-cnt"></div></div>
   </div>
   <div class="sb">
+    <div class="copilot-wrap" style="display:none;margin:0 0 10px">
+      <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
+      <div class="copilot-list"></div>
+    </div>
     <!-- KPI status bar -->
     <div class="acc-kpi" id="accKpi">
       <div class="acc-kpi-card on" onclick="filterAcc('all',this)" data-filter="all">
@@ -854,6 +862,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
   <div class="sb">
+    <div class="copilot-wrap" style="display:none;margin:0 0 10px">
+      <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
+      <div class="copilot-list"></div>
+    </div>
     <div style="display:flex;gap:8px;padding:6px 0 2px">
       <button class="btn btn-s" onclick="openSpintax()" style="flex:1;font-size:13px;padding:9px 6px">🎲 Spintax</button>
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1;font-size:13px;padding:9px 6px">📅 Расписание</button>
@@ -5709,6 +5721,8 @@ function loadTab(tab) {
   else if (tab==='accounts') loadAccounts();
   else if (tab==='broadcasts') loadBroadcasts();
   else if (tab==='more') loadHome();
+  // Панель «Что делать дальше» есть на всех вкладках (home грузит её сам).
+  if (tab==='bots' || tab==='accounts' || tab==='broadcasts') loadNextActions();
 }
 
 // ── Home ───────────────────────────────────────────────
@@ -5760,14 +5774,18 @@ function copilotDismiss(id) {
 }
 
 function renderNextActions(actions) {
-  const wrap = document.getElementById('copilotWrap');
-  const list = document.getElementById('copilotList');
-  if (!wrap || !list) return;
+  // Панель есть на всех вкладках (Главная/Боты/Аккаунты/Рассылки) — рендерим
+  // одинаковые подсказки в каждую видимую .copilot-list, чтобы рекомендуемые
+  // действия были под рукой в любом разделе.
+  const lists = document.querySelectorAll('.copilot-list');
+  if (!lists.length) return;
   const dismissed = copilotDismissed();
   const items = (actions||[]).filter(a => !dismissed[a.id]);
-  if (!items.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
-  wrap.style.display = 'block';
-  list.innerHTML = items.map(a => {
+  if (!items.length) {
+    lists.forEach(l => { const w = l.closest('.copilot-wrap'); if (w) w.style.display='none'; l.innerHTML=''; });
+    return;
+  }
+  const html = items.map(a => {
     const navArg = `copilotOpen(${a.nav?`'${a.nav}'`:'null'},${a.fn?`'${a.fn}'`:'null'})`;
     const hasApply = !!a.apply;
     // Есть действие в один клик → primary-кнопка «применить» + ссылка «открыть»
@@ -5789,6 +5807,7 @@ function renderNextActions(actions) {
       <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить">✕</div>
     </div>`;
   }).join('');
+  lists.forEach(l => { l.innerHTML = html; const w = l.closest('.copilot-wrap'); if (w) w.style.display='block'; });
 }
 
 // Применить подсказку в один клик (сервер сам решает безопасное действие по id).
