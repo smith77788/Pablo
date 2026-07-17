@@ -20,6 +20,12 @@
 
 ---
 
+## Добивка бэклога — predict_campaign_success подключён + last_post_at из bulk_post — 2026-07-12
+Закрыты два бэклог-пункта прошлых записей (6B + сигнал активности).
+- `predict_campaign_success` (была корректной, но инертной) подключена в уведомление о старте операции (`op_worker` ~1191): «Ожидаемый успех ~X% (по истории)». Показывается ТОЛЬКО при confidence medium/high (≥5 прошлых прогонов этого op_type) — иначе не шумим. best-effort, сбой не рушит уведомление. Читает operation_queue.status='done' — совпадает с финальным статусом op_worker.
+- `last_post_at` теперь проставляется и из `_exec_bulk_post_to_channel` (guard `if chat_id` — только когда известен numeric id), не только из mass_publish. Покрыты два основных пути публикации.
+- Регресс `tests/test_campaign_prediction.py` (5). Осталось (бэклог): last_post_at из quick_post/broadcast/narrative (реже используются, id не всегда numeric на месте).
+
 ## МОДУЛЬ Behavioral — 6B предсказание риска бана: подключено + fix словаря — 2026-07-12
 Проверено: `predict_ban_risk`/`predict_campaign_success` (0 call sites). Читаемые таблицы/колонки: `operation_audit(action,result,occurred_at)` — существуют, корректны (не «молча сломано»). Реальный словарь `operation_audit.result`.
 Найдено/сделано: обе функции корректны, но инертны (нет потребителя). `predict_ban_risk` дополнительно имел слепоту: считал провалы как `result=='error'`, а op_worker (главный писатель, ~685/1498) пишет `'failed'` → fail_rate игнорировал большинство реальных провалов. Исправлено на `IN ('error','failed')`. Подключён в `account_monitor` как `_check_ban_risk` (каждый цикл/час): кандидаты — аккаунты с тревожными событиями в operation_audit за 24ч (flood/ban/failed/error, LIMIT 25), уведомление владельца ТОЛЬКО на `critical` (score≥70), дедуп 6ч на аккаунт (in-memory). Дополняет `_check_low_trust` (статический trust) поведенческим сигналом — раннее предупреждение до падения trust. Регресс `tests/test_ban_risk_prediction.py` (4). Осталось (бэклог): `predict_campaign_success` тоже корректна и инертна — естественный потребитель это pre-flight оценка на запуске масс-операции (нужен UI/endpoint-тачпоинт), отложено чтобы не трогать горячий op_worker start / mini_app.

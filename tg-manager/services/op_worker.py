@@ -1188,12 +1188,25 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 start_kb.button(
                     text="📋 Очередь операций", callback_data=BmCb(action="op_reports")
                 )
+                # Pre-flight оценка успеха по истории (Behavioral 6B) — показываем
+                # только при достаточной уверенности, best-effort.
+                _pred_line = ""
+                try:
+                    from services import behavioral_engine as _be
+                    _pred = await _be.predict_campaign_success(pool, owner_id, op_type)
+                    if _pred.get("confidence") in ("medium", "high"):
+                        _pred_line = (
+                            f"\nОжидаемый успех: ~{int(_pred.get('success_rate', 0))}% "
+                            f"(по истории, {_pred.get('confidence')})"
+                        )
+                except Exception:
+                    _pred_line = ""
                 await db.notify_if_enabled(
                     pool,
                     bot,
                     owner_id,
                     "op_complete",
-                    f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>",
+                    f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>{_pred_line}",
                     reply_markup=start_kb.as_markup(),
                 )
             except Exception:
@@ -5903,6 +5916,16 @@ async def _exec_bulk_post_to_channel(
             err_list.append(f"⏳ {label}: flood_wait, пропущен")
         elif "msg_id" in result:
             ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
+            # Сигнал активности канала (last_post_at) — когда известен numeric id.
+            if chat_id:
+                try:
+                    await pool.execute(
+                        "UPDATE managed_channels SET last_post_at=now() "
+                        "WHERE owner_id=$1 AND channel_id=$2",
+                        owner_id, int(chat_id),
+                    )
+                except Exception:
+                    log_exc_swallow(log, "bulk_post: last_post_at update")
         else:
             err_str = result.get("error", "ошибка")
             if _is_dead_session_error(err_str):
