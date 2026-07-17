@@ -118,3 +118,52 @@ async def test_build_ecosystem_core_no_channels(monkeypatch):
     res = await _build_ecosystem_core(P(), uid=5)
     assert res["channels"] == 0
     assert res["ecosystem_id"] == 1
+
+
+async def test_assign_proxies_reuses_apply_rotation(monkeypatch):
+    """assign_proxies должен вызывать вылизанный proxy_rotation.apply_rotation с
+    id аккаунтов без прокси, а не писать логику изоляции сам."""
+    import services.proxy_rotation as pr
+    from services.mini_app_api import _apply_next_action
+
+    # apply_rotation вызывается с account_ids неназначенных аккаунтов
+    seen = {}
+
+    async def fake_apply(pool, owner_id, account_ids=None, proxy_ids=None):
+        seen["account_ids"] = account_ids
+        seen["owner"] = owner_id
+        return {"ok": True, "rotated": len(account_ids or []), "skipped_no_proxy": 0}
+
+    monkeypatch.setattr(pr, "apply_rotation", fake_apply)
+
+    class P:
+        async def fetch(self, q, *a):
+            return [{"id": 1}, {"id": 2}]
+
+    res = await _apply_next_action(P(), uid=9, action_id="assign_proxies")
+    assert res.get("ok")
+    assert seen["account_ids"] == [1, 2]
+    assert seen["owner"] == 9
+    assert "2" in res["message"]
+
+
+async def test_apply_unknown_action_returns_error():
+    from services.mini_app_api import _apply_next_action
+
+    class P:
+        async def fetch(self, q, *a):
+            return []
+
+    res = await _apply_next_action(P(), uid=1, action_id="nope_not_real")
+    assert res.get("error")
+
+
+async def test_apply_assign_proxies_no_unassigned():
+    from services.mini_app_api import _apply_next_action
+
+    class P:
+        async def fetch(self, q, *a):
+            return []   # нет аккаунтов без прокси
+
+    res = await _apply_next_action(P(), uid=1, action_id="assign_proxies")
+    assert res["ok"] and "уже с прокси" in res["message"]

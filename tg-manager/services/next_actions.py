@@ -253,6 +253,7 @@ def build_suggestions(state: dict) -> list[dict]:
         s.append(
             {
                 "id": "assign_proxies",
+                "apply": "Назначить прокси",
                 "priority": 85,
                 "icon": "🛡️",
                 "title": f"Назначьте прокси {n} аккаунтам",

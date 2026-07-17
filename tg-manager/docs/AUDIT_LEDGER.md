@@ -1113,3 +1113,17 @@ assign_proxies — затрагивает прокси-изоляцию (выс�
 collect_audience/add_first_account/relog — требуют пользовательского ввода
 (текст/цель/креды), автодефолта нет. Регресс: test_next_actions_apply.py
 (+2 ecosystem: создание+добавление каналов, пустой список) + apply-метки. 1701 passed.
+
+## tg-manager: Copilot one-click — assign_proxies + рефактор диспетчера — 2026-07-16
+Добавлен безопасный one-click для assign_proxies (ранее оставлял навигацией из-за
+риска изоляции): назначение прокси неназначенным аккаунтам ЧЕРЕЗ вылизанный
+proxy_rotation.apply_rotation (FOR UPDATE, инъективный plan_rotation, вычитание
+прокси занятых чужими аккаунтами) — логику изоляции сами НЕ пишем, переиспользуем
+единую реализацию (как требует модуль). Маппинг apply вынесен в модульную
+_apply_next_action(pool, uid, action_id)→dict (DRY+тестируемость); web-хендлер —
+тонкая обёртка. Полное one-click-покрытие безопасных подсказок: warmup×2, проверка
+прокси, перезапуск упавших, здоровье, экосистема, assign_proxies. Навигацией
+остаются ТОЛЬКО подсказки с обязательным пользовательским вводом (add_first_account/
+relog — креды; invite/broadcast/funnel/autoresponder/collect_audience — текст/цель):
+one-click для них невозможен без фабрикации контента. Регресс: test_next_actions_apply.py
+(assign через apply_rotation, unknown-id→error, no-unassigned) + apply-метка. 1704 passed.

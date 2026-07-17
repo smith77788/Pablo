@@ -546,6 +546,67 @@ async def _build_ecosystem_core(pool: asyncpg.Pool, uid: int) -> dict:
     return {"ok": True, "ecosystem_id": eco_id, "channels": added}
 
 
+async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> dict:
+    """Единая точка «применить подсказку Copilot в один клик». Маппит id подсказки
+    на безопасное owner-scoped действие. Возвращает {"ok": True, "message": ...}
+    или {"error": ...} для подсказки без действия. Клиент присылает только id —
+    произвольную операцию с клиента вызвать нельзя. Тестируется напрямую."""
+    if action_id in ("warmup_cold_accounts", "warmup_after_register"):
+        r = await _warmup_bulk_core(pool, uid)
+        if r.get("started"):
+            return {"ok": True, "message": f"Прогрев запущен для {r['started']} аккаунтов"}
+        return {"ok": True, "message": r.get("note") or "Нет подходящих аккаунтов"}
+
+    if action_id == "replace_dead_proxies":
+        r = await _check_all_proxies_core(pool, uid)
+        return {"ok": True,
+                "message": f"Проверено прокси: {r.get('checked', 0)}, живых: {r.get('alive', 0)}"}
+
+    if action_id == "review_failed_ops":
+        r = await _retry_failed_ops_core(pool, uid)
+        msg = f"Перезапущено операций: {r.get('retried', 0)}"
+        if r.get("skipped"):
+            msg += f" (массовых публикаций пропущено: {r['skipped']} — повторите точечно из карточки)"
+        return {"ok": True, "message": msg}
+
+    if action_id == "assign_proxies":
+        # Назначаем прокси аккаунтам без него — ЧЕРЕЗ вылизанный
+        # proxy_rotation.apply_rotation (FOR UPDATE, инъективный план, вычитание
+        # занятых чужими прокси). Логику изоляции сами НЕ пишем.
+        rows = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+            "AND proxy_id IS NULL LIMIT 500", uid)
+        ids = [int(r["id"]) for r in (rows or [])]
+        if not ids:
+            return {"ok": True, "message": "Все аккаунты уже с прокси"}
+        from services import proxy_rotation as _pr
+        r = await _pr.apply_rotation(pool, uid, account_ids=ids)
+        msg = f"Назначено прокси: {r.get('rotated', 0)}"
+        if r.get("skipped_no_proxy"):
+            msg += f" (не хватило прокси для {r['skipped_no_proxy']} — добавьте прокси в пул)"
+        return {"ok": True, "message": msg}
+
+    if action_id == "build_ecosystem":
+        r = await _build_ecosystem_core(pool, uid)
+        return {"ok": True, "message": f"Экосистема создана из {r.get('channels', 0)} каналов"}
+
+    if action_id == "check_account_health":
+        rows = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid)
+        ids = [int(r["id"]) for r in (rows or [])]
+        if not ids:
+            return {"ok": True, "message": "Нет активных аккаунтов для проверки"}
+        from services import operation_bus as _obus
+        op_id = await _obus.submit(
+            pool, uid, "check_accounts_health",
+            {"account_ids": ids, "check_spambot": True},
+            total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов")
+        return {"ok": True, "op_id": op_id,
+                "message": f"Проверка здоровья запущена для {len(ids)} аккаунтов"}
+
+    return {"error": "Для этой подсказки нет действия в один клик"}
+
+
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
@@ -11097,45 +11158,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = {}
         action_id = (body.get("id") or "").strip()
         try:
-            if action_id in ("warmup_cold_accounts", "warmup_after_register"):
-                r = await _warmup_bulk_core(pool, uid)
-                if r.get("started"):
-                    return _json_resp({"ok": True, "message": f"Прогрев запущен для {r['started']} аккаунтов"})
-                return _json_resp({"ok": True, "message": r.get("note") or "Нет подходящих аккаунтов"})
-
-            if action_id == "replace_dead_proxies":
-                r = await _check_all_proxies_core(pool, uid)
-                return _json_resp({"ok": True,
-                    "message": f"Проверено прокси: {r.get('checked', 0)}, живых: {r.get('alive', 0)}"})
-
-            if action_id == "review_failed_ops":
-                r = await _retry_failed_ops_core(pool, uid)
-                msg = f"Перезапущено операций: {r.get('retried', 0)}"
-                if r.get("skipped"):
-                    msg += f" (массовых публикаций пропущено: {r['skipped']} — повторите точечно из карточки)"
-                return _json_resp({"ok": True, "message": msg})
-
-            if action_id == "build_ecosystem":
-                r = await _build_ecosystem_core(pool, uid)
-                return _json_resp({"ok": True,
-                    "message": f"Экосистема создана из {r.get('channels', 0)} каналов"})
-
-            if action_id == "check_account_health":
-                rows = await _safe_fetch(pool,
-                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid)
-                ids = [int(r["id"]) for r in (rows or [])]
-                if not ids:
-                    return _json_resp({"ok": True, "message": "Нет активных аккаунтов для проверки"})
-                from services import operation_bus as _obus
-                op_id = await _obus.submit(
-                    pool, uid, "check_accounts_health",
-                    {"account_ids": ids, "check_spambot": True},
-                    total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов")
-                return _json_resp({"ok": True, "op_id": op_id,
-                    "message": f"Проверка здоровья запущена для {len(ids)} аккаунтов"})
-
-            return _err("Для этой подсказки нет действия в один клик", 400)
-        except Exception as e:
+            result = await _apply_next_action(pool, uid, action_id)
+            if result.get("error"):
+                return _err(result["error"], 400)
+            return _json_resp(result)
+        except Exception:
             log.exception("next_actions_apply id=%s uid=%s", action_id, uid)
             return _err("Не удалось применить действие", 500)
 
