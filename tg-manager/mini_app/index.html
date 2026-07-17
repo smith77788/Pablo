@@ -3291,6 +3291,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">Текст публикации</div>
     <div style="padding:8px 0">
+      <div class="preset-row" id="qpPresetRow"></div>
       <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     </div>
     <div class="sec">Выберите каналы</div>
@@ -7774,6 +7775,29 @@ function bcastPreset(key) {
   try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
 }
 
+// Пресеты постов для «Быстрого поста» (тот же паттерн, что рассылка).
+const POST_PRESETS = [
+  {k:'announce', t:'📣 Анонс',      v:'📣 {Важный анонс|Свежая новость}! Мы {подготовили|запустили} кое-что новое. Подробности ниже 👇'},
+  {k:'tip',      t:'💡 Совет',      v:'💡 Полезный совет дня: {попробуйте|возьмите на заметку}… А как делаете вы? Делитесь в комментариях 👇'},
+  {k:'engage',   t:'🔥 Вовлечение', v:'🔥 А вы знали? {Интересный факт|Небольшой инсайт}… Ставьте реакцию, если было полезно! 🚀'},
+  {k:'promo',    t:'🎁 Промо',      v:'🎁 Специально для вас — {выгодное предложение|подарок}! Успейте {воспользоваться|забрать}, пока действует.'},
+];
+function buildQuickPostPresets() {
+  const row = document.getElementById('qpPresetRow');
+  if (!row || row.dataset.built) return;
+  row.innerHTML = POST_PRESETS.map(p =>
+    `<span class="preset-chip" onclick="qpPreset('${p.k}')">${esc(p.t)}</span>`).join('');
+  row.dataset.built = '1';
+}
+function qpPreset(key) {
+  const p = POST_PRESETS.find(x => x.k === key);
+  const ta = document.getElementById('quickPostText');
+  if (!p || !ta) return;
+  ta.value = p.v;
+  ta.focus();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
+}
+
 // Восстанавливает несохранённый черновик рассылки и последний сегмент.
 function _restoreBcastForm() {
   buildBcastPresets();
@@ -10613,6 +10637,7 @@ let QUICK_POST_SELECTED = new Set();
 async function openQuickPost() {
   push('s-quickpost');
   QUICK_POST_SELECTED = new Set();
+  buildQuickPostPresets();
   document.getElementById('quickPostText').value='';
   txt('quickPostSelected','Выбрано: 0 каналов');
   txt('quickPostChannels','<div class="spin-wrap"><div class="spin"></div></div>');
