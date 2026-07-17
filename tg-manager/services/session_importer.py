@@ -111,11 +111,27 @@ async def import_sessions(
             failed += 1
             errors.append(f"Строка {i+1}: сессия уже существует (id={existing['id']})")
             continue
+        # Уникальный device-отпечаток НА АККАУНТ. Иначе импортные сессии идут в
+        # БД без device_* и на _make_client получают ОДИН дефолтный отпечаток
+        # (Samsung SM-S911B / en-US) — массовая коллизия фингерпринтов на самом
+        # частом пути (покупные сессии). locale выводится из страны номера.
+        from services.account_manager import (
+            generate_device_fingerprint,
+            country_code_from_phone,
+        )
+
+        phone = result.get('phone', '') or ''
+        dev = generate_device_fingerprint(country_code_from_phone(phone))
         try:
             await pool.execute(
-                """INSERT INTO tg_accounts (owner_id, session_str, session_fp, phone, is_active, acc_status)
-                   VALUES ($1, $2, $3, $4, TRUE, 'active')""",
-                owner_id, encrypt_token(session_str), _fp, result.get('phone', ''),
+                """INSERT INTO tg_accounts
+                       (owner_id, session_str, session_fp, phone, is_active, acc_status,
+                        device_model, system_version, app_version, lang_code, system_lang_code)
+                   VALUES ($1, $2, $3, $4, TRUE, 'active',
+                        $5, $6, $7, $8, $9)""",
+                owner_id, encrypt_token(session_str), _fp, phone,
+                dev["device_model"], dev["system_version"], dev["app_version"],
+                dev["lang_code"], dev["system_lang_code"],
             )
             imported += 1
         except Exception as e:
