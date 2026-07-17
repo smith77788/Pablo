@@ -2242,6 +2242,17 @@ async def _exec_mass_publish(
                 _ch_title = str(dialog.get("title") or dialog.get("username") or dialog["id"])[:60]
                 published_to.append(_ch_title)
                 _infra_mem.record_account_op(acc["id"], "publish", success=True)
+                # Сигнал активности канала: реальная публикация → last_post_at.
+                # Кормит ecosystem auto_remove_dead_channels и аналитику (раньше
+                # такого сигнала не было нигде). Best-effort — не рушим публикацию.
+                try:
+                    await pool.execute(
+                        "UPDATE managed_channels SET last_post_at=now() "
+                        "WHERE owner_id=$1 AND channel_id=$2",
+                        owner_id, int(dialog["id"]),
+                    )
+                except Exception:
+                    log_exc_swallow(log, "mass_publish: last_post_at update")
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                     op_id, idx, _ch_title,

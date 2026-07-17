@@ -2167,6 +2167,14 @@ async def run_auto_management(pool: asyncpg.Pool, bot) -> None:
                             "auto_management: eco=%d owner=%d +%d новых каналов",
                             e["id"], e["owner_id"], res["added"],
                         )
+                    # Удаление мёртвых каналов (по сигналу last_post_at, консервативно:
+                    # NULL — не трогаем). Теперь разблокировано реальным сигналом.
+                    rem = await auto_remove_dead_channels(pool, e["id"])
+                    if rem.get("removed"):
+                        log.info(
+                            "auto_management: eco=%d owner=%d −%d мёртвых каналов",
+                            e["id"], e["owner_id"], rem["removed"],
+                        )
                 except Exception as ie:
                     log_exc_swallow(log, f"auto_management eco={e['id']}: {ie}")
         except asyncio.CancelledError:
@@ -2177,18 +2185,29 @@ async def run_auto_management(pool: asyncpg.Pool, bot) -> None:
 
 
 async def auto_remove_dead_channels(pool: asyncpg.Pool, ecosystem_id: int, inactive_days: int = 30) -> dict:
+    """Удалить из экосистемы каналы без публикаций дольше inactive_days.
+
+    Сигнал активности — managed_channels.last_post_at (проставляется при реальной
+    публикации в op_worker._exec_mass_publish). Канал БЕЗ единой публикации
+    (last_post_at IS NULL) НЕ трогаем — «неизвестно» ≠ «мёртвый» (мог быть добавлен
+    только что). Удаляем лишь те, у кого была активность, но давно. Членство —
+    каноническая ecosystem_members (object_type='channel'), а не мёртвая
+    ecosystem_channels."""
     dead = await pool.fetch(
-        """SELECT ec.channel_id FROM ecosystem_channels ec
-           JOIN tg_channels ch ON ch.id = ec.channel_id
-           WHERE ec.ecosystem_id=$1
-             AND (ch.last_post_at IS NULL OR ch.last_post_at < NOW() - ($2 || ' days')::INTERVAL)""",
+        """SELECT em.object_id AS channel_id
+           FROM ecosystem_members em
+           JOIN managed_channels mc ON mc.channel_id = em.object_id
+           WHERE em.ecosystem_id=$1 AND em.object_type='channel'
+             AND mc.last_post_at IS NOT NULL
+             AND mc.last_post_at < NOW() - ($2 || ' days')::INTERVAL""",
         ecosystem_id, inactive_days,
     )
     removed = 0
     for d in dead:
         try:
             await pool.execute(
-                "DELETE FROM ecosystem_channels WHERE ecosystem_id=$1 AND channel_id=$2",
+                "DELETE FROM ecosystem_members "
+                "WHERE ecosystem_id=$1 AND object_type='channel' AND object_id=$2",
                 ecosystem_id, d["channel_id"],
             )
             removed += 1

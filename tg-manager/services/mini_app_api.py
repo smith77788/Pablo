@@ -615,6 +615,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         stmts = [
             "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
             "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
+            # Сигнал активности канала (для ecosystem auto_remove + аналитики):
+            # проставляется при реальной публикации (op_worker._exec_mass_publish).
+            "ALTER TABLE managed_channels ADD COLUMN IF NOT EXISTS last_post_at TIMESTAMPTZ",
             # tg_accounts — добавляем поля если отсутствуют
             "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
             "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
