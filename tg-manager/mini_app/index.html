@@ -466,6 +466,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .copilot-apply{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
 .copilot-apply:active{transform:scale(.95)}
 .copilot-apply:disabled{opacity:.6}
+/* Пресеты в формах ввода (шаблоны в один тап) */
+.preset-row{display:flex;gap:6px;overflow-x:auto;padding:0 0 8px;scrollbar-width:none}
+.preset-row::-webkit-scrollbar{display:none}
+.preset-chip{flex-shrink:0;background:var(--bg2);border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;white-space:nowrap;transition:transform .1s,border-color .12s}
+.preset-chip:active{transform:scale(.94)}
+.preset-chip:hover{border-color:var(--accent)}
 .copilot-x{position:absolute;top:7px;right:9px;font-size:12px;color:var(--hint);opacity:.55;padding:3px 5px;line-height:1;border-radius:8px}
 .copilot-x:active{opacity:1;background:var(--bg)}
 /* Часто используемые разделы */
@@ -4259,6 +4265,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field">
       <label>Текст сообщения</label>
+      <div class="preset-row" id="bcastPresetRow"></div>
       <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст..."></textarea>
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
     </div>
@@ -7739,8 +7746,37 @@ document.getElementById('bcastText').addEventListener('input', function(){
   saveDraft('bcast', this.value);  // не теряем набранный текст
 });
 
+// Пресеты сообщений рассылки — типовые шаблоны в один тап (spintax-совместимы).
+// Заполняют текст, дальше пользователь правит и отправляет.
+const BCAST_PRESETS = [
+  {k:'welcome', t:'👋 Приветствие', v:'Привет! 👋 Рады видеть тебя с нами. {Если есть вопросы|Если что понадобится} — просто напиши, поможем!'},
+  {k:'promo',   t:'🔥 Акция',       v:'🔥 Только сегодня — специальное предложение для наших подписчиков! {Успей воспользоваться|Не упусти шанс}. Подробности внутри.'},
+  {k:'news',    t:'📣 Новость',     v:'📣 У нас обновление! Мы {подготовили|запустили} кое-что новое для тебя. Загляни и оцени 👇'},
+  {k:'remind',  t:'⏰ Напоминание', v:'⏰ Напоминаем: ты не завершил начатое. Это займёт {пару минут|совсем немного} — вернись, когда будет удобно.'},
+  {k:'discount',t:'🎁 Скидка',      v:'🎁 Дарим скидку специально для тебя! {Активируй|Забери} её прямо сейчас — предложение ограничено.'},
+];
+function buildBcastPresets() {
+  const row = document.getElementById('bcastPresetRow');
+  if (!row || row.dataset.built) return;
+  row.innerHTML = BCAST_PRESETS.map(p =>
+    `<span class="preset-chip" onclick="bcastPreset('${p.k}')">${esc(p.t)}</span>`).join('');
+  row.dataset.built = '1';
+}
+function bcastPreset(key) {
+  const p = BCAST_PRESETS.find(x => x.k === key);
+  if (!p) return;
+  const ta = document.getElementById('bcastText');
+  if (!ta) return;
+  ta.value = p.v;
+  const len = document.getElementById('bcastLen'); if (len) len.textContent = p.v.length;
+  saveDraft('bcast', p.v);
+  ta.focus();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
+}
+
 // Восстанавливает несохранённый черновик рассылки и последний сегмент.
 function _restoreBcastForm() {
+  buildBcastPresets();
   applyFormPrefs('bcast', {segment:'bcastSegment'});
   const d = loadDraft('bcast');
   if (d) {
