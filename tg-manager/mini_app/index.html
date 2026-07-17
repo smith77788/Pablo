@@ -3634,6 +3634,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         </div>
       </div>
       <div class="field">
+        <label>Пресет безопасности (заполнит настройки)</label>
+        <div class="preset-row" id="invitePresetRow"></div>
+      </div>
+      <div class="field">
         <label>Темп инвайта</label>
         <select id="massInvitePace" class="sel">
           <option value="slow">🐢 Медленно — безопаснее от банов</option>
@@ -4791,6 +4795,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field">
       <label>Текст сообщения</label>
+      <div class="preset-row" id="cmpPresetRow"></div>
       <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Поддержка Spintax: {Привет|Здравствуйте}!"></textarea>
       <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
@@ -7798,6 +7803,54 @@ function qpPreset(key) {
   try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
 }
 
+// Пресеты личных сообщений (DM-композер) — личный тон (не «рассылочный»).
+const DM_PRESETS = [
+  {k:'intro',   t:'👋 Знакомство',  v:'{Привет|Здравствуйте}! Увидел(а) вас {в канале|среди участников} и решил(а) написать напрямую. {Можно задать пару вопросов|Есть минутка}?'},
+  {k:'offer',   t:'💼 Оффер',       v:'{Привет|Здравствуйте}! У меня есть {предложение|кое-что}, что может быть вам полезно. {Рассказать подробнее|Интересно}?'},
+  {k:'followup',t:'🔁 Фоллоу-ап',   v:'{Привет|Добрый день}! {Возвращаюсь к нашему разговору|Напоминаю о себе}. {Успели посмотреть|Что думаете}?'},
+  {k:'invite',  t:'📣 В канал',     v:'{Привет|Здравствуйте}! {Приглашаю вас|Думаю, вам будет интересно} в наш канал — там {много полезного|самое важное по теме}. Загляните 👇'},
+];
+function buildCmpPresets() {
+  const row = document.getElementById('cmpPresetRow');
+  if (!row || row.dataset.built) return;
+  row.innerHTML = DM_PRESETS.map(p =>
+    `<span class="preset-chip" onclick="cmpPreset('${p.k}')">${esc(p.t)}</span>`).join('');
+  row.dataset.built = '1';
+}
+function cmpPreset(key) {
+  const p = DM_PRESETS.find(x => x.k === key);
+  const ta = document.getElementById('cmpText');
+  if (!p || !ta) return;
+  ta.value = p.v;
+  const len = document.getElementById('cmpLen'); if (len) len.textContent = p.v.length;
+  ta.focus();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
+}
+
+// Пресеты безопасности инвайта — заполняют темп+батч+лимит на аккаунт разом
+// (инвайт — самая баноопасная операция; консервативные значения по умолчанию).
+const INVITE_PRESETS = [
+  {k:'safe',   t:'🛡️ Безопасный', pace:'slow',   batch:3,  perAcc:15},
+  {k:'normal', t:'⚖️ Обычный',    pace:'normal', batch:5,  perAcc:30},
+  {k:'fast',   t:'🚀 Быстрый',    pace:'fast',   batch:10, perAcc:50},
+];
+function buildInvitePresets() {
+  const row = document.getElementById('invitePresetRow');
+  if (!row || row.dataset.built) return;
+  row.innerHTML = INVITE_PRESETS.map(p =>
+    `<span class="preset-chip" onclick="invitePreset('${p.k}')">${esc(p.t)}</span>`).join('');
+  row.dataset.built = '1';
+}
+function invitePreset(key) {
+  const p = INVITE_PRESETS.find(x => x.k === key);
+  if (!p) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('massInvitePace', p.pace);
+  set('massInviteBatch', p.batch);
+  set('massInvitePerAcc', p.perAcc);
+  try { toast(`Настройки: ${p.t}`); tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
+}
+
 // Восстанавливает несохранённый черновик рассылки и последний сегмент.
 function _restoreBcastForm() {
   buildBcastPresets();
@@ -9747,6 +9800,7 @@ async function loadMoreSubs() {
 
 // ── DM Campaign modal ──────────────────────────────────
 function openCmpModal() {
+  buildCmpPresets();
   document.getElementById('cmpName').value='';
   document.getElementById('cmpTargetType').value='all_bots';
   document.getElementById('cmpText').value='';
@@ -11926,6 +11980,7 @@ async function scanGifts() {
 // ── Mass Inviter ─────────────────────────────────────────
 async function openMassInvite() {
   push('s-massinvite');
+  buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
   massInviteSrcToggle();
