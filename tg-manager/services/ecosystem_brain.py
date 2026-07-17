@@ -2192,21 +2192,23 @@ async def auto_remove_dead_channels(pool: asyncpg.Pool, ecosystem_id: int, inact
                 ecosystem_id, d["channel_id"],
             )
             removed += 1
-        except Exception as e:
-            log_exc_swallow(log, "capture_dna_from_ecosystem")
+        except Exception:
+            log_exc_swallow(log, "auto_remove_dead_channels")
     return {"removed": removed, "total_dead": len(dead)}
 
 
 async def auto_post_scheduling(pool: asyncpg.Pool, ecosystem_id: int) -> dict:
-    # ПРИМЕЧАНИЕ: функция сейчас не вызывается (dead code). Исправлены две ссылки
-    # на несуществующие колонки, из-за которых запросы падали бы 500 при подключении:
-    #  - tg_channels НЕ имеет is_active (убрано условие; каналы экосистемы = кандидаты);
-    #  - operation_queue НЕ имеет колонки target — mass_publish хранит цели в
-    #    params.channel_ids (jsonb-массив), проверяем через containment.
+    # ПРИМЕЧАНИЕ: функция пока не вызывается (dead code). Источник каналов —
+    # канонический managed_channels.channel_id через ecosystem_members
+    # (object_type='channel'), а НЕ мёртвая ecosystem_channels (см. AUDIT_LEDGER).
+    # operation_queue НЕ имеет колонки target — mass_publish хранит цели в
+    # params.channel_ids (jsonb-массив), проверяем через containment.
     channels = await pool.fetch(
-        """SELECT ch.id, ch.username FROM tg_channels ch
-           JOIN ecosystem_channels ec ON ec.channel_id = ch.id
-           WHERE ec.ecosystem_id=$1""",
+        """SELECT DISTINCT mc.channel_id AS id, mc.username
+           FROM managed_channels mc
+           JOIN ecosystem_members em
+             ON em.object_id = mc.channel_id AND em.object_type='channel'
+           WHERE em.ecosystem_id=$1""",
         ecosystem_id,
     )
     scheduled = 0

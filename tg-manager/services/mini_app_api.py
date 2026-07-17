@@ -1447,11 +1447,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       type, added_at
                FROM managed_channels
                WHERE owner_id=$1
-                  OR id IN (
-                      SELECT DISTINCT ec.channel_id FROM ecosystem_channels ec
-                      JOIN ecosystems e ON e.id=ec.ecosystem_id
-                      WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
+                  OR channel_id IN (
+                      SELECT em2.object_id FROM ecosystem_members em2
+                      JOIN ecosystems e ON e.id=em2.ecosystem_id
+                      WHERE em2.object_type='channel'
+                        AND (e.owner_id=$1
+                             OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1))
                   )
                   OR id IN (
                       SELECT DISTINCT mc.id FROM managed_channels mc
@@ -1464,11 +1465,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         total = await _safe_count(pool,
             """SELECT COUNT(DISTINCT id) FROM managed_channels
                WHERE owner_id=$1
-                  OR id IN (
-                      SELECT DISTINCT ec.channel_id FROM ecosystem_channels ec
-                      JOIN ecosystems e ON e.id=ec.ecosystem_id
-                      WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
+                  OR channel_id IN (
+                      SELECT em2.object_id FROM ecosystem_members em2
+                      JOIN ecosystems e ON e.id=em2.ecosystem_id
+                      WHERE em2.object_type='channel'
+                        AND (e.owner_id=$1
+                             OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1))
                   )
                   OR id IN (
                       SELECT DISTINCT mc.id FROM managed_channels mc
