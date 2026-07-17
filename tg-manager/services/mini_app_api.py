@@ -10573,24 +10573,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
-    async def topology_links(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            links = await pool.fetch(
-                """SELECT a.channel_id as ch1, b.channel_id as ch2,
-                          COUNT(DISTINCT a.user_id) as strength
-                   FROM channel_members a
-                   JOIN channel_members b ON a.user_id = b.user_id AND a.channel_id < b.channel_id
-                   WHERE a.channel_id IN (SELECT id FROM tg_channels WHERE owner_id=$1)
-                   GROUP BY a.channel_id, b.channel_id
-                   HAVING COUNT(DISTINCT a.user_id) > 5
-                   ORDER BY strength DESC LIMIT 30""",
-                uid
-            )
-            return _json_resp({"links": [{"from": f"ch_{l['ch1']}", "to": f"ch_{l['ch2']}", "strength": l['strength']} for l in links]})
-        except Exception as e:
-            return _err(str(e), 500)
+    # ПРИМЕЧАНИЕ: дубль topology_links (co-membership граф, отдавал {links}) удалён —
+    # он затенял основной topology_links выше (accounts/bots drill-down, ~стр. 2830)
+    # из-за одинакового имени в одной области видимости (Python: последнее опреде-
+    # ление побеждает). Фронт (openTopology) читает links.accounts/links.bots, а
+    # затеняющий возвращал {links} → «Карта связей» всегда показывала «Связей пока
+    # нет». Коллизия параллельных агентов; оставлена одна рабочая версия.
 
     async def schedule_post(request: web.Request) -> web.Response:
         uid = _get_uid(request)
