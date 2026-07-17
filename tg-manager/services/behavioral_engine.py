@@ -805,8 +805,10 @@ async def predict_ban_risk(pool: asyncpg.Pool, account_id: int) -> dict:
         risk_score = 0
         reasons = []
         
-        # Count failures
-        failures = sum(1 for op in recent_ops if op["result"] == "error")
+        # Count failures. operation_audit.result — смешанный словарь: op_worker
+        # (главный писатель) пишет 'failed', другие пути — 'error'. Считаем оба,
+        # иначе fail_rate слеп к большинству реальных провалов.
+        failures = sum(1 for op in recent_ops if op["result"] in ("error", "failed"))
         fail_rate = failures / len(recent_ops) if recent_ops else 0
         
         if fail_rate > 0.3:

@@ -126,6 +126,67 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
         )
 
 
+# In-memory cooldown for ban-risk alerts: account_id → last_alert_ts
+# (не переживает рестарт, не шарится между воркерами — как остальные дедупы здесь)
+_ban_risk_alerted: dict[int, float] = {}
+_BAN_RISK_ALERT_COOLDOWN = 21600  # 6h между алертами по одному аккаунту
+
+
+async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
+    """Раннее предупреждение о риске бана по ПОВЕДЕНИЮ (operation_audit за 24ч).
+
+    Дополняет _check_low_trust (статический trust_score) поведенческим сигналом:
+    всплеск flood/ban/провалов за сутки обычно предшествует падению trust.
+    Уведомляет только на 'critical' (risk_score≥70), дедуп 6ч на аккаунт.
+    Кандидаты ограничены теми, у кого реально были тревожные события — дёшево."""
+    from services import behavioral_engine
+
+    try:
+        cand = await pool.fetch(
+            """SELECT DISTINCT a.id, a.owner_id, a.username, a.first_name, a.phone
+               FROM tg_accounts a
+               JOIN operation_audit oa ON oa.account_id = a.id
+               WHERE a.is_active = true
+                 AND oa.occurred_at > now() - INTERVAL '24 hours'
+                 AND (oa.result IN ('flood_wait','banned','error','failed')
+                      OR oa.error_msg ILIKE '%flood%')
+               LIMIT 25"""
+        )
+    except Exception as e:
+        log.debug("ban_risk_check: candidate query failed: %s", e)
+        return
+
+    now = time.time()
+    for acc in cand:
+        if now - _ban_risk_alerted.get(acc["id"], 0) < _BAN_RISK_ALERT_COOLDOWN:
+            continue
+        try:
+            pred = await behavioral_engine.predict_ban_risk(pool, acc["id"])
+        except Exception:
+            log_exc_swallow(log, "ban_risk_check: predict failed")
+            continue
+        if pred.get("risk_level") != "critical":
+            continue
+        _ban_risk_alerted[acc["id"]] = now
+        label = acc["username"] or acc["first_name"] or acc["phone"] or str(acc["id"])
+        reasons = "; ".join(pred.get("reasons", [])[:3]) or "аномальная активность"
+        await db.notify_if_enabled(
+            pool,
+            bot,
+            acc["owner_id"],
+            "restriction",
+            f"🚨 <b>Критический риск бана</b> (поведение за 24ч)\n\n"
+            f"Аккаунт: <b>{label}</b>\n"
+            f"Risk score: <b>{pred.get('risk_score', 0)}/100</b>\n"
+            f"Причины: {reasons}\n\n"
+            f"Остановите операции через этот аккаунт на 24–48ч и проверьте его вручную.",
+        )
+        log.warning(
+            "account_monitor: ban risk CRITICAL acc=%d owner=%d score=%s",
+            acc["id"], acc["owner_id"], pred.get("risk_score"),
+        )
+
+
 async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
     """Mark operations stuck in 'running' for too long as failed."""
     try:
@@ -326,6 +387,7 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         try:
             await _check_and_alert(pool, bot)
             await _check_low_trust(pool, bot)
+            await _check_ban_risk(pool, bot)
             # Само-heal: снять истёкшие кулдауны (дёшево, каждый цикл) — иначе
             # один давний FloodWait держит аккаунт в «Под риском» навсегда.
             await _heal_expired_cooldowns(pool)
