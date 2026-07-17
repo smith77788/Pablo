@@ -1128,3 +1128,22 @@ _apply_next_action(pool, uid, action_id)→dict (DRY+тестируемость)
 relog — креды; invite/broadcast/funnel/autoresponder/collect_audience — текст/цель):
 one-click для них невозможен без фабрикации контента. Регресс: test_next_actions_apply.py
 (assign через apply_rotation, unknown-id→error, no-unassigned) + apply-метка. 1704 passed.
+## tg-manager: «Очистить» реально удаляет + кривая кнопка «Создать» — 2026-07-16
+Скриншот Диспетчера задач: «после Очистить пишет Очищено N, но не удалено ни одной»
++ кнопка «Создать» в шапке кривая (зелёный «кружок», текст вытекает).
+  - ОЧИСТКА (ничего не удалялось): clearDoneOps слал cancel по каждой done-операции,
+    а cancel_operation бьёт ТОЛЬКО по status IN ('pending','running') → для
+    завершённых это 404/no-op, и DELETE не было вовсе (cancel лишь ставит
+    'cancelled'). Тост показывал число ВЫБРАННЫХ, а не удалённых. Фикс: эндпойнт
+    POST /api/miniapp/operations/clear — DELETE терминальных (done/failed/cancelled),
+    owner-scoped, operation_log каскадом (ON DELETE CASCADE). Фронт зовёт его и
+    показывает реальный d.deleted; добавлен confirm (удаление необратимо).
+  - КРИВАЯ КНОПКА: header-кнопки «+ Создать/Добавить» имели inline flex:0;min-width:0.
+    Где hdr-meta = display:flex (Диспетчер задач, Боты, дашборд-метрик) кнопка —
+    flex-item, и flex:0 (basis 0%)+min-width:0 схлопывали её фон в «кружок», а
+    nowrap-текст вытекал наружу. В остальных шапках hdr-meta — блок, flex:0 инертен,
+    поэтому ломалось только там. Фикс: flex:0 0 auto (basis auto = ширина контента)
+    на всех 58 таких кнопках (52+4+1+1 вариантов padding).
+Проверено: test_operations_clear (4: DELETE терминальных owner-scoped; маршрут;
+фронт зовёт реальный эндпойнт с d.deleted и без cancel-цикла; нет схлопывающих
+кнопок) + operation_status 7 + ratchet + dashboard_visual зелёно. AST + node --check.

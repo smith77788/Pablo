@@ -2123,6 +2123,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.warning("cancel_operation op=%d uid=%d: %s", op_id, uid, e)
             return _err("Failed to cancel", 500)
 
+    async def clear_operations(request: web.Request) -> web.Response:
+        """Очистить очередь: УДАЛИТЬ терминальные операции (done/failed/cancelled)
+        владельца.
+
+        Раньше кнопка «Очистить» на фронте слала cancel по каждой done-операции —
+        а cancel_operation бьёт только по status IN ('pending','running'), т.е. для
+        завершённых это no-op (404). Тост показывал число ВЫБРАННЫХ, а не реально
+        удалённых → «Очищено 30», но список оставался полным. Здесь реальный DELETE
+        (operation_log удаляется каскадом ON DELETE CASCADE), возвращаем факт.
+
+        pending/running НЕ трогаем (активные операции). Скоуп по owner_id обязателен.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            res = await pool.execute(
+                "DELETE FROM operation_queue "
+                "WHERE owner_id=$1 AND status IN ('done','failed','cancelled')", uid)
+            tail = str(res).rsplit(" ", 1)[-1]
+            deleted = int(tail) if tail.isdigit() else 0
+            return _json_resp({"ok": True, "deleted": deleted})
+        except Exception as e:
+            log.warning("clear_operations uid=%d: %s", uid, e)
+            return _err("Failed to clear", 500)
+
     async def retry_operation(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10705,6 +10731,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/operation/{op_id}/log", operation_log)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
+    app.router.add_post("/api/miniapp/operations/clear", clear_operations)
     # Bot toggle
     app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)
     # Funnel steps
