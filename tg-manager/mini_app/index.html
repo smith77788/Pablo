@@ -8119,10 +8119,13 @@ async function pauseAllOps() {
     const d = await api('/api/miniapp/operations?status=running');
     const ops = d.operations||[];
     if (!ops.length) { toast('Нет активных операций'); return; }
+    // Считаем РЕАЛЬНЫЕ успехи, а не число выбранных — иначе тост врёт при
+    // частичных сбоях (тот же класс бага, что был в «Очистить»).
+    let ok = 0;
     for (const o of ops) {
-      try { await api('/api/miniapp/operation/'+o.id+'/cancel', {method:'POST'}); } catch(_) {}
+      try { await api('/api/miniapp/operation/'+o.id+'/cancel', {method:'POST'}); ok++; } catch(_) {}
     }
-    toast('⏸ '+ops.length+' операций приостановлено'); loadOps();
+    toast(ok ? ('⏸ Приостановлено: '+ok+' из '+ops.length) : '⚠️ Не удалось приостановить'); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 

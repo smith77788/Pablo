@@ -67,6 +67,22 @@ def test_frontend_clear_uses_real_endpoint():
     )
 
 
+def test_bulk_ops_report_real_success_count():
+    """Тот же класс, что «Очистить»: массовые действия должны считать РЕАЛЬНЫЕ
+    успехи (ok++), а не число выбранных — иначе тост врёт при частичных сбоях."""
+    html = _index_html()
+    for fn in ("pauseAllOps", "resumeAllOps"):
+        m = re.search(r"async function " + fn + r"\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
+        assert m, f"{fn} не найдена"
+        body = m.group(1)
+        assert "ok++" in body, f"{fn} должна считать реальные успехи"
+        # не должно быть тоста с чистым ops.length как «успешно N»
+        assert not re.search(r"toast\('[^']*'\+ops\.length\+'[^']*(приостановлено|возобновлено|удалено)",
+                             body, re.IGNORECASE), (
+            f"{fn} не должна выдавать число выбранных за число успешных"
+        )
+
+
 def test_header_buttons_do_not_collapse():
     """Ни одна кнопка не должна использовать схлопывающий flex:0;min-width:0 —
     в display:flex-шапках это ломает вид («кружок» вместо кнопки)."""
