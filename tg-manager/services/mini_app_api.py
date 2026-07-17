@@ -2149,6 +2149,50 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.warning("clear_operations uid=%d: %s", uid, e)
             return _err("Failed to clear", 500)
 
+    async def pause_operations(request: web.Request) -> web.Response:
+        """Приостановить ОЧЕРЕДЬ: pending → paused.
+
+        Честная пауза (раньше «Пауза» слала cancel по running → операции гибли в
+        'cancelled', возобновить их «Старт» не мог). Воркер подхватывает только
+        status='pending' (см. op_worker pickup) — значит paused не исполняется и не
+        сбрасывается stale-логикой. Уже запущенные (running) доигрывают: паузить их
+        нельзя без чекпоинта — пере-прогон дублировал бы действия и палил аккаунты.
+        Скоуп по owner_id. Возвращаем реальное число приостановленных.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            res = await pool.execute(
+                "UPDATE operation_queue SET status='paused' "
+                "WHERE owner_id=$1 AND status='pending'", uid)
+            tail = str(res).rsplit(" ", 1)[-1]
+            paused = int(tail) if tail.isdigit() else 0
+            return _json_resp({"ok": True, "paused": paused})
+        except Exception as e:
+            log.warning("pause_operations uid=%d: %s", uid, e)
+            return _err("Failed to pause", 500)
+
+    async def resume_operations(request: web.Request) -> web.Response:
+        """Возобновить приостановленные: paused → pending (воркер подхватит).
+
+        Возвращает в очередь ИМЕННО приостановленные операции — паритет с «Пауза».
+        Скоуп по owner_id, реальное число возобновлённых.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            res = await pool.execute(
+                "UPDATE operation_queue SET status='pending' "
+                "WHERE owner_id=$1 AND status='paused'", uid)
+            tail = str(res).rsplit(" ", 1)[-1]
+            resumed = int(tail) if tail.isdigit() else 0
+            return _json_resp({"ok": True, "resumed": resumed})
+        except Exception as e:
+            log.warning("resume_operations uid=%d: %s", uid, e)
+            return _err("Failed to resume", 500)
+
     async def retry_operation(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10732,6 +10776,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     app.router.add_post("/api/miniapp/operations/clear", clear_operations)
+    app.router.add_post("/api/miniapp/operations/pause", pause_operations)
+    app.router.add_post("/api/miniapp/operations/resume", resume_operations)
     # Bot toggle
     app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)
     # Funnel steps

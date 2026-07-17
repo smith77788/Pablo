@@ -68,14 +68,15 @@ def test_frontend_clear_uses_real_endpoint():
 
 
 def test_bulk_ops_report_real_success_count():
-    """Тот же класс, что «Очистить»: массовые действия должны считать РЕАЛЬНЫЕ
-    успехи (ok++), а не число выбранных — иначе тост врёт при частичных сбоях."""
+    """Тот же класс, что «Очистить»: массовые действия показывают РЕАЛЬНОЕ число
+    (счётчик от бэка), а не число выбранных — иначе тост врёт при частичных сбоях.
+    pause/resume ушли на честные bulk-эндпойнты (d.paused/d.resumed)."""
     html = _index_html()
-    for fn in ("pauseAllOps", "resumeAllOps"):
+    for fn, field in (("pauseAllOps", "d.paused"), ("resumeAllOps", "d.resumed")):
         m = re.search(r"async function " + fn + r"\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
         assert m, f"{fn} не найдена"
         body = m.group(1)
-        assert "ok++" in body, f"{fn} должна считать реальные успехи"
+        assert field in body, f"{fn} должна показывать реальный счётчик {field}"
         # не должно быть тоста с чистым ops.length как «успешно N»
         assert not re.search(r"toast\('[^']*'\+ops\.length\+'[^']*(приостановлено|возобновлено|удалено)",
                              body, re.IGNORECASE), (

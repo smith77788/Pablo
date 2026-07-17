@@ -1183,3 +1183,23 @@ one-click для них невозможен без фабрикации кон�
 требует backend-статуса 'paused', отдельная задача.
 Проверено: test_operations_clear +1 (bulk-ops считают реальные успехи) → 5/5.
 node --check index.html чисто.
+
+## tg-manager: честная Пауза/Старт очереди + скан бот-хендлеров на фейк-счётчики — 2026-07-16
+Две задачи параллельно.
+(1) Честная пауза/возобновление (раньше «Пауза» слала cancel по running →
+    операции гибли в 'cancelled', «Старт» ретраил pending — не пара pause/resume):
+  - Новые эндпойнты POST /operations/pause (pending→paused) и /operations/resume
+    (paused→pending), owner-scoped, реальные счётчики. Воркер подхватывает только
+    status='pending' (op_worker pickup) → paused не исполняется и не сбрасывается
+    stale-логикой; миграция не нужна (status TEXT без CHECK; stb() уже знал бейдж
+    '⏸ Пауза'). Running доигрывают — паузить их без чекпоинта нельзя (пере-прогон =
+    дубли/палево). Фронт pauseAllOps/resumeAllOps зовут новые эндпойнты, показывают
+    d.paused/d.resumed; старые per-op cancel/retry циклы убраны.
+(2) Скан бот-хендлеров (bot/handlers/*.py) на тот же класс «рапорт len() вместо
+    реального счётчика при swallow-цикле»: структурный проход (swallow-except +
+    мутация + отчёт-len без инкремент-счётчика) → 0 совпадений. Проверенные счётчики
+    (added/removed/sent_count/total_inv/updated/result['deleted']/len(dead_ids)) —
+    все реальные аккумуляторы; len(links)/len(selected) — эхо ввода и подпись кнопки,
+    не заявка об успехе. Бот-сторона по этому классу чиста.
+Проверено: test_operations_pause_resume (6) + test_operations_clear (5, обновлён
+под d.paused/d.resumed) + op-status 7 → зелено. AST mini_app_api + node --check.
