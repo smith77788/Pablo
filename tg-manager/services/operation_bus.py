@@ -20,6 +20,51 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+
+class PlanRequiredError(PermissionError):
+    """Операция требует платной подписки, а у владельца её нет.
+
+    Централизует enforcement OP_REGISTRY[op]['min_plan'] в submit(): раньше
+    min_plan только объявлялся, но проверялся исключительно в хендлерах — если
+    хендлер забывал гейт, free-юзер мог поставить платную операцию.
+    """
+
+    def __init__(self, op_type: str, required_plan: str) -> None:
+        self.op_type = op_type
+        self.required_plan = required_plan
+        super().__init__(f"operation {op_type!r} requires plan {required_plan!r}")
+
+
+async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> None:
+    """Проверить подписку владельца против min_plan операции.
+
+    Fail-open: если сам механизм проверки недоступен/упал — НЕ блокируем (лучше
+    пропустить, чем сломать масс-операцию из-за бага в проверке). Блокируем
+    только при однозначно недостаточном тарифе. Админы и free-mode пропускаются
+    внутри require_plan.
+    """
+    min_plan = meta.get("min_plan")
+    if not min_plan:
+        return
+    try:
+        from bot.utils.subscription import require_plan, coerce_plan
+    except Exception:
+        log.warning("operation_bus: subscription module unavailable — skip plan gate", exc_info=True)
+        return
+    if coerce_plan(min_plan) == "free":
+        return
+    try:
+        allowed = await require_plan(pool, owner_id, min_plan)
+    except Exception:
+        log.warning(
+            "operation_bus: plan check errored for op=%s owner=%s — allowing (fail-open)",
+            op_type, owner_id, exc_info=True,
+        )
+        return
+    if not allowed:
+        raise PlanRequiredError(op_type, coerce_plan(min_plan))
+
+
 # ── Registry всех типов операций ─────────────────────────────────────────────
 # Ключ: op_type (совпадает с op_worker dispatch)
 # description: отображается пользователю в очереди
@@ -423,6 +468,7 @@ async def submit(
     template_id: Optional[int] = None,
     max_retries: Optional[int] = None,
     label: Optional[str] = None,
+    bypass_plan_check: bool = False,
 ) -> int:
     """Поставить операцию в очередь. Возвращает op_id.
 
@@ -441,6 +487,7 @@ async def submit(
 
     Raises:
       ValueError — если op_type не зарегистрирован в OP_REGISTRY
+      PlanRequiredError — если у владельца нет подписки под min_plan операции
     """
     if op_type not in OP_REGISTRY:
         raise ValueError(
@@ -448,6 +495,12 @@ async def submit(
         )
 
     meta = OP_REGISTRY[op_type]
+    # Централизованный тариф-гейт (defense-in-depth поверх гейтов в хендлерах):
+    # объявленный min_plan становится авторитетным — free-юзер не поставит
+    # платную операцию, даже если какой-то хендлер забыл проверку.
+    if not bypass_plan_check:
+        await _enforce_min_plan(pool, owner_id, op_type, meta)
+
     retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
     op_label = label or meta.get("description") or op_type
 
