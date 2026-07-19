@@ -26,6 +26,40 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 
+# ── Чистые хелперы (тестируемые, без БД/Telethon) ─────────────────────────
+
+def normalize_source_ref(raw: str) -> str:
+    """Нормализует ссылку/username источника к «голому» username или id.
+
+    Пользователи вставляют что угодно: `@name`, `https://t.me/name`,
+    `t.me/name?after=123`, `telegram.me/name/456`. Раньше на входе парсера был
+    только `.lstrip("@")` — ссылка `https://t.me/name` уходила как есть и не
+    резолвилась. Здесь убираем протокол, хосты t.me/telegram.me, ведущий '@',
+    query-хвост и путь после username. Приватные инвайты (`+HASH`, `joinchat/…`)
+    сохраняем как есть (это не username).
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    for pref in ("https://", "http://"):
+        if s.lower().startswith(pref):
+            s = s[len(pref):]
+    low = s.lower()
+    for host in ("t.me/", "telegram.me/", "telegram.dog/"):
+        idx = low.find(host)
+        if idx != -1:
+            s = s[idx + len(host):]
+            break
+    s = s.lstrip("@")
+    # приватные инвайт-ссылки не трогаем (это хэш, не username)
+    if s.startswith("+") or s.lower().startswith("joinchat/"):
+        return s.split("?", 1)[0].strip()
+    for sep in ("?", "/"):
+        if sep in s:
+            s = s.split(sep, 1)[0]
+    return s.strip()
+
+
 # ── Чистые хелперы экспорта аудитории (тестируемые, без БД/Telethon) ───────
 # Форматы для многоформатного экспорта parsed_audiences. CSV делает эндпоинт
 # через _csv_resp; TXT/JSON — эти хелперы (паритет Telegram Expert по экспорту).

@@ -7035,7 +7035,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            source_ref = str(body.get("source_ref", "")).strip().lstrip("@")
+            # Нормализуем ссылку/username: пользователи вставляют https://t.me/name,
+            # t.me/name?after=…, @name — раньше .lstrip("@") оставлял URL как есть и
+            # источник не резолвился.
+            from services import parser as _parser
+            source_ref = _parser.normalize_source_ref(str(body.get("source_ref", "")))
             parse_type = str(body.get("parse_type", "members")).strip()
             limit = int(body.get("limit", 500))
         except Exception:

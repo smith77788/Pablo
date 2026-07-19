@@ -191,11 +191,15 @@ async def fsm_parser_source(
         )
         return
 
-    # Нормализуем — убираем https://t.me/
-    if "t.me/" in source:
-        source = "@" + source.split("t.me/")[-1].split("/")[0].lstrip("+")
-    if not source.startswith("@") and not source.lstrip("-").isdigit():
-        source = "@" + source
+    # Нормализуем через общий хелпер (убирает протокол/t.me/query-хвост ?after=…),
+    # затем восстанавливаем @-конвенцию бота. Раньше t.me/name?after=1 давал
+    # «@name?after=1» — источник не резолвился.
+    from services.parser import normalize_source_ref
+    norm = normalize_source_ref(source)
+    if norm.startswith("+") or norm.lstrip("-").isdigit():
+        source = norm  # приватный инвайт-хэш или числовой id — без '@'
+    elif norm:
+        source = "@" + norm
 
     await state.update_data(parse_source=source)
     await state.set_state(ParserFSM.waiting_limit)
