@@ -30,3 +30,17 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 ---
 
 <!-- Новые записи добавляй ниже. -->
+
+## services/ai_claude.py + spintax_ai — 2026-07-18 — добавлен Claude Opus 4.8 как предпочтительный AI-путь
+Проверено: весь AI-слой был OpenAI-совместимый (OpenRouter/Groq/Gemini/Ollama)
+через openai SDK; anthropic-пути не было, `anthropic` не в requirements.
+Найдено: параметры Opus 4.8 (adaptive thinking, output_config.effort) нельзя
+передать в OpenAI-совместимый chat.completions — нужен отдельный путь.
+Исправлено: да. services/ai_claude.py (официальный anthropic SDK, стриминг:
+model=claude-opus-4-8, max_tokens=64000, thinking=adaptive, effort=xhigh —
+стриминг обязателен при таком max_tokens); spintax_ai.complete предпочитает Claude
+(если ANTHROPIC_API_KEY), иначе/при сбое — прежний OpenAI-failover (без ключа
+поведение не меняется). anthropic>=0.69.0 в requirements. Регресс:
+tests/test_ai_claude.py (8: точная спецификация запроса, склейка текста без
+thinking-блоков, enabled/failover/no-config); сигнатура SDK-stream проверена
+(принимает thinking/output_config). 1760 passed.

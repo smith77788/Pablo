@@ -44,11 +44,27 @@ def models_for(provider) -> list[str]:
 
 
 async def complete(system: str, user: str) -> str:
-    """Единичный запрос к LLM с перебором провайдеров (OpenAI-совместимый API)."""
+    """Единичный запрос к LLM. Предпочитает Claude Opus 4.8 (если задан
+    ANTHROPIC_API_KEY), иначе/при сбое — перебор OpenAI-совместимых провайдеров."""
+    # 1) Claude Opus 4.8 (adaptive thinking, effort=xhigh) — предпочтительный путь.
+    from services import ai_claude
+
+    if ai_claude.enabled():
+        try:
+            text = await ai_claude.complete(system, user)
+            if text.strip():
+                return text
+        except Exception:  # noqa: BLE001 - failover на OpenAI-совместимые провайдеры
+            log_exc_swallow(log, "spin: Claude недоступен, failover на OpenAI-провайдеры")
+
+    # 2) OpenAI-совместимый failover (OpenRouter/Groq/Gemini/Ollama).
     providers = configured_providers()
     if not providers:
+        if ai_claude.enabled():
+            raise SpintaxServiceError("Claude не ответил, других AI-провайдеров нет")
         raise SpintaxServiceError(
-            "AI не настроен: добавьте OPENROUTER_API_KEY, GROQ_API_KEY или GEMINI_API_KEY"
+            "AI не настроен: добавьте ANTHROPIC_API_KEY, OPENROUTER_API_KEY, "
+            "GROQ_API_KEY или GEMINI_API_KEY"
         )
     try:
         from openai import AsyncOpenAI
