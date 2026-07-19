@@ -5,10 +5,18 @@
 `max_tokens` (64000) не-стриминговый запрос упирается в HTTP-таймаут SDK, поэтому
 стриминг обязателен, а не опция.
 
-Ключ — `ANTHROPIC_API_KEY` (env или override из БД через `ai_providers._key`).
-Если ключа нет — `enabled()` возвращает False, и вызывающий уходит на
-OpenAI-совместимый failover (OpenRouter/Groq/Gemini/Ollama). SDK импортируется
-лениво внутри вызова: отсутствие пакета `anthropic` не ломает импорт модуля.
+Подключение — БЕЗ обязательного API-ключа: SDK сам резолвит креды окружения по
+цепочке (см. ниже). Поддерживаются три способа, в порядке приоритета:
+  1) явный API-ключ  — `ANTHROPIC_API_KEY` (env или override из БД);
+  2) явный auth-token — `ANTHROPIC_AUTH_TOKEN` (env или override из БД) —
+     подключение напрямую по Bearer-токену, без API-ключа;
+  3) ambient (OAuth-профиль на диске / Workload Identity Federation / любой
+     дефолтный резолв SDK) — включается флагом `ANTHROPIC_USE_AMBIENT=1`, чтобы
+     не пытаться подключиться, когда ничего не настроено.
+Если ничего не задано — `enabled()` = False, и вызывающий уходит на
+OpenAI-совместимый failover. SDK импортируется лениво: отсутствие пакета
+`anthropic` не ломает импорт модуля. Базовый URL — `ANTHROPIC_BASE_URL`
+(если задан в окружении), иначе дефолт SDK.
 
 Переопределения через env: ANTHROPIC_MODEL, ANTHROPIC_EFFORT, ANTHROPIC_MAX_TOKENS.
 """
@@ -35,9 +43,42 @@ def _max_tokens() -> int:
         return 64000
 
 
+def _explicit_credential() -> tuple[str | None, str | None]:
+    """Явный кред: ('api_key', k) | ('auth_token', t) | (None, None)."""
+    api_key = _key("ANTHROPIC_API_KEY")
+    if api_key:
+        return "api_key", api_key
+    auth_token = _key("ANTHROPIC_AUTH_TOKEN")
+    if auth_token:
+        return "auth_token", auth_token
+    return None, None
+
+
+def _ambient_allowed() -> bool:
+    """Разрешён ли keyless-резолв кредов SDK (OAuth-профиль/WIF/дефолт). По флагу
+    ANTHROPIC_USE_AMBIENT — иначе не пытаемся, чтобы не падать без настройки."""
+    return os.getenv("ANTHROPIC_USE_AMBIENT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def enabled() -> bool:
-    """True, если задан ANTHROPIC_API_KEY (env или override из БД)."""
-    return bool(_key("ANTHROPIC_API_KEY"))
+    """True, если есть чем подключиться: явный ключ/токен или ambient-режим."""
+    kind, _val = _explicit_credential()
+    return bool(kind) or _ambient_allowed()
+
+
+def _make_client(timeout: float):
+    """Собрать AsyncAnthropic: явный ключ/токен, иначе — keyless (SDK резолвит
+    креды окружения: OAuth-профиль, WIF, ANTHROPIC_BASE_URL)."""
+    from anthropic import AsyncAnthropic  # ленивый импорт
+
+    kind, val = _explicit_credential()
+    if kind == "api_key":
+        return AsyncAnthropic(api_key=val, timeout=timeout)
+    if kind == "auth_token":
+        return AsyncAnthropic(auth_token=val, timeout=timeout)
+    # keyless: без явного креда — SDK резолвит окружение сам (auth_token из env,
+    # OAuth-профиль на диске, Workload Identity Federation).
+    return AsyncAnthropic(timeout=timeout)
 
 
 def _extract_text(message) -> str:
@@ -54,12 +95,10 @@ async def complete(system: str, user: str, *, timeout: float = 120.0) -> str:
     """Единичный запрос к Claude Opus 4.8 (adaptive thinking, effort=xhigh),
     стримингом. Возвращает текст ответа. Кидает, если ключ не задан или SDK/сеть
     отказали (вызывающий делает failover)."""
-    key = _key("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY не задан")
-    from anthropic import AsyncAnthropic  # ленивый импорт — не ломает импорт модуля
-
-    client = AsyncAnthropic(api_key=key, timeout=timeout)
+    if not enabled():
+        raise RuntimeError("Anthropic не настроен: задайте ANTHROPIC_API_KEY, "
+                           "ANTHROPIC_AUTH_TOKEN или ANTHROPIC_USE_AMBIENT=1")
+    client = _make_client(timeout)
     # Стриминг обязателен при большом max_tokens (иначе таймаут SDK); финальное
     # сообщение берём через get_final_message() — не нужно ловить события руками.
     async with client.messages.stream(

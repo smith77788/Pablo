@@ -43,4 +43,4 @@ model=claude-opus-4-8, max_tokens=64000, thinking=adaptive, effort=xhigh —
 поведение не меняется). anthropic>=0.69.0 в requirements. Регресс:
 tests/test_ai_claude.py (8: точная спецификация запроса, склейка текста без
 thinking-блоков, enabled/failover/no-config); сигнатура SDK-stream проверена
-(принимает thinking/output_config). 1760 passed.
+(принимает thinking/output_config). 1760 passed. Подключение БЕЗ API-ключа: поддержаны 3 крединга в приоритете — ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → ambient (OAuth-профиль/WIF по флагу ANTHROPIC_USE_AMBIENT=1; keyless — bare AsyncAnthropic резолвит окружение). Живой вызов в этом окружении невозможен: процессам не проброшен ни один Anthropic-кред (bare-клиент → «Could not resolve authentication method»); код keyless-корректен, активируется при наличии любого креда. +4 теста (api_key/auth_token/ambient/enabled). 1764 passed.

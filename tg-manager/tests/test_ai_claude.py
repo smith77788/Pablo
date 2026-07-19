@@ -146,3 +146,45 @@ async def test_spintax_no_ai_configured(monkeypatch):
 
     with pytest.raises(SpintaxServiceError, match="ANTHROPIC_API_KEY"):
         await spin.complete("s", "u")
+
+
+# ── Подключение без API-ключа: auth_token и ambient ──────────────────────────
+def _key_map(mapping):
+    """Фейк _key по словарю имя→значение (остальное — пусто)."""
+    return lambda name: mapping.get(name, "")
+
+
+async def test_client_uses_api_key(monkeypatch):
+    sink = {}
+    monkeypatch.setattr(ai_claude, "_key", _key_map({"ANTHROPIC_API_KEY": "sk-ant-K"}))
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _fake_client_factory(sink))
+    ai_claude._make_client(30.0)
+    assert sink["init_kwargs"] == {"api_key": "sk-ant-K", "timeout": 30.0}
+
+
+async def test_client_uses_auth_token_without_api_key(monkeypatch):
+    sink = {}
+    monkeypatch.setattr(ai_claude, "_key", _key_map({"ANTHROPIC_AUTH_TOKEN": "oat-TОКЕН"}))
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _fake_client_factory(sink))
+    ai_claude._make_client(30.0)
+    assert sink["init_kwargs"] == {"auth_token": "oat-TОКЕН", "timeout": 30.0}
+    assert "api_key" not in sink["init_kwargs"]
+
+
+async def test_client_keyless_ambient(monkeypatch):
+    sink = {}
+    monkeypatch.setattr(ai_claude, "_key", _key_map({}))  # ни ключа, ни токена
+    monkeypatch.setenv("ANTHROPIC_USE_AMBIENT", "1")
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _fake_client_factory(sink))
+    assert ai_claude.enabled() is True
+    ai_claude._make_client(30.0)
+    # keyless: SDK сам резолвит креды — ни api_key, ни auth_token не передаём
+    assert sink["init_kwargs"] == {"timeout": 30.0}
+
+
+def test_enabled_ambient_flag(monkeypatch):
+    monkeypatch.setattr(ai_claude, "_key", _key_map({}))
+    monkeypatch.delenv("ANTHROPIC_USE_AMBIENT", raising=False)
+    assert ai_claude.enabled() is False       # ничего не настроено
+    monkeypatch.setenv("ANTHROPIC_USE_AMBIENT", "yes")
+    assert ai_claude.enabled() is True        # ambient-режим включён
