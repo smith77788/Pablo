@@ -75,19 +75,15 @@ def invalidate_plan_cache(user_id: int) -> None:
     _plan_cache.pop(user_id, None)
 
 
-PLAN_LEVELS: dict[str, int] = {"free": 0, "paid": 1}
-BOT_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
-CHANNEL_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
-def _paid_price_str() -> str:
-    """Цена платного тарифа из конфига (env PRICE_PAID), а не хардкод."""
-    try:
-        from config import PLAN_PRICES_USD
-        return f"${PLAN_PRICES_USD.get('paid', 29)}"
-    except Exception:
-        return "$29"
+# Все тарифные значения — из единого источника правды bot/utils/tariffs.py
+# (env-оверрайдные, без хардкода). Здесь только удобные проекции для вызовов.
+from bot.utils import tariffs
 
+PLAN_LEVELS: dict[str, int] = dict(tariffs.PLAN_LEVELS)
+BOT_LIMITS: dict[str, int] = tariffs.resource_limits("bots")
+CHANNEL_LIMITS: dict[str, int] = tariffs.resource_limits("channels")
 
-PLAN_PRICES = {"paid": _paid_price_str()}
+PLAN_PRICES = {plan: tariffs.price_str(plan) for plan in tariffs.PLANS if plan != "free"}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
 PLAN_FEATURES = {
     "paid": "∞ ботов и каналов, CRM, воронки, аккаунты, AI-ассистент, рассылки, аналитика, все функции",
@@ -153,52 +149,20 @@ _FEATURE_UPSELL: dict[str, str] = {
     ),
 }
 
-PLAN_ALIASES: dict[str, str] = {
-    "max": "paid",
-    "maximum": "paid",
-    "starter": "paid",
-    "pro": "paid",
-    "enterprise": "paid",
-}
-FEATURE_PLAN: dict[str, str] = {
-    "basic_bots": "free",
-    "basic_broadcast": "paid",
-    "inbox": "paid",
-    "funnels": "paid",
-    "crm": "paid",
-    "seo": "paid",
-    "account_ops": "paid",
-    "channel_factory": "paid",
-    "audience_parser": "paid",
-    "bulk_operations": "paid",
-    "proxy_manager": "paid",
-    "ai_assistant": "paid",
-    "autonomous_engine": "paid",
-    "global_presence": "paid",
-    "swarm": "paid",
-    "workspaces": "paid",
-    "strike": "paid",
-    "email_oauth": "paid",
-    "infra_intelligence": "paid",
-    "account_readiness": "paid",
-}
+PLAN_ALIASES: dict[str, str] = dict(tariffs.PLAN_ALIASES)
+FEATURE_PLAN: dict[str, str] = tariffs.feature_plan_map()
 
 
 def normalize_plan(plan: str) -> str:
-    normalized = (plan or "free").lower()
-    return PLAN_ALIASES.get(normalized, normalized)
+    return tariffs.normalize_plan(plan)
 
 
 def coerce_plan(plan: str | None) -> str:
-    normalized = normalize_plan(plan or "free")
-    if normalized in PLAN_LEVELS:
-        return normalized
-    log.warning("unknown subscription plan %r coerced to free", plan)
-    return "free"
+    return tariffs.coerce_plan(plan)
 
 
 def feature_required_plan(feature_key: str) -> str:
-    return FEATURE_PLAN.get(feature_key, "paid")
+    return tariffs.feature_plan(feature_key)
 
 
 def _admin_ids() -> set[int]:
@@ -259,16 +223,16 @@ async def require_feature(pool: asyncpg.Pool, user_id: int, feature_key: str) ->
 
 async def get_bot_limit(pool: asyncpg.Pool, user_id: int) -> int:
     if is_platform_admin(user_id):
-        return 9999
+        return tariffs.UNLIMITED
     plan = await get_plan(pool, user_id)
-    return BOT_LIMITS[coerce_plan(plan)]
+    return tariffs.resource_limit("bots", plan)
 
 
 async def get_channel_limit(pool: asyncpg.Pool, user_id: int) -> int:
     if is_platform_admin(user_id):
-        return 9999
+        return tariffs.UNLIMITED
     plan = await get_plan(pool, user_id)
-    return CHANNEL_LIMITS[coerce_plan(plan)]
+    return tariffs.resource_limit("channels", plan)
 
 
 async def get_effective_bot_count(pool: asyncpg.Pool, user_id: int) -> int:
@@ -301,7 +265,7 @@ async def get_effective_channel_count(pool: asyncpg.Pool, user_id: int) -> int:
 def locked_text(feature: str, required_plan: str) -> str:
     required_plan = coerce_plan(required_plan)
     emoji = PLAN_EMOJIS.get(required_plan, "💎")
-    price = PLAN_PRICES.get(required_plan, "$29")
+    price = PLAN_PRICES.get(required_plan, tariffs.price_str(required_plan))
     upsell = _FEATURE_UPSELL.get(feature, "")
     upsell_block = f"\n{upsell}\n" if upsell else "\n"
     return (
@@ -330,35 +294,19 @@ async def count_operations_by_type(pool: asyncpg.Pool, user_id: int, period_days
     return result
 
 
+# Помесячные квоты операций — из единого источника (tariffs), env-оверрайдные.
 _OPERATION_LIMITS: dict[str, dict[str, int]] = {
-    "free": {
-        "mass_publish": 10,
-        "bulk_edit": 10,
-        "dm_campaign": 5,
-        "join_leave": 20,
-        "post_view": 50,
-        "boost": 5,
-        "comment": 10,
-        "react": 20,
-    },
-    "paid": {
-        "mass_publish": 9999,
-        "bulk_edit": 9999,
-        "dm_campaign": 9999,
-        "join_leave": 9999,
-        "post_view": 9999,
-        "boost": 9999,
-        "comment": 9999,
-        "react": 9999,
-    },
+    plan: tariffs.operation_quotas(plan) for plan in tariffs.PLANS
 }
 
 
 async def check_operation_limit(pool: asyncpg.Pool, user_id: int, op_type: str) -> dict:
     plan = await get_plan(pool, user_id)
     normalized = coerce_plan(plan)
-    limits = _OPERATION_LIMITS.get(normalized, _OPERATION_LIMITS["free"])
-    limit = limits.get(op_type, limits.get("mass_publish", 10))
+    if is_platform_admin(user_id):
+        limit = tariffs.UNLIMITED
+    else:
+        limit = tariffs.operation_quota(op_type, normalized)
 
     used = await pool.fetchval(
         """SELECT COUNT(*) FROM operation_queue
@@ -373,6 +321,7 @@ async def check_operation_limit(pool: asyncpg.Pool, user_id: int, op_type: str) 
         "op_type": op_type,
         "used": used,
         "limit": limit,
+        "unlimited": tariffs.is_unlimited(limit),
         "remaining": max(limit - used, 0),
         "exceeded": used >= limit,
     }
@@ -382,7 +331,7 @@ def locked_text_with_social_proof(feature: str, required_plan: str, active_subs:
     """Locked screen с социальным доказательством (кол-во подписчиков)."""
     required_plan = coerce_plan(required_plan)
     emoji = PLAN_EMOJIS.get(required_plan, "💎")
-    price = PLAN_PRICES.get(required_plan, "$29")
+    price = PLAN_PRICES.get(required_plan, tariffs.price_str(required_plan))
     upsell = _FEATURE_UPSELL.get(feature, "")
     upsell_block = f"\n{upsell}\n" if upsell else "\n"
     social = f"🔥 <b>{active_subs}</b> пользователей уже с подпиской\n\n" if active_subs > 1 else ""
