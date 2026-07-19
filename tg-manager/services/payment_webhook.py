@@ -79,15 +79,16 @@ async def _activate_subscription(
     amount: float,
 ) -> None:
     """Активировать подписку после успешного платежа."""
-    # Normalize legacy plan names to current canonical plan name
-    _PLAN_ALIAS = {"starter": "paid", "pro": "paid", "enterprise": "paid"}
-    plan = _PLAN_ALIAS.get(plan, plan)
-    _VALID_PLANS = {"paid"}
-    if plan not in _VALID_PLANS:
+    from bot.utils import tariffs
+    from services import billing
+
+    # Нормализация/валидация плана — из единого источника (никаких локальных карт).
+    if not billing.is_subscription_plan(plan):
         log.warning(
             "payment_webhook: unknown plan %r for user=%d, skipping", plan, user_id
         )
         return
+    plan = tariffs.normalize_plan(plan)
 
     # Записать платёж ПЕРВЫМ — если запись упадёт, подписка не активируется и вебхук можно переповторить.
     # Без этого подписка активируется без платёжной записи → финансовые данные теряются безвозвратно.
@@ -96,6 +97,7 @@ async def _activate_subscription(
     # Идемпотентность: повторная доставка вебхука (частое явление у платёжных
     # систем) НЕ должна повторно продлевать подписку. Продлеваем только если
     # этот платёж реально новый/перешёл в confirmed (RETURNING id; иначе дубль).
+    expires = None
     async with pool.acquire() as conn:
         async with conn.transaction():
             payment_id = await conn.fetchval(
@@ -112,43 +114,13 @@ async def _activate_subscription(
                 # Дубликат уже подтверждённого платежа — не продлеваем повторно.
                 log.info("payment webhook: дубликат подтверждённого платежа ref=%s — продление пропущено", safe_ref)
                 return
-            expires = await conn.fetchval(
-                """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-                   VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-                   ON CONFLICT(user_id) DO UPDATE
-                   SET plan        = EXCLUDED.plan,
-                       is_active   = true,
-                       expires_at  = CASE
-                           WHEN subscriptions.expires_at > now()
-                               THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                           ELSE now() + ($3 || ' months')::INTERVAL
-                       END,
-                       started_at  = CASE
-                           WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
-                           ELSE now()
-                       END
-                   RETURNING expires_at""",
-                user_id, plan, str(months),
-            )
-            # Синхронизируем platform_users.current_plan — часть кода читает его
-            # напрямую (brand_injection и др.), иначе платящий клиент видит free.
-            try:
-                await conn.execute(
-                    "UPDATE platform_users SET current_plan=$2 WHERE user_id=$1",
-                    user_id, plan,
-                )
-            except Exception:
-                log.warning("payment webhook: не удалось синхронизировать current_plan user=%s", user_id)
+            # Активация подписки + синк platform_users — единая логика (billing),
+            # в той же транзакции, что и запись платежа.
+            expires = await billing.activate_subscription(conn, user_id, plan, months)
     if expires is None:
         # RETURNING всегда должен вернуть строку при успешном upsert; запасной
         # вариант на случай неожиданного None — не даёт уведомлению упасть.
         expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
-
-    try:
-        from bot.utils.subscription import invalidate_plan_cache
-        invalidate_plan_cache(user_id)
-    except Exception as e:
-        log_exc_swallow(log, "_activate_subscription: import")
 
     try:
         await bot.send_message(

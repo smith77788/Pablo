@@ -316,49 +316,8 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
 
 
 async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> None:
-    await pool.execute(
-        """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
-           VALUES ($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-           ON CONFLICT (user_id) DO UPDATE SET
-               plan       = EXCLUDED.plan,
-               is_active  = true,
-               expires_at = CASE
-                   WHEN subscriptions.expires_at > now()
-                       THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                   ELSE now() + ($3 || ' months')::INTERVAL
-               END,
-               started_at = CASE
-                   WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
-                   ELSE now()
-               END""",
-        user_id,
-        plan,
-        str(months),
-    )
-    # Keep platform_users.current_plan in sync so admin panels show correct plan
-    try:
-        await pool.execute(
-            """UPDATE platform_users
-               SET current_plan=$1,
-                   plan_expires_at = CASE
-                       WHEN plan_expires_at > now()
-                           THEN plan_expires_at + ($2 || ' months')::INTERVAL
-                       ELSE now() + ($2 || ' months')::INTERVAL
-                   END
-               WHERE user_id=$3""",
-            plan,
-            str(months),
-            user_id,
-        )
-    except Exception:
-        log.warning(
-            "payment_checker: failed to sync platform_users.current_plan for user=%d",
-            user_id,
-            exc_info=True,
-        )
-    try:
-        from bot.utils.subscription import invalidate_plan_cache
+    # Единая точка активации (see services/billing.py) — та же логика, что у
+    # webhook, чтобы подписка/synced platform_users никогда не расходились.
+    from services import billing
 
-        invalidate_plan_cache(user_id)
-    except Exception as e:
-        log_exc_swallow(log, "_activate_subscription: import")
+    await billing.activate_subscription(pool, user_id, plan, months)
