@@ -104,12 +104,18 @@ async def import_sessions(
 
         _fp = session_fingerprint(session_str)
         existing = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE session_fp=$1 OR session_str=$2",
+            "SELECT id, owner_id FROM tg_accounts WHERE session_fp=$1 OR session_str=$2",
             _fp, session_str,
         )
         if existing:
             failed += 1
-            errors.append(f"Строка {i+1}: сессия уже существует (id={existing['id']})")
+            # Дедуп глобальный (одна Telegram-сессия = один аккаунт на платформе),
+            # но id раскрываем ТОЛЬКО владельцу. Иначе импорт чужой сессии выдал бы
+            # внутренний id аккаунта другого владельца (cross-tenant disclosure).
+            if existing["owner_id"] == owner_id:
+                errors.append(f"Строка {i+1}: сессия уже есть в вашем аккаунте (id={existing['id']})")
+            else:
+                errors.append(f"Строка {i+1}: сессия уже используется на платформе")
             continue
         # Уникальный device-отпечаток НА АККАУНТ. Иначе импортные сессии идут в
         # БД без device_* и на _make_client получают ОДИН дефолтный отпечаток
