@@ -430,7 +430,7 @@ async def _show_accounts_menu(
                 "Добавьте первый аккаунт ↓"
             )
 
-    limit_label = "∞" if limit >= 9999 else str(limit)
+    limit_label = tariffs.format_limit(limit)
     text += f"\n\n<i>Использовано: {total} / {limit_label}</i>"
 
     # All buttons so far are 1 per row
@@ -557,7 +557,7 @@ async def cb_add_account(
 
     accounts = await db.get_tg_accounts(pool, callback.from_user.id)
     if len(accounts) >= limit:
-        limit_label = "∞" if limit >= 9999 else str(limit)
+        limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
             f"⚠️ Достигнут лимит аккаунтов для вашего плана "
@@ -3140,7 +3140,7 @@ async def cb_import_menu(
         return
     accounts = await db.get_tg_accounts(pool, callback.from_user.id)
     if len(accounts) >= limit:
-        limit_label = "∞" if limit >= 9999 else str(limit)
+        limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
             f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
@@ -3650,7 +3650,7 @@ async def _finalize_import(
         return
 
     if len(accounts) >= limit:
-        limit_label = "∞" if limit >= 9999 else str(limit)
+        limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await message.answer(
             f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"

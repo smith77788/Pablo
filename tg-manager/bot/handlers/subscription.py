@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import SubCb, BmCb
 from bot.states import PaymentSettingsFSM, PromoSettingsFSM
 from bot.utils import subscription as sub_utils
+from bot.utils import tariffs
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
@@ -191,7 +192,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     plan, expires_at = await _get_plan_expiry(pool, user_id)
     plan = sub_utils.coerce_plan(plan)
     lim = sub_utils.BOT_LIMITS[plan]
-    lim_label = "∞" if lim >= 9999 else str(lim)
+    lim_label = tariffs.format_limit(lim)
     emoji = sub_utils.PLAN_EMOJIS.get(plan, "🆓")
     ton_ok = "✅" if _ton_wallet() else "❌"
     tron_ok = "✅" if _tron_wallet() else "❌"
@@ -263,7 +264,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     if promo_disc:
         period_hint = f"🔥 Акция −{promo_disc}% · 1 мес — скидки нет"
     else:
-        period_hint = "💰 Оплата на 12 мес — скидка 20%"
+        period_hint = f"💰 Оплата на 12 мес — скидка {PERIOD_DISCOUNTS.get(12, 0)}%"
 
     text = (
         f"💳 <b>Подписка Infragram</b>\n\n"
@@ -369,7 +370,7 @@ _PLAN_HIGHLIGHTS: dict[str, str] = {
 }
 
 _PLAN_ANNUAL_SAVINGS: dict[str, str] = {
-    "paid": f"При оплате на год: скидка 20%",
+    "paid": f"При оплате на год: скидка {PERIOD_DISCOUNTS.get(12, 0)}%",
 }
 
 
@@ -388,8 +389,8 @@ async def cb_plan_features(
     await safe_answer(callback)
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     price = PLAN_PRICES_USD.get(plan, PLAN_PRICES_USD["paid"])
-    bot_limit = sub_utils.BOT_LIMITS.get(plan, 9999)
-    limit_label = "∞" if bot_limit >= 9999 else str(bot_limit)
+    bot_limit = sub_utils.BOT_LIMITS.get(plan, tariffs.UNLIMITED)
+    limit_label = tariffs.format_limit(bot_limit)
     features_text = "\n".join(f"  {f}" for f in features)
     highlight = _PLAN_HIGHLIGHTS.get(plan, "")
     savings = _PLAN_ANNUAL_SAVINGS.get(plan, "")

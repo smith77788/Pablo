@@ -172,7 +172,7 @@ async def cb_rank_add(
 
     keywords = await db.get_tracked_keywords(pool, bot_id)
     if len(keywords) >= limit:
-        limit_display = "∞" if limit >= 9999 else str(limit)
+        limit_display = tariffs.format_limit(limit)
         await callback.answer(
             f"Достигнут лимит: {len(keywords)} из {limit_display} слов для плана {plan.upper()}. "
             "Перейдите на более высокий тариф.",
@@ -883,7 +883,7 @@ async def _render_rank_menu(
         kw_lines.append(f"🔑 <b>{kw_safe}</b> — {pos_text} {status_icon}")
 
     kw_block = "\n".join(kw_lines) if kw_lines else "Нет отслеживаемых ключевых слов."
-    limit_display = "∞" if limit >= 9999 else str(limit)
+    limit_display = tariffs.format_limit(limit)
     plan_upper = plan.upper()
 
     # Account warning
