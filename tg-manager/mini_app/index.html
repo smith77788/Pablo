@@ -6570,7 +6570,7 @@ function openAccProfile(id) {
 }
 // ── Прокси аккаунта ─────────────────────────────────────
 let APX_ACC_ID = null;
-async function openAccProxy(id) {
+async function openAccProxy(id, currentPid) {
   APX_ACC_ID = id;
   const sel = document.getElementById('apxSel');
   const err = document.getElementById('apxErr'); if(err) err.textContent='';
@@ -6579,8 +6579,11 @@ async function openAccProxy(id) {
   try {
     const d = await api('/api/miniapp/proxies');
     const list = Array.isArray(d) ? d : (d.proxies||[]);
-    let html = '<option value="">🚫 Без прокси (напрямую / CF relay)</option>';
-    html += list.map(p=>`<option value="${p.id}">${esc(p.label||p.proxy_url||('Прокси #'+p.id))}${p.geo_country?(' · '+esc(p.geo_country)):''}</option>`).join('');
+    // Текущий прокси предвыбираем — иначе сохранение случайно снимет назначенный.
+    const cur = (currentPid===null||currentPid===undefined) ? '' : String(currentPid);
+    const selAttr = v => (String(v)===cur ? ' selected' : '');
+    let html = `<option value=""${cur===''?' selected':''}>🚫 Без прокси (напрямую / CF relay)</option>`;
+    html += list.map(p=>`<option value="${p.id}"${selAttr(p.id)}>${esc(p.label||p.proxy_url||('Прокси #'+p.id))}${p.geo_country?(' · '+esc(p.geo_country)):''}</option>`).join('');
     sel.innerHTML = html;
   } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
 }
@@ -7357,6 +7360,35 @@ function buildAccDetail(d) {
       </div>`;
     }).join('')}</div>` : '';
 
+  // Прокси / IP аккаунта — через что он выходит в сеть и уникален ли IP. Тап —
+  // сменить прокси (модалка предвыбирает текущий). Прямой ответ на «мой реальный IP».
+  const tp = d.transport || null;
+  const _tpIco = !tp?'':tp.kind==='proxy'?'🌐':tp.kind==='ipv6'?'🧬':'⚠️';
+  const _tpColor = (tp&&tp.unique)?'var(--green)':'var(--orange)';
+  let _tpDetail = '';
+  if (tp && tp.kind==='proxy') {
+    const alive = tp.is_alive===true?'🟢':tp.is_alive===false?'🔴 не отвечает':'';
+    _tpDetail = `${esc(tp.label||'')}${tp.host?((tp.label?' · ':'')+'<span style="opacity:.85">'+esc(tp.host)+'</span>'):''} ${alive}`;
+  } else if (tp && tp.kind==='ipv6') {
+    _tpDetail = 'IPv6 — уникальный IP на аккаунт';
+  } else if (tp) {
+    _tpDetail = 'общий IP — назначьте прокси для изоляции 1:1';
+  }
+  // Строку показываем только когда транспорт известен (owner-просмотр); в admin
+  // межтенантном виде transport отсутствует — не вводим в заблуждение.
+  const transportRow = !tp ? '' : `
+    <div class="lst" style="margin:8px 14px 0">
+      <div class="row" onclick="openAccProxy(${a.id}, ${tp.proxy_id||'null'})" style="cursor:pointer">
+        <div class="row-ico" style="background:rgba(45,212,191,.14)">${_tpIco}</div>
+        <div class="row-body">
+          <div class="row-name">Прокси / IP</div>
+          <div class="row-val" style="color:${_tpColor};white-space:normal">${esc(tp.title||'')}</div>
+          <div style="font-size:12px;opacity:.75;white-space:normal;margin-top:2px">${_tpDetail}</div>
+        </div>
+        <div class="row-right"><span class="chev">›</span></div>
+      </div>
+    </div>`;
+
   return `
     <div class="profile-hdr">
       <div class="profile-ava ${avatarCls}">${initials}</div>
@@ -7365,6 +7397,7 @@ function buildAccDetail(d) {
       <div class="profile-badges">${statusBadge}</div>
     </div>
     ${healthBanner}
+    ${transportRow}
 
     <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
@@ -7380,7 +7413,7 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
       <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
       <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
-      <button class="btn btn-s" onclick="openAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
+      <button class="btn btn-s" onclick="openAccProxy(${a.id}, ${a.proxy_id||'null'})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
       <button class="btn btn-s" onclick="unbindAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔌 Снять прокси</button>
       <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
       <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>

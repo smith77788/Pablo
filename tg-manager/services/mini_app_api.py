@@ -1674,7 +1674,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           is_active, added_at, last_used,
                           COALESCE(trust_score, 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage
+                          status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1""", acc_id)
         else:
             acc = await _safe_fetchrow(pool,
@@ -1682,7 +1682,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           is_active, added_at, last_used,
                           COALESCE(trust_score, 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
-                          status_reason, cooldown_until, cluster, stage
+                          status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
             return _err("Account not found", 404)
@@ -1710,12 +1710,59 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                if a["account_id"] == acc_id), None)
             except Exception as _e:
                 log.debug("account_detail health owner=%s acc=%s: %s", uid, acc_id, _e)
+        # Прокси/IP аккаунта — ЧЕРЕЗ ЧТО он выходит в сеть. Пользователь должен
+        # видеть свой реальный IP и уникален ли он. Транспорт (account_manager):
+        # свой прокси (уник. IP 1:1) → свой IPv6 → CF-relay (ОБЩИЙ IP) → прямое.
+        # Только для владельца: прокси/IPv6 привязаны к owner_id; для admin
+        # межтенантного просмотра lookup по его uid дал бы неверный «общий IP».
+        transport = None
+        pid = None
+        if not admin:
+            try:
+                pid = acc["proxy_id"]
+            except Exception:
+                pid = None
+        if pid:
+            prow = await _safe_fetchrow(pool,
+                "SELECT id, label, proxy_url, proxy_type, is_alive FROM user_proxies "
+                "WHERE id=$1 AND owner_id=$2", pid, uid)
+            if prow:
+                from services.token_vault import decrypt_token
+                host = ""
+                try:
+                    host = (decrypt_token(prow["proxy_url"]) or "").split("@")[-1]
+                except Exception:
+                    host = ""
+                transport = {
+                    "kind": "proxy", "unique": True,
+                    "proxy_id": prow["id"],
+                    "label": prow["label"] or "",
+                    "host": host,                       # это и есть выходной IP/хост аккаунта
+                    "proxy_type": prow["proxy_type"] or "socks5",
+                    "is_alive": prow["is_alive"],
+                    "title": "Свой прокси — уникальный IP 1:1",
+                }
+        if transport is None and not admin:
+            # Нет своего прокси: IPv6 (если настроен у владельца) или общий CF-relay/прямое.
+            ipv6 = False
+            try:
+                from database.db import get_ipv6_subnet
+                ipv6 = bool(await get_ipv6_subnet(pool, uid))
+            except Exception:
+                ipv6 = False
+            if ipv6:
+                transport = {"kind": "ipv6", "unique": True,
+                             "title": "Свой IPv6 — уникальный IP без прокси"}
+            else:
+                transport = {"kind": "shared", "unique": False,
+                             "title": "Без своего прокси — общий CF-relay/прямое (НЕ уникальный IP)"}
         return _json_resp({
             "account": acc,
             "capabilities": caps,
             "warmup": warmup,
             "recent_ops": recent_ops,
             "health": health,
+            "transport": transport,
         })
 
     async def accounts_export(request: web.Request) -> web.Response:
