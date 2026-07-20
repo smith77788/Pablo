@@ -8136,6 +8136,22 @@ async function openOpDetail(opId) {
     if (o.status==='failed') {
       html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
     }
+    // Влияние на аккаунты: кто словил FloodWait за эту операцию — замыкает петлю
+    // «операция → её след на аккаунтах» (раньше приходилось смотреть каждый акк).
+    const imp = o.accounts_impact||[];
+    if (imp.length) {
+      html += `<div class="sec" style="margin-top:12px">📱 Влияние на аккаунты (FloodWait: ${imp.length})</div>
+        <div class="lst" style="margin:0 16px">
+          ${imp.map(a=>{
+            const nm = esc(a.first_name||a.phone||('#'+a.id));
+            const st = a.acc_status==='cooldown'?'<span class="badge b-or">⏳ Кулдаун</span>':(a.acc_status==='banned'?'<span class="badge b-rd">🚫 Бан</span>':'');
+            return `<div class="row" onclick="openAccount(${a.id})" style="cursor:pointer"><div class="row-body">
+              <div class="row-name">${nm}</div>
+              <div class="row-val">FloodWait ×${a.floods}${a.max_wait?' · до '+num(a.max_wait)+'с':''} ${st}</div>
+            </div><div class="row-right"><span class="chev">›</span></div></div>`;
+          }).join('')}
+        </div>`;
+    }
     if (logs.logs&&logs.logs.length) {
       html += `<div class="sec" style="margin-top:12px">📋 Лог (${logs.logs.length})</div>
         <div class="lst" style="margin:0 16px;max-height:300px;overflow-y:auto">

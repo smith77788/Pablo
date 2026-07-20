@@ -316,15 +316,10 @@ async def record_flood(
 
     # Persist to DB (non-blocking; skipped when pool is None, e.g. from account_manager)
     if pool is not None:
+        # Критично: кулдаун применяем ПЕРВЫМ и отдельно — он не должен пропасть
+        # из-за сбоя записи в аналитический лог (иначе аккаунт продолжит работать
+        # во флуд → риск бана). Раньше INSERT в лог и этот UPDATE были в одном try.
         try:
-            await pool.execute(
-                """INSERT INTO account_flood_log(account_id, flood_seconds, action_type)
-                   VALUES ($1, $2, $3)""",
-                account_id,
-                wait_seconds,
-                action_type,
-            )
-            # Update cooldown_until in tg_accounts
             await pool.execute(
                 """UPDATE tg_accounts
                    SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'),
@@ -341,7 +336,28 @@ async def record_flood(
                 f"{action_type} cooldown after FloodWait ({wait_seconds}s)",
             )
         except Exception as e:
-            log.warning("flood_engine DB write failed: %s", e)
+            log.warning("flood_engine cooldown update failed: %s", e)
+        # Аналитический лог С ПРИВЯЗКОЙ К ОПЕРАЦИИ. operation_id раньше принимался
+        # функцией, но НЕ писался — из-за этого нельзя было показать «что операция
+        # сделала с аккаунтами». Фолбэк без v41-колонок, чтобы не падать на
+        # неотмигрированной БД (лог не критичен).
+        try:
+            await pool.execute(
+                """INSERT INTO account_flood_log(account_id, flood_seconds, action_type,
+                                                 operation_id, actual_wait, consecutive_count)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                account_id, wait_seconds, action_type,
+                operation_id, int(actual_wait), state.consecutive_floods,
+            )
+        except Exception:
+            try:
+                await pool.execute(
+                    """INSERT INTO account_flood_log(account_id, flood_seconds, action_type)
+                       VALUES ($1, $2, $3)""",
+                    account_id, wait_seconds, action_type,
+                )
+            except Exception as e:
+                log.debug("flood_engine log insert failed: %s", e)
 
         # Physics Engine telemetry (fire-and-forget)
         try:

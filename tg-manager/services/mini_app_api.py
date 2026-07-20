@@ -2124,6 +2124,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         for _k in ("created_at", "finished_at"):
             if d.get(_k) is not None and hasattr(d[_k], "isoformat"):
                 d[_k] = d[_k].isoformat()
+        # Влияние операции на аккаунты: какие аккаунты словили FloodWait за эту
+        # операцию (account_flood_log.operation_id). Замыкает петлю «операция → её
+        # след на аккаунтах». Owner-scoped через join. Fail-soft.
+        try:
+            imp = await _safe_fetch(pool,
+                """SELECT a.id, a.phone, a.first_name, a.acc_status,
+                          COUNT(*) AS floods, MAX(f.actual_wait) AS max_wait
+                   FROM account_flood_log f
+                   JOIN tg_accounts a ON a.id = f.account_id
+                   WHERE f.operation_id=$1 AND a.owner_id=$2
+                   GROUP BY a.id, a.phone, a.first_name, a.acc_status
+                   ORDER BY floods DESC LIMIT 20""", op_id, uid)
+            d["accounts_impact"] = [dict(r) for r in (imp or [])]
+        except Exception as _e:
+            log.debug("operation_status impact op=%s: %s", op_id, _e)
+            d["accounts_impact"] = []
         return _json_resp(d)
 
     async def operation_log(request: web.Request) -> web.Response:
