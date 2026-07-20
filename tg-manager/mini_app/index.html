@@ -9916,8 +9916,25 @@ async function loadMoreSubs() {
 }
 
 // ── DM Campaign modal ──────────────────────────────────
+let PARSER_RUNS = [];
+let CMP_PARSE_RUN = null;   // предвыбранный parse_run_id при заходе «из парсера»
+
+// Мост «аудитория → операция»: с результата парсинга сразу в рассылку по ИМЕННО
+// этой аудитории (раньше был тупик — только экспорт в файл и ручной перенос).
+function startCampaignFromParse(runId) {
+  const r = (PARSER_RUNS||[]).find(x=>x.id===runId) || {};
+  openCmpModal();                 // сброс полей (в т.ч. CMP_PARSE_RUN=null)
+  CMP_PARSE_RUN = runId;
+  const tt = document.getElementById('cmpTargetType');
+  tt.value = 'parsed_audience';
+  updateCmpTargetBot();
+  document.getElementById('cmpName').value = 'Рассылка · ' + (r.source||'аудитория парсера');
+  toast('📨 Аудитория: '+(r.source||'парсер')+' · '+num(r.total_saved||0)+' — введите текст');
+}
+
 function openCmpModal() {
   buildCmpPresets();
+  CMP_PARSE_RUN = null;
   document.getElementById('cmpName').value='';
   document.getElementById('cmpTargetType').value='all_bots';
   document.getElementById('cmpText').value='';
@@ -9984,6 +10001,9 @@ async function saveCmp() {
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
   if (needBot && !target_id) { errEl.textContent='Выберите бота'; errEl.style.display='block'; return; }
   const payload = {name, text, target_type, target_id, pace, cohort_type};
+  // Пришли «из парсера» — таргетим ИМЕННО тот запуск (backend: parsed_audience +
+  // target_id=parse_run_id). Без этого рассылка шла по ВСЕЙ аудитории парсера.
+  if (target_type==='parsed_audience' && CMP_PARSE_RUN) payload.target_id = CMP_PARSE_RUN;
   if (target_type==='import_list') {
     const imp = document.getElementById('cmpImport').value.trim();
     if (!imp) { errEl.textContent='Вставьте список получателей'; errEl.style.display='block'; return; }
@@ -13210,6 +13230,7 @@ async function loadParserRuns() {
   try {
     const d = await api('/api/miniapp/parser/runs');
     const runs = d.runs||[];
+    PARSER_RUNS = runs;   // для «→ в рассылку» без проблем с экранированием
     if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
     const stIco = {pending:'⏳',running:'⚙️',done:'✅',empty:'∅',failed:'❌',cancelled:'🚫'};
     txt('parserRunList', runs.map(r=>`
@@ -13220,6 +13241,7 @@ async function loadParserRuns() {
           <div class="row-val">${stIco[r.status]||'?'} ${r.status} · ${num(r.total_saved)} сохранено</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.started_at)}${r.error?' · ⚠️'+esc(r.error.slice(0,60)):''}</div>
         </div>
+        ${r.status==='done'&&r.total_saved>0?`<div class="row-right"><button class="btn btn-p" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startCampaignFromParse(${r.id})">📨 В рассылку</button></div>`:''}
       </div>
     `).join(''));
     txt('m-parser-cnt', runs.filter(r=>r.status==='done').reduce((s,r)=>s+r.total_saved,0)+' спарсено');
