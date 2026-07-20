@@ -94,6 +94,14 @@ async def import_sessions(
     imported = 0
     failed = 0
     errors = []
+    # Каждая строка валидируется реальным подключением к Telegram (до 15с) —
+    # синхронно. Ограничиваем порцию, чтобы запрос не завис молча по тайм-ауту;
+    # честно сообщаем про остаток. Массовый импорт (файлы) — через бота.
+    MAX_PER_IMPORT = 20
+    truncated = 0
+    if len(lines) > MAX_PER_IMPORT:
+        truncated = len(lines) - MAX_PER_IMPORT
+        lines = lines[:MAX_PER_IMPORT]
     for i, line in enumerate(lines):
         fmt = detect_format(line)
         if fmt == 'unknown':
@@ -108,7 +116,13 @@ async def import_sessions(
         result = await validate_session(session_str, proxy_url)
         if not result['valid']:
             failed += 1
-            errors.append(f"Строка {i+1}: невалидная сессия — {result.get('error', '?')}")
+            # Классифицируем причину, а не сваливаем всё в «невалидная сессия»:
+            # мёртвый прокси/сеть/флуд → сессия скорее всего ЦЕЛА, дело в прокси —
+            # иначе пользователь удалит рабочую сессию. (net/flood отделяем от
+            # реально недействительной сессии.)
+            from services.contacts_hub.sync_service import classify_session_error
+            friendly, _kind = classify_session_error(result.get('error', '') or '')
+            errors.append(f"Строка {i+1}: {friendly}")
             continue
         # Дедуп по детерминированному fingerprint (шифр недетерминирован, поэтому
         # сравнение по session_str=шифротекст не сработало бы). Fallback на
@@ -165,4 +179,10 @@ async def import_sessions(
             await sync_relay_assignment(pool, owner_id)
         except Exception:
             pass
+    if truncated:
+        # ВПЕРЁД: иначе срез errors[:20] обрезал бы это важное сообщение, когда
+        # набралось 20 построчных ошибок.
+        errors.insert(0,
+            f"Ещё {truncated} строк не обработано за раз — импортируйте порцией "
+            f"до {MAX_PER_IMPORT} или загрузите файл сессий в боте.")
     return {"imported": imported, "failed": failed, "errors": errors[:20]}
