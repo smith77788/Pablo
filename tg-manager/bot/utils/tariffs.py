@@ -89,40 +89,10 @@ def resource_limits(resource: str) -> dict[str, int]:
     return {plan: resource_limit(resource, plan) for plan in PLANS}
 
 
-# ── monthly operation quotas (rolling 30-day windows) ────────────────────────
-
-_OPERATION_DEFAULTS: dict[str, dict[str, int]] = {
-    "mass_publish": {"free": 10, "paid": UNLIMITED},
-    "bulk_edit": {"free": 10, "paid": UNLIMITED},
-    "dm_campaign": {"free": 5, "paid": UNLIMITED},
-    "join_leave": {"free": 20, "paid": UNLIMITED},
-    "post_view": {"free": 50, "paid": UNLIMITED},
-    "boost": {"free": 5, "paid": UNLIMITED},
-    "comment": {"free": 10, "paid": UNLIMITED},
-    "react": {"free": 20, "paid": UNLIMITED},
-}
-
-
-def operation_quota(op_type: str, plan: str) -> int:
-    """Monthly quota for an operation type on a plan. Env-overridable."""
-    plan = normalize_plan(plan)
-    defaults = _OPERATION_DEFAULTS.get(op_type)
-    if defaults is None:
-        # Unknown op → fall back to the mass_publish quota so a new op type is
-        # gated (never accidentally unlimited on free).
-        defaults = _OPERATION_DEFAULTS["mass_publish"]
-        op_type = "mass_publish"
-    default = defaults.get(plan, defaults.get("free", 0))
-    return _limit_env(_env_key("QUOTA", plan, op_type), default)
-
-
-def operation_quotas(plan: str) -> dict[str, int]:
-    """{op_type: quota} for a plan."""
-    return {op: operation_quota(op, plan) for op in _OPERATION_DEFAULTS}
-
-
-def operation_types() -> tuple[str, ...]:
-    return tuple(_OPERATION_DEFAULTS)
+# Операции гейтятся строго по тарифу (OP_REGISTRY[op]['min_plan'], enforced в
+# operation_bus.submit()): на free — недоступны, на paid — без ограничений.
+# Отдельной месячной квоты операций нет намеренно (доступ бинарный по плану) —
+# так конфиг не расходится с фактическим поведением.
 
 
 # ── feature → required plan ──────────────────────────────────────────────────

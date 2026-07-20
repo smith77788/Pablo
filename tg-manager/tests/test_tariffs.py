@@ -26,13 +26,6 @@ def test_free_never_exceeds_paid_on_any_resource():
         assert free <= paid, f"{res}: free {free} > paid {paid}"
 
 
-def test_free_never_exceeds_paid_on_any_operation_quota():
-    for op in tariffs.operation_types():
-        free = tariffs.operation_quota(op, "free")
-        paid = tariffs.operation_quota(op, "paid")
-        assert free <= paid, f"{op}: free {free} > paid {paid}"
-
-
 def test_paid_resources_are_unlimited_by_default():
     for res in ("bots", "channels"):
         assert tariffs.is_unlimited(tariffs.resource_limit(res, "paid"))
@@ -88,11 +81,6 @@ def test_env_override_for_limit(monkeypatch):
     assert tariffs.is_unlimited(tariffs.resource_limit("bots", "free"))
     monkeypatch.setenv("LIMIT_FREE_BOTS", "-1")
     assert tariffs.is_unlimited(tariffs.resource_limit("bots", "free"))
-
-
-def test_env_override_for_operation_quota(monkeypatch):
-    monkeypatch.setenv("QUOTA_FREE_DM_CAMPAIGN", "0")
-    assert tariffs.operation_quota("dm_campaign", "free") == 0
 
 
 def test_env_override_for_feature_plan(monkeypatch):

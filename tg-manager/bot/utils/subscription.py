@@ -278,53 +278,9 @@ def locked_text(feature: str, required_plan: str) -> str:
     )
 
 
-async def count_operations_by_type(pool: asyncpg.Pool, user_id: int, period_days: int = 30) -> dict:
-    rows = await pool.fetch(
-        """SELECT op_type, COUNT(*) AS cnt
-           FROM operation_queue
-           WHERE owner_id=$1
-             AND created_at > NOW() - ($2 || ' days')::INTERVAL
-           GROUP BY op_type""",
-        user_id,
-        period_days,
-    )
-    result: dict[str, int] = {}
-    for r in rows:
-        result[r["op_type"]] = r["cnt"]
-    return result
-
-
-# Помесячные квоты операций — из единого источника (tariffs), env-оверрайдные.
-_OPERATION_LIMITS: dict[str, dict[str, int]] = {
-    plan: tariffs.operation_quotas(plan) for plan in tariffs.PLANS
-}
-
-
-async def check_operation_limit(pool: asyncpg.Pool, user_id: int, op_type: str) -> dict:
-    plan = await get_plan(pool, user_id)
-    normalized = coerce_plan(plan)
-    if is_platform_admin(user_id):
-        limit = tariffs.UNLIMITED
-    else:
-        limit = tariffs.operation_quota(op_type, normalized)
-
-    used = await pool.fetchval(
-        """SELECT COUNT(*) FROM operation_queue
-           WHERE owner_id=$1 AND op_type=$2
-             AND created_at > NOW()-INTERVAL '30 days'""",
-        user_id,
-        op_type,
-    ) or 0
-
-    return {
-        "plan": normalized,
-        "op_type": op_type,
-        "used": used,
-        "limit": limit,
-        "unlimited": tariffs.is_unlimited(limit),
-        "remaining": max(limit - used, 0),
-        "exceeded": used >= limit,
-    }
+# Примечание: операции гейтятся строго по тарифу (OP_REGISTRY[op]['min_plan'],
+# enforced в operation_bus.submit()) — отдельной месячной квоты операций нет
+# намеренно (доступ бинарный по плану), поэтому check_operation_limit убран.
 
 
 def locked_text_with_social_proof(feature: str, required_plan: str, active_subs: int = 0) -> str:
