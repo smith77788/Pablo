@@ -2862,8 +2862,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <option value="-1">🧠 Умный (30–90 сек)</option>
         </select>
       </div>
+      <div class="field">
+        <label>🐤 Сначала тест на N каналов</label>
+        <input type="number" id="mpCanary" min="0" max="5000" value="0" placeholder="0 = сразу во все">
+        <div class="field-note">Безопасно: опубликуйте в несколько каналов, проверьте результат в «Очереди операций», затем — во все. Публикацию нельзя отменить после старта.</div>
+      </div>
       <div class="field-err" id="mpErr"></div>
-      <button class="btn btn-p" id="mpBtn" onclick="sendMassPublish()" style="width:100%;margin-top:4px">📡 Опубликовать во все каналы</button>
+      <button class="btn btn-p" id="mpBtn" onclick="sendMassPublish()" style="width:100%;margin-top:4px">📡 Опубликовать</button>
     </div>
     <div class="sec" style="margin-top:4px">Последние операции публикации</div>
     <div class="lst" id="mpOpsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -9007,6 +9012,7 @@ async function saveTpl() {
 function openMassPub() {
   document.getElementById('mpText').value='';
   document.getElementById('mpLen').textContent='0';
+  { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
   document.getElementById('mpErr').style.display='none';
   document.getElementById('mpBtn').disabled=false;
   document.getElementById('mpBtn').textContent='📡 Опубликовать во все каналы';
@@ -9044,17 +9050,33 @@ async function loadMpOps() {
 async function sendMassPublish() {
   const text = document.getElementById('mpText').value.trim();
   const delay = parseInt(document.getElementById('mpDelay').value);
+  const canary = Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
   const errEl = document.getElementById('mpErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  // Канарейка: публикуем в первые N каналов (backend поддерживает channel_ids).
+  // Полная публикация во ВСЕ каналы необратима → подтверждение.
+  let channel_ids = null;
+  if (canary > 0) {
+    try {
+      const cd = await api('/api/miniapp/channels');
+      const ids = (cd.channels||[]).map(c=>c.channel_id).filter(x=>x!=null).slice(0, canary);
+      if (!ids.length) { errEl.textContent='Нет каналов для теста'; errEl.style.display='block'; return; }
+      channel_ids = ids;
+    } catch(e) { errEl.textContent='Не удалось загрузить каналы: '+(e.message||''); errEl.style.display='block'; return; }
+  } else {
+    if (!(await askConfirm('Опубликовать во ВСЕ ваши каналы? После старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.'))) return;
+  }
   const btn = document.getElementById('mpBtn');
   btn.disabled=true; btn.textContent='⏳ Добавление в очередь...';
   try {
-    const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify({text, delay})});
+    const payload = {text, delay};
+    if (channel_ids) payload.channel_ids = channel_ids;
+    const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify(payload)});
     document.getElementById('mpText').value='';
     document.getElementById('mpLen').textContent='0';
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Публикация запущена · '+num(d.total)+' каналов · op #'+d.op_id);
+    toast((canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · ')+num(d.total)+' каналов · op #'+d.op_id);
     loadMpOps();
   } catch(e) {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
