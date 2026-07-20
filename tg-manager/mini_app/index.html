@@ -730,7 +730,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
-    <div class="hdr-meta"><div class="hdr-user" id="acc-cnt"></div></div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
+      <div class="hdr-user" id="acc-cnt"></div>
+      <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAccImportModal()">➕ Добавить</button>
+    </div>
   </div>
   <div class="sb">
     <div class="copilot-wrap" style="display:none;margin:0 0 10px">
@@ -4532,6 +4535,29 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<div class="mbg" id="accImportMbg" onclick="if(event.target===this)closeAccImportModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeAccImportModal()">✕</div>
+    <div class="modal-title">📱 Добавить аккаунт</div>
+    <div class="field">
+      <label>Строки сессий (по одной на строку)</label>
+      <textarea id="accImportText" rows="5" placeholder="StringSession аккаунта…&#10;по одной сессии на строку" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
+      <div class="field-note">Формат определяется автоматически. Сессия проверяется подключением к Telegram и шифруется при сохранении.</div>
+    </div>
+    <div class="field">
+      <label>Прокси для проверки (необязательно)</label>
+      <select id="accImportProxy" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
+        <option value="">Без прокси (прямое подключение)</option>
+      </select>
+      <div class="field-note">Через него аккаунт проверяется. Постоянный прокси/IP назначается отдельно в карточке аккаунта.</div>
+    </div>
+    <div class="field-err" id="accImportErr"></div>
+    <div id="accImportResult" style="display:none;font-size:13px;line-height:1.5;margin:4px 0 10px"></div>
+    <button class="btn btn-p" id="accImportBtn" onclick="submitAccImport()" style="width:100%">➕ Импортировать</button>
+    <div class="field-note" style="text-align:center;margin-top:8px">Нет строки сессии? Загрузите файл сессии в боте: Аккаунты → Добавить.</div>
+  </div>
+</div>
+
 <!-- ══════════════════════ MODAL: DEEPLINK ══════════════════════ -->
 <div class="mbg" id="dlMbg" onclick="if(event.target===this)closeDlModal()">
   <div class="modal">
@@ -7048,7 +7074,7 @@ function renderAccounts(list) {
   if (!list.length) {
     const filtered = ACC_SEARCH || ACC_STAGE_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
-    else el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram');
+    else el.innerHTML=empty('📱','Нет аккаунтов','Импортируйте сессии прямо здесь или загрузите файл сессии в боте',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
   }
   el.innerHTML = list.map(a=>{
@@ -9121,6 +9147,64 @@ async function saveProxy() {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
     tg.HapticFeedback?.notificationOccurred('error');
   } finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
+}
+
+// ── Добавление аккаунта в мини-аппе (импорт сессий) ──────────────────────
+// Раньше добавить аккаунт можно было ТОЛЬКО в боте — первый шаг ядрового
+// сценария не работал в основном UI. Тянет существующий /import_sessions.
+async function openAccImportModal() {
+  document.getElementById('accImportText').value='';
+  const err=document.getElementById('accImportErr'); err.style.display='none';
+  const res=document.getElementById('accImportResult'); res.style.display='none'; res.innerHTML='';
+  const btn=document.getElementById('accImportBtn'); btn.disabled=false; btn.textContent='➕ Импортировать';
+  // Наполняем список прокси (для проверки сессии) из уже добавленных
+  const sel=document.getElementById('accImportProxy');
+  sel.innerHTML='<option value="">Без прокси (прямое подключение)</option>';
+  try {
+    const d=await api('/api/miniapp/proxies');
+    (d.proxies||[]).forEach(p=>{
+      const host=(p.proxy_url||'').split('@').pop();
+      const o=document.createElement('option');
+      o.value=p.proxy_url||'';
+      o.textContent=(p.label?p.label+' · ':'')+(host||('#'+p.id));
+      sel.appendChild(o);
+    });
+  } catch(_) {}
+  document.getElementById('accImportMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeAccImportModal() { document.getElementById('accImportMbg').classList.remove('show'); }
+
+async function submitAccImport() {
+  const raw=document.getElementById('accImportText').value.trim();
+  const proxy=document.getElementById('accImportProxy').value||null;
+  const err=document.getElementById('accImportErr'); err.style.display='none';
+  const res=document.getElementById('accImportResult'); res.style.display='none';
+  if (!raw) { err.textContent='Вставьте хотя бы одну строку сессии'; err.style.display='block'; return; }
+  const btn=document.getElementById('accImportBtn');
+  btn.disabled=true; btn.textContent='⏳ Проверяю и импортирую…';
+  try {
+    const r=await api('/api/miniapp/import_sessions', {method:'POST', body: JSON.stringify({sessions:raw, proxy_url:proxy})});
+    const imp=r.imported||0, fail=r.failed||0;
+    const errs=(r.errors||[]).slice(0,8);
+    // Честный итог: сколько реально добавлено/провалено + причины (см. правило
+    // «рапорт об успехе без эффекта»).
+    let html=`<div style="color:${imp?'var(--green)':'var(--hint)'}">✅ Импортировано: <b>${imp}</b></div>`;
+    if (fail) html+=`<div style="color:var(--red)">✕ Не удалось: <b>${fail}</b></div>`;
+    if (errs.length) html+=`<div style="margin-top:6px;opacity:.8">${errs.map(e=>'• '+esc(String(e))).join('<br>')}</div>`;
+    res.innerHTML=html; res.style.display='block';
+    if (imp) {
+      tg.HapticFeedback?.notificationOccurred('success');
+      toast('✅ Добавлено аккаунтов: '+imp);
+      if (typeof loadAccounts==='function') loadAccounts(); else if (typeof loadTab==='function') loadTab('accounts');
+      if (!fail) setTimeout(closeAccImportModal, 900);
+    } else {
+      tg.HapticFeedback?.notificationOccurred('error');
+    }
+  } catch(e) {
+    err.textContent='Ошибка: '+(e.message||'не удалось импортировать'); err.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='➕ Импортировать'; }
 }
 
 async function deleteProxy(id) {
