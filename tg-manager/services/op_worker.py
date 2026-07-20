@@ -7414,12 +7414,26 @@ async def _exec_mass_invite(
     # loop iterates an empty audience and adds nobody.
     if not user_refs and not phones:
         if source == "parsed":
-            rows = await _safe_fetch(
+            # Конкретный запуск парсера (мост «→ в инвайт»), иначе — вся аудитория.
+            _pr = params.get("parse_run_id")
+            try:
+                _pr = int(_pr) if _pr else None
+            except (TypeError, ValueError):
+                _pr = None
+            if _pr:
+                rows = await _safe_fetch(
                     pool,
-                "SELECT username, tg_user_id FROM parsed_audiences "
-                "WHERE owner_id=$1 ORDER BY parsed_at DESC LIMIT 2000",
-                owner_id,
-            )
+                    "SELECT username, tg_user_id FROM parsed_audiences "
+                    "WHERE owner_id=$1 AND parse_run_id=$2 ORDER BY parsed_at DESC LIMIT 2000",
+                    owner_id, _pr,
+                )
+            else:
+                rows = await _safe_fetch(
+                    pool,
+                    "SELECT username, tg_user_id FROM parsed_audiences "
+                    "WHERE owner_id=$1 ORDER BY parsed_at DESC LIMIT 2000",
+                    owner_id,
+                )
             user_refs = [
                 ("@" + r["username"]) if r["username"] else r["tg_user_id"]
                 for r in rows if r["username"] or r["tg_user_id"]

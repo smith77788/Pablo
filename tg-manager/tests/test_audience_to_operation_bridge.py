@@ -66,3 +66,38 @@ def test_backend_count_matches_target_run():
     assert ("FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2" in api), (
         "total_targets для выбранного запуска должен считаться по parse_run_id"
     )
+
+
+# ── Инвайтер-путь (симметрично DM) ───────────────────────────────────────────
+
+def test_parser_run_has_invite_action():
+    html = _index()
+    assert "startInviteFromParse(${r.id})" in html
+    assert "➕ В инвайт" in html
+
+
+def test_invite_bridge_preselects_run_and_sends_parse_run_id():
+    html = _index()
+    m = re.search(r"function startInviteFromParse\(runId\)\s*\{(.*?)\n\}", html, re.DOTALL)
+    assert m, "startInviteFromParse не найдена"
+    body = m.group(1)
+    assert "openMassInvite()" in body
+    assert "INV_PARSE_RUN = runId" in body
+    assert "'parsed'" in body
+    # submit шлёт parse_run_id для parsed
+    assert "source==='parsed' && INV_PARSE_RUN" in html
+    assert "body.parse_run_id = INV_PARSE_RUN" in html
+    # openMassInvite сбрасывает выбор
+    m2 = re.search(r"async function openMassInvite\(\)\s*\{(.*?)\n  buildInvitePresets", html, re.DOTALL)
+    assert m2 and "INV_PARSE_RUN = null" in m2.group(1)
+
+
+def test_invite_backend_threads_and_filters_parse_run_id():
+    """mass_inviter_submit кладёт parse_run_id в params, а исполнитель фильтрует
+    parsed_audiences по нему (иначе инвайт шёл бы по всей аудитории)."""
+    api = _read("services/mini_app_api.py")
+    assert 'params["parse_run_id"] = int(_pr)' in api, "submit должен прокинуть parse_run_id в params"
+    worker = _read("services/op_worker.py")
+    seg = worker[worker.index('if source == "parsed":'):]
+    seg = seg[:1200]
+    assert "parse_run_id=$2" in seg, "исполнитель инвайта должен фильтровать по parse_run_id"

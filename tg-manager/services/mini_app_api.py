@@ -5343,6 +5343,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             label = f"Mass Invite → {group}"
             params = {"group": group, "source": source, "pace": pace, "batch_size": batch_size}
+            # «Из парсера»: инвайтим ИМЕННО этот запуск (parse_run_id), симметрично
+            # DM-мосту. Без него source=parsed брал всю аудиторию парсера.
+            _pr = body.get("parse_run_id")
+            if source == "parsed" and _pr:
+                try:
+                    params["parse_run_id"] = int(_pr)
+                except (TypeError, ValueError):
+                    pass
             if user_refs:
                 params["user_refs"] = user_refs
             if phones:

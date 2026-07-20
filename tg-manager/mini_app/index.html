@@ -12115,8 +12115,20 @@ async function scanGifts() {
 }
 
 // ── Mass Inviter ─────────────────────────────────────────
+let INV_PARSE_RUN = null;   // предвыбранный parse_run_id при заходе «из парсера»
+// Мост «аудитория → инвайт»: с запуска парсера сразу инвайтить ИМЕННО эту аудиторию.
+function startInviteFromParse(runId) {
+  const r = (PARSER_RUNS||[]).find(x=>x.id===runId) || {};
+  openMassInvite();               // сброс (в т.ч. INV_PARSE_RUN=null)
+  INV_PARSE_RUN = runId;
+  const s = document.getElementById('massInviteSrc');
+  if (s) { s.value = 'parsed'; massInviteSrcToggle(); }
+  toast('➕ Инвайт аудитории: '+(r.source||'парсер')+' · '+num(r.total_saved||0)+' — укажите группу');
+}
+
 async function openMassInvite() {
   push('s-massinvite');
+  INV_PARSE_RUN = null;
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
@@ -12168,6 +12180,9 @@ async function submitMassInvite() {
   const errEl = document.getElementById('massInviteErr');
   if (!group) { errEl.textContent='Укажите группу'; return; }
   const body = {group, source};
+  // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
+  // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
+  if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;
   if (source==='import_list') {
     const imp = document.getElementById('massInviteImport').value.trim();
     if (!imp) { errEl.textContent='Вставьте список для инвайта'; return; }
@@ -13241,7 +13256,10 @@ async function loadParserRuns() {
           <div class="row-val">${stIco[r.status]||'?'} ${r.status} · ${num(r.total_saved)} сохранено</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.started_at)}${r.error?' · ⚠️'+esc(r.error.slice(0,60)):''}</div>
         </div>
-        ${r.status==='done'&&r.total_saved>0?`<div class="row-right"><button class="btn btn-p" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startCampaignFromParse(${r.id})">📨 В рассылку</button></div>`:''}
+        ${r.status==='done'&&r.total_saved>0?`<div class="row-right" style="display:flex;flex-direction:column;gap:4px">
+          <button class="btn btn-p" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startCampaignFromParse(${r.id})">📨 В рассылку</button>
+          <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startInviteFromParse(${r.id})">➕ В инвайт</button>
+        </div>`:''}
       </div>
     `).join(''));
     txt('m-parser-cnt', runs.filter(r=>r.status==='done').reduce((s,r)=>s+r.total_saved,0)+' спарсено');
