@@ -73,6 +73,12 @@ def _env_key(*parts: str) -> str:
 _RESOURCE_DEFAULTS: dict[str, dict[str, int]] = {
     "bots": {"free": 5, "paid": UNLIMITED},
     "channels": {"free": 5, "paid": UNLIMITED},
+    # Telegram-аккаунты (tg_accounts) — платная возможность.
+    "accounts": {"free": 0, "paid": UNLIMITED},
+    # Ключевые слова трекера позиций (ranking) — платная возможность.
+    "ranking_keywords": {"free": 0, "paid": UNLIMITED},
+    # Правила авто-ответов на бота — free получает базовые 5.
+    "auto_reply_rules": {"free": 5, "paid": UNLIMITED},
 }
 
 

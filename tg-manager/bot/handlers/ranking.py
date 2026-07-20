@@ -19,6 +19,7 @@ from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
 from bot.utils.op_helpers import safe_edit
 from bot.utils.subscription import get_plan, locked_text, require_plan
+from bot.utils import tariffs
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
@@ -29,12 +30,10 @@ router = Router()
 
 # ── Subscription limits ────────────────────────────────────────────────────
 
-KEYWORD_LIMITS: dict[str, int] = {
-    "free": 0,
-    "starter": 5,
-    "pro": 20,
-    "enterprise": 9999,
-}
+# Лимит ключевых слов трекера на план — из единого источника (tariffs).
+# Раньше словарь ключевался старыми именами (starter/pro/enterprise), а get_plan
+# теперь отдаёт free/paid → платники получали дефолт 0 и были заблокированы.
+KEYWORD_LIMITS: dict[str, int] = tariffs.resource_limits("ranking_keywords")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────

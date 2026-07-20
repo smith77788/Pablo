@@ -29,6 +29,7 @@ _DIALOGS_PAGE_SIZE = 10
 from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb, AutoRegCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
+from bot.utils import tariffs
 from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, safe_edit
 from config import TG_API_ID, TG_API_HASH
@@ -63,10 +64,8 @@ router = Router()
 
 # ── Plan limits ────────────────────────────────────────────────────────────────
 
-ACC_LIMITS: dict[str, int] = {
-    "free": 0,
-    "paid": 9999,
-}
+# Лимит Telegram-аккаунтов на план — из единого источника (bot/utils/tariffs.py).
+ACC_LIMITS: dict[str, int] = tariffs.resource_limits("accounts")
 
 
 def _next_account_plan(plan: str) -> str:

@@ -17,11 +17,14 @@ from bot.keyboards import (
 )
 from bot.states import AddAutoReply
 from bot.utils.subscription import get_plan
+from bot.utils import tariffs
 from database import db
 from bot.utils.op_helpers import safe_answer
 
-# Auto-reply rule limits per plan
-_AR_LIMITS: dict[str, int] = {"free": 5, "starter": 20, "pro": 100, "enterprise": 9999}
+# Лимит правил авто-ответа на план — из единого источника (tariffs).
+# Раньше словарь ключевался старыми именами (starter/pro/enterprise), а get_plan
+# теперь отдаёт free/paid → платники получали дефолт 5 вместо безлимита.
+_AR_LIMITS: dict[str, int] = tariffs.resource_limits("auto_reply_rules")
 
 router = Router()
 

@@ -31,6 +31,22 @@ def test_paid_resources_are_unlimited_by_default():
         assert tariffs.is_unlimited(tariffs.resource_limit(res, "paid"))
 
 
+def test_resource_limits_keyed_by_canonical_plans_only():
+    # Корень бага миграции: словарь, ключёванный не 'free'/'paid', ломает
+    # d.get('paid'). Любой ресурс из tariffs обязан иметь ровно эти ключи.
+    for res in ("bots", "channels", "accounts", "ranking_keywords", "auto_reply_rules"):
+        assert set(tariffs.resource_limits(res)) == {"free", "paid"}, res
+
+
+def test_new_resource_defaults():
+    assert tariffs.resource_limit("accounts", "free") == 0
+    assert tariffs.is_unlimited(tariffs.resource_limit("accounts", "paid"))
+    assert tariffs.resource_limit("ranking_keywords", "free") == 0
+    assert tariffs.is_unlimited(tariffs.resource_limit("ranking_keywords", "paid"))
+    assert tariffs.resource_limit("auto_reply_rules", "free") == 5
+    assert tariffs.is_unlimited(tariffs.resource_limit("auto_reply_rules", "paid"))
+
+
 def test_unknown_plan_fails_safe_to_free():
     assert tariffs.coerce_plan("totally-unknown") == "free"
     assert tariffs.coerce_plan(None) == "free"
