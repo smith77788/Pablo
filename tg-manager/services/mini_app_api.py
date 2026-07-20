@@ -11809,8 +11809,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
             raw = data.get("sessions", "")
             proxy = data.get("proxy_url")
+            try:
+                proxy_id = int(data["proxy_id"]) if data.get("proxy_id") else None
+            except (TypeError, ValueError):
+                proxy_id = None
             from services.session_importer import import_sessions
-            result = await import_sessions(pool, uid, raw, proxy)
+            # proxy_id закрепляется за аккаунтом (изоляция), проверяется на владельца
+            # внутри import_sessions.
+            result = await import_sessions(pool, uid, raw, proxy, proxy_id=proxy_id)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)

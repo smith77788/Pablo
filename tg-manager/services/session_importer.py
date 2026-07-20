@@ -74,7 +74,20 @@ async def import_sessions(
     owner_id: int,
     raw_data: str,
     proxy_url: str | None = None,
+    proxy_id: int | None = None,
 ) -> dict:
+    # proxy_url — через что ПРОВЕРЯЕМ сессию. proxy_id (если задан) — реальный прокси
+    # владельца, который СРАЗУ закрепляем за импортированным аккаунтом (изоляция с
+    # первого шага: иначе аккаунт падает на общий CF-relay с единым IP). proxy_id
+    # доверяем только свой — сверяем принадлежность владельцу.
+    if proxy_id is not None:
+        try:
+            owns_proxy = await pool.fetchval(
+                "SELECT 1 FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, owner_id)
+            if not owns_proxy:
+                proxy_id = None  # чужой/несуществующий прокси не закрепляем
+        except Exception:
+            proxy_id = None
     lines = [l.strip() for l in raw_data.strip().splitlines() if l.strip()]
     if not lines:
         return {"imported": 0, "failed": 0, "errors": ["Пустые данные"]}
@@ -132,12 +145,13 @@ async def import_sessions(
             await pool.execute(
                 """INSERT INTO tg_accounts
                        (owner_id, session_str, session_fp, phone, is_active, acc_status,
-                        device_model, system_version, app_version, lang_code, system_lang_code)
+                        device_model, system_version, app_version, lang_code, system_lang_code,
+                        proxy_id)
                    VALUES ($1, $2, $3, $4, TRUE, 'active',
-                        $5, $6, $7, $8, $9)""",
+                        $5, $6, $7, $8, $9, $10)""",
                 owner_id, encrypt_token(session_str), _fp, phone,
                 dev["device_model"], dev["system_version"], dev["app_version"],
-                dev["lang_code"], dev["system_lang_code"],
+                dev["lang_code"], dev["system_lang_code"], proxy_id,
             )
             imported += 1
         except Exception as e:

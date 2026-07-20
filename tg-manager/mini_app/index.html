@@ -4545,11 +4545,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field-note">Формат определяется автоматически. Сессия проверяется подключением к Telegram и шифруется при сохранении.</div>
     </div>
     <div class="field">
-      <label>Прокси для проверки (необязательно)</label>
+      <label>Прокси аккаунта (рекомендуется)</label>
       <select id="accImportProxy" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
-        <option value="">Без прокси (прямое подключение)</option>
+        <option value="">Без прокси (общий CF-relay)</option>
       </select>
-      <div class="field-note">Через него аккаунт проверяется. Постоянный прокси/IP назначается отдельно в карточке аккаунта.</div>
+      <div class="field-note">Через него сессия проверяется И он сразу закрепляется за аккаунтом (изоляция с первого шага). Без прокси аккаунт идёт через общий relay с единым IP — рискованно.</div>
     </div>
     <div class="field-err" id="accImportErr"></div>
     <div id="accImportResult" style="display:none;font-size:13px;line-height:1.5;margin:4px 0 10px"></div>
@@ -9165,7 +9165,8 @@ async function openAccImportModal() {
     (d.proxies||[]).forEach(p=>{
       const host=(p.proxy_url||'').split('@').pop();
       const o=document.createElement('option');
-      o.value=p.proxy_url||'';
+      o.value=String(p.id);            // id — чтобы закрепить прокси за аккаунтом
+      o.dataset.url=p.proxy_url||'';    // url — чтобы проверить сессию через него
       o.textContent=(p.label?p.label+' · ':'')+(host||('#'+p.id));
       sel.appendChild(o);
     });
@@ -9177,14 +9178,17 @@ function closeAccImportModal() { document.getElementById('accImportMbg').classLi
 
 async function submitAccImport() {
   const raw=document.getElementById('accImportText').value.trim();
-  const proxy=document.getElementById('accImportProxy').value||null;
+  const sel=document.getElementById('accImportProxy');
+  const opt=sel.options[sel.selectedIndex];
+  const proxyId=sel.value||null;                       // закрепим за аккаунтом
+  const proxyUrl=(opt&&opt.dataset&&opt.dataset.url)||null;  // через него проверим
   const err=document.getElementById('accImportErr'); err.style.display='none';
   const res=document.getElementById('accImportResult'); res.style.display='none';
   if (!raw) { err.textContent='Вставьте хотя бы одну строку сессии'; err.style.display='block'; return; }
   const btn=document.getElementById('accImportBtn');
   btn.disabled=true; btn.textContent='⏳ Проверяю и импортирую…';
   try {
-    const r=await api('/api/miniapp/import_sessions', {method:'POST', body: JSON.stringify({sessions:raw, proxy_url:proxy})});
+    const r=await api('/api/miniapp/import_sessions', {method:'POST', body: JSON.stringify({sessions:raw, proxy_url:proxyUrl, proxy_id:proxyId})});
     const imp=r.imported||0, fail=r.failed||0;
     const errs=(r.errors||[]).slice(0,8);
     // Честный итог: сколько реально добавлено/провалено + причины (см. правило

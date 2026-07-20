@@ -48,6 +48,29 @@ def test_accounts_screen_has_in_app_add():
     assert 'id="accImportMbg"' in html and "submitAccImport" in html
 
 
+def test_import_assigns_selected_proxy():
+    """Ре-аудит шага 1: выбранный в модалке прокси должен ЗАКРЕПЛЯТЬСЯ за
+    импортированным аккаунтом (изоляция), а не только использоваться для проверки —
+    иначе аккаунт падает на общий CF-relay с единым IP."""
+    import inspect
+    from services import session_importer
+    src = inspect.getsource(session_importer.import_sessions)
+    assert "proxy_id" in src, "import_sessions должен принимать proxy_id"
+    assert "user_proxies WHERE id=$1 AND owner_id=$2" in src, (
+        "proxy_id должен сверяться на принадлежность владельцу (не закреплять чужой)"
+    )
+    # proxy_id реально попадает в INSERT аккаунта
+    assert re.search(r"INSERT INTO tg_accounts.*proxy_id", src, re.DOTALL), (
+        "proxy_id должен писаться в tg_accounts при импорте"
+    )
+    # фронт передаёт proxy_id
+    html = _index()
+    m = re.search(r"async function submitAccImport\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
+    assert "proxy_id:proxyId" in m.group(1) or "proxy_id: proxyId" in m.group(1), (
+        "модалка должна передавать proxy_id на бэкенд"
+    )
+
+
 def test_submit_calls_real_endpoint_with_honest_result():
     html = _index()
     m = re.search(r"async function submitAccImport\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
