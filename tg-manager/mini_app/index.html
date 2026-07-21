@@ -7305,7 +7305,8 @@ function buildAccDetail(d) {
       </div>` : '<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Прогрев не запущен</div>'}
     </div>
     <div class="actions" style="padding-top:4px">
-      ${(!warmup||warmup.status!=='active')?`<button class="btn btn-g" onclick="startWarmup(${a.id},'standard')">🔥 Запустить (стандарт)</button>`:''}
+      ${(warmup&&warmup.status==='paused')?`<button class="btn btn-g" onclick="resumeWarmup(${a.id},${warmup.id})">▶ Возобновить</button>`:''}
+      ${(!warmup||(warmup.status!=='active'&&warmup.status!=='paused'))?`<button class="btn btn-g" onclick="startWarmup(${a.id},'standard')">🔥 Запустить (стандарт)</button>`:''}
       ${warmup&&warmup.status==='active'?`<button class="btn btn-o" onclick="pauseWarmup(${a.id})">⏸ Пауза</button>`:''}
     </div>`;
 
@@ -8847,6 +8848,16 @@ async function pauseWarmup(accId) {
     await api('/api/miniapp/account/'+accId+'/warmup/pause', {method:'POST'});
     tg.HapticFeedback?.notificationOccurred('success');
     toast('⏸ Прогрев поставлен на паузу');
+    openAccount(accId);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+// Возобновить приостановленный план (не начинать заново с дня 0 — продолжить прогресс).
+async function resumeWarmup(accId, planId) {
+  try {
+    await api('/api/miniapp/warmup/'+planId+'/resume', {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('▶ Прогрев возобновлён');
     openAccount(accId);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }

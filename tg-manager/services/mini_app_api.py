@@ -1745,7 +1745,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       daily_dm_limit, daily_invite_limit
                FROM account_capabilities WHERE account_id=$1""", acc_id)
         warmup = await _safe_fetchrow(pool,
-            """SELECT current_day, target_days, status, started_at
+            """SELECT id, current_day, target_days, status, started_at
                FROM account_warmup_plans WHERE account_id=$1
                ORDER BY started_at DESC LIMIT 1""", acc_id)
         recent_ops = await _safe_fetch(pool,
