@@ -856,3 +856,16 @@ rerollSpin из screens/spintax.js|dashboard.js) за мёртвые и я на�
 Тесты дополнены (test_op_retry_progress_reset, test_settings_notif_single_source,
 test_broadcast_spintax_sweep). Урок: свип по grep account_manager.(send_dm|post_to_
 channel) ловит ВСЕ text-сендеры — прогонять до конца, а не по первым найденным.
+
+## tg-manager: путь 3 (боты→рассылка→воронки) — верификация end-to-end — 2026-07-21
+Прошёл путь 3 по-настоящему, не по верхам. Итог: глубоко и честно, багов нет (кроме
+уже пофикшенного превью-числа получателей по сегменту). Проверено по РЕАЛЬНОМУ пути:
+рассылка — сегмент доходит и до счётчика, и до выборки получателей (create_broadcast +
+_exec_run_broadcast), silent/кнопки/расписание/повтор/resume работают; воронки —
+create_funnel seed'ит шаг 1 в транзакции, add_funnel_step auto-инкрементит step_order
+(COALESCE(MAX)+1), доставка реальна: funnel_runner.run И auto_funnel.run шедулятся
+_resilient'ом в main.py (623/700), advance ПОЗИЦИОННЫЙ (steps[next_step]) — устойчив к
+дырам step_order и удалению среднего шага, send берёт message_text из
+get_due_funnel_steps (удалённый шаг = нет строки = нет краха); KPI из
+funnel_subscriptions реальные. Урок: «проверено» для чужого кода = проследить runner до
+main.py (шедулится ли вообще) + одну edge (дыры/удаление), а не только «эндпоинт есть».
