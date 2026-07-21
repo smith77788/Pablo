@@ -2093,13 +2093,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if status_filter:
             rows = await _safe_fetch(pool,
                 f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at, {_err_sub}
+                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at,
+                          oq.scheduled_for, {_err_sub}
                    FROM operation_queue oq WHERE oq.owner_id=$1 AND oq.status=$2
                    ORDER BY oq.created_at DESC LIMIT 30""", uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
                 f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at, {_err_sub}
+                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at,
+                          oq.scheduled_for, {_err_sub}
                    FROM operation_queue oq WHERE oq.owner_id=$1
                    ORDER BY oq.created_at DESC LIMIT 30""", uid)
         return _json_resp({"operations": rows})
@@ -2115,13 +2117,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad op_id", 400)
         row = await _safe_fetchrow(pool,
             "SELECT id, op_type, status, label, total_items, done_items, error_msg, "
-            "created_at, finished_at, (result->>'summary') AS summary "
+            "created_at, finished_at, scheduled_for, (result->>'summary') AS summary "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)
         d = dict(row)
-        # ISO для фронта (детали операции: Создано/Завершено)
-        for _k in ("created_at", "finished_at"):
+        # ISO для фронта (детали операции: Создано/Завершено/Запланировано)
+        for _k in ("created_at", "finished_at", "scheduled_for"):
             if d.get(_k) is not None and hasattr(d[_k], "isoformat"):
                 d[_k] = d[_k].isoformat()
         # Влияние операции на аккаунты: какие аккаунты словили FloodWait за эту
@@ -8325,13 +8327,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
         if total == 0:
             return _err("No channels to publish to")
+        # Расписание (необязательно): ISO-время запуска в будущем. Фронт присылает
+        # UTC ISO (new Date(local).toISOString()); воркер уважает scheduled_for.
+        scheduled_for = None
+        _sched_raw = body.get("scheduled_for")
+        if _sched_raw:
+            import datetime as _dt
+            try:
+                _sd = _dt.datetime.fromisoformat(str(_sched_raw).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                return _err("Некорректное время публикации", 400)
+            if _sd.tzinfo is None:
+                _sd = _sd.replace(tzinfo=_dt.timezone.utc)
+            if _sd <= _dt.datetime.now(_dt.timezone.utc):
+                return _err("Время публикации должно быть в будущем", 400)
+            scheduled_for = _sd.isoformat()
         params = {"text": text, "delay": delay, "owner_id": uid}
         if channel_ids:
             params["channel_ids"] = channel_ids
         try:
             from services.operation_bus import submit
-            op_id = await submit(pool, uid, "mass_publish", params, total_items=total)
-            return _json_resp({"ok": True, "op_id": op_id, "total": total})
+            op_id = await submit(pool, uid, "mass_publish", params, total_items=total,
+                                 scheduled_for=scheduled_for)
+            return _json_resp({"ok": True, "op_id": op_id, "total": total,
+                               "scheduled_for": scheduled_for})
         except Exception:
             log.exception("mass_publish uid=%d", uid)
             return _err("Failed to enqueue mass publish", 500)

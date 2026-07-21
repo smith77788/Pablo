@@ -154,8 +154,14 @@
   спинтил per-recipient, публикатор — нет. → `_exec_mass_publish` раскрывает
   `expand_spintax(mp_text)` на каждый канал (оба send-пути), без spintax — no-op;
   подсказка в UI поля публикации. Тест `test_mass_publish_spintax` (3).
-- [ ] Расписание для массовой публикации в каналы: воркер уважает `scheduled_for`,
-  но в UI mass_publish нет выбора времени (у бот-рассылок расписание есть).
+- [x] **Расписание массовой публикации (end-to-end, готово).** Инфра была готова
+  (submit(scheduled_for), воркер уважает scheduled_for, cancel на pending), но
+  mass_publish не принимал время И список операций не отдавал scheduled_for
+  (запланированное было невидимым). Фикс: mass_publish принимает scheduled_for
+  (UTC ISO, валидируется «в будущем»); operations/operation_status отдают
+  scheduled_for; UI — поле datetime-local (локальное→UTC через toISOString),
+  очередь и деталь показывают «⏰ запланировано на …» + отмену. Таймзона корректна
+  сквозь всю цепочку. Тест `test_mass_publish_schedule` (4).
 - [ ] Шаблоны → публикация: вставить сохранённый шаблон в текст публикатора.
 - [ ] Quick post: ре-аудит (spintax/подтверждение/результат).
 
