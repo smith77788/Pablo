@@ -190,9 +190,17 @@
 Свип выполнен по 4 текст-рассылкам (`bulk_dm_adhoc`, `group_announce`,
 `bulk_post_to_channel`, `bulk_post_chans`): spintax + карантин + показ пропуска.
 `dm_engine`/`mass_publish`/`invite`/`join`/`leave` уже уважали карантин. Инвайт получил
-подтверждение перед запуском (самая баноопасная op). Тесты:
-`test_broadcast_spintax_sweep`, `test_broadcast_quarantine_respect`,
-`test_mass_invite_confirm`.
+подтверждение перед запуском (самая баноопасная op).
+
+Расширение на boost'ы: общий помощник `_filter_quarantined_accounts(pool, op_id,
+accounts) → (kept, skipped)` (fail-open) применён к action-verb boost'ам
+`boost_subscribers` (join) и `boost_bot_starts` (/start) + честный показ пропуска.
+Пассивные boost'ы (views/reactions/stories) не гейтим осознанно (низкий риск).
+`strike` НЕ трогаем: у него своя защита (is_strike_allowed, resource_selector
+flood-aware, preflight cooldown/flood, warmup-guard) — второй фильтр был бы дублем.
+
+Тесты: `test_broadcast_spintax_sweep`, `test_broadcast_quarantine_respect`,
+`test_boost_quarantine_respect`, `test_mass_invite_confirm`.
 
 ## Уже закрыто в рамках доводки (этой линии)
 
