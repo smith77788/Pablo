@@ -8780,22 +8780,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        try:
-            row = await pool.fetchrow(
-                "SELECT settings_json FROM platform_users WHERE user_id=$1", uid)
-            if row and row["settings_json"]:
-                import json as _json
-                return _json_resp(_json.loads(row["settings_json"]))
-        except Exception as e:
-            log.warning("user_settings_get: %s", e)
-        return _json_resp({
+        settings = {
             "notif_ops": True,
             "notif_pay": True,
             "notif_report": False,
             "notif_error": True,
             "utc_logs": False,
             "lang": "ru",
-        })
+        }
+        try:
+            row = await pool.fetchrow(
+                "SELECT settings_json FROM platform_users WHERE user_id=$1", uid)
+            if row and row["settings_json"]:
+                import json as _json
+                settings.update(_json.loads(row["settings_json"]))
+        except Exception as e:
+            log.warning("user_settings_get: %s", e)
+        # Тумблеры уведомлений отражают РЕАЛЬНЫЙ источник правды (notification_settings),
+        # а не что записал мини-апп — иначе тумблер мог «врать» относительно бота.
+        try:
+            from database import db as _db
+            _ns = await _db.get_notification_settings(pool, uid)
+            settings["notif_ops"] = bool(_ns.get("op_complete", True))
+            settings["notif_error"] = bool(_ns.get("restriction", True))
+        except Exception as _e:
+            log.debug("user_settings_get notif overlay uid=%d: %s", uid, _e)
+        return _json_resp(settings)
 
     async def user_settings_save(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -8814,6 +8824,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _am.set_owner_proxy_policy(uid, data.get("proxy_policy"))
             except Exception:
                 pass
+            # Тумблеры уведомлений — в ЕДИНЫЙ источник правды notification_settings
+            # (его читает notify_if_enabled). Иначе тумблеры мини-аппа были «тихим
+            # успехом»: сохранялись в settings_json, но бот их не читал. Маппинг:
+            # notif_ops→op_complete, notif_error→restriction+flood_warning.
+            try:
+                _op = bool(data.get("notif_ops", True))
+                _err = bool(data.get("notif_error", True))
+                await pool.execute(
+                    "INSERT INTO notification_settings(user_id, op_complete, restriction, flood_warning) "
+                    "VALUES($1,$2,$3,$3) "
+                    "ON CONFLICT(user_id) DO UPDATE SET op_complete=$2, restriction=$3, "
+                    "flood_warning=$3, updated_at=now()",
+                    uid, _op, _err,
+                )
+            except Exception as _ne:
+                log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
             return _json_resp({"ok": True})
         except Exception as e:
             log.warning("user_settings_save uid=%d: %s", uid, e)

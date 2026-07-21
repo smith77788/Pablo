@@ -784,3 +784,17 @@ proxies/bots её имели), но on-journey экраны контента п�
 пояснение про spintax/вставку. Тест test_empty_states_actionable.py (4, включая
 проверку, что fn реально определены). Урок: пустой экран = объяснение + следующий шаг,
 а не «Нет данных».
+
+## tg-manager: тумблеры уведомлений мини-аппа — «тихий успех» (второй источник) — 2026-07-21
+Журнал 5, полнота/честность настроек. Мини-апп сохранял notif_ops/notif_error в
+platform_users.settings_json, а бот гейтил уведомления по ДРУГОЙ таблице
+notification_settings (op_complete/restriction) через db.notify_if_enabled →
+grep подтвердил: settings_json.notif_* не читается НИГДЕ вне mini_app_api. Тумблеры
+«сохранены», но ни на что не влияли (нарушение «не плоди второй источник правды»).
+Фикс: user_settings_save синхронизирует в notification_settings (notif_ops→op_complete,
+notif_error→restriction+flood_warning; ON CONFLICT трогает только эти 3 поля, не
+затирая new_user/position_change/deploy); user_settings_get отражает реальное
+состояние оттуда. Тест test_settings_notif_single_source.py (4). Осталось косметикой:
+lang(en) и utc_logs — тоже тумблеры без эффекта (UI только рус); помечено, низкий
+приоритет — не золотим. Урок: настройка = единый источник + реальный эффект, иначе
+это ложь пользователю.
