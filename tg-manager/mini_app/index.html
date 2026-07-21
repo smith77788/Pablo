@@ -12212,10 +12212,20 @@ async function openMassInvite() {
   const accs = (accsD.status==='fulfilled' ? (accsD.value.accounts||[]) : []).filter(a=>a.is_active);
   const wrap = document.getElementById('massInviteAccsWrap');
   if (accs.length) {
+    // Проактивный риск-пульс: помечаем аккаунты, которые исполнитель пропустит
+    // для защиты от бана (карантин/под риском) — чтобы пользователь видел ДО запуска.
+    const riskBadge = a => a.health_status==='quarantine'
+        ? ' <span title="На паузе (риск-пульс) — будет пропущен для защиты" style="color:#ef4444">🛑</span>'
+        : a.health_status==='at_risk'
+        ? ' <span title="Под риском — будет пропущен для защиты" style="color:#f59e0b">⚠️</span>' : '';
     wrap.innerHTML = accs.map(a=>`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:13px">
       <input type="checkbox" value="${a.id}" style="accent-color:var(--btn)">
-      <span>${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span></span>
+      <span>${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span>${riskBadge(a)}</span>
     </label>`).join('');
+    const flagged = accs.filter(a=>a.health_status==='quarantine'||a.health_status==='at_risk').length;
+    if (flagged) {
+      wrap.insertAdjacentHTML('afterbegin', `<div style="font-size:12px;color:var(--hint);padding:2px 4px 6px;border-bottom:1px solid var(--sep);margin-bottom:4px">🛡 ${flagged} аккаунт(ов) под риск-пульсом — их пропустят для защиты от бана</div>`);
+    }
   } else {
     wrap.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:4px">Нет активных аккаунтов</div>';
   }
