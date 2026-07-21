@@ -827,3 +827,15 @@ account/{id}/action/{reset_cooldown,export_session,reauth} обслуживаю�
 обязан матчиться (префикс-конкатенации на '/' не проверяем — не восстановить
 статически). Ловит класс багов #4 (мёртвая кнопка/404) на будущее, по всем экранам
 разом.
+
+## tg-manager: гейт мёртвых onclick + урок про screens/*.js — 2026-07-21
+Добавил второй сквозной гейт test_no_dead_onclick_handlers.py: каждый onclick="fn("
+обязан иметь определение fn. ВАЖНЫЙ УРОК (обжёгся сам): функции определяются и в
+inline-<script> index.html, И в mini_app/screens/*.js. Первая версия аудита сканировала
+только index.html → приняла 4 живые функции (openSpintax/openUnifiedDashboard/submitSpin/
+rerollSpin из screens/spintax.js|dashboard.js) за мёртвые и я начал их «чинить»
+дублями. Спас гейт test_no_duplicate_definitions (поймал дубли) → откатил. Оба гейта
+(routes+onclick) теперь сканируют index.html + screens/*.js. Итог: РЕАЛЬНЫХ мёртвых
+кнопок нет — оба гейта зелёные, зафиксированы на будущее. Мораль: при аудите фронта
+ВСЕГДА включай mini_app/screens/*.js, иначе ложные «мёртвые» срабатывания; и доверяй
+дубль-гейту как страховке.

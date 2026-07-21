@@ -13,6 +13,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Вызовы api() есть и в index.html, и в mini_app/screens/*.js — сканируем оба.
+_SCREENS = "\n".join(
+    p.read_text(encoding="utf-8") for p in sorted((ROOT / "mini_app" / "screens").glob("*.js"))
+) if (ROOT / "mini_app" / "screens").is_dir() else ""
+HTML = HTML + "\n" + _SCREENS
 API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
 
 
