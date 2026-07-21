@@ -5625,6 +5625,8 @@ async def _exec_group_announce(
 ) -> dict:
     """Рассылка объявления во все группы выбранного аккаунта."""
     from services import account_manager
+    # Anti-detection: свой вариант текста на каждую группу (spintax; no-op без него).
+    from services.dm_engine import expand_spintax as _expand_spintax
 
     acc_id = int(params.get("acc_id", 0))
     text = params.get("text", "")
@@ -5666,9 +5668,10 @@ async def _exec_group_announce(
                 "summary": f"Отменено. Отправлено: {ok_count}/{total}",
             }
         access_hash = grp.get("access_hash", 0) or 0
+        _ann = _expand_spintax(text)  # свой вариант объявления в эту группу
         try:
             result = await account_manager.post_to_channel(
-                acc["session_str"], grp["id"], text, access_hash=access_hash, _acc=acc
+                acc["session_str"], grp["id"], _ann, access_hash=access_hash, _acc=acc
             )
             if "error" in result or result.get("banned"):
                 err_count += 1
@@ -5699,6 +5702,10 @@ async def _exec_bulk_dm_adhoc(
     """Рассылка личных сообщений по списку usernames с нескольких аккаунтов (round-robin)."""
     from services import account_manager
     from database import db as _db
+    # Anti-detection: каждый получатель получает свой вариант текста (spintax);
+    # без spintax expand возвращает текст как есть (no-op). Идентичные ЛС многим —
+    # самая палевная сигнатура (PeerFlood/spam-репорт).
+    from services.dm_engine import expand_spintax as _expand_spintax
 
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
     usernames: list[str] = params.get("usernames") or []
@@ -5748,10 +5755,11 @@ async def _exec_bulk_dm_adhoc(
             continue
 
         acc = active_accounts[i % len(active_accounts)]
+        _msg = _expand_spintax(text)  # свой вариант текста этому получателю
 
         try:
             result = await account_manager.send_dm(
-                acc["session_str"], username, text, _acc=acc
+                acc["session_str"], username, _msg, _acc=acc
             )
 
             if result.get("banned"):
@@ -5856,6 +5864,9 @@ async def _exec_bulk_post_to_channel(
     from services import account_manager
     from database import db as _db
     from bot.utils.op_helpers import backoff, _progress_text
+    # Anti-detection: разные аккаунты в ОДИН канал одинаковым текстом — самая явная
+    # сигнатура координации. Каждый аккаунт постит свой вариант (spintax; no-op без него).
+    from services.dm_engine import expand_spintax as _expand_spintax
 
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
     channel_ref = params.get("channel_ref", "")
@@ -5898,11 +5909,12 @@ async def _exec_bulk_post_to_channel(
             }
 
         label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+        _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
         try:
             result = await account_manager.post_to_channel(
                 acc["session_str"],
                 channel_ref,
-                text_to_post,
+                _body,
                 access_hash=bulk_access_hash,
                 _acc=acc,
             )
@@ -6312,6 +6324,8 @@ async def _exec_bulk_post_chans(
     from services import account_manager
     from database import db as _db
     from bot.utils.op_helpers import backoff
+    # Anti-detection: свой вариант текста в каждый канал (spintax; no-op без него).
+    from services.dm_engine import expand_spintax as _expand_spintax
 
     acc_id = int(params.get("acc_id", 0))
     channel_ids: list[int] = [int(x) for x in (params.get("channel_ids") or [])]
@@ -6364,9 +6378,10 @@ async def _exec_bulk_post_chans(
         ch_id = ch["channel_id"]
         access_hash = ch.get("access_hash", 0) or 0
         ch_username = ch.get("username") or ""
+        _body = _expand_spintax(text)  # свой вариант текста в этот канал
         try:
             last_result = await account_manager.post_to_channel(
-                acc["session_str"], ch_id, text,
+                acc["session_str"], ch_id, _body,
                 access_hash=access_hash, username=ch_username, _acc=acc
             )
             if last_result.get("banned"):

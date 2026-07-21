@@ -585,3 +585,21 @@ CLAUDE.md разросся до 301 строки (читается каждой 
 Проверено: ни одно правило не потеряно (grep 12 ключевых фраз — все в костяке или
 протоколе). Дублей нет (проектные факты — только в костяке; поведение — только в
 протоколе). Ничего в коде не менялось.
+
+## tg-manager: паттерн-свип anti-detection — spintax на цель во всех аккаунт-рассылках — 2026-07-21
+Сиблинги фикса mass_publish (b6bb0350). Свип по op_worker: исполнители, славшие ОДИН
+пользовательский текст многим целям через account_manager (Telethon session_str), —
+палевная сигнатура координации (Telegram банит за одинаковые сообщения). Найдено и
+пофикшено 4:
+  - _exec_bulk_dm_adhoc — ЛС многим usernames (самое палевное: PeerFlood/spam-репорт);
+  - _exec_group_announce — объявление во все группы одного аккаунта;
+  - _exec_bulk_post_to_channel — РАЗНЫЕ аккаунты в ОДИН канал (явная координация);
+  - _exec_bulk_post_chans — один аккаунт в много каналов.
+Фикс единообразный (как mass_publish): `from services.dm_engine import expand_spintax`,
+на каждой итерации свой вариант текста; без spintax expand = no-op. Регресс:
+test_broadcast_spintax_sweep.py (4 теста, падают без фикса — строк с _expand_spintax
+раньше не было). Ботовые рассылки (broadcaster/self_promo/aiogram → подписчики бота)
+СОЗНАТЕЛЬНО не трогаем — легитимный newsletter, не анти-детект аккаунтов.
+Свип №1 «параметр принят, но не сохраняется» (сиблинги record_flood/operation_id):
+проверены record_peer_flood (прокидывает operation_id корректно), record_account_op/
+record_proxy_op (in-memory, operation_id не принимают) — новых потерь нет.
