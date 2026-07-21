@@ -8086,7 +8086,9 @@ async function loadOps() {
     `);
     if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?'По фильтру «'+OPS_FILTER+'»':''))); return; }
     txt('opsList', ops.map(o=>{
-      const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
+      const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
+      // done не может превышать total — защита от «34/17» у старых операций.
+      const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
       const [bc,bl]=stb(o.status);
       const canCancel = o.status==='pending'||o.status==='running';
       return `<div class="li" style="display:block;cursor:pointer;padding:11px 14px" onclick="openOpDetail(${o.id})">
@@ -8094,7 +8096,7 @@ async function loadOps() {
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
             <div class="li-name">${esc(o.label||o.op_type||'операция')}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰</span>':''}</div>
-            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru'):num(o.done_items||0)+'/'+num(o.total_items||0)+' · '+ago(o.created_at)}</div>
+            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru'):num(dDone)+'/'+num(o.total_items||0)+' · '+ago(o.created_at)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
@@ -8118,14 +8120,15 @@ async function openOpDetail(opId) {
     // из-за чего завершённые/упавшие операции показывали «не найдена».
     const o = await api('/api/miniapp/operation/'+opId).catch(()=>null);
     if (!o || !o.id) { txt('opdetBody',empty('⚙️','Операция не найдена')); return; }
-    const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
+    const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
+    const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
     const [bc,bl]=stb(o.status);
     const logs = await api('/api/miniapp/operation/'+opId+'/log').catch(()=>({logs:[]}));
     let html = `
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.op_type)}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${num(o.done_items||0)} / ${num(o.total_items||0)} (${pct}%)</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${num(dDone)} / ${num(o.total_items||0)} (${pct}%)</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru'):''}</div></div></div>
         ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru')}</div></div></div>`:''}
         ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru')}</div></div></div>`:''}
