@@ -28,15 +28,36 @@ def _token() -> str:
     return token
 
 
-def call(method: str, timeout: float = 35.0, **params: Any) -> Any:
-    """Call a Bot API method and return its `result` payload."""
+def call(method: str, timeout: float = 35.0, _retries: int = 3, **params: Any) -> Any:
+    """Call a Bot API method and return its `result` payload.
+
+    Retries transient network failures and honours Telegram's flood-control
+    `retry_after` so one hiccup never kills the polling loop.
+    """
     url = API_URL.format(token=_token(), method=method)
-    resp = httpx.post(url, json=params, timeout=timeout)
-    resp.raise_for_status()
-    data = resp.json()
-    if not data.get("ok"):
-        raise RuntimeError(f"Telegram API {method} failed: {data}")
-    return data.get("result")
+    last_exc: Exception | None = None
+    for attempt in range(_retries):
+        try:
+            resp = httpx.post(url, json=params, timeout=timeout)
+            if resp.status_code == 429:
+                retry_after = 5
+                try:
+                    retry_after = int(
+                        resp.json().get("parameters", {}).get("retry_after", 5)
+                    )
+                except Exception:
+                    pass
+                time.sleep(min(retry_after, 60))
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                raise RuntimeError(f"Telegram API {method} failed: {data}")
+            return data.get("result")
+        except httpx.TransportError as e:
+            last_exc = e
+            time.sleep(2 * (attempt + 1))
+    raise last_exc or RuntimeError(f"Telegram API {method}: retries exhausted")
 
 
 def get_me() -> dict:

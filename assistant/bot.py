@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
+import anthropic
 import httpx
 
 from assistant import telegram_api as tg
@@ -179,15 +180,53 @@ class AssistantBot:
 
     def _claude_turn(self, chat_id: int, content: str | list[dict]) -> None:
         tg.send_chat_action(chat_id, "typing")
-        reply, history = self.chat.run_turn(
-            model=self.state.model,
-            history=self.state.history(chat_id),
-            user_content=content,
-            on_progress=lambda: tg.send_chat_action(chat_id, "typing"),
-        )
-        self.state.update_history(chat_id, history)
-        self.turns_handled += 1
+        try:
+            reply, history = self.chat.run_turn(
+                model=self.state.model,
+                history=self.state.history(chat_id),
+                user_content=content,
+                on_progress=lambda: tg.send_chat_action(chat_id, "typing"),
+            )
+            self.state.update_history(chat_id, history)
+            self.turns_handled += 1
+        except anthropic.BadRequestError as e:
+            reply = self._recover_bad_request(chat_id, content, e)
+        except anthropic.AuthenticationError:
+            reply = "🔑 Неверный ANTHROPIC_API_KEY — проверь переменные окружения."
+        except anthropic.RateLimitError:
+            reply = "⏳ Достигнут лимит запросов к Claude. Подожди минуту и повтори."
+        except anthropic.APIStatusError as e:
+            logger.error("Claude API error %s: %s", e.status_code, e.message)
+            reply = "⚠️ Claude временно недоступен. Попробуй ещё раз через минуту."
+        except anthropic.APIConnectionError:
+            reply = "🌐 Нет связи с Claude API. Повтори чуть позже."
         tg.send_message(chat_id, reply)
+
+    def _recover_bad_request(
+        self, chat_id: int, content: str | list[dict], err: Exception
+    ) -> str:
+        """A 400 usually means the stored history got corrupted (e.g. after a
+        model switch or a bad block) — reset it and retry the turn once."""
+        logger.warning("BadRequest from Claude (%s) — resetting history and retrying", err)
+        if isinstance(content, list) and len(str(content)) > 200_000:
+            return "⚠️ Вложение слишком большое для обработки. Пришли файл поменьше."
+        self.state.reset_history(chat_id)
+        try:
+            reply, history = self.chat.run_turn(
+                model=self.state.model,
+                history=[],
+                user_content=content,
+                on_progress=lambda: tg.send_chat_action(chat_id, "typing"),
+            )
+            self.state.update_history(chat_id, history)
+            self.turns_handled += 1
+            return "🧹 (Контекст был повреждён и очищен.)\n\n" + reply
+        except Exception:
+            logger.exception("Retry after history reset failed")
+            return (
+                "⚠️ Не удалось обработать запрос даже с чистым контекстом. "
+                "Попробуй /model claude-opus-4-8 и повтори."
+            )
 
     # -- attachments -----------------------------------------------------
 
