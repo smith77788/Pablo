@@ -2178,6 +2178,10 @@ async def _exec_mass_publish(
     failed_channels: list[str] = []
     published_to: list[str] = []
     isolated_accounts: set[int] = set()
+    # Spintax НА КАНАЛ: одинаковый текст во все каналы разом — палевная сигнатура
+    # координации (Telegram это ловит). Если в тексте есть {A|B} — каждый канал
+    # получает свой вариант; без spintax expand возвращает текст как есть (no-op).
+    from services.dm_engine import expand_spintax as _expand_spintax
 
     for idx, target_entry in enumerate(targets, 1):
         dialog = target_entry["dialog"]
@@ -2231,12 +2235,13 @@ async def _exec_mass_publish(
             if not dialog["access_hash"] and dialog.get("username")
             else dialog["id"]
         )
+        _ch_text = _expand_spintax(mp_text)  # свой вариант текста на этот канал
         for _attempt in range(2):  # per-item retry: 1 initial + 1 retry on FloodWait
             try:
                 result = await account_manager.post_to_channel(
                     acc["session_str"],
                     _ch_ref,
-                    mp_text,
+                    _ch_text,
                     access_hash=dialog["access_hash"],
                     username=dialog.get("username") or "",
                     _acc=acc,
@@ -2340,7 +2345,7 @@ async def _exec_mass_publish(
                             fallback_result = await account_manager.post_to_channel(
                                 fallback_acc["session_str"],
                                 _ch_ref,
-                                mp_text,
+                                _ch_text,
                                 access_hash=dialog["access_hash"],
                                 username=dialog.get("username") or "",
                                 _acc=fallback_acc,
