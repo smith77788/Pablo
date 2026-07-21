@@ -7260,6 +7260,29 @@ async def _exec_boost_stories(
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
 
+async def _filter_quarantined_accounts(
+    pool: asyncpg.Pool, op_id: int, accounts: list
+) -> tuple[list, int]:
+    """Отсеять аккаунты под риск-пульсом (is_account_quarantined) ПЕРЕД действием.
+
+    Возвращает (оставшиеся_аккаунты, пропущено_шт). Fail-open: если ВСЕ в карантине —
+    возвращаем исходный список (лучше рискнуть, чем обнулить операцию); ошибка проверки
+    тоже не блокирует ядро. Общий гейт для boost/action-исполнителей по реальным
+    аккаунтам — действие с флагнутого аккаунта = быстрый бан.
+    """
+    try:
+        kept = [a for a in accounts
+                if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+    except Exception:
+        log_exc_swallow(log, f"quarantine filter failed op={op_id}")
+        return accounts, 0
+    if kept and len(kept) != len(accounts):
+        skipped = len(accounts) - len(kept)
+        log.info("op=%d: пропущено %d аккаунтов в карантине (риск-пульс)", op_id, skipped)
+        return kept, skipped
+    return accounts, 0
+
+
 async def _premium_filter_accounts(
     pool: asyncpg.Pool, op_id: int, accounts: list, premium_only: bool
 ) -> tuple[list, int]:
@@ -7323,9 +7346,11 @@ async def _exec_boost_subscribers(
             "status": "failed",
             "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
         }
-    if skipped_premium:
-        # total_items учитывало все выбранные аккаунты; часть отсеяна фильтром
-        # Premium — подгоняем total_items, иначе прогресс-бар не дойдёт до 100%.
+    # Риск-пульс: вступление с флагнутого аккаунта = быстрый бан. Отсеиваем (fail-open).
+    accounts, skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+    if skipped_premium or skipped_quar:
+        # total_items учитывало все выбранные аккаунты; часть отсеяна фильтрами
+        # (Premium/риск-пульс) — подгоняем, иначе прогресс-бар не дойдёт до 100%.
         await _safe_execute(
                 pool,
             "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
@@ -7366,6 +7391,7 @@ async def _exec_boost_subscribers(
         f"✅ Вступили: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
         + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
+        + (f"\n🛡 Пропущено (риск-пульс): {skipped_quar}" if skipped_quar else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
@@ -7401,7 +7427,9 @@ async def _exec_boost_bot_starts(
             "status": "failed",
             "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
         }
-    if skipped_premium:
+    # Риск-пульс: /start с флагнутого аккаунта = риск бана. Отсеиваем (fail-open).
+    accounts, skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+    if skipped_premium or skipped_quar:
         await _safe_execute(
                 pool,
             "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
@@ -7445,6 +7473,7 @@ async def _exec_boost_bot_starts(
         + f"\n✅ Стартов: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
         + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
+        + (f"\n🛡 Пропущено (риск-пульс): {skipped_quar}" if skipped_quar else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 
