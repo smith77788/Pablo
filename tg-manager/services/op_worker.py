@@ -5742,12 +5742,14 @@ async def _exec_bulk_dm_adhoc(
     # Риск-пульс (fail-open): не шлём ЛС с аккаунтов под недавним серьёзным
     # ограничением — рассылка с флагнутого аккаунта = быстрый бан. Если все в
     # карантине — работаем всеми (лучше рискнуть, чем обнулить операцию).
+    _skipped_quar = 0
     try:
         _kept = [a for a in active_accounts
                  if not await _infra_mem.is_account_quarantined(pool, a["id"])]
         if _kept and len(_kept) != len(active_accounts):
+            _skipped_quar = len(active_accounts) - len(_kept)
             log.info("bulk_dm_adhoc op=%d: пропущено %d аккаунтов в карантине",
-                     op_id, len(active_accounts) - len(_kept))
+                     op_id, _skipped_quar)
             active_accounts = _kept
     except Exception:
         log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: quarantine check failed")
@@ -5819,11 +5821,12 @@ async def _exec_bulk_dm_adhoc(
         if i < total - 1:
             await asyncio.sleep(wait)
 
+    _quar_note = f" · 🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс)" if _skipped_quar else ""
     return {
         "status": "done",
         "ok": ok_count,
         "fail": err_count,
-        "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей",
+        "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей{_quar_note}",
     }
 
 
@@ -5921,12 +5924,14 @@ async def _exec_bulk_post_to_channel(
     # Риск-пульс (fail-open): не постим с аккаунтов под недавним серьёзным
     # ограничением. Разные аккаунты в один канал + флагнутый = быстрый бан.
     # Все в карантине → работаем всеми (лучше рискнуть, чем обнулить).
+    _skipped_quar = 0
     try:
         _kept = [a for a in accounts
                  if not await _infra_mem.is_account_quarantined(pool, a["id"])]
         if _kept and len(_kept) != len(accounts):
+            _skipped_quar = len(accounts) - len(_kept)
             log.info("bulk_post_to_channel op=%d: пропущено %d аккаунтов в карантине",
-                     op_id, len(accounts) - len(_kept))
+                     op_id, _skipped_quar)
             accounts = _kept
             total = len(accounts)
             await _safe_execute(
@@ -6024,6 +6029,8 @@ async def _exec_bulk_post_to_channel(
         + ok_list
         + err_list
     )
+    if _skipped_quar:
+        lines.append(f"🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс, защита от бана)")
     final_text = "\n".join(lines)
 
     if chat_id and message_id:

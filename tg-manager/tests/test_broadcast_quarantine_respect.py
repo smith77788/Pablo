@@ -75,3 +75,39 @@ def test_multi_account_filters_quarantined():
         # fail-open: фильтр применяется только если что-то осталось (_kept)
         assert "_kept" in src and "if _kept and len(_kept)" in src, \
             f"{fn.__name__} должен быть fail-open (пустой результат не обнуляет)"
+
+
+def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
+    """Честный итог: пользователь видит, что N аккаунтов пропущено (риск-пульс),
+    а не молча уменьшившееся число отправок."""
+    async def _fetch(*a, **k):
+        return [
+            {"id": 1, "session_str": "a", "first_name": "A", "phone": "+1"},
+            {"id": 2, "session_str": "b", "first_name": "B", "phone": "+2"},
+        ]
+    async def _exec(*a, **k):
+        return None
+    async def _quar(pool, aid):
+        return aid == 2  # второй в карантине
+    async def _not_cancelled(*a, **k):
+        return False
+    monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
+    monkeypatch.setattr(op_worker, "_safe_execute", _exec)
+    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _quar)
+    monkeypatch.setattr(op_worker, "_is_cancelled", _not_cancelled)
+
+    used = []
+    async def _send_dm(session, username, msg, _acc=None):
+        used.append(_acc["id"])
+        return {"ok": True}
+    from services import account_manager
+    monkeypatch.setattr(account_manager, "send_dm", _send_dm)
+
+    res = _run(op_worker._exec_bulk_dm_adhoc(
+        None, None, 1, 1, {"account_ids": [1, 2], "usernames": ["@x"], "text": "hi"}))
+    assert res["status"] == "done"
+    # карантинный аккаунт (2) не использовался
+    assert 2 not in used
+    # итог честно сообщает о пропуске
+    assert "риск-пульс" in res["summary"].lower()
+    assert "1 аккаунт" in res["summary"]
