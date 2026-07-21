@@ -2851,7 +2851,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
-        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал</div>
+        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
       </div>
       <div class="field" style="margin-bottom:12px">
         <label>Задержка между постами</label>
@@ -3305,7 +3305,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Текст публикации</div>
     <div style="padding:8px 0">
       <div class="preset-row" id="qpPresetRow"></div>
-      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
+      <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div></div>
     </div>
     <div class="sec">Выберите каналы</div>
     <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4833,7 +4834,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <label>Текст сообщения</label>
       <div class="preset-row" id="cmpPresetRow"></div>
       <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Поддержка Spintax: {Привет|Здравствуйте}!"></textarea>
-      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a></div>
+      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
     <div class="field">
@@ -8946,7 +8947,11 @@ async function cancelSchedule(id) {
 }
 
 // ── Templates ──────────────────────────────────────────
-function openTemplates() {
+// Куда вставлять выбранный шаблон: id textarea того композера, откуда пришли.
+// По умолчанию — сетевая рассылка (bcastText); публикатор/кампания задают свой.
+let TPL_TARGET = 'bcastText';
+function openTemplates(target) {
+  TPL_TARGET = target || 'bcastText';
   push('s-templates');
   txt('tplList', '<div class="spin-wrap"><div class="spin"></div></div>');
   loadTemplates();
@@ -8979,9 +8984,16 @@ async function loadTemplates() {
 }
 
 function useTpl(id, name, text) {
-  // Вставить шаблон в модалку рассылки
-  document.getElementById('bcastText').value = text;
-  document.getElementById('bcastLen').textContent = text.length;
+  // Вставить шаблон в тот композер, откуда пришли (TPL_TARGET), а не только в рассылку.
+  const ta = document.getElementById(TPL_TARGET) || document.getElementById('bcastText');
+  if (ta) {
+    ta.value = text;
+    // Обновить счётчик длины: у mpText/cmpText/bcastText свои input-слушатели.
+    ta.dispatchEvent(new Event('input', {bubbles:true}));
+    const lenId = {bcastText:'bcastLen', mpText:'mpLen', cmpText:'cmpLen'}[TPL_TARGET];
+    const lenEl = lenId && document.getElementById(lenId);
+    if (lenEl) lenEl.textContent = text.length;
+  }
   back();
   toast('📝 Шаблон «'+name+'» вставлен');
 }

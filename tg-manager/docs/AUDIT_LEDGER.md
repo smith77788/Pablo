@@ -603,3 +603,17 @@ test_broadcast_spintax_sweep.py (4 теста, падают без фикса �
 Свип №1 «параметр принят, но не сохраняется» (сиблинги record_flood/operation_id):
 проверены record_peer_flood (прокидывает operation_id корректно), record_account_op/
 record_proxy_op (in-memory, operation_id не принимают) — новых потерь нет.
+
+## tg-manager: шаблон → публикатор (тупик) + ре-аудит быстрого поста — 2026-07-21
+Путь «контент → публикация». Экран «Шаблоны» существовал, но useTpl жёстко писал
+только в bcastText (сетевая рассылка) — сохранённый пост нельзя было вставить в
+композер «Массовой публикации»/DM-кампании/«Быстрого поста». Тупик в пути.
+Фикс: openTemplates(target) запоминает целевой композер (TPL_TARGET); useTpl пишет в
+него и обновляет счётчик длины (через input-событие + маппинг счётчиков); кнопка
+«📝 Вставить шаблон» добавлена публикатору (mpText), кампании (cmpText), быстрому
+посту (quickPostText). Ре-аудит быстрого поста: spintax уже есть (quick_post
+исполняется через _exec_mass_publish — добавлен guard-тест, чтобы никто не форкнул
+отдельный публикатор без spintax); добавлена UI-подсказка про Spintax. Тесты:
+test_template_into_publisher.py (5). Замечено на будущее (НЕ трогал): quick_post_submit
+пишет прямым INSERT INTO operation_queue (grandfathered ratchet baseline); repeat_count
+читается бэком, но фронт его не шлёт → повтор без ограничения по числу.
