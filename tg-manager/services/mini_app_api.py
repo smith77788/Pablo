@@ -600,11 +600,13 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
         return {"ok": True, "message": f"Экосистема создана из {r.get('channels', 0)} каналов"}
 
     if action_id == "check_account_health":
+        # Проверяем ВСЕ свои аккаунты, включая неактивные — смысл проверки в т.ч.
+        # вернуть в строй ошибочно отключённые (фильтр is_active это ломал).
         rows = await _safe_fetch(pool,
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid)
+            "SELECT id FROM tg_accounts WHERE owner_id=$1", uid)
         ids = [int(r["id"]) for r in (rows or [])]
         if not ids:
-            return {"ok": True, "message": "Нет активных аккаунтов для проверки"}
+            return {"ok": True, "message": "Нет аккаунтов для проверки"}
         from services import operation_bus as _obus
         op_id = await _obus.submit(
             pool, uid, "check_accounts_health",
@@ -3114,8 +3116,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         admin = _is_admin(uid)
+        # «Проверить все» = ВСЕ аккаунты в области видимости, включая неактивные:
+        # смысл проверки — в т.ч. вернуть в строй ошибочно отключённые (об этом и
+        # предупреждение в UI). Фильтр is_active здесь выбирал только активные
+        # (6 из 25) и противоречил обещанию кнопки. Скоуп: админ — вся платформа,
+        # обычный пользователь — свои.
         if admin:
-            rows = await _safe_fetch(pool, "SELECT id FROM tg_accounts WHERE is_active=TRUE")
+            rows = await _safe_fetch(pool, "SELECT id FROM tg_accounts")
         else:
             rows = await _safe_fetch(pool,
                 "SELECT id FROM tg_accounts WHERE owner_id=$1", uid)

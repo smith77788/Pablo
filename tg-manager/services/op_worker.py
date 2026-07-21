@@ -6644,9 +6644,14 @@ async def _exec_check_accounts_health(
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
     """
-    _where = ("WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])"
+    # account_ids ВСЕГДА формируются на сервере с проверкой прав (owner-scoped для
+    # обычного пользователя, межтенантно для админа — см. accounts_check/_build).
+    # Поэтому по явному списку фильтруем ТОЛЬКО по id, без owner_id: иначе админская
+    # проверка чужих аккаунтов давала owner_id=админ AND id IN(чужие) = 0 строк →
+    # операция падала «0/N» (ровно баг «Проверка 6 аккаунтов — 0/6 Ошибка»).
+    _where = ("WHERE a.id = ANY($1::bigint[])"
               if account_ids else "WHERE a.owner_id=$1")
-    _args = (owner_id, account_ids) if account_ids else (owner_id,)
+    _args = (account_ids,) if account_ids else (owner_id,)
     query_errored = False
     try:
         rows = await pool.fetch(_HC_COLS + _where, *_args)
