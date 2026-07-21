@@ -7796,11 +7796,24 @@ function fillBcastBots(selectedId) {
   sel.addEventListener('change', updateBcastRecip);
 }
 
-function updateBcastRecip() {
+async function updateBcastRecip() {
   const sel = document.getElementById('bcastBot');
   const opt = sel.selectedOptions[0];
   const subs = opt?parseInt(opt.dataset.subs||0):0;
-  document.getElementById('bcastRecip').textContent = num(subs)+' получателей';
+  const botId = sel.value;
+  const segment = document.getElementById('bcastSegment')?.value || 'all';
+  const el = document.getElementById('bcastRecip');
+  // Мгновенно — общее число (для сегмента «Всем» оно и есть точное).
+  el.textContent = num(subs)+' получателей';
+  if (!botId || segment==='all') return;
+  // Точное число по сегменту — с бэкенда, иначе предпросмотр врёт (показывал бы
+  // ПОЛНУЮ аудиторию при выбранном «Активным 7д/30д»).
+  const token = (updateBcastRecip._t = (updateBcastRecip._t||0)+1);
+  try {
+    const d = await api('/api/miniapp/broadcast/recipients?bot_id='+encodeURIComponent(botId)+'&segment='+encodeURIComponent(segment));
+    if (token !== updateBcastRecip._t) return;   // устаревший ответ — сегмент уже сменили
+    el.textContent = num(d.count)+' получателей';
+  } catch(_) { /* fallback: оставляем общее число */ }
 }
 
 document.getElementById('bcastText').addEventListener('input', function(){

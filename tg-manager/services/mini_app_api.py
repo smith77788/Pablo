@@ -1330,6 +1330,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("create_broadcast bot=%d uid=%d", bot_id_int, uid)
             return _err("Failed to create broadcast", 500)
 
+    async def broadcast_recipients(request: web.Request) -> web.Response:
+        """Точное число получателей для бота+сегмента — честный предпросмотр.
+
+        Раньше UI показывал ПОЛНОЕ число подписчиков даже при выборе сегмента
+        «Активным 7д/30д» → предпросмотр врал (бэк слал по сегменту, а число было
+        от всей аудитории). Тот же _seg_sql, что и в create_broadcast/исполнителе.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        bot_id = validate_integer(request.rel_url.query.get("bot_id"), min_val=1)
+        if not bot_id:
+            return _err("bot_id required", 400)
+        segment = validate_string(request.rel_url.query.get("segment") or "all", max_len=20) or "all"
+        _seg_sql = {
+            "active_7d": " AND last_seen >= now() - interval '7 days'",
+            "active_30d": " AND last_seen >= now() - interval '30 days'",
+        }.get(segment, "")
+        # Владение ботом обязательно (иначе можно посчитать чужую аудиторию).
+        owns = await _safe_fetchrow(pool,
+            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            int(bot_id), uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql,
+            int(bot_id))
+        return _json_resp({"count": int(total or 0), "segment": segment})
+
     async def broadcast_resend(request: web.Request) -> web.Response:
         """Повторная отправка рассылки только НЕдоставленным получателям."""
         uid = _get_uid(request)
@@ -10891,6 +10920,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/funnel/{funnel_id}/toggle", toggle_funnel)
     # Broadcasts
     app.router.add_post("/api/miniapp/broadcast", create_broadcast)
+    app.router.add_get("/api/miniapp/broadcast/recipients", broadcast_recipients)
     app.router.add_post("/api/miniapp/broadcast/{bc_id}/resend", broadcast_resend)
     app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)
     app.router.add_post("/api/miniapp/broadcast/schedule", broadcast_schedule)
