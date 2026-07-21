@@ -557,14 +557,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <!-- Quick actions -->
     <div class="sec">Быстрые действия</div>
+    <!-- Плитки — ЧИСТАЯ навигация (без цифр): все счётчики живут один раз в верхней
+         ленте KPI. Раньше Боты/Аккаунты/Каналы/Рассылки/Операции дублировали KPI —
+         «несколько дашбордов». Теперь один дашборд (KPI) + навигация (плитки). -->
     <div class="qa-grid">
-      <div class="qa-tile" onclick="goTab('bots')"><div class="qa-tile-ico">🤖</div><div class="qa-tile-lbl">Боты</div><div class="qa-tile-val" id="qa-bots">—</div></div>
-      <div class="qa-tile" onclick="goTab('accounts')"><div class="qa-tile-ico">📱</div><div class="qa-tile-lbl">Аккаунты</div><div class="qa-tile-val" id="qa-accs">—</div></div>
-      <div class="qa-tile" onclick="openChannels()"><div class="qa-tile-ico">📡</div><div class="qa-tile-lbl">Каналы</div><div class="qa-tile-val" id="qa-chs">—</div></div>
-      <div class="qa-tile" onclick="goTab('broadcasts')"><div class="qa-tile-ico">📨</div><div class="qa-tile-lbl">Рассылки</div><div class="qa-tile-val" id="qa-bc">—</div></div>
-      <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div><div class="qa-tile-val" id="qa-ops">—</div></div>
-      <div class="qa-tile" onclick="openContacts()"><div class="qa-tile-ico">📇</div><div class="qa-tile-lbl">Контакты</div><div class="qa-tile-val" id="qa-contacts">—</div></div>
-      <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div><div class="qa-tile-val" style="color:var(--blue)">→</div></div>
+      <div class="qa-tile" onclick="goTab('bots')"><div class="qa-tile-ico">🤖</div><div class="qa-tile-lbl">Боты</div></div>
+      <div class="qa-tile" onclick="goTab('accounts')"><div class="qa-tile-ico">📱</div><div class="qa-tile-lbl">Аккаунты</div></div>
+      <div class="qa-tile" onclick="openChannels()"><div class="qa-tile-ico">📡</div><div class="qa-tile-lbl">Каналы</div></div>
+      <div class="qa-tile" onclick="goTab('broadcasts')"><div class="qa-tile-ico">📨</div><div class="qa-tile-lbl">Рассылки</div></div>
+      <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div></div>
+      <div class="qa-tile" onclick="openContacts()"><div class="qa-tile-ico">📇</div><div class="qa-tile-lbl">Контакты</div></div>
+      <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div></div>
     </div>
     <!-- Часто используемые (персонально, по реальным кликам) -->
     <div id="freqWrap" style="display:none">
@@ -6038,10 +6041,8 @@ function renderCards(d) {
       <div class="kpi-chip-lbl">${k.lbl}</div>
     </div>`;
   }).join('');
-  // Quick action counts
-  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  s('qa-bots',num(d.bots)); s('qa-accs',num(d.accounts)); s('qa-chs',num(d.channels));
-  s('qa-bc',num(d.campaigns_active)); s('qa-ops',d.ops_running?'🟡 '+d.ops_running:'—');
+  // Плитки «Быстрые действия» — навигация без цифр (счётчики — в ленте KPI выше,
+  // единый источник, без дублей). Ничего не заполняем.
   // Mini chart from recent_activity
   renderMiniChart(d.recent_activity||[]);
 }
