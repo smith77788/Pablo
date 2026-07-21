@@ -6428,7 +6428,7 @@ async function loadArList() {
 
 function renderArList(items) {
   const el = document.getElementById('arList');
-  if (!items.length) { el.innerHTML=empty('💬','Нет авто-ответов','Нажмите + Добавить чтобы создать'); return; }
+  if (!items.length) { el.innerHTML=empty('💬','Нет авто-ответов','Правило: на сообщение/ключевое слово бот отвечает автоматически',{label:'➕ Добавить правило',fn:'openArModal()'}); return; }
   el.innerHTML = items.map(r=>{
     const trig = r.trigger_type==='keyword'?`🔑 ${esc(r.keyword||'?')}`:r.trigger_type==='start'?'🚀 /start':'📬 Любое';
     const meta = [];
@@ -7741,7 +7741,7 @@ async function resendBcast(id) {
 
 function renderCmps(items) {
   const el = document.getElementById('cmpList');
-  if (!items.length) { el.innerHTML=empty('📨','Нет DM-кампаний'); return; }
+  if (!items.length) { el.innerHTML=empty('📨','Нет DM-кампаний','Аудитория + текст со spintax → рассылка в личные сообщения',{label:'➕ Создать кампанию',fn:'openCmpModal()'}); return; }
   el.innerHTML = items.map(c=>{
     const [bc,bl]=stb(c.status);
     return `<div class="li" style="cursor:default">
@@ -8968,7 +8968,7 @@ async function loadTemplates() {
     const items = d.templates||[];
     const tplTotal = (d.total!=null?d.total:items.length);
     txt('m-tpl-cnt', tplTotal ? tplTotal+' шаблонов' : '');
-    if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Нажмите + Создать')); return; }
+    if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Сохраните текст со spintax — и вставляйте в публикатор/рассылку в один тап',{label:'➕ Создать шаблон',fn:'openTplModal()'})); return; }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
       return `<div class="li">
