@@ -12267,6 +12267,11 @@ async function submitMassInvite() {
   if (_b) body.batch_size = parseInt(_b);
   if (_m) body.max_invites = parseInt(_m);
   if (_pa) body.per_account_limit = parseInt(_pa);
+  // Инвайт — самая баноопасная операция → подтверждение перед запуском.
+  // Без лимита на аккаунт риск бана максимальный — предупреждаем явно.
+  const _paceLbl = {slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;
+  const _warn = _pa ? '' : '\n\n⚠️ Лимит на аккаунт не задан — риск бана выше. Задайте его в «⚙️ Лимиты».';
+  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_warn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
   const btn = document.getElementById('massInviteBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
