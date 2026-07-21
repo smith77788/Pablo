@@ -5645,6 +5645,16 @@ async def _exec_group_announce(
         return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
 
+    # Риск-пульс: аккаунт под недавним серьёзным ограничением — рассылка объявлений
+    # с него = быстрый бан. Останавливаем ради защиты (снимется автоматически, когда
+    # ограничение устареет). fail-open: ошибка проверки не блокирует операцию.
+    try:
+        if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+            return {"status": "failed", "reason": "Аккаунт под риск-пульсом (недавнее "
+                    "ограничение) — рассылка остановлена для защиты от бана. Повторите позже."}
+    except Exception:
+        log_exc_swallow(log, f"group_announce op={op_id}: quarantine check failed")
+
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
     groups = [
         d for d in dialogs
@@ -5728,6 +5738,19 @@ async def _exec_bulk_dm_adhoc(
     active_accounts = [dict(r) for r in rows]
     if not active_accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    # Риск-пульс (fail-open): не шлём ЛС с аккаунтов под недавним серьёзным
+    # ограничением — рассылка с флагнутого аккаунта = быстрый бан. Если все в
+    # карантине — работаем всеми (лучше рискнуть, чем обнулить операцию).
+    try:
+        _kept = [a for a in active_accounts
+                 if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+        if _kept and len(_kept) != len(active_accounts):
+            log.info("bulk_dm_adhoc op=%d: пропущено %d аккаунтов в карантине",
+                     op_id, len(active_accounts) - len(_kept))
+            active_accounts = _kept
+    except Exception:
+        log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: quarantine check failed")
 
     total = len(usernames)
     await _safe_execute(
@@ -5894,6 +5917,22 @@ async def _exec_bulk_post_to_channel(
     total = len(accounts)
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    # Риск-пульс (fail-open): не постим с аккаунтов под недавним серьёзным
+    # ограничением. Разные аккаунты в один канал + флагнутый = быстрый бан.
+    # Все в карантине → работаем всеми (лучше рискнуть, чем обнулить).
+    try:
+        _kept = [a for a in accounts
+                 if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+        if _kept and len(_kept) != len(accounts):
+            log.info("bulk_post_to_channel op=%d: пропущено %d аккаунтов в карантине",
+                     op_id, len(accounts) - len(_kept))
+            accounts = _kept
+            total = len(accounts)
+            await _safe_execute(
+                    pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+    except Exception:
+        log_exc_swallow(log, f"bulk_post_to_channel op={op_id}: quarantine check failed")
 
     ok_list: list[str] = []
     err_list: list[str] = []
@@ -6345,6 +6384,15 @@ async def _exec_bulk_post_chans(
     if not row:
         return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
+
+    # Риск-пульс: аккаунт под недавним серьёзным ограничением — публикация с него
+    # = быстрый бан. Останавливаем ради защиты (снимется автоматически). fail-open.
+    try:
+        if await _infra_mem.is_account_quarantined(pool, acc_id):
+            return {"status": "failed", "reason": "Аккаунт под риск-пульсом (недавнее "
+                    "ограничение) — публикация остановлена для защиты от бана. Повторите позже."}
+    except Exception:
+        log_exc_swallow(log, f"bulk_post_chans op={op_id}: quarantine check failed")
 
     # Fetch channels with access_hash and username from DB
     ch_rows = await _safe_fetch(
