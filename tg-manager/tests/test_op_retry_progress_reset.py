@@ -36,6 +36,15 @@ def test_check_executor_resets_done_on_start():
     assert "total_items=$1, done_items=0" in src, "исполнитель должен обнулять done_items при старте"
 
 
+def test_stale_running_requeue_resets_done_items():
+    """Пере-подхват зависшей 'running' op (старт воркера + watchdog) тоже обязан
+    сбрасывать done_items — иначе счётчик копится поверх прошлого прогона."""
+    for fn in (op_worker._reset_stale_running, op_worker._watchdog_stale):
+        src = inspect.getsource(fn)
+        assert "status = 'pending'" in src
+        assert "done_items = 0" in src, f"{fn.__name__} должен сбрасывать done_items при requeue"
+
+
 def test_maybe_requeue_actually_issues_reset(monkeypatch):
     """Функционально: при ретраевой ошибке requeue-UPDATE реально содержит done_items=0."""
     captured = {}

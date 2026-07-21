@@ -902,8 +902,11 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
     """
     result = await _safe_execute(
             pool,
+        # done_items=0: операцию подхватит воркер заново и исполнитель прогонит её
+        # с нуля — без сброса счётчик копился бы поверх прошлого прогона (класс
+        # «done>total»/«34/17», как и в _maybe_requeue).
         """UPDATE operation_queue
-           SET status = 'pending', started_at = NULL
+           SET status = 'pending', started_at = NULL, done_items = 0
            WHERE status = 'running'""",
     )
     # asyncpg возвращает строку вида "UPDATE N"
@@ -933,8 +936,10 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
         active_ids_list = list(active_now) if active_now else None
 
         result = await pool.execute(
+            # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
+            # нуля, счётчик не должен копиться поверх прошлого (класс «done>total»).
             """UPDATE operation_queue
-                SET status = 'pending', started_at = NULL
+                SET status = 'pending', started_at = NULL, done_items = 0
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
