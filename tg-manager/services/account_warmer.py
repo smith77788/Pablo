@@ -523,6 +523,17 @@ def _is_restriction_error(etype: str, error_text: str = "") -> bool:
 # you keep issuing calls while a long flood-wait is active.
 _MAX_FLOOD_WAIT_INLINE = 1800  # 30 min
 
+# Серия подряд провалившихся действий (не классифицированных как fatal/restriction/
+# flood — таймауты, generic-ошибки, недоступные каналы). Высокая серия сама по себе
+# сигнал «что-то не так с аккаунтом» — продолжать долбить = риск. При достижении —
+# прерываем ДНЕВНОЙ прогон (план не паузим: следующий цикл повторит, вдруг транзиент).
+_WARMUP_MAX_FAIL_STREAK = 6
+
+
+def _fail_streak_abort(fail_streak: int) -> bool:
+    """True если серия провалов достигла потолка безопасности — прервать дневной прогон."""
+    return fail_streak >= _WARMUP_MAX_FAIL_STREAK
+
 
 def _actions_for_day_count(day: int, target_daily: int) -> int:
     """Ramp action volume low→medium→high so fresh accounts are never hit at max.
@@ -1169,6 +1180,7 @@ async def _run_daily_warmup_impl(
     actions_ok = 0
     actions_fail = 0
     consecutive_fails = 0
+    fail_streak = 0  # подряд провалов (сброс только на успехе) — потолок безопасности
     available_actions = _get_actions_for_day(current_day)
     resources = await _get_warmup_resources(pool, owner_id)
     own_bots = resources["bots"]
@@ -1470,9 +1482,20 @@ async def _run_daily_warmup_impl(
             if success:
                 actions_ok += 1
                 consecutive_fails = 0
+                fail_streak = 0
             else:
                 actions_fail += 1
                 consecutive_fails += 1
+                fail_streak += 1
+
+            # Потолок безопасности: длинная серия провалов (даже не-классифицированных)
+            # — сигнал, что аккаунт нездоров. Не добиваем его до конца дневного бюджета.
+            if _fail_streak_abort(fail_streak):
+                log.warning(
+                    "warmup: acc=%d — %d провалов подряд, прерываю дневной прогон",
+                    account_id, fail_streak,
+                )
+                break
 
             # Прогресс-коллбэк после каждого действия
             if update_callback is not None:
