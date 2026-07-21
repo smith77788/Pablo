@@ -719,3 +719,16 @@ KPI = дашборд, плитки = навигация, не смешивать
 Тесты: test_check_accounts_health_scope.py (3: executor id-only + fallback owner +
 submit-all). Урок: если операцию сабмитит АДМИН для чужих аккаунтов, исполнитель НЕ
 должен повторно фильтровать по owner_id сабмиттера — права уже проверены на сабмите.
+
+## tg-manager: счётчик прогресса переполнялся при ретрае (done>total, «34/17») — 2026-07-21
+Со скриншота: «Проверка 23 аккаунтов — 34/17» (done_items > total_items). Причина:
+_maybe_requeue перезапускает операцию с ТЕМ ЖЕ op_id (status='pending', retry_count++,
+started_at=NULL), но НЕ сбрасывал done_items — при повторном прогоне per-item
+инкременты (done_items=done_items+1) накапливались поверх прошлого прогона. Фикс
+(общий, для ВСЕХ прогресс-исполнителей): _maybe_requeue добавляет done_items=0 в
+requeue-UPDATE. Плюс defensive-сброс в _exec_check_accounts_health (total_items=$1,
+done_items=0 при старте — как уже сделано в _exec_niche_growth_post:7921), чтобы
+идемпотентность держалась при любом перезапуске (воркер-подхват, не только requeue).
+Тесты: test_op_retry_progress_reset.py (3). Урок: операция может пере-выполниться с тем
+же op_id (retry/подхват) — счётчики прогресса обязаны сбрасываться при старте прогона,
+а не накапливаться.

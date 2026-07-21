@@ -649,7 +649,8 @@ async def _maybe_requeue(
                 retry_count=$1,
                 last_error=$2,
                 scheduled_for=now() + make_interval(secs => $4::numeric),
-                started_at=NULL
+                started_at=NULL,
+                done_items=0
             WHERE id=$3""",
         retry_count,
         str(exc)[:300],
@@ -6672,8 +6673,11 @@ async def _exec_check_accounts_health(
         return {"status": "failed", "reason": "Нет аккаунтов для проверки"}
 
     n = len(accounts)
+    # done_items=0 при старте: операция может быть перезапущена (retry_count через
+    # _maybe_requeue или подхват воркером) с тем же op_id — без сброса счётчик
+    # накапливался поверх прошлого прогона (баг «34/17»: done>total).
     await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+            pool,"UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
 
     status_counts: dict[str, int] = {}
     deactivated = 0
