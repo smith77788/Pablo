@@ -22,7 +22,13 @@ from services import op_worker
 # ── single-account: функциональный тест раннего отказа ──────────────────────────
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Свежий loop на каждый вызов: общий loop мог быть закрыт другим async-тестом
+    # (pytest-asyncio), из-за чего get_event_loop() отдаёт закрытый loop.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 async def _fake_row(*a, **k):
