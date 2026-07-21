@@ -2140,8 +2140,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad op_id", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT id, op_type, status, label, total_items, done_items, error_msg, "
-            "created_at, finished_at, scheduled_for, (result->>'summary') AS summary "
+            "SELECT id, op_type, status, label, total_items, done_items, "
+            # error_msg честно: колонка, иначе reason из result (старые «мягкие»
+            # провалы писали reason в result, не в error_msg).
+            "COALESCE(error_msg, result->>'reason') AS error_msg, "
+            "created_at, finished_at, scheduled_for, "
+            "COALESCE(result->>'summary', result->>'reason') AS summary "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)

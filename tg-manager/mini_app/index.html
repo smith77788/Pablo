@@ -8129,7 +8129,8 @@ async function openOpDetail(opId) {
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru'):''}</div></div></div>
         ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru')}</div></div></div>`:''}
         ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru')}</div></div></div>`:''}
-        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">Ошибка</div><div class="row-val" style="color:var(--red)">${esc(o.error_msg)}</div></div></div>`:''}
+        ${(o.summary&&o.summary!==o.error_msg)?`<div class="row"><div class="row-body"><div class="row-name">Итог</div><div class="row-val" style="white-space:pre-line">${esc(o.summary)}</div></div></div>`:''}
+        ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':'Ошибка'}</div><div class="row-val" style="color:var(--red)">${esc(o.error_msg)}</div></div></div>`:''}
       </div>
     `;
     if (o.status==='running') {

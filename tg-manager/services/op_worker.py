@@ -1464,12 +1464,21 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
             except Exception as e:
                 log.warning("pacing_engine record_result failed for op %d: %s", op_id, e)
+            # Честное зеркало: при «мягком» провале (исполнитель вернул
+            # status='failed' с reason/summary, без исключения) error_msg НЕ
+            # заполнялся, а operation_status читает summary/error_msg → пользователь
+            # видел «Ошибка» без причины. Пишем error_msg из reason/summary.
+            _err_text = None
+            if _final_status == "failed":
+                _err_text = (str(result.get("reason") or result.get("summary") or "").strip()[:300]) or None
             await _safe_execute(
                 pool,
-                "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb WHERE id=$2 AND status NOT IN ('done','failed','cancelled')",
+                "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb, "
+                "error_msg=COALESCE($4, error_msg) WHERE id=$2 AND status NOT IN ('done','failed','cancelled')",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
                 _final_status,
+                _err_text,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
             # Autopost v2: рекуррентная переочередь постинг-операций в СВОИ каналы.
