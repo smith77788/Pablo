@@ -869,3 +869,15 @@ _resilient'ом в main.py (623/700), advance ПОЗИЦИОННЫЙ (steps[next
 get_due_funnel_steps (удалённый шаг = нет строки = нет краха); KPI из
 funnel_subscriptions реальные. Урок: «проверено» для чужого кода = проследить runner до
 main.py (шедулится ли вообще) + одну edge (дыры/удаление), а не только «эндпоинт есть».
+
+## tg-manager: путь 4 (каналы) — подтверждение массового поста + spintax-подсказка — 2026-07-21
+Трассировка пути 4. Массовые действия над каналами (channels_mass) роутятся честно:
+title/about/username→bulk_chan_exec, post→отдельный bulk_post_to_channel НА КАНАЛ (тот
+спинтит text_to_post → каждый канал свой вариант, анти-детект сохранён), promote→
+promote_all_admins. channel_edit_worker_op не ловит 'post' (только title/about/username)
+— мисроутинга нет. Один паритет-хвост: массовый ПОСТ в N каналов (необратимо) шёл без
+подтверждения, хотя mass_publish/invite его имеют. Добавил askConfirm только для post
+(правки метаданных обратимы — без него) + spintax-подсказку в композер и confirm. Тест
+test_channels_mass_post_confirm.py (3). Остальное пути 4 (деталь канала: публикация/пин/
+правка/ссылка/админы/удаление + график роста; действия через pollOpResult/sync) —
+глубоко и честно.

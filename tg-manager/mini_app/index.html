@@ -7496,7 +7496,7 @@ function openChMass(op) {
   if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
   CHM_OP = op;
   const cfg = {
-    post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах.`, ph:'Текст поста…'},
+    post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах. Spintax {A|B} — свой вариант на канал (меньше палева).`, ph:'Текст поста… Spintax: {Привет|Здравствуйте}!'},
     title:{t:'📛 Новое название', h:`Название изменится в ${CH_SEL.size} каналах.`, ph:'Новое название…'},
     about:{t:'✏️ Новое описание', h:`Описание изменится в ${CH_SEL.size} каналах.`, ph:'Новое описание…'},
     username:{t:'🔗 Новый username', h:'Без @. Применяется по одному каналу (username уникален).', ph:'newusername'},
@@ -7512,6 +7512,9 @@ async function submitChMass() {
   const errEl = document.getElementById('chmErr'); errEl.textContent='';
   const val = document.getElementById('chmValue').value.trim();
   if (!val) { errEl.textContent='Введите значение'; return; }
+  // Публикация в N каналов необратима → осознанное подтверждение (как mass_publish/
+  // invite). Правки метаданных (title/about/username) обратимы — без подтверждения.
+  if (CHM_OP==='post' && !await askConfirm(`Опубликовать пост в ${CH_SEL.size} каналов? После публикации отменить нельзя.\n\nСовет: каждый канал получит свой вариант, если использовать Spintax {A|B}.`)) return;
   const body = {op:CHM_OP, channel_ids:[...CH_SEL]};
   if (CHM_OP==='post') body.text = val; else body.value = val.replace(/^@/,'');
   const btn=document.getElementById('chmBtn'); btn.disabled=true; btn.textContent='Применяю…';
