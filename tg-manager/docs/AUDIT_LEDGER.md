@@ -839,3 +839,20 @@ rerollSpin из screens/spintax.js|dashboard.js) за мёртвые и я на�
 кнопок нет — оба гейта зелёные, зафиксированы на будущее. Мораль: при аудите фронта
 ВСЕГДА включай mini_app/screens/*.js, иначе ложные «мёртвые» срабатывания; и доверяй
 дубль-гейту как страховке.
+
+## tg-manager: перепроверка сессии — добитые хвосты — 2026-07-21
+Ре-аудит всей работы сессии по тем же паттернам, нашёл и добил:
+1. Счётчик «34/17» (done>total): _maybe_requeue уже чинил, но пере-подхват зависшей
+   'running' op (_reset_stale_running при старте + _watchdog_stale) requeue'ил без
+   сброса done_items → тот же баг другим путём. Добавил done_items=0 в оба.
+2. Мёртвые тумблеры настроек: notif_pay/notif_report ничего не гейтят (нет колонок в
+   notification_settings, нет читателя) — убраны, как ранее lang/utc_logs. Секция
+   «Уведомления» теперь только рабочие (ops→op_complete, error→restriction+flood).
+3. Anti-detection свип был НЕПОЛНЫЙ: _exec_niche_growth_post (Growth Agent) постит
+   promo_text в ≤5 ниш-групп — пропущенный сиблинг. Добавил spintax на группу +
+   _filter_quarantined_accounts (select_accounts учитывал flood/trust, но не единый
+   is_account_quarantined). Growth Agent и так самый безопасный (лимиты/задержки/дедуп/
+   content_safety), теперь консистентен с остальными.
+Тесты дополнены (test_op_retry_progress_reset, test_settings_notif_single_source,
+test_broadcast_spintax_sweep). Урок: свип по grep account_manager.(send_dm|post_to_
+channel) ловит ВСЕ text-сендеры — прогонять до конца, а не по первым найденным.

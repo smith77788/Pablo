@@ -8136,6 +8136,9 @@ async def _exec_niche_growth_post(
     """
     import random
     from services import niche_searcher, resource_selector, account_manager
+    # Anti-detection: свой вариант рекламного текста в каждую группу (spintax; no-op
+    # без него) — иначе один и тот же promo_text в 5 групп = сигнатура координации.
+    from services.dm_engine import expand_spintax as _expand_spintax
 
     niche: str = params.get("niche", "")
     geo: str = (params.get("geo") or "").strip()
@@ -8171,6 +8174,10 @@ async def _exec_niche_growth_post(
             "reason": "Нет активных аккаунтов",
             "summary": "❌ Нет активных аккаунтов для Growth Agent",
         }
+    # Риск-пульс: не постим с аккаунтов под недавним серьёзным ограничением
+    # (select_accounts учитывает flood/trust, но не единый is_account_quarantined).
+    # fail-open: все в карантине → работаем всеми, чтобы не сорвать операцию.
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     # Берём лучший аккаунт для поиска групп
     search_acc = accounts[0]
@@ -8320,12 +8327,13 @@ async def _exec_niche_growth_post(
                 "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
             }
 
-        # Шаг 2: Опубликовать текст
+        # Шаг 2: Опубликовать текст (свой spintax-вариант на эту группу)
         try:
+            _promo = _expand_spintax(promo_text)
             post_result = await account_manager.post_to_channel(
                 acc["session_str"],
                 grp_id,
-                promo_text,
+                _promo,
                 access_hash=access_hash,
                 username=username,
                 _acc=acc,

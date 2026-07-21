@@ -61,3 +61,12 @@ def test_bulk_post_chans_spintax_per_channel():
     i = src.index("for idx, ch")
     after = src[i:]
     assert "ch_id, _body," in after, "post_to_channel должен слать _body, а не text"
+
+
+def test_niche_growth_post_applies_spintax_and_quarantine():
+    """Growth Agent постит promo_text в НЕСКОЛЬКО ниш-групп — тот же анти-детект класс:
+    свой spintax-вариант на группу + уважение риск-пульса аккаунтов."""
+    src = _src(op_worker._exec_niche_growth_post)
+    assert "expand_spintax" in src, "Growth Agent должен спинтить promo_text"
+    assert "_promo = _expand_spintax(promo_text)" in src
+    assert "_filter_quarantined_accounts" in src, "Growth Agent должен уважать риск-пульс"
