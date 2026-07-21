@@ -363,7 +363,7 @@ def _dna_to_dict(dna: Any) -> dict:
     }
 
 
-async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
+async def _stats(pool: asyncpg.Pool, uid: int, admin: bool = False) -> dict:
     bots = await _safe_count(pool,
         "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
     channels = await _safe_count(pool,
@@ -374,8 +374,17 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
            WHERE mb.added_by=$1""", uid)
     campaigns_active = await _safe_count(pool,
         "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1 AND status='running'", uid)
-    accounts = await _safe_count(pool,
-        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=true", uid)
+    # Скоуп аккаунтов ДОЛЖЕН совпадать с экраном «Аккаунты»: там админ видит все
+    # аккаунты платформы (межтенантно), а обычный пользователь — свои. Иначе на
+    # дашборде «Аккаунтов: 0», а на экране — «25» (админ владеет 0, но видит все).
+    # Счётчик — ВСЕГО в области видимости (совпадает с крупной «25 аккаунтов»
+    # в шапке экрана), а не только активные.
+    if admin:
+        accounts = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts")
+    else:
+        accounts = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)
     ops_running = await _safe_count(pool,
         "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'", uid)
     try:
@@ -775,7 +784,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return None
         _q = {
-            "stats": _stats(pool, uid),
+            "stats": _stats(pool, uid, _is_admin(uid)),
             "plan": _plan(),
             "plan_row": pool.fetchrow(
                 "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid),
@@ -10775,14 +10784,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return []
 
+        _adm = _is_admin(uid)
         try:
-            data = await _stats(pool, uid)
+            data = await _stats(pool, uid, _adm)
             await push("stats", data)
             await push("activity", {"items": await fetch_activity()})
             await push("op_progress", {"items": await fetch_op_progress()})
             while True:
                 await asyncio.sleep(15)
-                data = await _stats(pool, uid)
+                data = await _stats(pool, uid, _adm)
                 await push("stats", data)
                 await push("activity", {"items": await fetch_activity()})
                 await push("op_progress", {"items": await fetch_op_progress()})
