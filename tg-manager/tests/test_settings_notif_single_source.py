@@ -52,3 +52,12 @@ def test_notify_gate_reads_same_table():
     from database import db
     src = inspect.getsource(db.notify_if_enabled)
     assert "get_notification_settings" in src
+
+
+def test_dead_toggles_removed_from_settings_ui():
+    # lang(en)/utc_logs ничего не делали (UI только рус, логи флаг не читают) — убраны,
+    # чтобы не было «мёртвых» настроек.
+    from pathlib import Path
+    html = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
+    assert 'id="set-lang"' not in html, "мёртвый селектор языка должен быть убран"
+    assert 'id="set-utc-logs"' not in html, "мёртвый тумблер UTC-логов должен быть убран"

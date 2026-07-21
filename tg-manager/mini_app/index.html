@@ -4172,21 +4172,6 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </label>
     </div>
 
-    <div class="sec" style="margin-top:16px">Интерфейс</div>
-    <div class="card" style="padding:14px 16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">🌐 Язык</span>
-        <select id="set-lang" style="background:var(--bg2);border:1px solid var(--sep);border-radius:8px;color:var(--text);padding:6px 10px;font-size:13px">
-          <option value="ru">Русский</option>
-          <option value="en">English</option>
-        </select>
-      </div>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
-        <span style="font-size:14px">🕐 UTC-время в логах</span>
-        <input type="checkbox" id="set-utc-logs" style="width:18px;height:18px;accent-color:var(--accent)">
-      </label>
-    </div>
-
     <div class="sec" style="margin-top:16px">Безопасность</div>
     <div class="card" style="padding:14px 16px">
       <div style="padding:8px 0;border-bottom:1px solid var(--sep)">
@@ -15654,9 +15639,6 @@ async function openSettings() {
   setChk('set-notif-pay', s.notif_pay, true);
   setChk('set-notif-report', s.notif_report, false);
   setChk('set-notif-error', s.notif_error, true);
-  setChk('set-utc-logs', s.utc_logs, false);
-  const langEl = document.getElementById('set-lang');
-  if (langEl) langEl.value = s.lang || 'ru';
   const ppEl = document.getElementById('set-proxy-policy');
   if (ppEl) ppEl.value = s.proxy_policy || 'allow_direct';
   txt('set-save-msg','');
@@ -15675,8 +15657,6 @@ async function saveSettings() {
     notif_pay: document.getElementById('set-notif-pay')?.checked ?? true,
     notif_report: document.getElementById('set-notif-report')?.checked ?? false,
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
-    utc_logs: document.getElementById('set-utc-logs')?.checked ?? false,
-    lang: document.getElementById('set-lang')?.value || 'ru',
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };
   _saveLocalSettings(s);
