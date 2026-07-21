@@ -2117,14 +2117,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if status_filter:
             rows = await _safe_fetch(pool,
                 f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at,
+                          COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
+                          oq.created_at, oq.started_at, oq.finished_at,
                           oq.scheduled_for, {_err_sub}
                    FROM operation_queue oq WHERE oq.owner_id=$1 AND oq.status=$2
                    ORDER BY oq.created_at DESC LIMIT 30""", uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
                 f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          oq.error_msg, oq.created_at, oq.started_at, oq.finished_at,
+                          COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
+                          oq.created_at, oq.started_at, oq.finished_at,
                           oq.scheduled_for, {_err_sub}
                    FROM operation_queue oq WHERE oq.owner_id=$1
                    ORDER BY oq.created_at DESC LIMIT 30""", uid)
