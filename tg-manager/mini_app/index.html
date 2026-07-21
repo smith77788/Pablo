@@ -4158,16 +4158,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <span style="font-size:14px">🔔 Уведомления об операциях</span>
         <input type="checkbox" id="set-notif-ops" style="width:18px;height:18px;accent-color:var(--accent)">
       </label>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">💳 Уведомления об оплате</span>
-        <input type="checkbox" id="set-notif-pay" style="width:18px;height:18px;accent-color:var(--accent)">
-      </label>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">📊 Еженедельные отчёты</span>
-        <input type="checkbox" id="set-notif-report" style="width:18px;height:18px;accent-color:var(--accent)">
-      </label>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
-        <span style="font-size:14px">⚠️ Критические ошибки</span>
+        <span style="font-size:14px">⚠️ Критические ошибки (флуд/ограничения)</span>
         <input type="checkbox" id="set-notif-error" style="width:18px;height:18px;accent-color:var(--accent)" checked>
       </label>
     </div>
@@ -15649,8 +15641,6 @@ async function openSettings() {
     if (el) el.checked = (val !== undefined ? val : def);
   };
   setChk('set-notif-ops', s.notif_ops, true);
-  setChk('set-notif-pay', s.notif_pay, true);
-  setChk('set-notif-report', s.notif_report, false);
   setChk('set-notif-error', s.notif_error, true);
   const ppEl = document.getElementById('set-proxy-policy');
   if (ppEl) ppEl.value = s.proxy_policy || 'allow_direct';
@@ -15667,8 +15657,6 @@ async function openSettings() {
 async function saveSettings() {
   const s = {
     notif_ops: document.getElementById('set-notif-ops')?.checked ?? true,
-    notif_pay: document.getElementById('set-notif-pay')?.checked ?? true,
-    notif_report: document.getElementById('set-notif-report')?.checked ?? false,
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };

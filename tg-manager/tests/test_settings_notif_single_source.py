@@ -61,3 +61,7 @@ def test_dead_toggles_removed_from_settings_ui():
     html = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
     assert 'id="set-lang"' not in html, "мёртвый селектор языка должен быть убран"
     assert 'id="set-utc-logs"' not in html, "мёртвый тумблер UTC-логов должен быть убран"
+    # notif_pay/notif_report ничего не гейтят (нет колонок в notification_settings,
+    # нет кода-читателя) — тоже убраны; остаются только рабочие ops/error.
+    assert 'id="set-notif-pay"' not in html, "мёртвый тумблер оплаты должен быть убран"
+    assert 'id="set-notif-report"' not in html, "мёртвый тумблер отчётов должен быть убран"
