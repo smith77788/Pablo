@@ -785,8 +785,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return await _gp(pool, uid)
             except Exception:
                 return None
+        _adm = _is_admin(uid)
+        # Здоровье аккаунтов на дашборде должно совпадать по скоупу со счётчиком
+        # аккаунтов и экраном «Аккаунты»: админ — по всей платформе, иначе показывал
+        # бы «100%» при 0 своих аккаунтов (25 чужих разного здоровья не учитывались).
+        _health_sql = (
+            """SELECT ROUND(AVG(
+                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
+                         ELSE COALESCE(trust_score, 1.0)
+                    END
+                ) * 100) FROM tg_accounts WHERE is_active=true"""
+            if _adm else
+            """SELECT ROUND(AVG(
+                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
+                         ELSE COALESCE(trust_score, 1.0)
+                    END
+                ) * 100) FROM tg_accounts WHERE owner_id=$1 AND is_active=true"""
+        )
+        _health_args = () if _adm else (uid,)
         _q = {
-            "stats": _stats(pool, uid, _is_admin(uid)),
+            "stats": _stats(pool, uid, _adm),
             "plan": _plan(),
             "plan_row": pool.fetchrow(
                 "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid),
@@ -798,12 +816,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           done_items, total_items, error_msg
                    FROM operation_queue WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 10""", uid),
-            "acc_health": pool.fetchval(
-                """SELECT ROUND(AVG(
-                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
-                         ELSE COALESCE(trust_score, 1.0)
-                    END
-                ) * 100) FROM tg_accounts WHERE owner_id=$1 AND is_active=true""", uid),
+            "acc_health": pool.fetchval(_health_sql, *_health_args),
             "queue_backlog": pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'", uid),
             "ops_failed": pool.fetchval(

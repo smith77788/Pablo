@@ -9,6 +9,7 @@ _stats дашборда всегда owner-scoped (админ владеет 0 �
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from services import mini_app_api
 
@@ -60,3 +61,18 @@ def test_counts_total_not_only_active():
     pool = FakePool()
     _run(mini_app_api._stats(pool, uid=1, admin=True))
     assert "is_active" not in pool.acc_sql, pool.acc_sql
+
+
+def test_dashboard_acc_health_admin_aware():
+    """Здоровье аккаунтов на дашборде тоже admin-aware: для админа — по всей
+    платформе (без owner_id), иначе показывал бы 100% при 0 своих аккаунтов."""
+    import re
+    src = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    m = re.search(r"async def dashboard\(request.*?_res = await asyncio\.gather", src, re.DOTALL)
+    assert m, "dashboard не найден"
+    body = m.group(0)
+    # есть admin-ветка запроса здоровья без owner_id
+    assert "_health_sql" in body
+    assert "_adm else" in body
+    # admin-вариант считает по всей платформе (WHERE is_active=true без owner_id)
+    assert re.search(r"FROM tg_accounts WHERE is_active=true", body), "нет платформенного варианта здоровья"
