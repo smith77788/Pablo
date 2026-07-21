@@ -12564,7 +12564,8 @@ async function openDmCampaigns() {
           <div class="row-val">${DM_STATUS[c.status]||c.status} · ${c.sent_count||0}/${c.total_targets||0} отправлено</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
-          ${c.status==='draft'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="launchDm(${c.id})">▶</button>`:''}
+          ${c.status==='draft'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Запустить" onclick="launchDm(${c.id},'draft')">▶</button>`:''}
+          ${c.status==='paused'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Возобновить (продолжит с места остановки)" onclick="launchDm(${c.id},'paused')">▶ Возобновить</button>`:''}
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id})">🗑</button>
         </div>
       </div>
@@ -12574,11 +12575,14 @@ async function openDmCampaigns() {
     txt('dmList', empty('⚠️','Ошибка',e.message));
   }
 }
-async function launchDm(id) {
-  if (!await askConfirm('Запустить кампанию?')) return;
+async function launchDm(id, status) {
+  const resuming = status==='paused';
+  // Возобновление безопасно: dm_engine пропускает уже обработанных получателей
+  // (dm_campaign_log), поэтому повторной рассылки тем же людям не будет.
+  if (!await askConfirm(resuming ? 'Возобновить кампанию? Продолжит с места остановки (уже отправленным повторно не пойдёт).' : 'Запустить кампанию?')) return;
   try {
     await api(`/api/miniapp/dm_campaign/${id}/launch`,{method:'POST'});
-    toast('▶️ Кампания запущена');
+    toast(resuming ? '▶️ Кампания возобновлена' : '▶️ Кампания запущена');
     openDmCampaigns();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
