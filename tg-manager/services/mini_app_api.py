@@ -10199,6 +10199,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("narrative_campaign_detail uid=%d cid=%d", uid, cid)
             return _err(str(exc), 500)
 
+    async def narrative_campaign_pause(request: web.Request) -> web.Response:
+        """Пауза нарратив-кампании (движок умел, но UI/роут не выводили)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            cid = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            from services import narrative_engine
+            ok = await narrative_engine.pause_campaign(pool, cid, uid)
+            if not ok:
+                return _err("Кампанию нельзя приостановить (не найдена/не активна)", 404)
+            return _json_resp({"ok": True, "status": "paused"})
+        except Exception as exc:
+            log.exception("narrative_campaign_pause uid=%d cid=%d", uid, cid)
+            return _err(str(exc), 500)
+
+    async def narrative_campaign_resume(request: web.Request) -> web.Response:
+        """Возобновить приостановленную нарратив-кампанию."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            cid = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            from services import narrative_engine
+            ok = await narrative_engine.resume_campaign(pool, cid, uid)
+            if not ok:
+                return _err("Кампанию нельзя возобновить (не найдена/не на паузе)", 404)
+            return _json_resp({"ok": True, "status": "active"})
+        except Exception as exc:
+            log.exception("narrative_campaign_resume uid=%d cid=%d", uid, cid)
+            return _err(str(exc), 500)
+
     async def narrative_campaign_create(request: web.Request) -> web.Response:
         """Создаёт и сразу запускает кампанию (как мастер в боте) — а не пустой
         черновик: без выбранных каналов посты некому публиковать, и раньше
@@ -11256,6 +11294,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)
     app.router.add_post("/api/miniapp/narrative", narrative_campaign_create)
     app.router.add_get("/api/miniapp/narrative/{campaign_id}", narrative_campaign_detail)
+    app.router.add_post("/api/miniapp/narrative/{campaign_id}/pause", narrative_campaign_pause)
+    app.router.add_post("/api/miniapp/narrative/{campaign_id}/resume", narrative_campaign_resume)
     # Spintax
     app.router.add_post("/api/miniapp/spintax/generate", spintax_generate)
     app.router.add_post("/api/miniapp/spintax/expand", spintax_expand)

@@ -14916,6 +14916,11 @@ async function openNarrativeDetail(cid, topic) {
         <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${c.posts_published||0}/${c.posts_total||0} постов</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Послание</div><div class="row-val">${esc(c.core_message)}</div></div></div>
       </div>
+      ${(c.status==='active'||c.status==='running'||c.status==='paused')?`<div class="actions" style="padding:8px 16px 0">
+        ${c.status==='paused'
+          ? `<button class="btn btn-g" onclick="resumeNarrative(${c.id})">▶ Возобновить</button>`
+          : `<button class="btn btn-o" onclick="pauseNarrative(${c.id})">⏸ Пауза</button>`}
+      </div>`:''}
       <div class="sec" style="margin-top:8px">Посты (${posts.length})</div>
     `;
     if (!posts.length) {
@@ -14938,6 +14943,21 @@ async function openNarrativeDetail(cid, topic) {
     }
     txt('narr-body', html);
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',e.message)); }
+}
+
+async function pauseNarrative(cid) {
+  try {
+    await api(`/api/miniapp/narrative/${cid}/pause`, {method:'POST'});
+    toast('⏸ Кампания приостановлена');
+    openNarrativeDetail(cid, document.getElementById('narr-name')?.textContent);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+async function resumeNarrative(cid) {
+  try {
+    await api(`/api/miniapp/narrative/${cid}/resume`, {method:'POST'});
+    toast('▶ Кампания возобновлена');
+    openNarrativeDetail(cid, document.getElementById('narr-name')?.textContent);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 let NC_CHANNELS_SELECTED = new Set();
