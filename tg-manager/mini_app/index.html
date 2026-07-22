@@ -8914,9 +8914,10 @@ function openSchModal() {
   document.getElementById('schErr').style.display='none';
   document.getElementById('schBtn').disabled=false;
   document.getElementById('schBtn').textContent='⏰ Запланировать';
-  // Default: tomorrow 10:00 UTC
-  const d = new Date(); d.setUTCDate(d.getUTCDate()+1); d.setUTCHours(10,0,0,0);
-  document.getElementById('schDate').value = d.toISOString().slice(0,16);
+  // Default: завтра 10:00 ЛОКАЛЬНОГО времени (поле datetime-local показывает локальное;
+  // submit конвертирует local→UTC). Раньше подставлялось UTC → рассинхрон с submit.
+  const d = new Date(); d.setDate(d.getDate()+1); d.setHours(10,0,0,0);
+  document.getElementById('schDate').value = toLocalInput(d);
   document.getElementById('schMbg').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
 }
@@ -8929,7 +8930,7 @@ async function saveSchedule() {
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
   if (!dateVal) { errEl.textContent='Выберите дату'; errEl.style.display='block'; return; }
-  const dt = new Date(dateVal+'Z');
+  const dt = new Date(dateVal);  // datetime-local — ЛОКАЛЬНОЕ время (без +'Z')
   if (isNaN(dt.getTime()) || dt < new Date()) { errEl.textContent='Дата должна быть в будущем'; errEl.style.display='block'; return; }
   const btn = document.getElementById('schBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
@@ -15057,6 +15058,9 @@ async function toggleSelfPromo(id,btn) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); btn.disabled=false; }
 }
 async function launchSelfPromo(id,btn) {
+  // Массовая рассылка подписчикам ботов → осознанное подтверждение (паритет с
+  // остальными blast-операциями).
+  if (!await askConfirm('Запустить self-promo рассылку по подписчикам ваших ботов?')) return;
   btn.disabled=true; btn.textContent='...';
   try {
     await api(`/api/miniapp/self_promo/${id}/launch`,{method:'POST'});
@@ -15569,6 +15573,16 @@ function esc(s) {
 function progFrac(o) {
   const t=o.total_items||0, d=o.done_items||0;
   return num(t>0?Math.min(d,t):d)+'/'+num(t);
+}
+// Таймзона: значение <input datetime-local> (ЛОКАЛЬНОЕ настенное время) → UTC ISO
+// для бэка (он парсит fromisoformat с заменой Z). new Date(local) трактует строку как
+// локальную — верно; new Date(local+'Z') трактовал бы как UTC (сдвиг на оффсет — баг).
+function localToUtcIso(v) { return v ? new Date(v).toISOString() : null; }
+// Date → значение для <input datetime-local> в ЛОКАЛЬНОМ времени (не toISOString,
+// который вернул бы UTC и поле показало бы чужое время).
+function toLocalInput(d) {
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
 }
 function ago(ts) {
   if (!ts) return '';
