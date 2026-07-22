@@ -7845,6 +7845,10 @@ async def _exec_mass_report(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
+    # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
+    accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+
     ok_count, fail_count = 0, 0
     total = len(accounts)
 
@@ -7887,6 +7891,7 @@ async def _exec_mass_report(
         f"🚨 Жалобы на {target} [{reason_label}]\n"
         f"✅ Отправлено: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        + (f"\n🛡 Пропущено (риск-пульс): {_skipped_quar}" if _skipped_quar else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
 

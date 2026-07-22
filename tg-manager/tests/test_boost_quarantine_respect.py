@@ -61,3 +61,10 @@ def test_boost_action_verbs_use_quarantine_gate():
         src = inspect.getsource(fn)
         assert "_filter_quarantined_accounts" in src, f"{fn.__name__} без quarantine-гейта"
         assert "риск-пульс" in src, f"{fn.__name__} должен честно показывать пропуск"
+
+
+def test_mass_report_respects_quarantine():
+    # жалоба с флагнутого аккаунта = быстрый бан → mass_report тоже уважает риск-пульс
+    src = inspect.getsource(op_worker._exec_mass_report)
+    assert "_filter_quarantined_accounts" in src, "mass_report должен уважать риск-пульс"
+    assert "риск-пульс" in src, "должен честно показывать пропуск"
