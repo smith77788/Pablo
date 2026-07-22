@@ -8017,6 +8017,8 @@ async def _exec_ai_comment(
         pool, owner_id, action_type="comment", respect_cooldown=True)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+    # Риск-пульс: коммент в канал с флагнутого аккаунта = быстрый бан (fail-open).
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     accounts = accounts[:acc_count]
 
     channels = channels[:50]  # потолок против гигантских прогонов
@@ -8891,6 +8893,9 @@ async def _exec_report_peer(
 
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для репортинга"}
+
+    # Риск-пульс: репорт с флагнутого аккаунта = быстрый бан этого аккаунта (fail-open).
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     ok_count = 0
     fail_count = 0

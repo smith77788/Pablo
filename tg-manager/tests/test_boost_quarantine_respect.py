@@ -68,3 +68,10 @@ def test_mass_report_respects_quarantine():
     src = inspect.getsource(op_worker._exec_mass_report)
     assert "_filter_quarantined_accounts" in src, "mass_report должен уважать риск-пульс"
     assert "риск-пульс" in src, "должен честно показывать пропуск"
+
+
+def test_report_peer_and_ai_comment_respect_quarantine():
+    # репорт и коммент в канал — аккаунт-действия → уважают риск-пульс
+    for fn in (op_worker._exec_report_peer, op_worker._exec_ai_comment):
+        src = inspect.getsource(fn)
+        assert "_filter_quarantined_accounts" in src, f"{fn.__name__} без quarantine-гейта"
