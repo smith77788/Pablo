@@ -107,22 +107,29 @@ _SKIP_ERRORS = {
     "InputUserDeactivated",
 }
 _FLOOD_ERRORS = {"FloodWaitError", "FloodWait"}
+# PER-TARGET блокировки: конкретный юзер заблокировал/запретил запись. Аккаунт
+# при этом ЗДОРОВ — такую ошибку нельзя трактовать как «убрать аккаунт».
 _BLOCKED_ERRORS = {
     "UserBlockedBan",
     "YouBlockedUser",
-    "PeerFloodError",
     "ChatWriteForbidden",
     "UserBannedInChannel",
 }
+# ACCOUNT-LEVEL флаг: аккаунт помечен Telegram за спам пользователям ВООБЩЕ.
+# Отделён от per-target: PeerFlood должен убрать аккаунт из ротации И поставить
+# длинный cooldown (иначе следующая операция сразу добьёт флагнутый аккаунт).
+_PEER_FLOOD_ERRORS = {"PeerFloodError"}
 
 
 def _classify_error(exc: Exception) -> str:
-    """Возвращает 'flood' | 'blocked' | 'skip' | 'auth' | 'retry'."""
+    """Возвращает 'flood' | 'peer_flood' | 'blocked' | 'skip' | 'auth' | 'retry'."""
     name = type(exc).__name__
     exc_str = str(exc)
     if name in _FLOOD_ERRORS or "FLOOD_WAIT" in exc_str.upper():
         return "flood"
-    if name in _BLOCKED_ERRORS or "PEER_FLOOD" in exc_str:
+    if name in _PEER_FLOOD_ERRORS or "PEER_FLOOD" in exc_str:
+        return "peer_flood"
+    if name in _BLOCKED_ERRORS:
         return "blocked"
     if name in _SKIP_ERRORS:
         return "skip"
@@ -208,6 +215,7 @@ _DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
 }
 _DEFAULT_DELAY_RANGE: tuple[float, float] = (45.0, 110.0)
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
+_PEER_FLOOD_COOLDOWN = 48 * 3600  # PeerFlood — аккаунт-флаг: длинный cooldown (48ч)
 
 
 async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
@@ -601,9 +609,11 @@ async def run_campaign(
                 acc["id"], "dm_campaign", False, "flood_wait"
             )
             continue
-        elif status in ("blocked", "auth"):
-            # Аккаунт заблокирован/невалиден — считать текущую попытку ошибкой
-            log.warning("dm_engine: acc %d status %s, skipping", acc["id"], status)
+        elif status in ("blocked", "peer_flood", "auth"):
+            # Цель в любом случае не доставлена — фиксируем как failed.
+            log.warning(
+                "dm_engine: acc %d target %d status %s", acc["id"], user_id, status
+            )
             failed += 1
             await pool.execute(
                 "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
@@ -621,12 +631,36 @@ async def run_campaign(
             infra_memory.record_account_op(
                 acc["id"], "dm_campaign", False, result.get("error", "")
             )
-            acc_cycle = [a for a in acc_cycle if a["id"] != acc["id"]]
-            if not acc_cycle:
-                log.error(
-                    "dm_engine: no more accounts for campaign %d, stopping", campaign_id
-                )
-                break  # Оставшиеся цели будут учтены после цикла
+
+            if status == "blocked":
+                # PER-TARGET (юзер заблокировал/запретил запись) — аккаунт ЗДОРОВ.
+                # НЕ убираем его из ротации: раньше один недружелюбный таргет
+                # выкидывал здоровый аккаунт из всей кампании. Идём дальше тем же пулом.
+                pass
+            else:
+                # auth (сессия мертва) или peer_flood (аккаунт флагнут за спам) —
+                # account-level: убираем аккаунт из ротации кампании.
+                if status == "peer_flood":
+                    # Длинный cooldown, чтобы СЛЕДУЮЩАЯ операция не добила флагнутый
+                    # аккаунт (per-campaign удаления мало — флаг живёт на аккаунте).
+                    try:
+                        await pool.execute(
+                            "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
+                            "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
+                            "WHERE id=$2",
+                            _PEER_FLOOD_COOLDOWN,
+                            acc["id"],
+                        )
+                    except Exception:
+                        log_exc_swallow(
+                            log, "dm_engine: peer_flood cooldown failed acc=%d", acc["id"]
+                        )
+                acc_cycle = [a for a in acc_cycle if a["id"] != acc["id"]]
+                if not acc_cycle:
+                    log.error(
+                        "dm_engine: no more accounts for campaign %d, stopping", campaign_id
+                    )
+                    break  # Оставшиеся цели будут учтены после цикла
         elif status == "skip":
             # Пользователь заблокировал бота или деактивирован — не ошибка, пропускаем тихо
             log.debug(
