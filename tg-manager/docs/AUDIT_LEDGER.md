@@ -1036,6 +1036,18 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 деталей пользователю закрыто. Новые классы в СВОД: (11) сырой 500 наружу; (12)
 застрявшая крутилка = тупик без повтора.
 
+## tg-manager: Strike (самая баноопасная операция) не уважал риск-пульс — 2026-07-23
+Проверено: ban-safety `_exec_strike` (queued Strike) — свип класса 7 на action-verb'ы
+помимо send_dm/post_to_channel (жалоба = аккаунт-действие).
+Найдено: `_exec_strike` фильтровал `preflight_accounts` (cooldown/flood) + warmup-guard,
+но НЕ `is_account_quarantined`. Критическое restriction-событие с истёкшим cooldown
+проходило фильтр → жалоба с флагнутого аккаунта = быстрый хард-бан. При этом СЕСТРИНСКАЯ
+функция `mass_report` (strike_engine:3801) такой гейт уже имела — рассинхрон путей.
+Исправлено: общий `_filter_quarantined_accounts` (fail-open) между preflight и plan_waves.
+Регресс `tests/test_strike_quarantine_respect.py` (2, падают без фикса).
+Урок: гейт риск-пульса нужен и на action-verb операциях (репорт/жалоба), не только на
+текст-сендерах; проверять ОБА пути, если у операции есть queued- и engine-варианты.
+
 ## tg-manager: класс 7 — свип op_worker закрыт (все post_to_channel/send_dm) — 2026-07-23
 Проверено: каждый `account_manager.(post_to_channel|send_dm)` внутри op_worker.
 Все массовые исходящие сендеры через фикс/множество аккаунтов имеют парность
