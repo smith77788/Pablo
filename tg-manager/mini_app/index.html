@@ -7747,7 +7747,7 @@ function renderCmps(items) {
   if (!items.length) { el.innerHTML=empty('📨','Нет DM-кампаний','Аудитория + текст со spintax → рассылка в личные сообщения',{label:'➕ Создать кампанию',fn:'openCmpModal()'}); return; }
   el.innerHTML = items.map(c=>{
     const [bc,bl]=stb(c.status);
-    return `<div class="li" style="cursor:default">
+    return `<div class="li tap" onclick="openDmCampaigns()">
       <div class="ava ava-orange">📨</div>
       <div class="li-body"><div class="li-name">${esc(c.name||'Кампания')}</div><div class="li-sub">✓ ${num(c.sent_count||0)} · ✕ ${num(c.failed_count||0)}</div></div>
       <span class="badge ${bc}">${bl}</span>
