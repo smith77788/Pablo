@@ -7954,6 +7954,11 @@ async def _exec_content_clone(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД клонированием —
+    # действие с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий
+    # гейт, fail-open (все в карантине → не обнуляем op, берём исходный список).
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+
     acc = dict(accounts[0])
 
     # Если msg_ids не переданы — получаем последние msg_count сообщений

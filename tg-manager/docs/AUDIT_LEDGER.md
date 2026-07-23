@@ -87,10 +87,9 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
-## СВИП #7 — quarantine-гейт на контент-движках-аккаунт-сендерах — 2026-07-20 — content_mesh закрыт, ещё 3 движка на проверке
-Проверено: свип #7 (аккаунт-текст-сендеры через Telethon) по контент-движкам: `content_mesh`, `brand_injection`, `ai_comment_engine`, `content_cloner_engine` — `grep is_account_quarantined` = 0 во всех.
-Найдено: `content_mesh._process_delivery` (ЗАПУЩЕН в main.py:697) репостит через `client.send_message`, отсеивая аккаунт только по acc_status (banned/deactivated/session_expired), но НЕ по единому пульсу здоровья (флуд/cooldown/недавнее ограничение) → мог репостить флагнутым аккаунтом (эскалация).
-Исправлено: content_mesh — да. Гейт `is_account_quarantined` ПЕРЕД `_make_client`; при карантине доставка откладывается (`scheduled_at +15м`, не error — аккаунт восстановится), fail-open. Регресс `tests/test_content_mesh_quarantine.py` (2, падает без фикса). ОТКРЫТО (следующие циклы): `brand_injection`/`ai_comment_engine`/`content_cloner_engine` — проверить wired-статус и добавить тот же гейт, если шлют через аккаунт по расписанию.
+## СВИП #7 — quarantine-гейт на контент-движках-аккаунт-сендерах — 2026-07-20 — ЗАКРЫТ
+Проверено: свип #7 (аккаунт-текст-сендеры через Telethon) по контент-движкам: `content_mesh`, `brand_injection`, `ai_comment_engine`, `content_cloner_engine`.
+Найдено/исправлено (все ветки свипа): (1) `content_mesh._process_delivery` (loop в main.py:697) репостил через `client.send_message`, отсеивая аккаунт только по acc_status — БЕЗ единого пульса → фикс: гейт `is_account_quarantined` перед `_make_client`, при карантине доставка откладывается (`scheduled_at +15м`), fail-open; тест `test_content_mesh_quarantine.py`. (2) `_exec_content_clone` (op_worker) выбирал `acc=accounts[0]` только по is_active, БЕЗ гейта → фикс: общий `_filter_quarantined_accounts` перед выбором аккаунта; тест `test_content_clone_quarantine.py`. (3) `ai_comment` executor — УЖЕ гейтит через `_filter_quarantined_accounts` (чисто). (4) `brand_injection` — bot-side утилиты (add_promo/post_welcome_and_pin), не аккаунт-масс-сендер по реальным целям — вне свипа. Свип #7 по контент-движкам закрыт.
 
 ## МОДУЛЬ Массовый инвайт — длинный FloodWait + PeerFlood без cooldown — 2026-07-20 — не инвайтить во время флуда, флагнутому — cooldown
 Проверено: ban-safety `mass_inviter_engine.invite_batch/invite_by_phones` + `op_worker._exec_mass_invite` (самая баноопасная операция).
