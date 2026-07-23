@@ -5385,10 +5385,27 @@ async function api(path, opts={}) {
                    : r.status===403 ? 'Нет доступа'
                    : r.status===404 ? 'Не найдено'
                    : `Ошибка сервера (${r.status})`;
+    // 500 = внутренняя ошибка: пользователю НЕ показываем сырой текст исключения
+    // (нечитаемо и потенциальная утечка); деталь остаётся в серверных логах.
+    if (r.status === 500) msg = 'Внутренняя ошибка сервиса — попробуйте позже';
     throw new Error(msg);
   }
   try { return await r.json(); } catch(_) { throw new Error('Ответ сервера не является JSON'); }
 }
+
+// Глобальная сеть безопасности: любая НЕпойманная ошибка (баг рендера, отвалившийся
+// промис) не должна молча замораживать экран — показываем понятный тост, деталь в
+// консоль. Гарантирует, что сценарий всегда доходит до видимого результата.
+window.addEventListener('unhandledrejection', function(ev){
+  try {
+    console.error('unhandledrejection:', ev && ev.reason);
+    const m = (ev && ev.reason && ev.reason.message) ? String(ev.reason.message) : '';
+    toast('⚠️ ' + (m && m.length>0 && m.length<120 ? m : 'Что-то пошло не так — попробуйте ещё раз'));
+  } catch(_) {}
+});
+window.addEventListener('error', function(ev){
+  try { console.error('window error:', (ev && (ev.error||ev.message))); } catch(_) {}
+});
 
 // ── SSE ────────────────────────────────────────────────
 let _sseRetry = 0;
