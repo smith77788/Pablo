@@ -4828,6 +4828,19 @@ async def _exec_strike(
             "summary": "⚠️ Strike: все аккаунты на прогреве или в cooldown",
         }
 
+    # ── Anti-detection (класс 7): риск-пульс ──────────────────────────────────
+    # Strike — самая баноопасная операция (жалоба через реальный аккаунт). Бить с
+    # аккаунта под недавним СЕРЬЁЗНЫМ ограничением (restriction_events) = быстрый
+    # хард-бан. preflight выше ловит cooldown/flood, но НЕ критические restriction-
+    # события с истёкшим cooldown. Общий гейт fail-open: все в карантине → НЕ
+    # обнуляем (лучше рискнуть, чем no-op). Тот же гейт, что уже в mass_report.
+    viable, _quar_skipped = await _filter_quarantined_accounts(pool, op_id, viable)
+    if _quar_skipped:
+        log.info(
+            "_exec_strike op=%d: пропущено %d аккаунтов под риск-пульсом",
+            op_id, _quar_skipped,
+        )
+
     # ── Волны ─────────────────────────────────────────────────────────────────
     waves = plan_waves(viable, num_waves=num_waves)
 
