@@ -250,12 +250,13 @@ def _fire_db_flag(acc_ids: list[int], value: bool) -> None:
     if not _db_pool or not acc_ids:
         return
     try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_do_db_flag(acc_ids, value))
-    except RuntimeError:
-        pass  # No running loop (called from sync context) — skip DB update
+        # spawn держит strong-ссылку (класс 14): иначе GC мог бы собрать апдейт
+        # флага in_operation до записи → рассинхрон изоляции/координации аккаунтов.
+        # Нет running loop (sync-контекст) → spawn вернёт None, флаг просто пропущен.
+        from services.bg_tasks import spawn
+        spawn(_do_db_flag(acc_ids, value))
     except Exception as e:
-        log.warning("op_worker: _fire_db_flag create_task failed: %s", e)
+        log.warning("op_worker: _fire_db_flag spawn failed: %s", e)
 
 
 async def _do_db_flag(acc_ids: list[int], value: bool) -> None:

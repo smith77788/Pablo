@@ -150,9 +150,12 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     pool, row["sub_id"], next_step, row["total_steps"], next_delay,
                     funnel_id=row["funnel_id"],
                 )
-                # Record conversion when funnel completes
+                # Record conversion when funnel completes.
+                # spawn держит ссылку (класс 14): несохранённый create_task мог быть
+                # собран GC до записи → недосчёт конверсий воронки (нечестная аналитика).
                 if is_last:
-                    asyncio.create_task(
+                    from services.bg_tasks import spawn
+                    spawn(
                         _record_funnel_conversion(
                             pool,
                             row["bot_id"],
