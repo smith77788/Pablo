@@ -87,6 +87,11 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## СВИП #7 — quarantine-гейт на контент-движках-аккаунт-сендерах — 2026-07-20 — content_mesh закрыт, ещё 3 движка на проверке
+Проверено: свип #7 (аккаунт-текст-сендеры через Telethon) по контент-движкам: `content_mesh`, `brand_injection`, `ai_comment_engine`, `content_cloner_engine` — `grep is_account_quarantined` = 0 во всех.
+Найдено: `content_mesh._process_delivery` (ЗАПУЩЕН в main.py:697) репостит через `client.send_message`, отсеивая аккаунт только по acc_status (banned/deactivated/session_expired), но НЕ по единому пульсу здоровья (флуд/cooldown/недавнее ограничение) → мог репостить флагнутым аккаунтом (эскалация).
+Исправлено: content_mesh — да. Гейт `is_account_quarantined` ПЕРЕД `_make_client`; при карантине доставка откладывается (`scheduled_at +15м`, не error — аккаунт восстановится), fail-open. Регресс `tests/test_content_mesh_quarantine.py` (2, падает без фикса). ОТКРЫТО (следующие циклы): `brand_injection`/`ai_comment_engine`/`content_cloner_engine` — проверить wired-статус и добавить тот же гейт, если шлют через аккаунт по расписанию.
+
 ## МОДУЛЬ Массовый инвайт — длинный FloodWait + PeerFlood без cooldown — 2026-07-20 — не инвайтить во время флуда, флагнутому — cooldown
 Проверено: ban-safety `mass_inviter_engine.invite_batch/invite_by_phones` + `op_worker._exec_mass_invite` (самая баноопасная операция).
 Найдено: (1) invite_batch на FloodWait спал `min(seconds,60)` и ПРОДОЛЖАЛ инвайтить — при длинном флуде это запросы во время активного flood-wait = эскалация (тот же класс, что warmer уже лечит). Длинный флуд не сигналился наверх. (2) `_exec_mass_invite` на `peer_flood` делал `break` (переключал аккаунт), но БЕЗ cooldown → следующая операция сразу добивала флагнутый аккаунт (класс DM-фикса).

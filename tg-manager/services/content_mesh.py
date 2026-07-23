@@ -160,6 +160,26 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
         await pool.execute("UPDATE mesh_queue SET status='error', error_msg='no_session' WHERE id=$1", item["id"])
         return
 
+    # Anti-detection (#7): не репостим через аккаунт в карантине (недавний
+    # флуд/блок/ограничение). acc_status выше ловит только banned/deactivated —
+    # единый пульс здоровья ловит ещё и флуд/cooldown. Откладываем доставку
+    # (не error: аккаунт восстановится), fail-open — сбой сигнала не блокирует.
+    try:
+        from services.infra_memory import is_account_quarantined
+
+        if await is_account_quarantined(pool, account_id):
+            await pool.execute(
+                "UPDATE mesh_queue SET scheduled_at = NOW() + INTERVAL '15 minutes' WHERE id=$1",
+                item["id"],
+            )
+            log.info(
+                "content_mesh: acc %d в карантине — доставка item %d отложена на 15м",
+                account_id, item["id"],
+            )
+            return
+    except Exception as _qe:
+        log.debug("content_mesh: quarantine check failed (fail-open): %s", _qe)
+
     try:
         client = _make_client(session, dict(acc))
         async with client:
