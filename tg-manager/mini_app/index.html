@@ -7758,7 +7758,7 @@ function renderCmps(items) {
 function renderFuns(items) {
   const el = document.getElementById('funList');
   if (!items.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
-  el.innerHTML = items.map(f=>`<div class="li" style="cursor:default">
+  el.innerHTML = items.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc((f.name||'Воронка').replace(/'/g,''))}')">
     <div class="ava ava-orange">🔄</div>
     <div class="li-body">
       <div class="li-name">${esc(f.name||'Воронка')}</div>
