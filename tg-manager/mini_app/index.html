@@ -7026,7 +7026,12 @@ async function loadMoreAccounts() {
     ACC_OFFSET += more.length;
     renderAccounts(CUR_ACCS);
     renderLoadMore(ad.page);
-  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+  } catch(e){
+    toast('⚠️ '+(e.message||'Ошибка'));
+    // Не оставляем застрявшую крутилку — возвращаем кнопку для повтора (сценарий
+    // «загрузить ещё» доходит до результата: успех или явная возможность повторить).
+    if(box) box.innerHTML='<button class="btn btn-s" onclick="loadMoreAccounts()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+  }
   finally { ACC_LOADING=false; }
 }
 function renderLoadMore(page) {
