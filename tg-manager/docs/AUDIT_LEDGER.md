@@ -1025,6 +1025,21 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 деталей пользователю закрыто. Новые классы в СВОД: (11) сырой 500 наружу; (12)
 застрявшая крутилка = тупик без повтора.
 
+## tg-manager: свип класса 7 по НЕ-op_worker сендерам (narrative, presence) — 2026-07-23
+Проверено: все `account_manager.(send_dm|post_to_channel)` вне op_worker (свип класса 7).
+Найдено: `narrative_engine._publish_post` постил в каналы владельца через ФИКСИРОВАННЫЙ
+owner-аккаунт канала (`acc_id`), минуя `get_best_account`, — БЕЗ проверки риск-пульса.
+Движок крутится в фоне (execute_pending_posts каждые 15 мин), поэтому флагнутый аккаунт
+использовался бы каждый цикл → эскалация. Провал в движке = `status='failed'` НАВСЕГДА,
+поэтому карантинный пост не фейлим, а ОТКЛАДЫВАЕМ (pending, scheduled_at +2ч).
+Исправлено: гейт `_is_quarantined` (fail-open) в `_execute_with_session` → defer.
+Регресс `tests/test_narrative_quarantine_defer.py` (3, падают без фикса).
+Verified-clean: `presence_setup.seed_channel_via_account` — идёт через `get_best_account`,
+который уже исключает active cooldown (его ставят record_flood/record_peer_flood при
+серьёзном ограничении) + trust-порог; это разовый setup, не цикл → гейт не нужен.
+Урок: явный quarantine-гейт нужен там, где сендер берёт ФИКСИРОВАННЫЙ аккаунт в обход
+get_best_account; кто идёт через селектор — уже прикрыт cooldown-фильтром.
+
 ## tg-manager: некликабельные ряды-тупики в обзоре рассылок — 2026-07-23
 Проверено: обзор рассылок (`loadBroadcasts` → renderBcasts/renderCmps/renderFuns) +
 delivery-analytics на честность. Analytics чист: `get_broadcast_analytics` и
