@@ -9732,7 +9732,7 @@ function renderBcScheduleList(items) {
 }
 function renderBcAbList(items) {
   const el = document.getElementById('bcAbList');
-  if (!items.length) { el.innerHTML=empty('🧪','Нет A/B тестов','Включите A/B при создании рассылки'); return; }
+  if (!items.length) { el.innerHTML=empty('🧪','A/B тесты — в разделе Эксперименты','Создавайте варианты и сравнивайте отклик там',{label:'🧪 Открыть A/B тесты',fn:'openExperiments()'}); return; }
   el.innerHTML = items.map(b=>{
     const winsA = b.ab_wins_a||0, winsB = b.ab_wins_b||0;
     const total = winsA+winsB;
