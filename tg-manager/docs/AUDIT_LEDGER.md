@@ -87,6 +87,13 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## Аудит-чисто: payment_webhook / broadcaster / funnel_runner — 2026-07-20 — деньги/рассылка/drip проверены, дефектов нет
+Проверено (класс #4 fake/silent success + идемпотентность + честный итог):
+- `payment_webhook._activate_subscription`: идемпотентность корректна — `INSERT ... ON CONFLICT (reference) DO UPDATE SET status='confirmed' WHERE status<>'confirmed' RETURNING id`; при NULL (дубль подтверждённого) продление пропускается. Подпись HMAC-SHA256 при заданном `WEBHOOK_SECRET` (иначе verify выключен — деплой-политика, не баг).
+- `broadcaster.run`: `sent` растёт ТОЛЬКО по факту (`if success`), crash-resume через `already_sent` (без дублей), retry на 429, `mark_user_inactive` на 403, финал partial/failed/done по факту sent vs total. #4-compliant.
+- `funnel_runner.run_once`: retry×3 с backoff, `dropped` на non-retryable, conversion на завершении; `get_due_funnel_steps` исключает `completed/dropped` + активные funnel/bot. Крашевое окно send→advance = at-least-once (редкий дубль вместо потери) — осознанный трейдофф, не баг.
+Найдено: ничего существенного. Не перепроверять эти три с нуля без изменений кода.
+
 ## СВИП #7 — quarantine-гейт на boost/profile-исполнителях — 2026-07-20 — 4 из 6 не гейтили
 Проверено: свип #7 по boost/profile-исполнителям op_worker.
 Найдено: `_exec_boost_subscribers`/`_bot_starts` уже отсеивали карантин через `_filter_quarantined_accounts`, а `_exec_boost_views`/`_reactions`/`_stories` и `_exec_bulk_set_profile` — НЕТ (грузили accounts только по is_active и сразу шли в цикл действий) → реакция/просмотр/правка профиля флагнутым аккаунтом = быстрый бан. reactions/profile — write-действия (заметный риск), views/stories — чтение (ниже, но тот же принцип единообразия).
