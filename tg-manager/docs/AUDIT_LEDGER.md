@@ -1042,6 +1042,24 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 деталей пользователю закрыто. Новые классы в СВОД: (11) сырой 500 наружу; (12)
 застрявшая крутилка = тупик без повтора.
 
+## tg-manager: парсинг host прокси требовал '@' → ложно-негативная изоляция — 2026-07-23
+Проверено: ядро-дифференциатор — прокси-изоляция 1:1. Путь `audit_proxy_isolation` →
+`validate_ip_diversity` → `extract_ip_from_proxy`.
+Найдено (высокая ценность): `extract_ip_from_proxy` брал IP regex'ом, требующим '@'
+(user:pass@host). Прокси БЕЗ auth (`socks5://1.2.3.4:1080` — частый), голый host:port,
+http-без-auth, IPv6 → None → аккаунт молча выпадал из проверки → ДВА аккаунта на одном
+IP НЕ флагались, `isolation_ok` возвращал True при сломанной изоляции (координационная
+сигнатура). Эмпирически: два акка на `9.9.9.9` → `valid=True, ip_usage={}`.
+Исправлено: переписано на `urlparse` (host с/без креденшелов, IPv6, голый), возврат
+только IP-литералов. Регресс `tests/test_proxy_ip_extraction_isolation.py` (падает без).
+Смежное (тот же класс parsing-требует-'@'): `mini_app_api` transport-host брался
+`split('@')[-1]` → для прокси без auth показывал весь URL со схемой/портом в поле
+«уникальный IP 1:1». Выделен `_proxy_display_host` (urlparse, без креденшелов).
+Регресс `tests/test_proxy_display_host.py`. Прочие парсеры host (proxy_selector
+is_safe_proxy_url, security.py) уже на urlparse — verified-clean.
+Урок: любой парсинг proxy/URL host, предполагающий креденшелы ('@'/split), ломается
+на формате без auth → для изоляции это ТИХИЙ ложный «в порядке». Всегда urlparse.
+
 ## tg-manager: fire-and-forget задачи без ссылки — GC-риск (класс 14) — 2026-07-23
 Проверено: свип `create_task(` по services/ на удержание ссылки.
 Найдено и исправлено 3 (все — несохранённый create_task долгоживущей/критичной задачи):
