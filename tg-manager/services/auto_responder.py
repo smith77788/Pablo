@@ -25,6 +25,11 @@ _MAX_RULES_PER_USER_PER_CYCLE = 5
 # Structure: {(bot_id, chat_id): int}
 _cycle_rule_counts: dict[tuple[int, int], int] = {}
 
+# Strong reference to фоновый inactivity-sweep. Event loop держит на задачу лишь
+# СЛАБУЮ ссылку — несохранённый create_task может быть собран GC до завершения, и
+# фоновый цикл авто-неактивности молча умер бы. Держим ссылку на уровне модуля.
+_inactivity_sweep_task: asyncio.Task | None = None
+
 # Cooldown for bots whose token getUpdates rejects as Unauthorized (revoked/invalid
 # token). Without this, a single dead-token bot gets re-polled every 10s forever,
 # spamming warnings and hammering Telegram's API with calls that can only ever fail.
@@ -886,7 +891,8 @@ async def _process_bot(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
-    asyncio.get_event_loop().create_task(run_inactivity_sweep(pool, http))
+    global _inactivity_sweep_task
+    _inactivity_sweep_task = asyncio.create_task(run_inactivity_sweep(pool, http))
     # Stagger startup — don't hammer DB immediately alongside other services
     await asyncio.sleep(10)
     while True:
