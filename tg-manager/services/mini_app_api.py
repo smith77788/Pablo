@@ -133,6 +133,23 @@ def channel_edit_worker_op(op) -> str | None:
     return _CHANNEL_EDIT_OPS.get(op)
 
 
+def _proxy_display_host(raw: str) -> str:
+    """Чистый выходной host прокси для показа в транспорте аккаунта.
+
+    urlparse.hostname единообразен и с креденшелами, и без них; `split('@')[-1]`
+    для прокси без auth возвращал весь URL со схемой/портом. Креденшелы никогда не
+    показываем. Fallback на хвост после '@' для нераспознанных строк.
+    """
+    if not raw or not isinstance(raw, str):
+        return ""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(raw if "://" in raw else "//" + raw)
+        return parsed.hostname or raw.split("@")[-1]
+    except (ValueError, TypeError):
+        return raw.split("@")[-1]
+
+
 def is_safe_public_url(url: str) -> bool:
     """SSRF-гард для загрузки картинок по URL (аватар бота).
 
@@ -1783,7 +1800,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 from services.token_vault import decrypt_token
                 host = ""
                 try:
-                    host = (decrypt_token(prow["proxy_url"]) or "").split("@")[-1]
+                    host = _proxy_display_host(decrypt_token(prow["proxy_url"]) or "")
                 except Exception:
                     host = ""
                 transport = {
