@@ -75,7 +75,13 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
     кликабелен (воронки: `funList` немой vs `bfList` → `openFunnelDetail`), это
     палево несогласованности. Ряд обязан вести в деталь/менеджер. Исключение:
     чисто информационные логи/сводки (история, «последние N», парсенные юзеры) —
-    там `cursor:default` легитимен.
+    там `cursor:default` легитимен. 14. **Fire-and-forget задача без ссылки = GC-риск.**
+    `asyncio.create_task(...)`/`get_event_loop().create_task(...)` без сохранённой
+    ссылки: event loop держит на задачу лишь СЛАБУЮ ссылку → GC может собрать её до
+    завершения (тихая смерть фонового цикла/операции). Долгоживущие циклы и критичные
+    задачи обязаны держать ссылку (модульная переменная / set + `add_done_callback(
+    set.discard)` / await напрямую / task_registry). Свип: `grep -n 'create_task('` —
+    для каждого проверить, удержана ли ссылка. Гейт: test_no_unreferenced_bg_tasks.
 
 
 **Правила проверки:** «Проверено» = проследить цепочку до ЭФФЕКТА (runner шедулится в
@@ -1035,6 +1041,19 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 любая ошибка ВИДИМА и понятна, сценарий не зависает молча, а раскрытие внутренних
 деталей пользователю закрыто. Новые классы в СВОД: (11) сырой 500 наружу; (12)
 застрявшая крутилка = тупик без повтора.
+
+## tg-manager: fire-and-forget задачи без ссылки — GC-риск (класс 14) — 2026-07-23
+Проверено: свип `create_task(` по services/ на удержание ссылки.
+Найдено и исправлено 3 (все — несохранённый create_task долгоживущей/критичной задачи):
+1. `scheduler.run` — часовой A/B-свип `get_event_loop().create_task(declare_ab_winners)`
+   без ссылки → await напрямую (свип ограничен, перед sleep(60)).
+2. `auto_responder.run` — фоновый `run_inactivity_sweep` без ссылки → модульная
+   `_inactivity_sweep_task`.
+3. `op_worker` — КАЖДАЯ операция `create_task(_run_op_task)` без ссылки (был только
+   int-id в `_active_op_ids`) → набор strong-ссылок `_active_op_tasks` + done-callback.
+Гейт `tests/test_no_unreferenced_bg_tasks.py` (3, падают без фиксов). Новый класс 14
+в СВОД + свип-правило. Осталось точечно проверить прочие create_task (flood_engine,
+funnel_runner, account_warmer, op_worker:1559/254) — многие держатся переменной/gather.
 
 ## tg-manager: вестигиальный A/B-виджет рассылок вводил в заблуждение — 2026-07-23
 Проверено: A/B на честность (не placebo) + boost-движок «оба пути».
