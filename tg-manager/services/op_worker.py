@@ -7104,6 +7104,10 @@ async def _exec_boost_views(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
+    # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+
     ok_count, fail_count = 0, 0
     total = len(accounts)
 
@@ -7172,6 +7176,10 @@ async def _exec_boost_reactions(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
+    # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+
     ok_count, fail_count = 0, 0
     total = len(accounts)
 
@@ -7238,6 +7246,9 @@ async def _exec_boost_stories(
     )
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием, fail-open.
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     ok_count, fail_count, stories_seen = 0, 0, 0
     total = len(accounts)
@@ -7785,6 +7796,10 @@ async def _exec_bulk_set_profile(
     )
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
+    # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
+    accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
     ok_count, fail_count = 0, 0
     total = len(accounts)
