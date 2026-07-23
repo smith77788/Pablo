@@ -1024,6 +1024,17 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 деталей пользователю закрыто. Новые классы в СВОД: (11) сырой 500 наружу; (12)
 застрявшая крутилка = тупик без повтора.
 
+## tg-manager: класс 7 — свип op_worker закрыт (все post_to_channel/send_dm) — 2026-07-23
+Проверено: каждый `account_manager.(post_to_channel|send_dm)` внутри op_worker.
+Все массовые исходящие сендеры через фикс/множество аккаунтов имеют парность
+spintax+quarantine: bulk_dm_adhoc, group_announce, bulk_post_to_channel, bulk_post_chans,
+niche_growth_post, **mass_publish** (per-target `_expand_spintax` + quarantine-гейт +
+health-фильтр — подтверждено сейчас). Verified-clean без гейта: **global_presence_channel**
+initial-post — это benign self-post в ТОЛЬКО ЧТО созданный аккаунтом канал (текст = title,
+уникален; пустой канал → shadow-ban, поэтому пропуск ВРЕДЕН); здоровье решается на этапе
+создания. Урок: гейт — для исходящего спама через флагнутый аккаунт, НЕ для self-post
+в свой свежий ресурс.
+
 ## tg-manager: свип класса 7 по НЕ-op_worker сендерам (narrative, presence) — 2026-07-23
 Проверено: все `account_manager.(send_dm|post_to_channel)` вне op_worker (свип класса 7).
 Найдено: `narrative_engine._publish_post` постил в каналы владельца через ФИКСИРОВАННЫЙ
