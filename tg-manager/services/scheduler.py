@@ -181,11 +181,17 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
         except Exception:
             log.exception("Scheduler loop error")
 
-        # A/B winner sweep — once per hour
+        # A/B winner sweep — once per hour.
+        # Ждём НАПРЯМУЮ, а не fire-and-forget create_task: у event loop только
+        # СЛАБАЯ ссылка на задачу, поэтому несохранённый create_task может быть
+        # собран GC до завершения — свип победителей молча не доработал бы (а
+        # именно на систему experiments мы ведём пользователя). Свип ограничен
+        # (активные эксперименты) и со своим try/except; идёт перед sleep(60),
+        # firing рассылок не задерживает.
         _ab_sweep_cycle += 1
         if _ab_sweep_cycle >= 60:
             _ab_sweep_cycle = 0
-            asyncio.get_event_loop().create_task(declare_ab_winners(pool))
+            await declare_ab_winners(pool)
 
         await asyncio.sleep(60)
 
