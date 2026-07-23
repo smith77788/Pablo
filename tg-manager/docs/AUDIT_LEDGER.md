@@ -1052,8 +1052,16 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 3. `op_worker` — КАЖДАЯ операция `create_task(_run_op_task)` без ссылки (был только
    int-id в `_active_op_ids`) → набор strong-ссылок `_active_op_tasks` + done-callback.
 Гейт `tests/test_no_unreferenced_bg_tasks.py` (3, падают без фиксов). Новый класс 14
-в СВОД + свип-правило. Осталось точечно проверить прочие create_task (flood_engine,
-funnel_runner, account_warmer, op_worker:1559/254) — многие держатся переменной/gather.
+в СВОД + свип-правило.
+Добор (2-й коммит): свип ВСЕХ create_task в hot-файлах закрыт. Добавлен общий
+`services/bg_tasks.spawn` (strong-ссылка + done-callback, безопасен вне loop);
+переведены консеквентные side-effect'ы: `op_worker._fire_db_flag` (флаг in_operation
+→ изоляция/координация), funnel_runner запись конверсии (честность аналитики),
+op_worker telemetry+compliance (аудит-след), flood_engine telemetry, auto_responder
+new-user уведомление. Регресс `tests/test_bg_tasks_spawn.py` (поведенческий: держит
+ссылку до done + снимает). Остальные create_task (account_warmer gather, op_worker
+progress_task/_active_op_tasks, cf_relay self._*, *_task=… + await) держат ссылку —
+verified-clean. Класс 14 закрыт по services/.
 
 ## tg-manager: вестигиальный A/B-виджет рассылок вводил в заблуждение — 2026-07-23
 Проверено: A/B на честность (не placebo) + boost-движок «оба пути».
