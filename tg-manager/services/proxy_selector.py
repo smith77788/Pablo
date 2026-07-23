@@ -147,11 +147,27 @@ def extract_ip_from_proxy(proxy_url: str) -> Optional[str]:
     from services.token_vault import decrypt_token
 
     proxy_url = decrypt_token(proxy_url)
-    # Try to extract IP from socks5://user:pass@host:port format
-    match = re.search(r'@((\[?[0-9a-fA-F.:]+\]?)|(\d+\.\d+\.\d+\.\d+)):', proxy_url)
-    if match:
-        return match.group(1).strip("[]")
-    return None
+    # urlparse надёжно достаёт host и С креденшелами (user:pass@host:port), и БЕЗ
+    # них (scheme://host:port), и голый host:port, и IPv6 в скобках ([::1]).
+    # Старый regex требовал '@' → прокси без auth (очень частый формат) давали
+    # None → аккаунт молча выпадал из проверки изоляции, и общий IP НЕ ловился
+    # (ложно-негативная изоляция — прямой удар по ядру-дифференциатору).
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(proxy_url if "://" in proxy_url else "//" + proxy_url)
+        host = parsed.hostname
+    except (ValueError, TypeError):
+        host = None
+    if not host:
+        return None
+    # Возвращаем только IP-литералы (v4/v6): изоляция и датацентр-проверка идут по IP.
+    # Домен-прокси без резолва к IP не сгруппировать — их отсеиваем (как и раньше).
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        return None
 
 
 def is_datacenter_ip(ip_str: str) -> tuple[bool, str]:
