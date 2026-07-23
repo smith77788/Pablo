@@ -1555,21 +1555,23 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     duration_ms=int(duration_seconds * 1000),
                 )
 
-            # Physics Engine + Compliance telemetry (fire-and-forget)
+            # Physics Engine + Compliance telemetry (fire-and-forget с удержанием
+            # ссылки — класс 14; compliance-запись = аудит-след, терять нельзя).
             try:
                 from services import physics_engine as _pe
                 from services import compliance_engine as _ce
+                from services.bg_tasks import spawn
                 _dur_ms = int(duration_seconds * 1000)
                 _outcome = result.get("status", "success")
                 _comp_outcome = "success" if _outcome == "done" else _outcome
                 if _acc_ids_done:
                     for _tid in _acc_ids_done:
-                        asyncio.create_task(
+                        spawn(
                             _pe.record_telemetry(
                                 pool, int(_tid), owner_id, op_type, _audit_outcome, 0, _dur_ms
                             )
                         )
-                asyncio.create_task(
+                spawn(
                     _ce.record(pool, owner_id, None, op_type, _comp_outcome, op_id)
                 )
             except Exception as e:

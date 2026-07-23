@@ -284,7 +284,8 @@ async def _process_bot(
                 # dedup_key = (bot, новый юзер): каждый отдельный новый подписчик
                 # уведомляется, иначе кулдаун по (owner, "new_user") глушил всех
                 # новых юзеров со всех ботов владельца в одном слоте.
-                asyncio.create_task(
+                from services.bg_tasks import spawn
+                spawn(
                     db.notify_if_enabled(
                         pool, main_bot, owner_id, "new_user", note,
                         dedup_key=f"{bot_id}:{chat_id}",

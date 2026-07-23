@@ -359,11 +359,11 @@ async def record_flood(
             except Exception as e:
                 log.debug("flood_engine log insert failed: %s", e)
 
-        # Physics Engine telemetry (fire-and-forget)
+        # Physics Engine telemetry (fire-and-forget, но с удержанием ссылки — класс 14)
         try:
             from services import physics_engine as _pe
-            loop = asyncio.get_event_loop()
-            loop.create_task(
+            from services.bg_tasks import spawn
+            spawn(
                 _pe.record_telemetry(pool, account_id, None, action_type, "flood_wait", wait_seconds, 0)
             )
         except Exception as e:
