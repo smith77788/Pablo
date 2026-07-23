@@ -1036,6 +1036,21 @@ no_dead_onclick_handlers, no_duplicate_definitions, no_stuck_spinner + 2 гло�
 деталей пользователю закрыто. Новые классы в СВОД: (11) сырой 500 наружу; (12)
 застрявшая крутилка = тупик без повтора.
 
+## tg-manager: вестигиальный A/B-виджет рассылок вводил в заблуждение — 2026-07-23
+Проверено: A/B на честность (не placebo) + boost-движок «оба пути».
+Найдено: `renderBcAbList` (экран расписания рассылок) читал `b.ab_variant/ab_wins_a/b`,
+но этих колонок НЕТ ни в схеме, ни в `/api/miniapp/broadcasts`, ни в композере рассылки
+→ `filter(b=>b.ab_variant)` всегда пуст → виджет вечно показывал «Включите A/B при
+создании рассылки» = обещание фичи, которой на рассылках нет. Настоящий A/B — отдельная
+система `experiments` (openExperiments/openExpDetail: варианты, показы, CR, 🏆 winner;
+бэкед реальным hourly `scheduler.declare_ab_winners` → `db.check_experiment_winner`).
+Исправлено: пустое состояние виджета теперь ведёт в реальные Эксперименты (кнопка
+openExperiments). Регресс `tests/test_ab_widget_signpost.py`.
+Verified-clean: boost_engine (views/reaction/stories) принимает аккаунты параметром, НЕ
+ре-фетчит → гейт op_worker держится, расхождения путей нет.
+Урок: виджет, читающий поля, которых нет в API/схеме, = вечно-пустой тупик; либо
+питать реальными данными, либо явно вести в место, где фича живёт.
+
 ## tg-manager: Strike (самая баноопасная операция) не уважал риск-пульс — 2026-07-23
 Проверено: ban-safety `_exec_strike` (queued Strike) — свип класса 7 на action-verb'ы
 помимо send_dm/post_to_channel (жалоба = аккаунт-действие).
