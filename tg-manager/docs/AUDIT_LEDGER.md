@@ -75,6 +75,11 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## МОДУЛЬ Массовый инвайт — длинный FloodWait + PeerFlood без cooldown — 2026-07-20 — не инвайтить во время флуда, флагнутому — cooldown
+Проверено: ban-safety `mass_inviter_engine.invite_batch/invite_by_phones` + `op_worker._exec_mass_invite` (самая баноопасная операция).
+Найдено: (1) invite_batch на FloodWait спал `min(seconds,60)` и ПРОДОЛЖАЛ инвайтить — при длинном флуде это запросы во время активного flood-wait = эскалация (тот же класс, что warmer уже лечит). Длинный флуд не сигналился наверх. (2) `_exec_mass_invite` на `peer_flood` делал `break` (переключал аккаунт), но БЕЗ cooldown → следующая операция сразу добивала флагнутый аккаунт (класс DM-фикса).
+Исправлено: да. invite_batch/invite_by_phones: длинный FloodWait (`>_MAX_FLOOD_INLINE=60`) → break + `flood_wait` в результат (короткий — пережидаем инлайн). `_exec_mass_invite._rest_invite_account`: peer_flood → `record_peer_flood` (48ч), длинный флуд → `record_flood` ровно на длительность — через ЕДИНЫЙ flood-сигнал (не второй источник правды). Регресс `tests/test_invite_flood_safety.py` (7, падают без фикса; FloodWaitError — стаб-класс conftest).
+
 ## МОДУЛЬ DM-движок — PeerFlood ≠ per-target блокировка — 2026-07-20 — не выкидывать здоровый аккаунт, флагнутый — с cooldown
 Проверено: ban-safety цикла `dm_engine.run_campaign` (quarantine-гейт, per_account_daily cap, FloodWait cooldown+ротация, cancel из UI/очереди, классификация ошибок send_dm).
 Найдено: `_classify_error` сваливал в один бакет `"blocked"` И per-target ошибки (`YouBlockedUser`/`ChatWriteForbidden` — этот юзер меня заблокировал), И account-level `PeerFloodError` (аккаунт помечен за спам ВООБЩЕ). Обработка `"blocked"` УБИРАЛА весь аккаунт из ротации → (1) один недружелюбный таргет выкидывал ЗДОРОВЫЙ аккаунт из всей кампании (трата аккаунтов, при неудачном порядке — быстрый слив пула); (2) PeerFlood убирал аккаунт из этой кампании, но БЕЗ cooldown → следующая операция сразу снова его юзала → эскалация к хард-бану (anti-detection слой — дороже обычной фичи).

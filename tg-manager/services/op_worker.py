@@ -7640,6 +7640,21 @@ async def _exec_mass_invite(
     except Exception:
         log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
 
+    async def _rest_invite_account(acc_id: int, res: dict) -> None:
+        """Дать флагнутому/зафлуженному инвайт-аккаунту cooldown через ЕДИНЫЙ
+        flood-сигнал. Без этого переключение внутри операции недостаточно: флаг
+        живёт на аккаунте, и следующая операция сразу его добьёт (anti-detection).
+        PeerFlood → 48ч; длинный FloodWait → ровно на длительность флуда."""
+        try:
+            from services.flood_engine import record_peer_flood, record_flood
+            if res.get("peer_flood"):
+                await record_peer_flood(pool, acc_id, "invite", op_id)
+            elif res.get("flood_wait"):
+                await record_flood(pool, acc_id, wait_seconds=int(res["flood_wait"]),
+                                   action_type="invite", operation_id=op_id)
+        except Exception:
+            log_exc_swallow(log, "mass_invite: rest-account cooldown failed")
+
     total_ok, total_fail = 0, 0
     all_users = list(user_refs)
     all_phones = list(phones)
@@ -7697,8 +7712,12 @@ async def _exec_mass_invite(
                         "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
                         op_id, len(batch),
                     )
-                    if res["peer_flood"]:
-                        log.warning("mass_invite op=%d acc=%s PeerFlood — switching", op_id, acc.get("id"))
+                    if res.get("peer_flood") or res.get("flood_wait"):
+                        log.warning(
+                            "mass_invite op=%d acc=%s %s — cooldown+switch", op_id, acc.get("id"),
+                            "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
+                        )
+                        await _rest_invite_account(acc["id"], res)
                         break
                     await asyncio.sleep(_batch_delay)
                 except Exception as exc:
@@ -7722,7 +7741,12 @@ async def _exec_mass_invite(
                         "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
                         op_id, len(batch),
                     )
-                    if res["peer_flood"]:
+                    if res.get("peer_flood") or res.get("flood_wait"):
+                        log.warning(
+                            "mass_invite op=%d acc=%s %s (phones) — cooldown+switch", op_id, acc.get("id"),
+                            "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
+                        )
+                        await _rest_invite_account(acc["id"], res)
                         break
                     await asyncio.sleep(_batch_delay)
                 except Exception as exc:

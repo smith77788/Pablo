@@ -26,6 +26,10 @@ log = logging.getLogger(__name__)
 _CONNECT_TIMEOUT = 15.0
 _ACTION_TIMEOUT = 15.0
 _BATCH_SIZE = 5  # Telegram разрешает добавлять до 5 за раз без флуда
+# FloodWait длиннее этого (сек) — стоп-сигнал: продолжать инвайты во время
+# активного длинного флуда = эскалация (Telegram усиливает ограничение). Короткий
+# флуд пережидаем инлайн, длинный — прекращаем батч и сигналим наверх для cooldown.
+_MAX_FLOOD_INLINE = 60
 
 
 async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
@@ -99,6 +103,7 @@ async def invite_batch(
     ok, failed = 0, 0
     errors: list[str] = []
     peer_flood = False
+    flood_wait = 0
 
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -127,9 +132,14 @@ async def invite_batch(
                 errors.append(f"{ref}: peer flood — аккаунт ограничен")
                 break  # аккаунт перегрет, дальше не пробуем
             except FloodWaitError as e:
-                await asyncio.sleep(min(e.seconds, 60))
+                _fw = int(getattr(e, "seconds", 60) or 60)
                 failed += 1
-                errors.append(f"{ref}: flood wait {e.seconds}s")
+                errors.append(f"{ref}: flood wait {_fw}s")
+                if _fw > _MAX_FLOOD_INLINE:
+                    # Длинный флуд: НЕ инвайтим во время активного флуда (эскалация).
+                    flood_wait = _fw
+                    break
+                await asyncio.sleep(min(_fw, 60))
             except (ChatWriteForbiddenError, ChannelPrivateError) as e:
                 failed += 1
                 errors.append(f"group error: {e}")
@@ -148,7 +158,8 @@ async def invite_batch(
         except Exception as e:
             log_exc_swallow(log, "invite_batch: disconnect")
 
-    return {"ok": ok, "failed": failed, "peer_flood": peer_flood, "errors": errors}
+    return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
+            "flood_wait": flood_wait, "errors": errors}
 
 
 # ── Добавление по номерам телефонов ──────────────────────────────────────────
@@ -178,6 +189,7 @@ async def invite_by_phones(
     ok, failed = 0, 0
     errors: list[str] = []
     peer_flood = False
+    flood_wait = 0
     imported_users: list = []
 
     try:
@@ -197,7 +209,7 @@ async def invite_by_phones(
         log.info("invite_by_phones: imported %d/%d users", len(imported_users), len(phones))
 
         for user in imported_users:
-            if peer_flood:
+            if peer_flood or flood_wait:
                 break
             try:
                 await asyncio.wait_for(
@@ -215,8 +227,13 @@ async def invite_by_phones(
                 failed += 1
                 errors.append("peer flood — аккаунт ограничен")
             except FloodWaitError as e:
-                await asyncio.sleep(min(e.seconds, 60))
+                _fw = int(getattr(e, "seconds", 60) or 60)
                 failed += 1
+                if _fw > _MAX_FLOOD_INLINE:
+                    flood_wait = _fw  # длинный флуд → стоп, не инвайтим во время флуда
+                    errors.append(f"flood wait {_fw}s")
+                    break
+                await asyncio.sleep(min(_fw, 60))
             except Exception as e:
                 log.warning('invite failed: %s', e)
                 failed += 1
@@ -247,7 +264,8 @@ async def invite_by_phones(
         except Exception as e:
             log_exc_swallow(log, "invite_by_phones: disconnect")
 
-    return {"ok": ok, "failed": failed, "peer_flood": peer_flood, "errors": errors}
+    return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
+            "flood_wait": flood_wait, "errors": errors}
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────
