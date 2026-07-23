@@ -406,6 +406,19 @@ async def cancel_campaign(pool: asyncpg.Pool, campaign_id: int, owner_id: int) -
 # ── Execution loop ────────────────────────────────────────────────────────────
 
 
+async def _is_quarantined(pool: asyncpg.Pool, account_id: int) -> bool:
+    """Fail-open обёртка над риск-пульсом: любая ошибка → False (публикуем).
+
+    Anti-detection ядро не должно вставать из-за отсутствия/сбоя сигнала —
+    откладываем пост ТОЛЬКО при явно подтверждённом недавнем ограничении.
+    """
+    try:
+        from services import infra_memory
+        return await infra_memory.is_account_quarantined(pool, account_id)
+    except Exception:
+        return False
+
+
 async def _publish_post(pool: asyncpg.Pool, post: dict) -> tuple[bool, str]:
     """
     Публикует один пост в канал через Telethon-сессию аккаунта, которым канал
@@ -485,6 +498,26 @@ async def _execute_with_session(pool: asyncpg.Pool, posts: list) -> int:
     published_count = 0
     for post in posts:
         post_dict = dict(post)
+
+        # Anti-detection: не публикуем через аккаунт под недавним серьёзным
+        # ограничением (риск-пульс) — активность флагнутого аккаунта эскалирует
+        # к хард-бану. Пост НЕ теряем (fail = permanent тут), а ОТКЛАДЫВАЕМ:
+        # оставляем pending и сдвигаем scheduled_at вперёд — опубликуется, когда
+        # аккаунт выйдет из карантина. Гейт fail-open (нет сигнала → публикуем).
+        acc_id = post_dict.get("acc_id")
+        if acc_id and await _is_quarantined(pool, int(acc_id)):
+            await pool.execute(
+                """UPDATE narrative_posts
+                   SET scheduled_at = NOW() + interval '2 hours'
+                   WHERE id=$1 AND status='pending'""",
+                post_dict["id"],
+            )
+            log.info(
+                "narrative_engine: пост %d отложен на 2ч — аккаунт %d под риск-пульсом",
+                post_dict["id"], acc_id,
+            )
+            continue
+
         success, error = await _publish_post(pool, post_dict)
 
         if success:
