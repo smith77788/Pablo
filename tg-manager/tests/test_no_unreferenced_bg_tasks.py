@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 
-from services import scheduler, auto_responder
+from services import scheduler, auto_responder, op_worker
 
 
 def test_scheduler_ab_sweep_not_unreferenced():
@@ -30,4 +30,14 @@ def test_auto_responder_inactivity_sweep_has_ref():
     )
     assert "_inactivity_sweep_task" in inspect.getsource(auto_responder), (
         "ссылка на sweep должна существовать на уровне модуля"
+    )
+
+
+def test_op_worker_holds_op_task_refs():
+    # Самый критичный путь: каждая операция = отдельная задача. Без удержания
+    # ссылки GC мог бы собрать выполняющуюся операцию до завершения.
+    mod = inspect.getsource(op_worker)
+    assert "_active_op_tasks" in mod, "нужен набор strong-ссылок на задачи операций"
+    assert "add_done_callback(_active_op_tasks.discard)" in mod, (
+        "задача операции должна сниматься по завершении, а до этого держаться ссылкой"
     )

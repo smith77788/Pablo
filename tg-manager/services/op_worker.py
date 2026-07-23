@@ -730,6 +730,11 @@ async def write_op_audit(
 
 
 _active_op_ids: set[int] = set()
+# Strong-ссылки на запущенные задачи операций. _active_op_ids хранит лишь int-id;
+# сам объект задачи, созданный create_task, event loop держит только СЛАБОЙ ссылкой
+# → без этого набора GC мог бы собрать выполняющуюся операцию до завершения (тихая
+# смерть на самом критичном пути). done-callback снимает ссылку по завершении.
+_active_op_tasks: set[asyncio.Task] = set()
 _active_lock = asyncio.Lock()
 
 # Per-owner semaphores: не более _MAX_PARALLEL_PER_OWNER параллельных операций на владельца
@@ -1128,7 +1133,9 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         op_id = row["id"]
         async with _active_lock:
             _active_op_ids.add(op_id)
-        asyncio.create_task(_run_op_task(pool, bot, dict(row)))
+        _op_task = asyncio.create_task(_run_op_task(pool, bot, dict(row)))
+        _active_op_tasks.add(_op_task)
+        _op_task.add_done_callback(_active_op_tasks.discard)
 
 
 async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
