@@ -1105,7 +1105,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = [dict(r) for r in rows]
         except Exception:
             rows = await _safe_fetch(pool,
-                "SELECT id, trigger_type, keyword, response_text, is_active, created_at FROM auto_replies WHERE bot_id=$1 ORDER BY created_at DESC",
+                "SELECT id, trigger_type, keyword, response_text, is_active, created_at, "
+                "COALESCE(match_mode,'contains') AS match_mode FROM auto_replies WHERE bot_id=$1 ORDER BY created_at DESC",
                 bot_id)
         return _json_resp({"auto_replies": rows})
 
@@ -1140,13 +1141,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         trigger_type = body.get("trigger_type", "keyword")
         keyword = body.get("keyword", "").strip()
         response_text = body.get("response_text", "").strip()
+        # match_mode принимался из UI, но НЕ персистился → выбор exact/starts молча
+        # игнорировался (правило всегда работало как contains). Валидируем и пишем.
+        match_mode = (body.get("match_mode") or "contains").lower()
+        if match_mode not in ("contains", "exact", "starts"):
+            match_mode = "contains"
         if not response_text:
             return _err("response_text required", 400)
         try:
             row = await pool.fetchrow(
-                """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text, is_active)
-                   VALUES ($1,$2,$3,$4,TRUE) RETURNING id""",
-                bot_id, trigger_type, keyword or None, response_text)
+                """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text, is_active, match_mode)
+                   VALUES ($1,$2,$3,$4,TRUE,$5) RETURNING id""",
+                bot_id, trigger_type, keyword or None, response_text, match_mode)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)

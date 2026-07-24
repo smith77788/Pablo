@@ -93,6 +93,11 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## МОДУЛЬ Auto-reply — match_mode не персистился (класс #3) — 2026-07-20 — выбор exact/starts молча терялся
+Проверено: цепочка auto-reply UI→endpoint→БД→`_match_rule` (мультирежимный вход match_mode: contains/exact/starts + мультиключи через запятую).
+Найдено: `_match_rule` корректно поддерживает 3 режима и мультиключи, колонка `auto_replies.match_mode DEFAULT 'contains'` есть (schema_v139), бот грузит правила `SELECT *` (mode доходит). НО `create_auto_reply` (mini_app_api) принимал `match_mode` из тела и НЕ читал/не писал его в INSERT → выбор exact/starts молча игнорировался, ВСЕ правила работали как contains (класс #3: параметр принят, но не доходит до эффекта). Плюс список авто-ответов не возвращал match_mode (round-trip не показывал сохранённый режим).
+Исправлено: да. `create_auto_reply` валидирует match_mode ∈ {contains,exact,starts} и пишет в INSERT; список-SELECT отдаёт `COALESCE(match_mode,'contains')`. Регресс `tests/test_auto_reply_match_mode.py` (5: семантика 3 режимов + мультиключи + персист в endpoint, падает без фикса).
+
 ## Аудит-чисто: payment_webhook / broadcaster / funnel_runner — 2026-07-20 — деньги/рассылка/drip проверены, дефектов нет
 Проверено (класс #4 fake/silent success + идемпотентность + честный итог):
 - `payment_webhook._activate_subscription`: идемпотентность корректна — `INSERT ... ON CONFLICT (reference) DO UPDATE SET status='confirmed' WHERE status<>'confirmed' RETURNING id`; при NULL (дубль подтверждённого) продление пропускается. Подпись HMAC-SHA256 при заданном `WEBHOOK_SECRET` (иначе verify выключен — деплой-политика, не баг).
