@@ -6497,12 +6497,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM ad_advertisers WHERE owner_id=$1 ORDER BY last_seen_at DESC LIMIT 10""",
                 uid,
             )
+            # Итоги по ВСЕМ рекламодателям, а не по top-10: фронт рисует ими KPI-плитки
+            # «Рекламодателей» и «Размещений». Без этих ключей обе плитки всегда
+            # показывали 0 при реальных данных (нечестная статистика).
+            adv_totals = await pool.fetchrow(
+                """SELECT COUNT(*) AS advertisers,
+                          COALESCE(SUM(placements_count), 0) AS placements
+                   FROM ad_advertisers WHERE owner_id=$1""",
+                uid,
+            )
         except Exception as exc:
             log.exception("ad_intel_overview uid=%d", uid)
             return _err(str(exc), 500)
         avg_score = sum(r["quality_score"] or 0 for r in top) / max(len(top), 1)
         return _json_resp({
             "total_channels": int(total or 0),
+            "total_advertisers": int((adv_totals or {}).get("advertisers") or 0),
+            "total_placements": int((adv_totals or {}).get("placements") or 0),
             "avg_quality": round(avg_score, 1),
             "top_channels": [
                 {
