@@ -39,8 +39,30 @@ async def set_channel_id(pool: asyncpg.Pool, channel_id: str) -> None:
     )
 
 
+_TEMPLATE_BRAND = "MEXAHI3MBOT"  # значение-шаблон в текстах ниже, см. _apply_brand
+
+
+def _apply_brand(text: str) -> str:
+    """Подставить канонический бренд-хендл вместо шаблонного в текстах постов.
+
+    Единый источник правды — `brand_injection.PROMO_USERNAME`. Тексты в этом
+    модуле писались с литералом @MEXAHI3MBOT: при смене хендла публичные посты
+    канала уводили бы на мёртвый юзернейм, пока контент из brand_injection
+    обновлялся бы корректно (второй источник правды). Ошибка импорта → текст
+    как есть (публикация важнее косметики).
+    """
+    try:
+        from services.brand_injection import PROMO_USERNAME
+        if PROMO_USERNAME and PROMO_USERNAME != _TEMPLATE_BRAND:
+            return text.replace(_TEMPLATE_BRAND, PROMO_USERNAME)
+    except Exception:
+        pass
+    return text
+
+
 async def post(pool: asyncpg.Pool, bot: Bot, text: str) -> bool:
     """Опубликовать текст в Infragram канал. Возвращает True при успехе."""
+    text = _apply_brand(text)
     channel_id = await get_channel_id(pool)
     if not channel_id:
         log.warning("botmother_channel.post: channel_id не настроен")
