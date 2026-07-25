@@ -52,8 +52,33 @@ def test_create_endpoint_persists_match_mode():
     api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
     src = api.read_text(encoding="utf-8")
     start = src.index("async def create_auto_reply")
-    body = src[start:start + 3000]
+    body = src[start:start + 4000]
     assert 'body.get("match_mode")' in body, "match_mode не читается из тела"
     insert = body.index("INSERT INTO auto_replies")
-    assert "match_mode" in body[insert:insert + 300], \
+    assert "match_mode" in body[insert:insert + 400], \
         "INSERT не содержит match_mode — параметр не персистится"
+
+
+def test_create_endpoint_persists_buttons_priority_delay():
+    """create_auto_reply обязан персистить buttons/priority/reply_delay_sec.
+
+    Тот же класс #3: UI шлёт эти поля, send-путь их потребляет
+    (_rule_buttons, ORDER BY priority DESC, reply_delay_sec), но INSERT их ронял
+    → инлайн-кнопки, приоритет и человекоподобная задержка молча терялись.
+    """
+    import pathlib
+
+    api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
+    src = api.read_text(encoding="utf-8")
+    start = src.index("async def create_auto_reply")
+    body = src[start:start + 4000]
+    # читаются из тела
+    assert 'body.get("buttons")' in body, "buttons не читается из тела"
+    assert 'body.get("priority")' in body, "priority не читается из тела"
+    assert 'body.get("reply_delay_sec")' in body, "reply_delay_sec не читается из тела"
+    # и попадают в INSERT
+    insert = body.index("INSERT INTO auto_replies")
+    cols = body[insert:insert + 400]
+    assert "buttons" in cols, "INSERT не содержит buttons"
+    assert "priority" in cols, "INSERT не содержит priority"
+    assert "reply_delay_sec" in cols, "INSERT не содержит reply_delay_sec"

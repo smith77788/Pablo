@@ -101,6 +101,11 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## МОДУЛЬ Auto-reply — buttons/priority/reply_delay_sec не персистились (класс #3) — 2026-07-25 — кнопки, приоритет и задержка молча терялись при создании
+Проверено: тот же endpoint `create_auto_reply` (mini_app_api), что и match_mode. Round-trip UI→endpoint→БД→send-путь для трёх полей, которые UI шлёт в теле create (`buttons`, `priority`, `reply_delay_sec`).
+Найдено: send-путь `auto_responder` их ПОТРЕБЛЯЕТ (правила грузятся `ORDER BY priority DESC`; `_delay = rule.get("reply_delay_sec")` перед ответом; `_rule_buttons(rule)` читает JSONB-кнопки), колонки есть (schema_v140 buttons JSONB, schema_v142 priority/reply_delay_sec), список-SELECT их отдаёт. НО `create_auto_reply` INSERT писал только `bot_id, trigger_type, keyword, response_text, is_active, match_mode` — три поля молча ронялись → каждое созданное через UI правило получало buttons=NULL, priority=0, reply_delay_sec=0 (класс #3: параметр принят, но не доходит до эффекта; тот же баг-класс, что match_mode строкой ниже).
+Исправлено: да. `create_auto_reply` валидирует buttons (max 10, text≤64, url http(s), escape_html — как рассылка), priority (0..1000), reply_delay_sec (0..300) и пишет их в INSERT (buttons как JSONB через `_json.dumps`). Регресс `tests/test_auto_reply_match_mode.py::test_create_endpoint_persists_buttons_priority_delay` (чтение из тела + присутствие в INSERT; падает без фикса).
+
 ## МОДУЛЬ Auto-reply — match_mode не персистился (класс #3) — 2026-07-20 — выбор exact/starts молча терялся
 Проверено: цепочка auto-reply UI→endpoint→БД→`_match_rule` (мультирежимный вход match_mode: contains/exact/starts + мультиключи через запятую).
 Найдено: `_match_rule` корректно поддерживает 3 режима и мультиключи, колонка `auto_replies.match_mode DEFAULT 'contains'` есть (schema_v139), бот грузит правила `SELECT *` (mode доходит). НО `create_auto_reply` (mini_app_api) принимал `match_mode` из тела и НЕ читал/не писал его в INSERT → выбор exact/starts молча игнорировался, ВСЕ правила работали как contains (класс #3: параметр принят, но не доходит до эффекта). Плюс список авто-ответов не возвращал match_mode (round-trip не показывал сохранённый режим).

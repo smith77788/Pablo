@@ -1148,11 +1148,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             match_mode = "contains"
         if not response_text:
             return _err("response_text required", 400)
+        # buttons/priority/reply_delay_sec принимались из UI, но НЕ персистились
+        # (тот же класс #3, что и match_mode) → инлайн-кнопки, приоритет правила и
+        # человекоподобная задержка молча терялись при создании. Send-путь
+        # (_rule_buttons, ORDER BY priority DESC, reply_delay_sec) их потребляет.
+        buttons = []
+        for b in (body.get("buttons") or [])[:10]:
+            try:
+                bt = validate_string(b.get("text"), max_len=64) or ""
+                bu = validate_string(b.get("url"), max_len=2048) or ""
+            except Exception:
+                continue
+            if bt and bu.lower().startswith(("http://", "https://")):
+                buttons.append({"text": escape_html(bt), "url": bu})
+        buttons_json = _json.dumps(buttons) if buttons else None
+        try:
+            priority = max(0, min(1000, int(body.get("priority") or 0)))
+        except (TypeError, ValueError):
+            priority = 0
+        try:
+            reply_delay_sec = max(0, min(300, int(body.get("reply_delay_sec") or 0)))
+        except (TypeError, ValueError):
+            reply_delay_sec = 0
         try:
             row = await pool.fetchrow(
-                """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text, is_active, match_mode)
-                   VALUES ($1,$2,$3,$4,TRUE,$5) RETURNING id""",
-                bot_id, trigger_type, keyword or None, response_text, match_mode)
+                """INSERT INTO auto_replies
+                       (bot_id, trigger_type, keyword, response_text, is_active,
+                        match_mode, buttons, priority, reply_delay_sec)
+                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8) RETURNING id""",
+                bot_id, trigger_type, keyword or None, response_text, match_mode,
+                buttons_json, priority, reply_delay_sec)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
