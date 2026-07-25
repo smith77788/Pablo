@@ -486,8 +486,14 @@ async def cb_pset_apply(
     if replies:
         applied.append(f"✅ Авто-ответы ({len(replies)} шт.)")
 
-    # 4. Funnel
-    steps = tpl.get("funnel_steps", [])
+    # 4. Funnel — без дубля приветствия: если welcome уже задан, 0-й шаг воронки
+    # (delay 0) дублирует его на /start, поэтому убираем такие шаги.
+    from services.preset_templates import strip_duplicate_welcome_steps
+    steps = strip_duplicate_welcome_steps(
+        tpl.get("funnel_steps", []),
+        has_start_welcome=bool(welcome),
+        funnel_trigger="start",
+    )
     if steps:
         try:
             funnel_row = await db.create_funnel(

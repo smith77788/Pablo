@@ -1009,10 +1009,20 @@ async def _apply_bot_template_data(
             log.warning("welcome auto_reply bot=%s: %s", bot_id, e)
             results.append("👋 Приветственное сообщение: ⚠️")
 
-    # Funnel
+    # Funnel — без дубля приветствия на /start (см. strip_duplicate_welcome_steps)
     if data.get("funnel_steps"):
-        steps = data["funnel_steps"]
         funnel_trigger = data.get("funnel_trigger", "start")
+        _has_start_welcome = bool(data.get("welcome_message")) or any(
+            ar.get("keyword", "").strip().lower() in ("/start", "start")
+            for ar in (data.get("auto_replies") or [])
+        )
+        from services.preset_templates import strip_duplicate_welcome_steps
+        steps = strip_duplicate_welcome_steps(
+            data["funnel_steps"],
+            has_start_welcome=_has_start_welcome,
+            funnel_trigger=funnel_trigger,
+        )
+    if data.get("funnel_steps") and steps:
         try:
             funnel_row = await db.create_funnel(pool, bot_id, f"{tpl_name} — Автоворонка", funnel_trigger, None)
             funnel_id = funnel_row["id"]

@@ -1108,3 +1108,30 @@ def render_template(template: dict, subs: dict[str, str]) -> dict:
         return val
 
     return _replace(copy.deepcopy(template))
+
+
+def strip_duplicate_welcome_steps(
+    steps: list[dict],
+    *,
+    has_start_welcome: bool,
+    funnel_trigger: str,
+) -> list[dict]:
+    """Убрать 0-задержечные шаги воронки, дублирующие стартовое приветствие.
+
+    Каждый бот-пресет несёт И welcome_message, И funnel[0] с delay_hours=0 почти
+    тем же текстом. На /start бот шлёт приветствие (welcome-автоответ) И сразу
+    нулевой шаг воронки → пользователь получает два почти одинаковых приветствия.
+    Если стартовое приветствие уже есть и воронка триггерится на 'start', 0-шаги —
+    дубль; оставляем только таймерные follow-up (24h/72h/…). Возвращает НОВЫЙ список.
+    """
+    if not has_start_welcome or funnel_trigger != "start":
+        return list(steps)
+    out = []
+    for s in steps:
+        try:
+            delay = float(s.get("delay_hours", 0) or 0)
+        except (TypeError, ValueError):
+            delay = 0.0
+        if delay > 0:
+            out.append(s)
+    return out
