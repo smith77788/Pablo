@@ -22,8 +22,30 @@ def test_all_login_routes_registered():
         "/api/miniapp/account/add/qr/start",
         "/api/miniapp/account/add/qr/poll",
         "/api/miniapp/account/add/qr/2fa",
+        "/api/miniapp/account/add/session_file",
+        "/api/miniapp/account/add/tdata",
     ):
         assert route in API, f"роут не зарегистрирован: {route}"
+
+
+def test_file_upload_bounded_and_guarded():
+    # multipart читается с жёстким лимитом; tdata распаковка — через vetted-хелпер
+    assert "_read_upload" in API and "read_chunk" in API
+    assert "import_tdata_from_zip_bytes" in API
+    assert "import_from_session_file" in API
+    from services import account_manager as am
+    import inspect
+    assert inspect.iscoroutinefunction(am.import_tdata_from_zip_bytes)
+
+
+def test_tdata_zip_helper_guards():
+    """import_tdata_from_zip_bytes защищает от zip-bomb и path-traversal."""
+    import inspect
+    from services import account_manager as am
+    src = inspect.getsource(am.import_tdata_from_zip_bytes)
+    assert "_MAX_UNCOMPRESSED" in src and "_MAX_FILES" in src
+    assert "path traversal" in src.lower() or ".." in src
+    assert "BadZipFile" in src
 
 
 def test_handlers_use_vetted_persistence_and_proxy_binding():
@@ -62,5 +84,6 @@ def test_ui_has_all_login_methods():
     html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
     # вкладки способов входа
     assert "accSetLoginMethod" in html, "нет переключателя способов входа"
-    for fn in ("accPhoneStart", "accPhoneCode", "accQrStart", "accQrPoll"):
+    for fn in ("accPhoneStart", "accPhoneCode", "accQrStart", "accQrPoll",
+               "accFileUpload", "accTdataUpload"):
         assert fn in html, f"нет JS-функции {fn}"

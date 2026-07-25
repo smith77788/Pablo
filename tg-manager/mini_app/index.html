@@ -4585,10 +4585,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="modal-x" onclick="closeAccImportModal()">✕</div>
     <div class="modal-title">📱 Добавить аккаунт</div>
     <!-- Переключатель способа входа: как в боте (строка / номер / QR) -->
-    <div style="display:flex;gap:6px;margin-bottom:12px">
-      <button type="button" id="accTab-string" class="btn" onclick="accSetLoginMethod('string')" style="flex:1;padding:8px 4px;font-size:13px">🔑 Строка</button>
-      <button type="button" id="accTab-phone" class="btn" onclick="accSetLoginMethod('phone')" style="flex:1;padding:8px 4px;font-size:13px">☎️ Номер</button>
-      <button type="button" id="accTab-qr" class="btn" onclick="accSetLoginMethod('qr')" style="flex:1;padding:8px 4px;font-size:13px">🔲 QR</button>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+      <button type="button" id="accTab-string" class="btn" onclick="accSetLoginMethod('string')" style="flex:1 1 28%;padding:8px 4px;font-size:12px">🔑 Строка</button>
+      <button type="button" id="accTab-phone" class="btn" onclick="accSetLoginMethod('phone')" style="flex:1 1 28%;padding:8px 4px;font-size:12px">☎️ Номер</button>
+      <button type="button" id="accTab-qr" class="btn" onclick="accSetLoginMethod('qr')" style="flex:1 1 28%;padding:8px 4px;font-size:12px">🔲 QR</button>
+      <button type="button" id="accTab-file" class="btn" onclick="accSetLoginMethod('file')" style="flex:1 1 45%;padding:8px 4px;font-size:12px">📂 .session</button>
+      <button type="button" id="accTab-tdata" class="btn" onclick="accSetLoginMethod('tdata')" style="flex:1 1 45%;padding:8px 4px;font-size:12px">📦 tdata</button>
     </div>
 
     <!-- Общий выбор прокси (для всех способов) -->
@@ -4642,6 +4644,26 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <label>Пароль 2FA</label>
         <input type="password" id="accQr2fa" placeholder="облачный пароль" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accQr2faBtn" onclick="accQr2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
+      </div>
+    </div>
+
+    <!-- Способ 4: файл .session -->
+    <div id="accMethod-file" style="display:none">
+      <div class="field">
+        <label>Файл .session (Telethon/Pyrogram)</label>
+        <input type="file" id="accFileInput" accept=".session" style="width:100%;font-size:13px;color:var(--text)">
+        <div class="field-note">Файл проверяется подключением и шифруется при сохранении.</div>
+        <button class="btn btn-p" id="accFileBtn" onclick="accFileUpload()" style="width:100%;margin-top:8px">📂 Загрузить и импортировать</button>
+      </div>
+    </div>
+
+    <!-- Способ 5: tdata (Telegram Desktop) -->
+    <div id="accMethod-tdata" style="display:none">
+      <div class="field">
+        <label>ZIP-архив папки tdata</label>
+        <input type="file" id="accTdataInput" accept=".zip" style="width:100%;font-size:13px;color:var(--text)">
+        <div class="field-note">Упакуйте папку <b>tdata</b> из Telegram Desktop в ZIP целиком. Макс 50 МБ. Конвертируется в сессию на сервере.</div>
+        <button class="btn btn-p" id="accTdataBtn" onclick="accTdataUpload()" style="width:100%;margin-top:8px">📦 Загрузить и конвертировать</button>
       </div>
     </div>
 
@@ -9425,7 +9447,7 @@ function accStopQrPoll(){ if(_accQrTimer){ clearInterval(_accQrTimer); _accQrTim
 function accSetLoginMethod(m){
   accStopQrPoll(); _accErr('');
   document.getElementById('accImportResult').style.display='none';
-  ['string','phone','qr'].forEach(k=>{
+  ['string','phone','qr','file','tdata'].forEach(k=>{
     const sec=document.getElementById('accMethod-'+k); if(sec) sec.style.display = (k===m)?'block':'none';
     const tab=document.getElementById('accTab-'+k); if(tab) tab.classList.toggle('btn-p', k===m);
   });
@@ -9511,6 +9533,35 @@ async function accQr2fa(){
     _accDone(r);
   }catch(e){ _accErr(String(e&&e.message||e)); }
   finally{ b.disabled=false; b.textContent='🔓 Подтвердить 2FA'; }
+}
+
+// Загрузка файлов (.session / tdata) — multipart, а не JSON ───────────────
+async function _accUpload(path, file){
+  const fd=new FormData(); fd.append('file', file);
+  const pid=_accProxy().id; if(pid) fd.append('proxy_id', pid);
+  // Свой fetch: multipart Content-Type ставит браузер (api() форсит JSON).
+  let r=await fetch(path,{method:'POST',headers:{'Authorization':'Bearer '+TK},body:fd});
+  if(r.status===401){ await _reAuth(); r=await fetch(path,{method:'POST',headers:{'Authorization':'Bearer '+TK},body:fd}); }
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok||j.ok===false) throw new Error(j.message||j.error||'Ошибка загрузки файла');
+  return j;
+}
+async function accFileUpload(){
+  _accErr(''); const f=document.getElementById('accFileInput').files[0];
+  if(!f){ _accErr('Выберите файл .session'); return; }
+  const b=document.getElementById('accFileBtn'); b.disabled=true; b.textContent='⏳ Импортирую…';
+  try{ _accDone(await _accUpload('/api/miniapp/account/add/session_file', f)); }
+  catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ b.disabled=false; b.textContent='📂 Загрузить и импортировать'; }
+}
+async function accTdataUpload(){
+  _accErr(''); const f=document.getElementById('accTdataInput').files[0];
+  if(!f){ _accErr('Выберите ZIP-архив tdata'); return; }
+  if(f.size>50*1024*1024){ _accErr('Архив больше 50 МБ'); return; }
+  const b=document.getElementById('accTdataBtn'); b.disabled=true; b.textContent='⏳ Конвертирую…';
+  try{ _accDone(await _accUpload('/api/miniapp/account/add/tdata', f)); }
+  catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ b.disabled=false; b.textContent='📦 Загрузить и конвертировать'; }
 }
 
 async function submitAccImport() {

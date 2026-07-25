@@ -12865,12 +12865,86 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("account_add_qr_2fa uid=%s", uid)
             return _err("Не удалось подтвердить 2FA", 400)
 
+    async def _read_upload(part, max_bytes: int) -> bytes:
+        """Прочитать multipart-part с жёстким лимитом (защита от OOM)."""
+        buf = bytearray()
+        while True:
+            chunk = await part.read_chunk(65536)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > max_bytes:
+                raise ValueError("Файл слишком большой")
+        return bytes(buf)
+
+    async def _multipart_file_and_proxy(request, max_bytes: int):
+        """Достать (file_bytes, filename, proxy_id) из multipart-запроса."""
+        reader = await request.multipart()
+        file_bytes = b""
+        filename = ""
+        proxy_id = None
+        async for part in reader:
+            if part.name == "file":
+                filename = part.filename or ""
+                file_bytes = await _read_upload(part, max_bytes)
+            elif part.name == "proxy_id":
+                proxy_id = (await part.text()).strip() or None
+        return file_bytes, filename, proxy_id
+
+    async def account_add_session_file(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            file_bytes, filename, proxy_id = await _multipart_file_and_proxy(request, 20 * 1024 * 1024)
+            if not file_bytes:
+                return _err("Файл сессии не получен", 400)
+            from services import account_manager as am
+            session_str, info = await asyncio.wait_for(
+                am.import_from_session_file(file_bytes, filename), timeout=60)
+            pid, _ = await _resolve_proxy_url(uid, proxy_id)
+            acc_id = await _persist_login(uid, session_str, info, pid)
+            return _json_resp({"ok": True, "account_id": acc_id, "username": info.get("username")})
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except asyncio.TimeoutError:
+            return _err("Импорт занял слишком долго — проверьте прокси/сессию", 400)
+        except Exception:
+            log.exception("account_add_session_file uid=%s", uid)
+            return _err("Не удалось импортировать .session", 400)
+
+    async def account_add_tdata(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            file_bytes, filename, proxy_id = await _multipart_file_and_proxy(request, 50 * 1024 * 1024)
+            if not file_bytes:
+                return _err("ZIP-архив не получен", 400)
+            if not filename.lower().endswith(".zip"):
+                return _err("Ожидается ZIP-архив папки tdata", 400)
+            from services import account_manager as am
+            session_str, info = await asyncio.wait_for(
+                am.import_tdata_from_zip_bytes(file_bytes), timeout=120)
+            pid, _ = await _resolve_proxy_url(uid, proxy_id)
+            acc_id = await _persist_login(uid, session_str, info, pid)
+            return _json_resp({"ok": True, "account_id": acc_id, "username": info.get("username")})
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except ImportError:
+            return _err("Конвертер tdata недоступен на сервере — используйте .session или строку", 400)
+        except asyncio.TimeoutError:
+            return _err("Конвертация tdata заняла слишком долго", 400)
+        except Exception:
+            log.exception("account_add_tdata uid=%s", uid)
+            return _err("Не удалось импортировать tdata", 400)
+
     app.router.add_post("/api/miniapp/account/add/phone/start", account_add_phone_start)
     app.router.add_post("/api/miniapp/account/add/phone/code", account_add_phone_code)
     app.router.add_post("/api/miniapp/account/add/phone/2fa", account_add_phone_2fa)
     app.router.add_post("/api/miniapp/account/add/qr/start", account_add_qr_start)
     app.router.add_post("/api/miniapp/account/add/qr/poll", account_add_qr_poll)
     app.router.add_post("/api/miniapp/account/add/qr/2fa", account_add_qr_2fa)
+    app.router.add_post("/api/miniapp/account/add/session_file", account_add_session_file)
+    app.router.add_post("/api/miniapp/account/add/tdata", account_add_tdata)
 
     async def team_audit(request: web.Request) -> web.Response:
         uid = _get_uid(request)

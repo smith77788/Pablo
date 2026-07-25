@@ -1439,6 +1439,66 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
             log_exc_swallow(log, "Сбой отключения в import_from_tdata")
 
 
+def _find_tdata_root(extract_dir: str) -> str | None:
+    """Найти корень tdata (папку с файлом key_datas) в распакованном архиве."""
+    import os
+    for root, dirs, files in os.walk(extract_dir):
+        if "key_datas" in files:
+            return root
+        depth = root[len(extract_dir):].count(os.sep)
+        if depth >= 3:
+            dirs.clear()
+    return None
+
+
+async def import_tdata_from_zip_bytes(zip_bytes: bytes) -> tuple[str, dict]:
+    """ZIP-архив папки tdata (в байтах) → Telethon StringSession + info.
+
+    Инкапсулирует безопасную распаковку (защита от zip-bomb и path-traversal),
+    поиск корня tdata и конвертацию. Единая точка для веб-API и бота.
+    Бросает ValueError с человекочитаемой причиной.
+    """
+    import os as _os
+    import tempfile
+    import zipfile
+
+    _MAX_UNCOMPRESSED = 200 * 1024 * 1024  # 200 MB
+    _MAX_FILES = 5_000
+
+    tmp_dir = tempfile.mkdtemp(prefix="tdata_web_")
+    zip_path = _os.path.join(tmp_dir, "tdata.zip")
+    extract_dir = _os.path.join(tmp_dir, "extracted")
+    _os.makedirs(extract_dir, exist_ok=True)
+    try:
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                members = zf.infolist()
+                if len(members) > _MAX_FILES:
+                    raise ValueError(f"Слишком много файлов в архиве (>{_MAX_FILES}).")
+                if sum(i.file_size for i in members) > _MAX_UNCOMPRESSED:
+                    raise ValueError("Архив слишком большой в распакованном виде (>200 МБ).")
+                for member in members:
+                    fname = member.filename.replace("\\", "/")
+                    if _os.path.isabs(fname) or ".." in fname.split("/"):
+                        raise ValueError("Подозрительные пути в архиве (path traversal). Отклонено.")
+                zf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            raise ValueError("Файл повреждён или не является ZIP-архивом.")
+
+        tdata_path = _find_tdata_root(extract_dir)
+        if not tdata_path:
+            raise ValueError("Папка tdata (с файлом key_datas) не найдена в архиве.")
+        return await import_from_tdata(tdata_path)
+    finally:
+        import shutil
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            log_exc_swallow(log, "import_tdata_from_zip_bytes cleanup")
+
+
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
     client = _pending.get(phone)
