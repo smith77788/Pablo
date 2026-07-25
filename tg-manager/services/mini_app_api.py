@@ -5028,6 +5028,91 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("channels_bulk_create uid=%d", uid)
             return _err(str(exc), 500)
 
+    _JOIN_DELAY_MODES = ("fast", "normal", "slow", "smart")
+
+    async def _mass_membership_op(request: web.Request, kind: str) -> web.Response:
+        """Массовое вступление/выход по списку чатов (паритет с ботом).
+
+        kind='join'  → op bulk_join,  список зовётся "links";
+        kind='leave' → op bulk_leave, список зовётся "channels".
+        Имена параметров и total_items = цели × аккаунты повторяют ботовый путь
+        (bot/handlers/mass_ops.py) — второй источник правды не плодим.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        raw = data.get("targets") or data.get("links") or data.get("channels") or []
+        if isinstance(raw, str):
+            raw = re.split(r"[\s,;]+", raw)
+        targets = [t.strip() for t in raw if isinstance(t, str) and t.strip()][:500]
+        if not targets:
+            return _err("Укажите хотя бы один канал/группу", 400)
+
+        acc_ids = [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()]
+        if not acc_ids:
+            return _err("Выберите хотя бы один аккаунт", 400)
+
+        delay_mode = str(data.get("delay_mode") or "smart")
+        if delay_mode not in _JOIN_DELAY_MODES:
+            delay_mode = "smart"
+
+        # Аккаунты — только свои и живые, иначе операция провалится уже в воркере.
+        rows = await _safe_fetch(
+            pool,
+            "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[]) AND owner_id=$2 "
+            "AND is_active AND session_str IS NOT NULL",
+            acc_ids, uid,
+        )
+        acc_ids = [r["id"] for r in (rows or [])]
+        if not acc_ids:
+            return _err("Нет доступных активных аккаунтов из выбранных", 400)
+
+        # Ban-safety: массовый join/leave — рисковая операция, и бот проверяет
+        # давление инфраструктуры ПЕРЕД постановкой. Мини-апп обязан так же,
+        # иначе через второй вход тот же аккаунт получит больше нагрузки.
+        try:
+            from services import infra_orchestrator
+            op_name = "bulk_join" if kind == "join" else "bulk_leave"
+            ready, reason = await infra_orchestrator.is_ready_for_op(pool, uid, op_name)
+            if not ready:
+                return _err(f"Инфраструктура перегружена: {reason}", 429)
+        except Exception:
+            # Гейт давления — защита, а не блокер: его собственный сбой не должен
+            # мешать пользователю запустить операцию.
+            log.warning("_mass_membership_op(%s): pressure check failed", kind, exc_info=True)
+
+        op_type = "bulk_join" if kind == "join" else "bulk_leave"
+        key = "links" if kind == "join" else "channels"
+        params = {key: targets, "account_ids": acc_ids, "delay_mode": delay_mode}
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, op_type, params,
+                total_items=len(targets) * len(acc_ids),
+                label=(f"{'Вступление в' if kind == 'join' else 'Выход из'} "
+                       f"{len(targets)} чатов × {len(acc_ids)} акк."),
+            )
+            return _json_resp({
+                "ok": True, "op_id": op_id,
+                "targets": len(targets), "accounts": len(acc_ids),
+            })
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("_mass_membership_op(%s) uid=%d", kind, uid)
+            return _err(str(exc), 500)
+
+    async def channels_bulk_join(request: web.Request) -> web.Response:
+        return await _mass_membership_op(request, "join")
+
+    async def channels_bulk_leave(request: web.Request) -> web.Response:
+        return await _mass_membership_op(request, "leave")
+
     async def bot_remove(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -11306,6 +11391,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
     app.router.add_post("/api/miniapp/channels/bulk_create", channels_bulk_create)
+    app.router.add_post("/api/miniapp/channels/bulk_join", channels_bulk_join)
+    app.router.add_post("/api/miniapp/channels/bulk_leave", channels_bulk_leave)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)
     app.router.add_get("/api/miniapp/bot/{bot_id}/auto_replies", bot_auto_replies)
