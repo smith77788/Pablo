@@ -12412,13 +12412,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             cid = request.match_info['contact_id']
             data = await request.json()
+            # next_reminder_at — TIMESTAMPTZ, а asyncpg биндит его БЕЗ каста и
+            # требует datetime: строка с фронта роняла запрос (DataError) → фича
+            # «напоминание» падала 500 всегда. Парсим на границе; naive-время
+            # (старые клиенты) трактуем как UTC, чтобы не сдвигать.
+            import datetime as _dtm
+            _raw = data.get('remind_at')
+            remind_dt = None
+            if _raw:
+                try:
+                    remind_dt = _dtm.datetime.fromisoformat(
+                        str(_raw).replace("Z", "+00:00"))
+                except (TypeError, ValueError):
+                    return _err("Некорректная дата напоминания", 400)
+                if remind_dt.tzinfo is None:
+                    remind_dt = remind_dt.replace(tzinfo=_dtm.timezone.utc)
             from services.contacts_hub.crm_engine import upsert_crm
             await upsert_crm(pool, uid, cid, {
-                'next_reminder_at': data.get('remind_at'),
+                'next_reminder_at': remind_dt,
                 'next_reminder_text': data.get('text', ''),
             })
             return _json_resp({'ok': True})
         except Exception as e:
+            log.exception("uch_crm_reminder uid=%s", uid)
             return _err(str(e), 500)
 
     async def uch_duplicates(request: web.Request) -> web.Response:

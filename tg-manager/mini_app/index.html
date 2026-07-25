@@ -9791,7 +9791,10 @@ function openBcScheduleModal() {
   document.getElementById('bs-err').style.display='none';
   const now = new Date();
   now.setMinutes(now.getMinutes()+60);
-  document.getElementById('bs-datetime').value = now.toISOString().slice(0,16);
+  // datetime-local показывает ЛОКАЛЬНОЕ время: toISOString() дал бы UTC, и у
+  // пользователя с ненулевым смещением дефолт «через час» съезжал бы на величину
+  // смещения (для UTC+3 — на 3 часа в прошлое).
+  document.getElementById('bs-datetime').value = toLocalInput(now);
   document.getElementById('mo-bc-schedule').classList.add('show');
 }
 async function submitBcSchedule() {
@@ -9806,7 +9809,11 @@ async function submitBcSchedule() {
   if (!text) { errEl.textContent='Введите текст сообщения'; errEl.style.display='block'; return; }
   if (!datetime) { errEl.textContent='Укажите дату и время'; errEl.style.display='block'; return; }
   try {
-    const body = {bot_id:parseInt(botId), message_text:text, segment, scheduled_at:datetime, repeat};
+    // Время уходит в UTC-ISO: operation_queue.scheduled_for — TIMESTAMPTZ, и
+    // наивная локальная строка трактовалась бы как UTC → рассылка уходила бы со
+    // сдвигом на часовой пояс пользователя.
+    const body = {bot_id:parseInt(botId), message_text:text, segment,
+                  scheduled_at:localToUtcIso(datetime), repeat};
     if (abToggle) {
       body.ab_variant = 'B';
       body.ab_text_b = document.getElementById('bs-ab-text').value.trim();
@@ -11488,7 +11495,10 @@ async function saveCrmReminder(id) {
   const text = document.getElementById('crm-remind-text').value.trim();
   if (!remindAt) { toast('⚠️ Укажите дату'); return; }
   try {
-    await api('/api/miniapp/uch/contacts/'+id+'/crm/reminder', {method:'POST', body:JSON.stringify({remind_at: remindAt, text})});
+    // next_reminder_at — TIMESTAMPTZ и сравнивается с NOW(): наивная локальная
+    // строка легла бы как UTC, и напоминание считалось бы «предстоящим» лишние
+    // часы (сдвиг на пояс пользователя). Шлём UTC-ISO.
+    await api('/api/miniapp/uch/contacts/'+id+'/crm/reminder', {method:'POST', body:JSON.stringify({remind_at: localToUtcIso(remindAt), text})});
     toast('⏰ Напоминание установлено');
     openContactCRM(id);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
