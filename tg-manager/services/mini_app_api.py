@@ -5144,6 +5144,68 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("_import_all_op(%s) uid=%d", kind, uid)
             return _err(str(exc), 500)
 
+    async def groups_announce(request: web.Request) -> web.Response:
+        """Объявление во все группы аккаунта (паритет с ботом).
+
+        Контракт совпадает с ботовым: {"acc_id", "text"}, total_items = число
+        групп аккаунта. Группы считаем по той же таксономии типов, что и бот.
+        Текст поддерживает spintax — исполнитель разворачивает его НА КАЖДУЮ
+        группу отдельно (anti-detection: одинаковый текст в десятки групп —
+        палевная сигнатура).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        acc_id = validate_integer(data.get("acc_id"), min_val=1)
+        if not acc_id:
+            return _err("Выберите аккаунт", 400)
+        text = validate_string(data.get("text"), max_len=4096)
+        if not text:
+            return _err("Введите текст объявления", 400)
+        if check_sql_suspicious(text):
+            return _err("Недопустимые символы в тексте", 400)
+
+        acc = await _safe_fetchrow(
+            pool,
+            "SELECT id, is_active, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            int(acc_id), uid,
+        )
+        if not acc:
+            return _err("Аккаунт не найден", 404)
+        if not acc["is_active"] or not acc["session_str"]:
+            return _err("Аккаунт неактивен или без сессии — выберите другой", 400)
+
+        # Честный total: если групп нет, операцию не ставим — иначе пользователь
+        # увидел бы «запущено» и молчаливый ноль в итоге.
+        cnt = await _safe_count(
+            pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 "
+            "AND type IN ('megagroup','supergroup','group','chat')",
+            uid, int(acc_id),
+        )
+        if not cnt:
+            return _err("У этого аккаунта нет групп — сначала импортируйте их", 400)
+
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "group_announce",
+                {"acc_id": int(acc_id), "text": text},
+                total_items=int(cnt),
+                label=f"Объявление в {cnt} групп аккаунта #{acc_id}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "groups": int(cnt)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("groups_announce uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def channels_import_all(request: web.Request) -> web.Response:
         return await _import_all_op(request, "channels")
 
@@ -11436,6 +11498,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/bulk_create", channels_bulk_create)
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
+    app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_post("/api/miniapp/channels/bulk_join", channels_bulk_join)
     app.router.add_post("/api/miniapp/channels/bulk_leave", channels_bulk_leave)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)

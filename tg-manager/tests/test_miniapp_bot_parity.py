@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # собираются динамически (f"global_presence_{asset_type}") и давно доступны из
 # мини-аппа — детектор литералов их не видел. Едва не начал реализовывать уже
 # работающее; отсюда учёт динамических префиксов ниже.
-BASELINE_GAP = 8
+BASELINE_GAP = 7
 
 
 def _strip_comments(src: str) -> str:
