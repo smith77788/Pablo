@@ -1823,6 +1823,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div id="mjErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
+    <div class="sec">Массовое редактирование</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <select id="beTarget" onchange="beSyncFields()" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+        <option value="channels">📡 Каналы аккаунтов</option>
+        <option value="bots">🤖 Мои боты</option>
+        <option value="profile">👤 Профили аккаунтов</option>
+      </select>
+      <select id="beField" onchange="beSyncHint()" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"></select>
+      <input type="text" id="beValue" placeholder="Новое значение" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
+      <div id="beHint" style="font-size:12px;color:var(--hint);margin-bottom:8px"></div>
+      <button class="btn btn-p" style="width:100%" onclick="submitBulkEdit()">✏️ Применить ко всем</button>
+      <div id="beErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+    </div>
     <div class="sec">Объявление во все группы аккаунта</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <select id="gaAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
@@ -14587,6 +14600,53 @@ const MASS_OP_LABELS = {
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
+// Массовое редактирование: каналы / боты / профили. Поля ровно те, что понимают
+// исполнители — иначе получился бы «тихий успех» (операция прошла, эффекта нет).
+const BE_FIELDS = {
+  channels: [['title','Название канала']],
+  bots:     [['name','Имя бота'],['desc','Описание'],['short_desc','Краткое описание'],['commands','Команды']],
+  profile:  [['first_name','Имя'],['last_name','Фамилия'],['about','О себе'],['username','Username']],
+};
+const BE_HINTS = {
+  'profile:username': '⚠️ К значению автоматически добавляется номер: имя1, имя2… Одинаковая основа у всех аккаунтов — координационная сигнатура, используйте осознанно.',
+  'bots:commands': 'Список команд, по одной на строку: start - Описание',
+  'channels:title': 'Применится ко ВСЕМ каналам выбранных аккаунтов.',
+};
+function beSyncFields() {
+  const t = document.getElementById('beTarget').value;
+  const sel = document.getElementById('beField');
+  sel.innerHTML = (BE_FIELDS[t]||[]).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+  beSyncHint();
+}
+function beSyncHint() {
+  const t = document.getElementById('beTarget')?.value;
+  const f = document.getElementById('beField')?.value;
+  const el = document.getElementById('beHint');
+  if (el) el.textContent = BE_HINTS[`${t}:${f}`] || '';
+}
+async function submitBulkEdit() {
+  const errEl = document.getElementById('beErr');
+  errEl.textContent = '';
+  const target = document.getElementById('beTarget').value;
+  const field = document.getElementById('beField').value;
+  const value = (document.getElementById('beValue').value || '').trim();
+  if (!value) { errEl.textContent = 'Введите новое значение'; return; }
+  const what = target==='bots' ? 'всех ваших ботов'
+             : target==='channels' ? 'все каналы ваших аккаунтов'
+             : 'профили всех активных аккаунтов';
+  if (!await askConfirm(`Изменить «${field}» у ${what}?\n\nНовое значение: ${value}\n\nИзменения применяются в Telegram — откатить массово нельзя.`)) return;
+  const url = target==='bots' ? '/api/miniapp/bots/bulk_edit'
+            : target==='channels' ? '/api/miniapp/channels/bulk_edit'
+            : '/api/miniapp/accounts/bulk_profile';
+  try {
+    const r = await api(url, {method:'POST', body:JSON.stringify({field, value})});
+    toast(`✏️ Изменение «${r.field}» запущено · ${r.total} шт. · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Массовое редактирование');
+    document.getElementById('beValue').value = '';
+    openMassOps();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+}
+
 // Объявление во все группы аккаунта — операция group_announce, как в боте.
 async function submitGroupAnnounce() {
   const errEl = document.getElementById('gaErr');
@@ -14664,6 +14724,7 @@ async function openMassOps() {
           <input type="checkbox" class="mj-acc-cb" value="${a.id}" style="width:16px;height:16px">
           ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
       : '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>');
+    beSyncFields();
     const ga = document.getElementById('gaAccount');
     if (ga) ga.innerHTML = live.length
       ? live.map(a=>`<option value="${a.id}">${esc(a.phone||a.first_name||('#'+a.id))}</option>`).join('')
