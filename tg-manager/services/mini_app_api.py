@@ -6,6 +6,7 @@ import json
 import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
 import os
+import re  # модульный: часть хендлеров зовёт re.split/re.sub без локального import
 import time
 from typing import Any
 
@@ -23,6 +24,10 @@ from services.security import (
     escape_html,
     escape_json_value,
     security_middleware,
+    # Использовались в хендлерах, но НЕ импортировались: добавление бота по токену
+    # и разбор start-параметра падали NameError → 500 на каждом вызове.
+    validate_bot_token,
+    validate_start_param,
 )
 
 log = logging.getLogger(__name__)
@@ -8953,7 +8958,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE user_proxies SET is_alive=$1, last_check=now() WHERE id=$2 AND owner_id=$3",
                 bool(res.get("ok")), proxy_id, uid)
         except Exception:
-            log_exc_swallow(log, "check_proxy persist")
+            # log_exc_swallow в этом модуле не импортирован — обработчик ошибки сам
+            # падал бы NameError, превращая штатный сбой записи в 500 и теряя
+            # результат уже выполненной проверки прокси.
+            log.warning("check_proxy persist failed proxy=%s", proxy_id, exc_info=True)
         return _json_resp({"ok": True, "alive": bool(res.get("ok")),
                            "latency_ms": res.get("latency_ms"), "error": res.get("error")})
 
