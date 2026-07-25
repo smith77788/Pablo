@@ -12500,6 +12500,188 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
 
+    # ── Добавление аккаунта: интерактивные способы входа (как в боте) ──────────
+    # Раньше в мини-аппе был ТОЛЬКО импорт строки сессии. Добавляем вход по номеру
+    # (код + 2FA) и по QR — те же примитивы account_manager, что и в боте.
+    # Полученная сессия сохраняется через db.add_tg_account (шифрование+дедуп),
+    # прокси закрепляется за аккаунтом (изоляция с первого шага).
+
+    async def _resolve_proxy_url(_uid: int, proxy_id) -> tuple[int | None, str | None]:
+        """proxy_id → (validated_proxy_id, proxy_url) со скоупом по владельцу."""
+        try:
+            pid = int(proxy_id) if proxy_id else None
+        except (TypeError, ValueError):
+            return None, None
+        if not pid:
+            return None, None
+        row = await _safe_fetchrow(pool,
+            "SELECT proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            pid, _uid)
+        return (pid, row["proxy_url"]) if row else (None, None)
+
+    async def _persist_login(_uid: int, session_str: str, info: dict, pid: int | None) -> int:
+        """Сохранить залогиненный аккаунт (шифрование+дедуп) + закрепить прокси."""
+        from database import db as _db
+        acc_id = await _db.add_tg_account(
+            pool, owner_id=_uid,
+            phone=info.get("phone") or "",
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
+        )
+        if pid and acc_id:
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+                    pid, acc_id, _uid)
+            except Exception as e:
+                log.warning("proxy bind failed acc=%s: %s", acc_id, e)
+        return acc_id
+
+    async def account_add_phone_start(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            phone = (body.get("phone") or "").strip()
+            if not phone.startswith("+") or len(phone) < 8:
+                return _err("Укажите номер в формате +71234567890", 400)
+            _pid, proxy_url = await _resolve_proxy_url(uid, body.get("proxy_id"))
+            from services import account_manager as am
+            phone_code_hash, hint = await asyncio.wait_for(
+                am.start_login(phone, proxy_url=proxy_url), timeout=40)
+            return _json_resp({"ok": True, "phone_code_hash": phone_code_hash, "hint": hint})
+        except asyncio.TimeoutError:
+            return _err("Telegram не ответил за 40с — проверьте номер/прокси", 400)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception:
+            log.exception("account_add_phone_start uid=%s", uid)
+            return _err("Не удалось отправить код", 400)
+
+    async def account_add_phone_code(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            phone = (body.get("phone") or "").strip()
+            code = (body.get("code") or "").strip()
+            pch = (body.get("phone_code_hash") or "").strip()
+            if not phone or not code or not pch:
+                return _err("Нужны phone, code и phone_code_hash", 400)
+            from services import account_manager as am
+            res = await asyncio.wait_for(am.confirm_code(phone, code, pch), timeout=40)
+            if res == "need_2fa":
+                return _json_resp({"ok": True, "needs_2fa": True})
+            session_str, info = await am.get_client_info_and_session(phone)
+            pid, _ = await _resolve_proxy_url(uid, body.get("proxy_id"))
+            acc_id = await _persist_login(uid, session_str, info, pid)
+            return _json_resp({"ok": True, "account_id": acc_id, "username": info.get("username")})
+        except asyncio.TimeoutError:
+            return _err("Telegram не ответил за 40с", 400)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception:
+            log.exception("account_add_phone_code uid=%s", uid)
+            return _err("Не удалось подтвердить код", 400)
+
+    async def account_add_phone_2fa(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            phone = (body.get("phone") or "").strip()
+            password = body.get("password") or ""
+            if not phone or not password:
+                return _err("Нужны phone и password", 400)
+            from services import account_manager as am
+            await asyncio.wait_for(am.confirm_2fa(phone, password), timeout=40)
+            session_str, info = await am.get_client_info_and_session(phone)
+            pid, _ = await _resolve_proxy_url(uid, body.get("proxy_id"))
+            acc_id = await _persist_login(uid, session_str, info, pid)
+            return _json_resp({"ok": True, "account_id": acc_id, "username": info.get("username")})
+        except asyncio.TimeoutError:
+            return _err("Telegram не ответил за 40с", 400)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception:
+            log.exception("account_add_phone_2fa uid=%s", uid)
+            return _err("Не удалось подтвердить 2FA", 400)
+
+    async def account_add_qr_start(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            import base64
+            from services import account_manager as am
+            png = await asyncio.wait_for(am.start_qr_login(uid), timeout=40)
+            b64 = base64.b64encode(png).decode("ascii")
+            return _json_resp({"ok": True, "qr_png": f"data:image/png;base64,{b64}"})
+        except asyncio.TimeoutError:
+            return _err("Не удалось создать QR за 40с", 400)
+        except Exception:
+            log.exception("account_add_qr_start uid=%s", uid)
+            return _err("Не удалось создать QR", 400)
+
+    async def account_add_qr_poll(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            from services import account_manager as am
+            from telethon.errors import SessionPasswordNeededError
+            try:
+                # короткий таймаут — фронт опрашивает периодически
+                session_str, info = await am.wait_qr_login(uid, timeout=8.0)
+            except SessionPasswordNeededError:
+                return _json_resp({"ok": True, "status": "need_2fa"})
+            except (asyncio.TimeoutError, TimeoutError):
+                return _json_resp({"ok": True, "status": "pending"})
+            except ValueError as ve:
+                # QR-сессия не найдена/истекла — начать заново
+                return _err(str(ve), 400)
+            pid, _ = await _resolve_proxy_url(uid, body.get("proxy_id"))
+            acc_id = await _persist_login(uid, session_str, info, pid)
+            return _json_resp({"ok": True, "status": "done", "account_id": acc_id,
+                               "username": info.get("username")})
+        except Exception:
+            log.exception("account_add_qr_poll uid=%s", uid)
+            return _err("Ошибка ожидания QR", 400)
+
+    async def account_add_qr_2fa(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            password = body.get("password") or ""
+            if not password:
+                return _err("Введите пароль 2FA", 400)
+            from services import account_manager as am
+            session_str, info = await asyncio.wait_for(am.confirm_qr_2fa(uid, password), timeout=40)
+            pid, _ = await _resolve_proxy_url(uid, body.get("proxy_id"))
+            acc_id = await _persist_login(uid, session_str, info, pid)
+            return _json_resp({"ok": True, "account_id": acc_id, "username": info.get("username")})
+        except asyncio.TimeoutError:
+            return _err("Telegram не ответил за 40с", 400)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception:
+            log.exception("account_add_qr_2fa uid=%s", uid)
+            return _err("Не удалось подтвердить 2FA", 400)
+
+    app.router.add_post("/api/miniapp/account/add/phone/start", account_add_phone_start)
+    app.router.add_post("/api/miniapp/account/add/phone/code", account_add_phone_code)
+    app.router.add_post("/api/miniapp/account/add/phone/2fa", account_add_phone_2fa)
+    app.router.add_post("/api/miniapp/account/add/qr/start", account_add_qr_start)
+    app.router.add_post("/api/miniapp/account/add/qr/poll", account_add_qr_poll)
+    app.router.add_post("/api/miniapp/account/add/qr/2fa", account_add_qr_2fa)
+
     async def team_audit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid or not _is_admin(uid): return _err("Forbidden", 403)

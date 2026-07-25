@@ -110,6 +110,12 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## UX Мини-апп — добавление аккаунта всеми способами входа (было только строка сессии) — 2026-07-25 — по фидбеку пользователя
+Проверено: способы добавления аккаунта в боте (accounts.py: QR, номер+код+2FA, строка Telethon/Pyrogram, .session файл, tdata ZIP) против мини-аппа (был ТОЛЬКО импорт строки через /import_sessions).
+Найдено: мини-апп предлагал единственный способ — вставить строку сессии; интерактивные входы (номер, QR) — которые пользователи ждут — были только в боте.
+Сделано: примитивы уже были в `account_manager` (start_login/confirm_code/confirm_2fa/get_client_info_and_session, start_qr_login/wait_qr_login/confirm_qr_2fa) — добавил тонкие REST-эндпоинты `/api/miniapp/account/add/{phone/start,phone/code,phone/2fa,qr/start,qr/poll,qr/2fa}` и UI (вкладки Строка/Номер/QR в модалке добавления). Полученная сессия сохраняется через `db.add_tg_account` (шифрование+дедуп по session_fp) + прокси закрепляется за аккаунтом (изоляция с первого шага, как у импорта строки). QR: фронт опрашивает poll (короткий таймаут 8с на сервере), 2FA сигналится `SessionPasswordNeededError`→need_2fa. Строковый импорт (Telethon/Pyrogram авто-детект) остался. Файловые способы (.session/tdata) — пока только в боте (upload файла в веб-API не делал; модалка уже отсылала в бота за файлами — актуально для них).
+Регресс `tests/test_miniapp_account_login_methods.py` (роуты, vetted-персистенция+прокси, ветки need_2fa/pending, контракт примитивов, наличие UI-функций). Фронт-гейты (dead onclick/route, dup, stuck spinner) + node --check зелёные. pytest 2109.
+
 ## СВИП класса #7 (anti-detection на аккаунт-сендерах) — 2026-07-25 — 2 массовых цикла постили без единого карантин-гейта
 Проверено: все `account_manager.(post_to_channel|send_dm|send_message)` в services/ + bot/ — на каждом парные требования #7: `is_account_quarantined` ПЕРЕД действием + spintax-на-цель + честный пропуск.
 Найдено (2 живых пробела в МАССОВЫХ циклах):

@@ -4559,22 +4559,69 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="modal">
     <div class="modal-x" onclick="closeAccImportModal()">✕</div>
     <div class="modal-title">📱 Добавить аккаунт</div>
-    <div class="field">
-      <label>Строки сессий (по одной на строку)</label>
-      <textarea id="accImportText" rows="5" placeholder="StringSession аккаунта…&#10;по одной сессии на строку" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
-      <div class="field-note">Формат определяется автоматически. Сессия проверяется подключением к Telegram и шифруется при сохранении.</div>
+    <!-- Переключатель способа входа: как в боте (строка / номер / QR) -->
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button type="button" id="accTab-string" class="btn" onclick="accSetLoginMethod('string')" style="flex:1;padding:8px 4px;font-size:13px">🔑 Строка</button>
+      <button type="button" id="accTab-phone" class="btn" onclick="accSetLoginMethod('phone')" style="flex:1;padding:8px 4px;font-size:13px">☎️ Номер</button>
+      <button type="button" id="accTab-qr" class="btn" onclick="accSetLoginMethod('qr')" style="flex:1;padding:8px 4px;font-size:13px">🔲 QR</button>
     </div>
+
+    <!-- Общий выбор прокси (для всех способов) -->
     <div class="field">
       <label>Прокси аккаунта (рекомендуется)</label>
       <select id="accImportProxy" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
         <option value="">Без прокси (общий CF-relay)</option>
       </select>
-      <div class="field-note">Через него сессия проверяется И он сразу закрепляется за аккаунтом (изоляция с первого шага). Без прокси аккаунт идёт через общий relay с единым IP — рискованно.</div>
+      <div class="field-note">Закрепляется за аккаунтом сразу (изоляция с первого шага). Без прокси — общий relay с единым IP, рискованно.</div>
     </div>
-    <div class="field-err" id="accImportErr"></div>
+
+    <!-- Способ 1: строка сессии -->
+    <div id="accMethod-string">
+      <div class="field">
+        <label>Строки сессий (по одной на строку)</label>
+        <textarea id="accImportText" rows="4" placeholder="StringSession аккаунта…&#10;по одной сессии на строку" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
+        <div class="field-note">Формат (Telethon/Pyrogram) определяется автоматически. Сессия проверяется подключением и шифруется при сохранении.</div>
+      </div>
+      <button class="btn btn-p" id="accImportBtn" onclick="submitAccImport()" style="width:100%">➕ Импортировать</button>
+    </div>
+
+    <!-- Способ 2: вход по номеру телефона -->
+    <div id="accMethod-phone" style="display:none">
+      <div class="field" id="accPhoneStep-phone">
+        <label>Номер телефона</label>
+        <input type="tel" id="accPhoneNum" placeholder="+71234567890" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <div class="field-note">Telegram пришлёт код в приложение на этом номере.</div>
+        <button class="btn btn-p" id="accPhoneStartBtn" onclick="accPhoneStart()" style="width:100%;margin-top:8px">📨 Отправить код</button>
+      </div>
+      <div class="field" id="accPhoneStep-code" style="display:none">
+        <label>Код из Telegram</label>
+        <input type="text" inputmode="numeric" id="accPhoneCode" placeholder="12345" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <button class="btn btn-p" id="accPhoneCodeBtn" onclick="accPhoneCode()" style="width:100%;margin-top:8px">✅ Подтвердить код</button>
+      </div>
+      <div class="field" id="accPhoneStep-2fa" style="display:none">
+        <label>Пароль 2FA (облачный пароль)</label>
+        <input type="password" id="accPhone2fa" placeholder="пароль двухфакторной защиты" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <button class="btn btn-p" id="accPhone2faBtn" onclick="accPhone2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
+      </div>
+    </div>
+
+    <!-- Способ 3: QR-код -->
+    <div id="accMethod-qr" style="display:none">
+      <div class="field" style="text-align:center">
+        <div id="accQrBox" style="min-height:60px;display:flex;align-items:center;justify-content:center">
+          <button class="btn btn-p" id="accQrStartBtn" onclick="accQrStart()" style="width:100%">🔲 Показать QR-код</button>
+        </div>
+        <div class="field-note" id="accQrHint" style="display:none">Откройте Telegram → Настройки → Устройства → «Подключить устройство» и отсканируйте код.</div>
+      </div>
+      <div class="field" id="accQrStep-2fa" style="display:none">
+        <label>Пароль 2FA</label>
+        <input type="password" id="accQr2fa" placeholder="облачный пароль" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <button class="btn btn-p" id="accQr2faBtn" onclick="accQr2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
+      </div>
+    </div>
+
+    <div class="field-err" id="accImportErr" style="margin-top:10px"></div>
     <div id="accImportResult" style="display:none;font-size:13px;line-height:1.5;margin:4px 0 10px"></div>
-    <button class="btn btn-p" id="accImportBtn" onclick="submitAccImport()" style="width:100%">➕ Импортировать</button>
-    <div class="field-note" style="text-align:center;margin-top:8px">Нет строки сессии? Загрузите файл сессии в боте: Аккаунты → Добавить.</div>
   </div>
 </div>
 
@@ -9335,10 +9382,111 @@ async function openAccImportModal() {
       sel.appendChild(o);
     });
   } catch(_) {}
+  accSetLoginMethod('string');
   document.getElementById('accImportMbg').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
 }
-function closeAccImportModal() { document.getElementById('accImportMbg').classList.remove('show'); }
+function closeAccImportModal() {
+  accStopQrPoll();
+  document.getElementById('accImportMbg').classList.remove('show');
+}
+
+// ── Способы входа в аккаунт (строка / номер / QR) ────────────────────────────
+let _accLoginPhone='', _accLoginHash='', _accQrTimer=null;
+function _accErr(msg){ const e=document.getElementById('accImportErr'); if(!msg){e.style.display='none';return;} e.textContent=msg; e.style.display='block'; }
+function _accProxy(){ const sel=document.getElementById('accImportProxy'); const opt=sel.options[sel.selectedIndex]; return { id: sel.value||null, url:(opt&&opt.dataset&&opt.dataset.url)||null }; }
+function accStopQrPoll(){ if(_accQrTimer){ clearInterval(_accQrTimer); _accQrTimer=null; } }
+
+function accSetLoginMethod(m){
+  accStopQrPoll(); _accErr('');
+  document.getElementById('accImportResult').style.display='none';
+  ['string','phone','qr'].forEach(k=>{
+    const sec=document.getElementById('accMethod-'+k); if(sec) sec.style.display = (k===m)?'block':'none';
+    const tab=document.getElementById('accTab-'+k); if(tab) tab.classList.toggle('btn-p', k===m);
+  });
+  // сброс шагов
+  ['accPhoneStep-code','accPhoneStep-2fa','accQrStep-2fa'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
+  const ps=document.getElementById('accPhoneStep-phone'); if(ps) ps.style.display='block';
+  const qb=document.getElementById('accQrBox'); if(qb) qb.innerHTML='<button class="btn btn-p" id="accQrStartBtn" onclick="accQrStart()" style="width:100%">🔲 Показать QR-код</button>';
+  const qh=document.getElementById('accQrHint'); if(qh) qh.style.display='none';
+  _accLoginPhone=''; _accLoginHash='';
+}
+
+function _accDone(r){
+  accStopQrPoll();
+  const res=document.getElementById('accImportResult');
+  res.innerHTML='<div style="color:var(--green)">✅ Аккаунт добавлен'+(r&&r.username?(' @'+esc(r.username)):'')+'</div>';
+  res.style.display='block';
+  tg.HapticFeedback?.notificationOccurred('success'); toast('✅ Аккаунт добавлен');
+  if (typeof loadAccounts==='function') loadAccounts(); else if (typeof loadTab==='function') loadTab('accounts');
+  setTimeout(closeAccImportModal, 1100);
+}
+
+// Вход по номеру ───────────────────────────────────────
+async function accPhoneStart(){
+  _accErr(''); const phone=(document.getElementById('accPhoneNum').value||'').trim();
+  if(!/^\+\d{7,15}$/.test(phone)){ _accErr('Введите номер в формате +71234567890'); return; }
+  const b=document.getElementById('accPhoneStartBtn'); b.disabled=true; b.textContent='⏳ Отправляю…';
+  try{
+    const r=await api('/api/miniapp/account/add/phone/start',{method:'POST',body:JSON.stringify({phone,proxy_id:_accProxy().id})});
+    _accLoginPhone=phone; _accLoginHash=r.phone_code_hash;
+    document.getElementById('accPhoneStep-code').style.display='block';
+    toast(r.hint||'Код отправлен');
+  }catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ b.disabled=false; b.textContent='📨 Отправить код'; }
+}
+async function accPhoneCode(){
+  _accErr(''); const code=(document.getElementById('accPhoneCode').value||'').trim();
+  if(!code){ _accErr('Введите код из Telegram'); return; }
+  const b=document.getElementById('accPhoneCodeBtn'); b.disabled=true; b.textContent='⏳ Проверяю…';
+  try{
+    const r=await api('/api/miniapp/account/add/phone/code',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,code,phone_code_hash:_accLoginHash,proxy_id:_accProxy().id})});
+    if(r.needs_2fa){ document.getElementById('accPhoneStep-2fa').style.display='block'; toast('Требуется пароль 2FA'); }
+    else _accDone(r);
+  }catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ b.disabled=false; b.textContent='✅ Подтвердить код'; }
+}
+async function accPhone2fa(){
+  _accErr(''); const password=document.getElementById('accPhone2fa').value||'';
+  if(!password){ _accErr('Введите пароль 2FA'); return; }
+  const b=document.getElementById('accPhone2faBtn'); b.disabled=true; b.textContent='⏳ Проверяю…';
+  try{
+    const r=await api('/api/miniapp/account/add/phone/2fa',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,password,proxy_id:_accProxy().id})});
+    _accDone(r);
+  }catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ b.disabled=false; b.textContent='🔓 Подтвердить 2FA'; }
+}
+
+// Вход по QR ────────────────────────────────────────────
+async function accQrStart(){
+  _accErr(''); const box=document.getElementById('accQrBox');
+  box.innerHTML='⏳ Генерирую QR…';
+  try{
+    const r=await api('/api/miniapp/account/add/qr/start',{method:'POST',body:JSON.stringify({})});
+    box.innerHTML='<img src="'+r.qr_png+'" alt="QR" style="width:200px;height:200px;border-radius:12px;background:#fff;padding:8px">';
+    document.getElementById('accQrHint').style.display='block';
+    accStopQrPoll();
+    _accQrTimer=setInterval(accQrPoll, 3000);
+  }catch(e){ _accErr(String(e&&e.message||e)); box.innerHTML='<button class="btn btn-p" onclick="accQrStart()" style="width:100%">🔁 Повторить</button>'; }
+}
+async function accQrPoll(){
+  try{
+    const r=await api('/api/miniapp/account/add/qr/poll',{method:'POST',body:JSON.stringify({proxy_id:_accProxy().id})});
+    if(r.status==='done'){ _accDone(r); }
+    else if(r.status==='need_2fa'){ accStopQrPoll(); document.getElementById('accQrStep-2fa').style.display='block'; toast('Требуется пароль 2FA'); }
+    // pending → ждём следующий тик
+  }catch(e){ accStopQrPoll(); _accErr(String(e&&e.message||e)); }
+}
+async function accQr2fa(){
+  _accErr(''); const password=document.getElementById('accQr2fa').value||'';
+  if(!password){ _accErr('Введите пароль 2FA'); return; }
+  const b=document.getElementById('accQr2faBtn'); b.disabled=true; b.textContent='⏳ Проверяю…';
+  try{
+    const r=await api('/api/miniapp/account/add/qr/2fa',{method:'POST',body:JSON.stringify({password,proxy_id:_accProxy().id})});
+    _accDone(r);
+  }catch(e){ _accErr(String(e&&e.message||e)); }
+  finally{ b.disabled=false; b.textContent='🔓 Подтвердить 2FA'; }
+}
 
 async function submitAccImport() {
   const raw=document.getElementById('accImportText').value.trim();
