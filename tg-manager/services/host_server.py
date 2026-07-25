@@ -417,6 +417,9 @@ async def set_rental_status(
 def device_compute_execution_enabled() -> bool:
     """Включён ли РЕАЛЬНЫЙ запуск чужой инфры на устройстве владельца.
 
+    Дизайн исполнительного слоя (для ревью, не для прода) —
+    docs/HOST_SERVER_DEVICE_AGENT_DESIGN.md.
+
     Отдельный security-гейт (env HOST_SERVER_DEVICE_EXEC=1). По умолчанию False:
     модель данных, согласие и оплата аренды работают, но фактический
     исполнительный агент на чужом железе не активируется, пока слой изоляции
