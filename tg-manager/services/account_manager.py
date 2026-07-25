@@ -534,45 +534,106 @@ async def _submit_message_report(
     return await _traverse(b"", 0)
 
 
-# Pool of realistic Android device fingerprints
-_ANDROID_DEVICES: list[tuple[str, str]] = [
-    ("Samsung SM-S928B", "Android 14"),
-    ("Samsung SM-S918B", "Android 14"),
-    ("Samsung SM-S911B", "Android 14"),
-    ("Samsung SM-A546B", "Android 13"),
-    ("Xiaomi 14 Pro", "Android 14"),
-    ("Xiaomi 13T Pro", "Android 13"),
-    ("Xiaomi Redmi Note 13 Pro", "Android 13"),
-    ("Google Pixel 8 Pro", "Android 14"),
-    ("Google Pixel 7a", "Android 13"),
-    ("OnePlus 12", "Android 14"),
-    ("OnePlus 11", "Android 13"),
-    ("POCO X6 Pro", "Android 14"),
+# ── Отпечатки клиента: СТАРЕЮЩИЙ АКТИВ, требует регулярной актуализации ───────
+#
+# Anti-detection: пул отпечатков нельзя «сделать один раз». Telegram-клиент
+# АВТООБНОВЛЯЕТСЯ, поэтому аккаунт, заявляющий прошлогоднюю версию приложения,
+# выпадает из реальной популяции — а весь наш пул на одной устаревшей версии
+# превращается в КОГОРТНУЮ СИГНАТУРУ (все наши аккаунты похожи друг на друга и
+# не похожи на живых людей). Это дороже обычного бага.
+#
+# Важная асимметрия:
+#   * версия ПРИЛОЖЕНИЯ стареть НЕ должна — клиент обновляется сам у всех;
+#   * модель УСТРОЙСТВА стареть МОЖЕТ и должна — люди держат телефон 3-4 года,
+#     пул из одних новинок так же неправдоподобен, как пул из одного старья.
+# Поэтому список устройств — широкий (от флагманов до бюджеток разных лет), а
+# версии приложения держим в узком «свежем» окне последних месяцев.
+#
+# ОБНОВЛЕНИЕ БЕЗ ДЕПЛОЯ: оба пула переопределяются через env (см. ниже) — при
+# выходе новой версии Telegram достаточно поменять переменную окружения.
+# ПРИНУДИТЕЛЬНАЯ РЕВИЗИЯ: дату ниже сторожит tests/test_fingerprint_freshness.py —
+# он падает, когда пул не пересматривали дольше FINGERPRINT_MAX_AGE_DAYS.
+# При ревизии: сверить актуальную версию Telegram Android и поднять дату.
+FINGERPRINT_REVIEWED = "2026-07-25"  # ISO-дата последней сверки с реальностью
+FINGERPRINT_MAX_AGE_DAYS = 120       # дольше — пул считается протухшим (гейт красный)
+
+# Модели проверены как реально существующие: выдуманный код модели сам по себе
+# палево (такой строки нет в живой популяции).
+_DEFAULT_ANDROID_DEVICES: list[tuple[str, str]] = [
+    # актуальные флагманы (получили свежую ОС)
+    ("Samsung SM-S938B", "Android 17"),
+    ("Samsung SM-S931B", "Android 17"),
+    ("Google Pixel 10 Pro", "Android 17"),
+    ("Google Pixel 9 Pro", "Android 17"),
+    ("Samsung SM-S928B", "Android 16"),
+    ("Google Pixel 8 Pro", "Android 16"),
+    ("OnePlus 12", "Android 16"),
+    ("Xiaomi 14 Pro", "Android 16"),
+    # массовый сегмент прошлых лет (обновились частично)
+    ("Samsung SM-S918B", "Android 15"),
+    ("Samsung SM-S911B", "Android 15"),
+    ("Xiaomi 13T Pro", "Android 15"),
+    ("Google Pixel 7a", "Android 15"),
+    ("OnePlus 11", "Android 15"),
+    ("Samsung SM-A546B", "Android 15"),
+    ("POCO X6 Pro", "Android 15"),
+    ("Motorola Edge 50 Pro", "Android 15"),
+    # бюджетки и старые аппараты — реалистично отстают
+    ("Xiaomi Redmi Note 13 Pro", "Android 14"),
     ("realme GT 5 Pro", "Android 14"),
-    ("Motorola Edge 50 Pro", "Android 14"),
-    ("Samsung SM-A336B", "Android 12"),
-    ("Xiaomi POCO M5s", "Android 12"),
+    ("Samsung SM-A336B", "Android 14"),
+    ("Vivo V27 Pro", "Android 14"),
+    ("Motorola Moto G84", "Android 14"),
     ("Samsung SM-A135F", "Android 13"),
-    ("Vivo V27 Pro", "Android 13"),
-    ("Nokia G60 5G", "Android 12"),
-    ("Motorola Moto G84", "Android 13"),
+    ("Xiaomi POCO M5s", "Android 13"),
+    ("Nokia G60 5G", "Android 13"),
 ]
-_APP_VERSIONS: list[str] = [
-    "11.6.0",
-    "11.5.3",
-    "11.5.2",
-    "11.4.1",
-    "11.4.0",
-    "11.3.2",
-    "11.3.1",
-    "11.2.0",
-    "11.1.3",
-    "11.1.2",
-    "11.0.1",
-    "10.14.5",
-    "10.14.4",
-    "10.14.3",
+# Узкое окно свежих версий: клиент автообновляется, «хвост» на старых мажорах
+# неправдоподобен. Сверено 2026-07: актуальная ветка Telegram Android — 12.9.x.
+_DEFAULT_APP_VERSIONS: list[str] = [
+    "12.9.1",
+    "12.9.0",
+    "12.8.2",
+    "12.8.0",
+    "12.7.3",
+    "12.7.1",
+    "12.6.2",
+    "12.6.0",
+    "12.5.1",
 ]
+
+
+def _pool_from_env(var: str, fallback):
+    """Переопределение пула через env (JSON) — актуализация без деплоя.
+
+    Формат: TG_APP_VERSIONS='["12.9.1","12.9.0"]'
+            TG_ANDROID_DEVICES='[["Samsung SM-S938B","Android 17"]]'
+    Любая ошибка разбора/пустое значение → дефолт из кода (fail-safe: лучше
+    работать на встроенном пуле, чем упасть на старте из-за опечатки в env).
+    """
+    raw = _os.getenv(var, "").strip()
+    if not raw:
+        return fallback
+    try:
+        import json as _json
+        parsed = _json.loads(raw)
+        if not isinstance(parsed, list) or not parsed:
+            raise ValueError("ожидался непустой список")
+        if isinstance(fallback[0], tuple):
+            out = [(str(a), str(b)) for a, b in parsed]
+        else:
+            out = [str(x) for x in parsed]
+        log.info("fingerprint: пул %s переопределён из env (%d значений)", var, len(out))
+        return out
+    except Exception as e:
+        log.warning("fingerprint: не удалось разобрать %s (%s) — беру встроенный пул", var, e)
+        return fallback
+
+
+_ANDROID_DEVICES: list[tuple[str, str]] = _pool_from_env(
+    "TG_ANDROID_DEVICES", _DEFAULT_ANDROID_DEVICES)
+_APP_VERSIONS: list[str] = _pool_from_env(
+    "TG_APP_VERSIONS", _DEFAULT_APP_VERSIONS)
 
 _COUNTRY_LOCALES: dict[str, tuple[str, str]] = {
     "RU": ("ru", "ru-RU"),
