@@ -5107,6 +5107,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("_mass_membership_op(%s) uid=%d", kind, uid)
             return _err(str(exc), 500)
 
+    async def _import_all_op(request: web.Request, kind: str) -> web.Response:
+        """Импорт каналов/групп со ВСЕХ активных аккаунтов (паритет с ботом).
+
+        Операция неразрушающая: обнаруживает уже существующие ресурсы аккаунтов
+        и заводит их в БД, в Telegram ничего не меняет — поэтому подтверждения
+        не требует. Контракт совпадает с ботовым: {"account_ids": [...]},
+        total_items = число аккаунтов.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(
+            pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+            "AND session_str IS NOT NULL ORDER BY id",
+            uid,
+        )
+        acc_ids = [int(r["id"]) for r in (rows or [])]
+        if not acc_ids:
+            return _err("Нет активных аккаунтов с сессией", 400)
+        op_type = "channel_import_all" if kind == "channels" else "group_import_all"
+        what = "каналов" if kind == "channels" else "групп"
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, op_type,
+                {"account_ids": acc_ids},
+                total_items=len(acc_ids),
+                label=f"Импорт {what} с {len(acc_ids)} аккаунтов",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("_import_all_op(%s) uid=%d", kind, uid)
+            return _err(str(exc), 500)
+
+    async def channels_import_all(request: web.Request) -> web.Response:
+        return await _import_all_op(request, "channels")
+
+    async def groups_import_all(request: web.Request) -> web.Response:
+        return await _import_all_op(request, "groups")
+
     async def channels_bulk_join(request: web.Request) -> web.Response:
         return await _mass_membership_op(request, "join")
 
@@ -11391,6 +11434,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
     app.router.add_post("/api/miniapp/channels/bulk_create", channels_bulk_create)
+    app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
+    app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/channels/bulk_join", channels_bulk_join)
     app.router.add_post("/api/miniapp/channels/bulk_leave", channels_bulk_leave)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
