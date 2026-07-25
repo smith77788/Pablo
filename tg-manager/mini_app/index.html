@@ -823,6 +823,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
+      <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт с аккаунтов</button>
     </div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -1885,6 +1886,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         Супергруппа
       </label>
       <button class="btn btn-p" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
+      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="importAllResources('groups')" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп с аккаунтов</button>
       <div id="gfErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
   </div>
@@ -14575,6 +14577,20 @@ const MASS_OP_LABELS = {
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
+// Импорт каналов/групп со всех активных аккаунтов (операции channel_import_all /
+// group_import_all — те же, что в боте). Неразрушающая: только обнаруживает уже
+// существующие ресурсы и заводит их в БД, поэтому подтверждения не просим.
+async function importAllResources(kind) {
+  const isCh = kind === 'channels';
+  const url = isCh ? '/api/miniapp/channels/import_all'
+                   : '/api/miniapp/groups/import_all';
+  try {
+    const r = await api(url, {method:'POST'});
+    toast(`📥 Импорт ${isCh?'каналов':'групп'} запущен · ${r.accounts} акк. · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, isCh ? 'Импорт каналов' : 'Импорт групп');
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
 // Массовое вступление/выход — те же операции bulk_join/bulk_leave, что в боте.
 async function submitMassMembership(kind) {
   const errEl = document.getElementById('mjErr');
