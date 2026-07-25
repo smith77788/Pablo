@@ -91,6 +91,7 @@ from bot.callbacks import (
     DmCb,
     SpinCb,
     StrikeCb,
+    HostCb,
     TopoCb,
     VisCb,
     WarmupCb,
@@ -211,6 +212,7 @@ def _operations_kb(plan: str = "free"):
 
     kb = InlineKeyboardBuilder()
     kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Strike (зачистка)", callback_data=StrikeCb(action="menu"))
+    kb.button(text="🖥️ Host-Server (аренда)", callback_data=HostCb(action="menu"))
     kb.button(text=f"{_lock(plan,'enterprise')}🌍 Гео-сеть: создать", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}📤 Публикация", callback_data=MassPubCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}✍️ Быстрый пост", callback_data=QuickPostCb(action="start"))

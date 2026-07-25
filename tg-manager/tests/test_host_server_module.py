@@ -7,6 +7,7 @@ security-гейт исполнения на устройстве.
 """
 from __future__ import annotations
 
+import pathlib
 import re
 
 import pytest
@@ -279,6 +280,24 @@ def test_all_api_routes_registered():
         assert route in src, f"роут не зарегистрирован: {route}"
     # админ-гейт на смену цены
     assert "host_server_set_price" in src and "_is_admin(uid)" in src
+
+
+def test_bot_handler_router_loads_and_is_wired():
+    """Хендлер импортируется, роутер существует и включён в main + меню операций."""
+    import inspect
+    from bot.handlers import host_server as hsh
+    assert hsh.router.name == "host_server"
+    # есть ключевые экраны
+    src = inspect.getsource(hsh)
+    for action in ('action == "menu"', 'action == "buy"', 'action == "market"',
+                   'action == "new"', 'action == "rent"', 'action == "setprice"'):
+        assert action in src, f"нет обработчика {action}"
+    # включён в диспетчер и в меню операций
+    main_src = pathlib.Path(__file__).resolve().parents[1].joinpath("main.py").read_text("utf-8")
+    assert "host_server_handler.router" in main_src
+    menu_src = pathlib.Path(__file__).resolve().parents[1].joinpath(
+        "bot", "handlers", "botmother_menu.py").read_text("utf-8")
+    assert 'HostCb(action="menu")' in menu_src, "нет входа в меню операций"
 
 
 def test_payment_checker_activates_host_server_as_module_not_subscription():

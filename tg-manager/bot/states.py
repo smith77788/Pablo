@@ -662,3 +662,17 @@ class SpinFlow(StatesGroup):
     waiting_script = State()   # ждём обычный текст сценария для авто-спина
     waiting_expand = State()   # ждём готовый spintax-шаблон для раскрытия
     showing = State()          # показан результат; храним шаблоны для быстрой перегенерации
+
+
+class HostOfferingFSM(StatesGroup):
+    """Публикация предложения аренды инфраструктуры (Host-Server)."""
+    kind    = State()   # тип: proxy|server|device_compute (выбор кнопкой)
+    title   = State()   # название
+    price   = State()   # цена в USD за период
+    period  = State()   # период: hour|day|month (кнопкой)
+    consent = State()   # для device_compute — явное согласие на использование устройства
+
+
+class HostPriceFSM(StatesGroup):
+    """Админ меняет цену модуля Host-Server."""
+    waiting_price = State()

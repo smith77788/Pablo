@@ -90,6 +90,7 @@ from bot.handlers import growth_hub as growth_hub_handler
 from bot.handlers import account_cleaner as account_cleaner_handler
 from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
+from bot.handlers import host_server as host_server_handler
 from bot.handlers import active_tasks as active_tasks_handler
 from bot.handlers import topology as topology_handler
 from bot.handlers import presence_pack as presence_pack_handler
@@ -369,6 +370,7 @@ async def main() -> None:
     dp.include_router(presence_pack_handler.router)
     dp.include_router(dm_campaigns_handler.router)
     dp.include_router(strike_handler.router)
+    dp.include_router(host_server_handler.router)
     dp.include_router(active_tasks_handler.router)
     dp.include_router(workspaces_handler.router)
     dp.include_router(approval_flow_handler.router)
