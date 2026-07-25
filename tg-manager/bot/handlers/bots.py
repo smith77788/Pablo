@@ -380,9 +380,21 @@ async def cb_pset_view(
     steps = tpl.get("funnel_steps", [])
     cmd_list = "\n".join(f"  • /{c['command']} — {c['description']}" for c in cmds[:5]) or "нет"
     reply_list = "\n".join(f"  • {r['keyword']}" for r in replies[:5]) or "нет"
+    has_fields = bool(preset.get("customize_fields"))
     kb = InlineKeyboardBuilder()
+    if has_fields:
+        # Пошаговая настройка своих данных (название/часы/оператор) — тот же
+        # проверенный флоу, что и в библиотеке шаблонов (asset_templates).
+        from bot.callbacks import LibCb
+        kb.button(
+            text="✏️ Настроить свои данные",
+            callback_data=LibCb(
+                action="bot_customize", asset_type="bot",
+                preset_key=f"bot__{preset['id']}",
+            ),
+        )
     kb.button(
-        text="✅ Применить",
+        text=("⚡ Применить по умолчанию" if has_fields else "✅ Применить"),
         callback_data=BotCb(action="pset_apply", bot_id=callback_data.bot_id, page=idx),
     )
     kb.button(
@@ -390,13 +402,22 @@ async def cb_pset_view(
         callback_data=BotCb(action="pset_list", bot_id=callback_data.bot_id),
     )
     kb.adjust(1)
+    # Подсказка про плейсхолдеры: чтобы юзер понимал, что подставится
+    fields_hint = ""
+    if has_fields:
+        labels = ", ".join(f["label"].split("/")[0].split("(")[0].strip()
+                           for f in preset["customize_fields"][:3])
+        fields_hint = (
+            f"\n✏️ <b>Настраивается:</b> {html.escape(labels)}\n"
+            "Нажмите «Настроить свои данные» — иначе подставятся значения по умолчанию.\n"
+        )
     await callback.message.edit_text(
         f"📦 <b>{html.escape(preset['name'])}</b>\n"
         f"<i>{html.escape(preset.get('description', ''))}</i>\n\n"
         f"<b>Команды ({len(cmds)}):</b>\n{cmd_list}\n\n"
         f"<b>Авто-ответы ({len(replies)}):</b>\n{reply_list}\n\n"
-        f"<b>Приветственная воронка:</b> {len(steps)} шаг(а/ов)\n\n"
-        f"Нажмите <b>Применить</b> — всё будет настроено автоматически.",
+        f"<b>Приветственная воронка:</b> {len(steps)} шаг(а/ов)\n"
+        f"{fields_hint}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -422,7 +443,12 @@ async def cb_pset_apply(
         return
     await callback.answer("⏳ Применяю шаблон...")
     preset = presets[idx]
-    tpl = preset["template"]
+    # Плейсхолдеры {{COMPANY}}/{{HOURS}}/{{OPERATOR_LINE}} обязательно подставить
+    # значениями по умолчанию ДО записи в БД — иначе пользователи бота получают
+    # сырые токены (быстрый путь без пошаговой настройки). Настроить свои данные
+    # можно кнопкой «✏️ Настроить» на экране просмотра шаблона.
+    from services.preset_templates import default_subs, render_template
+    tpl = render_template(preset["template"], default_subs(preset))
     token = row["token"]
     bot_id = callback_data.bot_id
 

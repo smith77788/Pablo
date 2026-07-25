@@ -1102,10 +1102,10 @@ async def cb_apply_bot_exec(
         raw_tpl = preset["template"] if preset else {}
         tpl_name = preset["name"] if preset else "preset"
         # Apply default substitutions for customizable fields ({{COMPANY}} etc.)
-        customize_fields = preset.get("customize_fields", []) if preset else []
-        if customize_fields:
-            subs = {f["key"]: (f.get("default") or "") for f in customize_fields}
-            data = _substitute_placeholders(raw_tpl, subs)
+        # default_subs включает производный {{OPERATOR_LINE}} — иначе он утекал сырым.
+        if preset and preset.get("customize_fields"):
+            from services.preset_templates import default_subs
+            data = _substitute_placeholders(raw_tpl, default_subs(preset))
         else:
             data = raw_tpl
     else:
@@ -1430,22 +1430,13 @@ async def cb_lib_apply(
 
 
 def _substitute_placeholders(template: dict, subs: dict[str, str]) -> dict:
-    """Deep-copy template dict and replace {{KEY}} placeholders with subs values."""
-    import copy
-    import re
+    """Deep-copy template dict and replace {{KEY}} placeholders with subs values.
 
-    def _replace(val: object) -> object:
-        if isinstance(val, str):
-            for k, v in subs.items():
-                val = val.replace(f"{{{{{k}}}}}", v)
-            return val
-        if isinstance(val, dict):
-            return {kk: _replace(vv) for kk, vv in val.items()}
-        if isinstance(val, list):
-            return [_replace(item) for item in val]
-        return val
-
-    return _replace(copy.deepcopy(template))
+    Делегирует единственному источнику правды в сервисе (preset_templates), чтобы
+    per-bot меню и библиотека подставляли плейсхолдеры одинаково.
+    """
+    from services.preset_templates import render_template
+    return render_template(template, subs)
 
 
 async def _show_bot_pick_for_preset(

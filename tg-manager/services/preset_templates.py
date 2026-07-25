@@ -1066,3 +1066,45 @@ _ALL: dict[str, dict] = {
 def get_preset_by_key(key: str) -> dict | None:
     """Return preset by combined key 'asset_type__preset_id'."""
     return _ALL.get(key)
+
+
+def default_subs(preset: dict) -> dict[str, str]:
+    """Подстановки {{KEY}} → значение по умолчанию для всех customize_fields пресета.
+
+    Плюс производный ``OPERATOR_LINE`` (в шаблонах он используется отдельно от
+    ``OPERATOR``): при заданном операторе → ' пишите @op', иначе пусто — чтобы
+    ``{{OPERATOR_LINE}}`` не утекал сырым. Канон: и быстрое применение «по
+    умолчанию», и интерактивная настройка используют эту же логику вывода.
+    """
+    subs = {
+        f["key"]: (f.get("default") or "")
+        for f in (preset.get("customize_fields") or [])
+        if f.get("key")
+    }
+    op = (subs.get("OPERATOR") or "").lstrip("@")
+    subs["OPERATOR"] = f"@{op}" if op else ""
+    subs["OPERATOR_LINE"] = f" пишите @{op}" if op else ""
+    return subs
+
+
+def render_template(template: dict, subs: dict[str, str]) -> dict:
+    """Глубокая копия шаблона с заменой {{KEY}} на значения subs. Не крашится.
+
+    Единственный источник правды для подстановки плейсхолдеров пресетов —
+    оба хендлера (per-bot меню и библиотека) обязаны прогонять шаблон через это
+    перед записью в БД, иначе пользователи бота получают сырые {{COMPANY}}/{{HOURS}}.
+    """
+    import copy
+
+    def _replace(val: object) -> object:
+        if isinstance(val, str):
+            for k, v in subs.items():
+                val = val.replace(f"{{{{{k}}}}}", v)
+            return val
+        if isinstance(val, dict):
+            return {kk: _replace(vv) for kk, vv in val.items()}
+        if isinstance(val, list):
+            return [_replace(item) for item in val]
+        return val
+
+    return _replace(copy.deepcopy(template))
