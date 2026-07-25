@@ -72,7 +72,13 @@
   `claude/telegram-bot-services-xfAh6`. Отдельный бот-проект вне `tg-manager` не
   создавать.
 - **Рантайм:** прод — Python 3.12; держать код 3.12-совместимым (`except
-  (TypeError, ValueError):`, не `except TypeError, ValueError:`).
+  (TypeError, ValueError):`, не `except TypeError, ValueError:`). **aiogram
+  запинен на `3.30.0`** (последний стабильный 3.x на 2026-07-25; `requirements.txt`) —
+  ветку не менять и вниз не откатывать без причины; используется API после 3.7
+  (`Bot(default=DefaultBotProperties(parse_mode=…))`, НЕ `parse_mode=` kwarg),
+  `aiogram.enums.ParseMode`, `aiogram.webhook.aiohttp_server`. main.py трогает
+  приватный `AiohttpSession._connector_init["ssl"]` — при следующем апгрейде
+  aiogram проверить, что атрибут ещё есть. pydantic 2.x (тянется aiogram).
 - **Продукт:** Telegram-native инфраструктура и движок массовых действий. Массовые
   операции — суть продукта; всё важное со временем становится Operation через
   `services/operation_bus.submit` (НЕ прямой `INSERT INTO operation_queue` — стережёт

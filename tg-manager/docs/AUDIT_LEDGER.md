@@ -110,6 +110,11 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## ЗАВИСИМОСТЬ aiogram 3.13.1 → 3.30.0 — 2026-07-25 — апгрейд до последнего стабильного 3.x
+Сделано: `requirements.txt` aiogram `3.13.1`→`3.30.0` (последний стабильный на дату; requires_python `<3.15,>=3.10` — прод-3.12 ок). В пределах 3.x — API стабилен, мажора не было.
+Проверено перед пином (не на веру): (1) все реально используемые импорты резолвятся на 3.30.0 — `F/Router/Bot/BaseMiddleware`, `utils.keyboard.{Inline,Reply}KeyboardBuilder`, `fsm.{context,state,storage.memory,storage.base}`, `types.*` (Callback/Message/Buffered/WebApp/Inline*/ErrorEvent/PhotoSize/BotCommand), `filters.{Command,StateFilter}`, `client.default.DefaultBotProperties`, `enums.ParseMode`, `webhook.aiohttp_server.{SimpleRequestHandler,setup_application}`; (2) `Bot(default=DefaultBotProperties(parse_mode=ParseMode.HTML))` строится (код уже на post-3.7 API, `parse_mode=` kwarg нигде нет — main.py:293, codex_bridge/bot.py:653); (3) приватный `AiohttpSession._connector_init["ssl"]=False` (main.py:291) ещё жив на 3.30.0 — это единственная приватная точка, при след. апгрейде перепроверить; (4) полный `pytest` — 2039 passed.
+Знание для агентов: пин и его инварианты продублированы в `CLAUDE.md` (Проектные факты→Рантайм), чтобы каждый агент видел их при старте сессии.
+
 ## МОДУЛЬ Auto-reply — buttons/priority/reply_delay_sec не персистились (класс #3) — 2026-07-25 — кнопки, приоритет и задержка молча терялись при создании
 Проверено: тот же endpoint `create_auto_reply` (mini_app_api), что и match_mode. Round-trip UI→endpoint→БД→send-путь для трёх полей, которые UI шлёт в теле create (`buttons`, `priority`, `reply_delay_sec`).
 Найдено: send-путь `auto_responder` их ПОТРЕБЛЯЕТ (правила грузятся `ORDER BY priority DESC`; `_delay = rule.get("reply_delay_sec")` перед ответом; `_rule_buttons(rule)` читает JSONB-кнопки), колонки есть (schema_v140 buttons JSONB, schema_v142 priority/reply_delay_sec), список-SELECT их отдаёт. НО `create_auto_reply` INSERT писал только `bot_id, trigger_type, keyword, response_text, is_active, match_mode` — три поля молча ронялись → каждое созданное через UI правило получало buttons=NULL, priority=0, reply_delay_sec=0 (класс #3: параметр принят, но не доходит до эффекта; тот же баг-класс, что match_mode строкой ниже).
