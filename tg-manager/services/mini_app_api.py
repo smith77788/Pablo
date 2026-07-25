@@ -4827,8 +4827,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uname_template = validate_string(data.get("username"), max_len=32)
         description = validate_string(data.get("description"), max_len=512)
         short_desc = validate_string(data.get("short_description"), max_len=120)
-        account_id = data.get("account_id")
-        count = min(max(validate_integer(data.get("count", 1), min_val=1, max_val=10) or 1, 1), 10)
+        # ВАЖНО: этот путь регистрирует ОДИН уже существующий токен и применяет
+        # оформление через Bot API — BotFather здесь не участвует. Поэтому
+        # account_id («аккаунт для BotFather») и count принимать нельзя: раньше
+        # они читались и молча игнорировались, а count ещё и возвращался в ответе,
+        # создавая иллюзию, что количество учтено. Массовое создание НОВЫХ ботов
+        # через BotFather — отдельная операция op_type="bot_factory" (в боте).
         ecosystem_id = data.get("ecosystem_id")
         if not token:
             return _err("token обязателен", 400)
@@ -4899,7 +4903,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "username": bot_info.get("username", ""),
                 "first_name": bot_info.get("first_name", ""),
                 "applied_settings": applied,
-                "count": count,
             })
         except Exception as exc:
             log.exception("bot_factory_create uid=%d", uid)
