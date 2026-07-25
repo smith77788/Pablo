@@ -12585,8 +12585,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.crm_engine import upsert_crm
             crm = await upsert_crm(pool, uid, cid, data)
             return _json_resp({'ok': True, 'crm': crm})
-        except Exception as e:
-            return _err(str(e), 500)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception:
+            log.exception("uch_crm_upsert uid=%s", uid)
+            return _err("Не удалось сохранить CRM", 500)
 
     async def uch_crm_activity(request: web.Request) -> web.Response:
         uid = _get_uid(request)

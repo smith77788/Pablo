@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime as _dt
 import json
 import logging
 from typing import Optional
@@ -6,6 +7,37 @@ from typing import Optional
 import asyncpg
 
 log = logging.getLogger(__name__)
+
+# Колонки contact_crm типа TIMESTAMPTZ. asyncpg биндит их по типу колонки и на
+# строку кидает DataError → весь upsert падал 500 (класс #15: фича «есть», но
+# при передаче даты строкой с фронта не работала никогда). Нормализуем на
+# границе: ISO-строка → tz-aware datetime; naive-время трактуем как UTC.
+_TS_FIELDS = ("next_reminder_at", "last_interaction_at")
+
+
+def _coerce_dt(value):
+    """None/`datetime` → как есть; ISO-строка → aware datetime; иначе ValueError."""
+    if value is None or isinstance(value, _dt.datetime):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        dt = _dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        raise ValueError(f"некорректная дата/время: {value!r}")
+    return dt.replace(tzinfo=_dt.timezone.utc) if dt.tzinfo is None else dt
+
+
+def _normalize_ts(data: dict) -> dict:
+    """Копия data с приведёнными timestamptz-полями (не мутирует вход)."""
+    if not any(f in data for f in _TS_FIELDS):
+        return data
+    out = dict(data)
+    for f in _TS_FIELDS:
+        if f in out:
+            out[f] = _coerce_dt(out[f])
+    return out
 
 
 async def get_crm_data(pool, owner_id: int, contact_id: str) -> Optional[dict]:
@@ -24,6 +56,9 @@ async def get_crm_data(pool, owner_id: int, contact_id: str) -> Optional[dict]:
 
 
 async def upsert_crm(pool, owner_id: int, contact_id: str, data: dict) -> dict:
+    # timestamptz-поля из тела запроса могут прийти строкой → привести к datetime,
+    # иначе asyncpg роняет весь upsert (класс #15). ValueError пробросится вызывающему.
+    data = _normalize_ts(data)
     existing = await get_crm_data(pool, owner_id, contact_id)
     if existing:
         sets = []
