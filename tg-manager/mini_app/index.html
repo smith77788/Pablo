@@ -1804,6 +1804,24 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-massops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚡ Массовые операции</div></div>
   <div class="sub-sb">
+    <div class="sec">Вступление / выход по списку</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <textarea id="mjTargets" rows="3" placeholder="@channel1&#10;https://t.me/channel2&#10;@group3" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">По одному на строку (можно через запятую). До 500 целей.</div>
+      <select id="mjDelay" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+        <option value="smart">🧠 Умный темп (авто)</option>
+        <option value="slow">🐌 Медленно — безопаснее</option>
+        <option value="normal">🛡 Нормально</option>
+        <option value="fast">⚡ Быстро — выше риск</option>
+      </select>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:6px">Аккаунты (чем больше — тем выше нагрузка на каждый):</div>
+      <div id="mjAccounts" style="max-height:150px;overflow-y:auto;margin-bottom:8px"><div class="spin-wrap"><div class="spin"></div></div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-p" style="flex:1" onclick="submitMassMembership('join')">🔗 Вступить</button>
+        <button class="btn btn-d" style="flex:1" onclick="submitMassMembership('leave')">🚪 Выйти</button>
+      </div>
+      <div id="mjErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+    </div>
     <div class="sec">Массовые операции</div>
     <div class="lst" id="massopsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -14409,9 +14427,50 @@ const MASS_OP_LABELS = {
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
+// Массовое вступление/выход — те же операции bulk_join/bulk_leave, что в боте.
+async function submitMassMembership(kind) {
+  const errEl = document.getElementById('mjErr');
+  errEl.textContent = '';
+  const raw = (document.getElementById('mjTargets')?.value || '').trim();
+  const targets = raw.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean);
+  if (!targets.length) { errEl.textContent = 'Укажите хотя бы один канал/группу'; return; }
+  const accIds = [...document.querySelectorAll('.mj-acc-cb:checked')].map(cb=>+cb.value);
+  if (!accIds.length) { errEl.textContent = 'Выберите хотя бы один аккаунт'; return; }
+  const delay = document.getElementById('mjDelay')?.value || 'smart';
+  const isJoin = kind === 'join';
+  const word = isJoin ? 'вступить в' : 'выйти из';
+  // Действие затрагивает реальные аккаунты и обратимо только вручную → подтверждаем.
+  if (!await askConfirm(`Массово ${word} ${targets.length} чат(ов) с ${accIds.length} аккаунт(ов)?\n\nТемп: ${document.getElementById('mjDelay').selectedOptions[0].textContent}\nВсего действий: ${targets.length*accIds.length}`)) return;
+  try {
+    // URL пишем целиком, а не склейкой: статические гейты (мёртвые роуты)
+    // не умеют разрешать динамические пути, да и грепается так честнее.
+    const url = isJoin ? '/api/miniapp/channels/bulk_join'
+                       : '/api/miniapp/channels/bulk_leave';
+    const r = await api(url, {
+      method:'POST',
+      body: JSON.stringify({ targets, account_ids: accIds, delay_mode: delay }),
+    });
+    toast(`${isJoin?'🔗':'🚪'} Операция #${r.op_id} запущена · ${r.targets} чатов × ${r.accounts} акк.`);
+    if (r.op_id) pollOpResult(r.op_id, isJoin ? 'Массовое вступление' : 'Массовый выход');
+    document.getElementById('mjTargets').value = '';
+    openMassOps();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+}
+
 async function openMassOps() {
   push('s-massops');
   txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  // Аккаунты для вступления/выхода: показываем только живые — на выключенных
+  // операция всё равно провалилась бы в воркере.
+  try {
+    const accs = await api('/api/miniapp/accounts');
+    const live = (accs.accounts||[]).filter(a=>a.is_active);
+    txt('mjAccounts', live.length
+      ? live.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
+          <input type="checkbox" class="mj-acc-cb" value="${a.id}" style="width:16px;height:16px">
+          ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
+      : '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>');
+  } catch(_) { txt('mjAccounts','<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'); }
   try {
     const rows = await api('/api/miniapp/mass_ops');
     if (!rows.length) { txt('massopsList', empty('⚡','Нет массовых операций','')); return; }
