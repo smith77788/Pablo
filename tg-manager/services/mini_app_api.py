@@ -4968,6 +4968,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_factory_create_new uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def channels_bulk_create(request: web.Request) -> web.Response:
+        """Массовое создание каналов аккаунтом (паритет с ботом).
+
+        Контракт параметров совпадает с ботовым путём (bot/handlers —
+        bulk_create_confirm), чтобы не плодить второй источник правды.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        acc_id = validate_integer(data.get("acc_id"), min_val=1)
+        if not acc_id:
+            return _err("Выберите аккаунт, который создаст каналы", 400)
+        prefix = validate_string(data.get("prefix"), max_len=128)
+        if not prefix:
+            return _err("Укажите название/префикс канала", 400)
+        about = validate_string(data.get("about"), max_len=255) or ""
+        uname_pattern = validate_string(data.get("username_pattern"), max_len=32) or ""
+        count = min(max(validate_integer(data.get("count", 1), min_val=1, max_val=20) or 1, 1), 20)
+
+        acc = await _safe_fetchrow(
+            pool,
+            "SELECT id, is_active, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            int(acc_id), uid,
+        )
+        if not acc:
+            return _err("Аккаунт не найден", 404)
+        if not acc["is_active"] or not acc["session_str"]:
+            return _err("Аккаунт неактивен или без сессии — выберите другой", 400)
+
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "bulk_create_channels",
+                {
+                    "prefix": prefix,
+                    "count": count,
+                    "about": about,
+                    "username_pattern": uname_pattern,
+                    "acc_id": int(acc_id),
+                },
+                total_items=count,
+                label=f"Создание каналов: {count} шт. через аккаунт #{acc_id}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "count": count})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("channels_bulk_create uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def bot_remove(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -11242,6 +11297,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/bot/add", bot_add)
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
+    app.router.add_post("/api/miniapp/channels/bulk_create", channels_bulk_create)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)
     app.router.add_get("/api/miniapp/bot/{bot_id}/auto_replies", bot_auto_replies)

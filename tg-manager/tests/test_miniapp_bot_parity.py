@@ -20,9 +20,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Факт на 2026-07-25 после подключения bot_factory: 16 операций есть в боте и
-# ещё не выведены в мини-апп. Двигать ВНИЗ по мере закрытия.
-BASELINE_GAP = 16
+# Факт на 2026-07-25 после подключения bot_factory + bulk_create_channels.
+# Двигать ВНИЗ по мере закрытия.
+#
+# Первый замер дал 17, но был ЗАВЫШЕН: global_presence_channel/_group/_bot
+# собираются динамически (f"global_presence_{asset_type}") и давно доступны из
+# мини-аппа — детектор литералов их не видел. Едва не начал реализовывать уже
+# работающее; отсюда учёт динамических префиксов ниже.
+BASELINE_GAP = 12
 
 
 def _strip_comments(src: str) -> str:
@@ -45,12 +50,33 @@ def _mini_src() -> str:
     return _strip_comments((ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8"))
 
 
+def _dynamic_prefixes(src: str) -> list[str]:
+    """Префиксы op_type, собираемых динамически: f"global_presence_{asset_type}".
+
+    Без этого детектор литералов считает такие операции «отсутствующими» и
+    завышает разрыв — я на этом уже ошибся, чуть не начав реализовывать то, что
+    в мини-аппе давно работает.
+    """
+    out = []
+    for m in re.finditer(r'op_type\s*=\s*f["\']([a-z_]+?)\{', src):
+        out.append(m.group(1))
+    for m in re.finditer(r'submit\(\s*[^,]+,\s*[^,]+,\s*f["\']([a-z_]+?)\{', src):
+        out.append(m.group(1))
+    return out
+
+
+def _reachable_from_mini(op: str, mini: str, prefixes: list[str]) -> bool:
+    if re.search(r'["\']' + re.escape(op) + r'["\']', mini):
+        return True
+    return any(op.startswith(p) and op != p for p in prefixes)
+
+
 def _gap() -> list[str]:
     bot, mini = _bot_src(), _mini_src()
+    prefixes = _dynamic_prefixes(mini)
     gap = []
     for op in _worker_ops():
-        lit = r'["\']' + re.escape(op) + r'["\']'
-        if re.search(lit, bot) and not re.search(lit, mini):
+        if re.search(r'["\']' + re.escape(op) + r'["\']', bot) and not _reachable_from_mini(op, mini, prefixes):
             gap.append(op)
     return gap
 
@@ -74,8 +100,22 @@ def test_baseline_not_stale():
     )
 
 
-def test_bot_factory_reached_parity():
-    """Реальное создание ботов через @BotFather — было первым закрытым пунктом."""
-    assert "bot_factory" not in _gap(), (
-        "создание ботов через BotFather обязано быть доступно из мини-аппа"
+def test_creation_operations_reached_parity():
+    """Создание сущностей — то, что владелец назвал в первую очередь."""
+    gap = _gap()
+    for op in ("bot_factory", "bulk_create_channels",
+               "global_presence_channel", "global_presence_group", "global_presence_bot"):
+        assert op not in gap, f"{op}: создание должно быть доступно из мини-аппа"
+
+
+def test_dynamic_optypes_counted_as_reachable():
+    """Регресс на ошибку замера: op_type, собираемый f-строкой, — тоже доступен.
+
+    Без этого разрыв завышается и можно начать реализовывать уже работающее.
+    """
+    mini = _mini_src()
+    prefixes = _dynamic_prefixes(mini)
+    assert "global_presence_" in prefixes, (
+        "динамический префикс global_presence_ должен распознаваться"
     )
+    assert _reachable_from_mini("global_presence_channel", mini, prefixes)
