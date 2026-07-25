@@ -10846,15 +10846,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             scheduled_at = data.get("scheduled_at")
             if not channel_id or not text or not scheduled_at:
                 return _err("Missing channel_id, text, or scheduled_at")
-            await pool.execute(
-                """INSERT INTO operation_queue (owner_id, op_type, label, status, params, scheduled_for)
-                   VALUES ($1, 'mass_publish', $2, 'pending', $3, $4)""",
-                uid, f"Scheduled post to #{channel_id}",
-                json.dumps({"channel_ids": [channel_id], "text": text}),
-                scheduled_at
+            # Раньше здесь был прямой INSERT со строкой в scheduled_for БЕЗ
+            # ::timestamptz — asyncpg на строку в timestamptz кидает DataError,
+            # т.е. эндпойнт падал 500 при любом вызове. operation_bus.submit
+            # кастует ($5::timestamptz) и заодно применяет проверки плана/лимитов.
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "mass_publish",
+                {"channel_ids": [channel_id], "text": text},
+                total_items=1,
+                label=f"Отложенный пост в #{channel_id}",
+                scheduled_for=scheduled_at,
             )
-            return _json_resp({"status": "scheduled"})
+            return _json_resp({"status": "scheduled", "op_id": op_id})
         except Exception as e:
+            log.exception("schedule_post uid=%s", uid)
             return _err(str(e), 500)
 
     # ── SSE ──────────────────────────────────────────────────────────────────
