@@ -110,6 +110,14 @@ git-истории (`git log -- docs/AUDIT_LEDGER.md`), не в этом фай�
 
 <!-- Новые записи добавляй ниже. -->
 
+## СВИП класса #7 (anti-detection на аккаунт-сендерах) — 2026-07-25 — 2 массовых цикла постили без единого карантин-гейта
+Проверено: все `account_manager.(post_to_channel|send_dm|send_message)` в services/ + bot/ — на каждом парные требования #7: `is_account_quarantined` ПЕРЕД действием + spintax-на-цель + честный пропуск.
+Найдено (2 живых пробела в МАССОВЫХ циклах):
+1. `op_worker._exec_global_presence_channel` гейтил только по `trust_score < 0.3` — это ВТОРОЙ источник правды (одна ось), а не единый пульс `is_account_quarantined` (restriction/flood/acc_status/health). Аккаунт под FloodWait/ограничением, но trust≥0.3 → всё равно постил (риск бана).
+2. `self_promo._post_to_channels_bg` постил с каждого привязанного аккаунта БЕЗ карантин-гейта ВООБЩЕ и слал идентичный `content` во все каналы (когортная сигнатура — все посты одинаковы).
+Исправлено: да. (1) В gp-исполнителе условие пропуска = `trust<0.3 OR is_account_quarantined`, поиск запасного аккаунта тоже исключает карантинные, честная причина в target.error_message; fail-open. (2) В self_promo — гейт `is_account_quarantined` перед постом (пропуск считается отдельно и показывается юзеру: «Пропущено (карантин): N»), текст раскрывается `expand_template` на КАЖДУЮ цель (spintax-на-цель). Регресс `tests/test_selfpromo_quarantine_spintax.py` (карантинный аккаунт не постит, spintax применён, счётчики честные; + статик-гейт на gp-исполнитель). pytest 2087.
+Проверено-чисто/вне объёма (одноразовые ДЕЛИБЕРАТНЫЕ посты, не массовый цикл — не гейтил): `channel_ops` fsm-посты (×2, один канал/аккаунт по явному действию юзера), `ai_tools.post_to_channel` (единичный AI-экшен), `admin` посты (действие админа). Массовые DM/инвайты/boost уже гейтятся `_filter_quarantined_accounts` (op_worker) — см. прежние записи.
+
 ## СВИП класса #15 (строка → TIMESTAMPTZ) — 2026-07-25 — CRM upsert падал 500 при сохранении даты; остальные пути чисты
 Проверено: сквозной свип timestamptz-присваиваний `col = $N` без `::` + INSERT-биндингов из тел запросов. Кандидаты: crm upsert, schedule.py, broadcast schedule, schedule_post, execute_at, contacts repository.
 Найдено (живой баг): `contacts_hub/crm_engine.upsert_crm` биндил `next_reminder_at`/`last_interaction_at` (TIMESTAMPTZ) как `$N` без каста, а `uch_crm_upsert` (mini_app_api) передаёт СЫРОЕ тело запроса → строка-дата с фронта = asyncpg DataError = сохранение CRM с датой падало 500 всегда (напоминание из общей формы CRM не работало; отдельный эндпоинт `uch_crm_reminder` парсил корректно — расхождение двух путей).

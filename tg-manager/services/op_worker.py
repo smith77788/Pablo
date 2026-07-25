@@ -3229,32 +3229,46 @@ async def _exec_global_presence_channel(
             )
             continue
 
-        # ── Проверка trust_score аккаунта перед использованием ──
+        # ── Единый гейт здоровья аккаунта перед постом ──
+        # trust_score — лишь одна ось; is_account_quarantined сводит весь риск-пульс
+        # (restriction_events + acc_status + flood + trust + health). Без него
+        # постили бы с зафлуженного/ограниченного аккаунта → риск бана (класс #7/#2).
+        # fail-open: при ошибке проверки аккаунт НЕ блокируется.
         trust_score = acc.get("trust_score") or 0.5
-        if trust_score < 0.3:
+        _quarantined = await _infra_mem.is_account_quarantined(pool, acc["id"])
+        if trust_score < 0.3 or _quarantined:
             log.warning(
-                "op_worker gp_%s: skipping account %s with low trust_score=%.2f",
+                "op_worker gp_%s: skipping account %s (trust=%.2f, quarantined=%s)",
                 "group" if is_group else "channel",
                 acc["phone"],
                 trust_score,
+                _quarantined,
             )
-            # Попробовать найти альтернативный аккаунт с лучшим trust_score
+            # Альтернатива: приемлемый trust И не под карантином.
             alt_acc = None
             for a in accounts_rows:
-                if a["id"] != acc_id and (a.get("trust_score") or 0.5) >= 0.5:
-                    alt_acc = dict(a)
-                    log.info(
-                        "op_worker gp: switching to account %s with trust=%.2f",
-                        a["phone"],
-                        a.get("trust_score"),
-                    )
-                    break
+                if a["id"] == acc_id or (a.get("trust_score") or 0.5) < 0.5:
+                    continue
+                if await _infra_mem.is_account_quarantined(pool, a["id"]):
+                    continue
+                alt_acc = dict(a)
+                log.info(
+                    "op_worker gp: switching to account %s with trust=%.2f",
+                    a["phone"],
+                    a.get("trust_score"),
+                )
+                break
 
             if not alt_acc:
+                _reason = (
+                    "Аккаунт под карантином (риск-пульс), запасных нет"
+                    if _quarantined
+                    else f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})"
+                )
                 await _safe_execute(
                         pool,
                     "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                    f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})",
+                    _reason,
                     target["id"],
                 )
                 failed_count += 1

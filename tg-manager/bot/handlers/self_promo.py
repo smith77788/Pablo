@@ -571,17 +571,29 @@ async def _post_to_channels_bg(
     channels: list,
     content: str,
 ) -> None:
-    sent = failed = 0
+    # Anti-detection (класс #7): карантин-гейт ПЕРЕД постом + spintax-на-цель.
+    from services.infra_memory import is_account_quarantined
+    from services.spintax_service import expand_template
+
+    sent = failed = skipped = 0
     for ch in channels:
         try:
+            # Не постим с аккаунта под риск-пульсом (флуд/ограничение/низкое здоровье).
+            # fail-open: ошибка проверки не блокирует. Пропуск честно считаем отдельно.
+            if await is_account_quarantined(pool, ch["acc_id"]):
+                skipped += 1
+                continue
             acc_row = await db.get_account_for_telethon(pool, ch["acc_id"], user_id)
             if not acc_row or not acc_row["session_str"]:
                 failed += 1
                 continue
+            # Spintax-на-цель: каждый канал получает свой вариант (если в шаблоне
+            # есть {a|b}); без раскрытия все посты идентичны = когортная сигнатура.
+            _text = expand_template(content)
             res = await account_manager.post_to_channel(
                 session_string=acc_row["session_str"],
                 channel_id=ch["channel_id"],
-                text=content,
+                text=_text,
                 access_hash=ch.get("access_hash") or 0,
                 _acc=dict(acc_row),
             )
@@ -602,11 +614,13 @@ async def _post_to_channels_bg(
         sent, template_id,
     )
     try:
+        _skip_line = f"\n🛡 Пропущено (карантин): <b>{skipped}</b>" if skipped else ""
         await bot.send_message(
             user_id,
             f"✅ <b>Самопиар завершён!</b>\n\n"
             f"📢 Опубликовано: <b>{sent}</b>\n"
-            f"⚠️ Ошибок: <b>{failed}</b>",
+            f"⚠️ Ошибок: <b>{failed}</b>"
+            f"{_skip_line}",
             parse_mode="HTML",
         )
     except Exception as e:
