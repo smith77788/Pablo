@@ -1823,6 +1823,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div id="mjErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
+    <div class="sec">Объявление во все группы аккаунта</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <select id="gaAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+        <option value="">Выберите аккаунт...</option>
+      </select>
+      <textarea id="gaText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст объявления…" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Spintax {{вариант1|вариант2}} обязателен: одинаковый текст в десятки групп — палевная сигнатура. Вариант подбирается для каждой группы отдельно.</div>
+      <button class="btn btn-p" style="width:100%" onclick="submitGroupAnnounce()">📣 Разослать по группам</button>
+      <div id="gaErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+    </div>
     <div class="sec">Массовые операции</div>
     <div class="lst" id="massopsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -14577,6 +14587,26 @@ const MASS_OP_LABELS = {
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
+// Объявление во все группы аккаунта — операция group_announce, как в боте.
+async function submitGroupAnnounce() {
+  const errEl = document.getElementById('gaErr');
+  errEl.textContent = '';
+  const accId = document.getElementById('gaAccount')?.value;
+  const text = (document.getElementById('gaText')?.value || '').trim();
+  if (!accId) { errEl.textContent = 'Выберите аккаунт'; return; }
+  if (!text) { errEl.textContent = 'Введите текст объявления'; return; }
+  if (!await askConfirm('Разослать объявление во ВСЕ группы этого аккаунта?\n\nСообщения уйдут реальным людям — отменить отправку нельзя.')) return;
+  try {
+    const r = await api('/api/miniapp/groups/announce', {method:'POST', body:JSON.stringify({
+      acc_id: +accId, text,
+    })});
+    toast(`📣 Объявление запущено · групп: ${r.groups} · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Объявление в группы');
+    document.getElementById('gaText').value = '';
+    openMassOps();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+}
+
 // Импорт каналов/групп со всех активных аккаунтов (операции channel_import_all /
 // group_import_all — те же, что в боте). Неразрушающая: только обнаруживает уже
 // существующие ресурсы и заводит их в БД, поэтому подтверждения не просим.
@@ -14634,6 +14664,10 @@ async function openMassOps() {
           <input type="checkbox" class="mj-acc-cb" value="${a.id}" style="width:16px;height:16px">
           ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
       : '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>');
+    const ga = document.getElementById('gaAccount');
+    if (ga) ga.innerHTML = live.length
+      ? live.map(a=>`<option value="${a.id}">${esc(a.phone||a.first_name||('#'+a.id))}</option>`).join('')
+      : '<option value="">Нет активных аккаунтов</option>';
   } catch(_) { txt('mjAccounts','<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'); }
   try {
     const rows = await api('/api/miniapp/mass_ops');
