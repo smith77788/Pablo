@@ -227,7 +227,14 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
             user_id,
             payment["reference"],
         )
-    if payment["plan"] != "strike":
+    if payment["plan"] == "host_server":
+        # Разовая лицензия на модуль Host-Server (как strike) — не подписка.
+        try:
+            from services import host_server
+            await host_server.grant_access(pool, user_id, payment["reference"])
+        except Exception as e:
+            log.warning("host_server grant_access failed user=%s: %s", user_id, e)
+    if payment["plan"] not in ("strike", "host_server"):
         period_months = int(payment["period_months"] or 1)
         await _activate_subscription(
             pool, user_id, payment["plan"], period_months
@@ -288,14 +295,20 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         log.warning("Referral paid hook error: %s", e)
 
     try:
-        em = {"paid": "💎", "starter": "💎", "pro": "💎", "enterprise": "💎", "strike": "⚔️"}.get(
-            payment["plan"], "💳"
-        )
+        em = {"paid": "💎", "starter": "💎", "pro": "💎", "enterprise": "💎",
+              "strike": "⚔️", "host_server": "🖥️"}.get(payment["plan"], "💳")
         if payment["plan"] == "strike":
             msg = (
                 "⚔️ <b>Strike Module активирован!</b>\n\n"
                 "Вы получили пожизненный доступ к модулю массовой зачистки нелегального контента.\n\n"
                 "Перейти: /menu → ⚔️ Strike"
+            )
+        elif payment["plan"] == "host_server":
+            msg = (
+                "🖥️ <b>Модуль Host-Server активирован!</b>\n\n"
+                "Теперь вы можете сдавать свою инфраструктуру в аренду, брать "
+                "чужую и (с вашего согласия) зарабатывать на своих вычислительных "
+                "мощностях.\n\nПерейти: /menu → 🖥️ Host-Server"
             )
         else:
             msg = (

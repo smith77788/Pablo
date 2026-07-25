@@ -7085,6 +7085,171 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("strike_launch uid=%d", uid)
             return _err(str(exc), 500)
 
+    # ── Host-Server: покупаемый модуль + маркетплейс инфраструктуры ────────────
+
+    async def host_server_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import host_server as hs
+            return _json_resp({
+                "has_access": await hs.has_access(pool, uid),
+                "price_usd": await hs.get_price(pool),
+                "is_admin": _is_admin(uid),
+                "kinds": list(hs.OFFERING_KINDS),
+                "periods": list(hs.PERIODS),
+                "device_exec_enabled": hs.device_compute_execution_enabled(),
+            })
+        except Exception as exc:
+            log.exception("host_server_status uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_buy(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import host_server as hs
+            res = await hs.create_purchase(pool, uid)
+            if res.get("already"):
+                return _json_resp({"ok": True, "already": True})
+            return _json_resp({"ok": True, **res})
+        except Exception as exc:
+            log.exception("host_server_buy uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_set_price(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        if not _is_admin(uid):
+            return _err("Только для администратора", 403)
+        try:
+            body = await request.json()
+            from services import host_server as hs
+            applied = await hs.set_price(pool, body.get("price_usd"))
+            return _json_resp({"ok": True, "price_usd": applied})
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception as exc:
+            log.exception("host_server_set_price uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_market(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import host_server as hs
+            kind = request.query.get("kind") or None
+            offers = await hs.list_market(pool, viewer_id=uid, kind=kind)
+            return _json_resp({"offerings": offers})
+        except Exception as exc:
+            log.exception("host_server_market uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_create_offering(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            from services import host_server as hs
+            res = await hs.create_offering(
+                pool, uid,
+                kind=body.get("kind", "server"),
+                title=body.get("title", ""),
+                price_usd=body.get("price_usd", 0),
+                period=body.get("period", "month"),
+                description=body.get("description"),
+                specs=body.get("specs"),
+                region=body.get("region"),
+                allow_device_compute=bool(body.get("allow_device_compute")),
+            )
+            return _json_resp({"ok": True, **res})
+        except PermissionError as pe:
+            return _err(str(pe), 403)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception as exc:
+            log.exception("host_server_create_offering uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_toggle_offering(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            offering_id = int(request.match_info["offering_id"])
+            body = await request.json()
+            from services import host_server as hs
+            ok = await hs.set_offering_active(pool, uid, offering_id, bool(body.get("active", True)))
+            if not ok:
+                return _err("Предложение не найдено", 404)
+            return _json_resp({"ok": True})
+        except (KeyError, ValueError):
+            return _err("Invalid offering_id", 400)
+        except Exception as exc:
+            log.exception("host_server_toggle_offering uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_my(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import host_server as hs
+            return _json_resp({
+                "offerings": await hs.my_offerings(pool, uid),
+                "rentals_out": await hs.incoming_rentals(pool, uid),
+                "rentals_in": await hs.my_rentals(pool, uid),
+            })
+        except Exception as exc:
+            log.exception("host_server_my uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_rent(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            offering_id = int(body.get("offering_id"))
+            units = int(body.get("units") or 1)
+            from services import host_server as hs
+            res = await hs.rent_offering(pool, uid, offering_id, units=units)
+            return _json_resp({"ok": True, **res})
+        except (TypeError, ValueError) as ve:
+            return _err(str(ve) or "Invalid request", 400)
+        except Exception as exc:
+            log.exception("host_server_rent uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def host_server_rental_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rental_id = int(request.match_info["rental_id"])
+            body = await request.json()
+            new_status = body.get("status", "")
+            as_provider = bool(body.get("as_provider", True))
+            from services import host_server as hs
+            res = await hs.set_rental_status(
+                pool, uid, rental_id, new_status, as_provider=as_provider
+            )
+            return _json_resp({"ok": True, **res})
+        except PermissionError as pe:
+            return _err(str(pe), 403)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except KeyError:
+            return _err("Invalid rental_id", 400)
+        except Exception as exc:
+            log.exception("host_server_rental_status uid=%s", uid)
+            return _err(str(exc), 500)
+
     # ── Audience Parser (read-only history) ───────────────────────────────────
 
     async def parser_runs(request: web.Request) -> web.Response:
@@ -11160,6 +11325,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/strike/history", strike_history)
     app.router.add_get("/api/miniapp/strike/status", strike_status)
     app.router.add_post("/api/miniapp/strike/launch", strike_launch)
+    # Host-Server module
+    app.router.add_get("/api/miniapp/host_server/status", host_server_status)
+    app.router.add_post("/api/miniapp/host_server/buy", host_server_buy)
+    app.router.add_post("/api/miniapp/host_server/price", host_server_set_price)
+    app.router.add_get("/api/miniapp/host_server/market", host_server_market)
+    app.router.add_post("/api/miniapp/host_server/offering", host_server_create_offering)
+    app.router.add_post("/api/miniapp/host_server/offering/{offering_id}/toggle", host_server_toggle_offering)
+    app.router.add_get("/api/miniapp/host_server/my", host_server_my)
+    app.router.add_post("/api/miniapp/host_server/rent", host_server_rent)
+    app.router.add_post("/api/miniapp/host_server/rental/{rental_id}/status", host_server_rental_status)
     # Audience Parser
     app.router.add_get("/api/miniapp/parser/runs", parser_runs)
     app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
