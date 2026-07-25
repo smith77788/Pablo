@@ -1941,7 +1941,7 @@ def _analyze_error(error_msg: str) -> dict:
     if any(w in msg for w in ("auth", "unauthorized", "session", "key", "token")):
         result["cause"] = "Проблема с авторизацией аккаунта или бота"
         result["recommendation"] = (
-            "Проверьте аккаунт в разделе 📱 Активы → 📱 Аккаунты. "
+            "Проверьте аккаунт в разделе 🏗 Активы & Сети → 📱 TG-аккаунты. "
             "Возможно, сессия истекла — используйте кнопку «Переподключить»."
         )
         return result
@@ -2577,7 +2577,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await _edit(
             callback,
             "<b>📅 Расписание рассылок</b>\n\nУ вас нет ботов.\n"
-            "Добавьте бота через <b>📱 Активы → 🤖 Мои боты</b>.",
+            "Добавьте бота через <b>🏗 Активы & Сети → 🤖 Мои боты</b>.",
             kb.as_markup(),
         )
         return

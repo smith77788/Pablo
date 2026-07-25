@@ -325,7 +325,7 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         await message.answer(
             "⚠️ <b>Каналов не найдено.</b>\n\n"
             "Сначала подключите аккаунты и импортируйте каналы:\n"
-            "Меню → 📡 Каналы → 📥 Импорт из Telegram",
+            "Меню → 🏗 Активы & Сети → 📡 Каналы → 📥 Импорт из Telegram",
             parse_mode="HTML",
         )
         return
@@ -454,7 +454,7 @@ async def cb_qp_use_template(
         await callback.message.edit_text(
             "⚠️ <b>Каналов не найдено.</b>\n\n"
             "Сначала подключите аккаунты и импортируйте каналы:\n"
-            "Меню → 📡 Каналы → 📥 Импорт из Telegram",
+            "Меню → 🏗 Активы & Сети → 📡 Каналы → 📥 Импорт из Telegram",
             parse_mode="HTML",
         )
         return

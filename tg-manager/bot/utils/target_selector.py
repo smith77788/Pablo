@@ -406,7 +406,7 @@ async def show_bot_picker(
 
     if not targets:
         return (
-            "⚠️ У вас нет ботов. Добавьте бота через 📱 Активы → 🤖 Мои боты.",
+            "⚠️ У вас нет ботов. Добавьте бота через 🏗 Активы & Сети → 🤖 Мои боты.",
             InlineKeyboardBuilder()
             .button(text="◀️ Назад", callback_data=back_callback)
             .as_markup(),
@@ -433,7 +433,7 @@ async def show_account_picker(
         pool, owner_id, active_only=active_only
     )
     if not targets:
-        msg = "⚠️ Нет активных аккаунтов. Добавьте аккаунт через ⚙️ Мониторинг → 📱 Аккаунты."
+        msg = "⚠️ Нет активных аккаунтов. Добавьте аккаунт через 🏗 Активы & Сети → 📱 TG-аккаунты."
         if not active_only:
             msg = "⚠️ У вас нет аккаунтов."
         return (

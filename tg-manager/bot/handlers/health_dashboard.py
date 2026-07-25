@@ -1159,7 +1159,7 @@ async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         await safe_edit(
             callback,
             "📊 <b>Сравнение аккаунтов</b>\n\n"
-            "ℹ️ Нет данных. Добавьте аккаунты через ⚙️ Мониторинг → 📱 Аккаунты.",
+            "ℹ️ Нет данных. Добавьте аккаунты через 🏗 Активы & Сети → 📱 TG-аккаунты.",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1329,7 +1329,7 @@ async def cb_health_recommendations(
     general: list[str] = []
     if len(accounts) == 0:
         general.append(
-            "ℹ️ Нет подключённых аккаунтов.\n   Добавьте через ⚙️ Мониторинг → 📱 Аккаунты."
+            "ℹ️ Нет подключённых аккаунтов.\n   Добавьте через 🏗 Активы & Сети → 📱 TG-аккаунты."
         )
     elif critical_count == 0 and not recs:
         general.append("✅ <b>Все аккаунты в норме</b> — проблем не обнаружено.")
