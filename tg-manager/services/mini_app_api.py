@@ -5144,6 +5144,85 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("_import_all_op(%s) uid=%d", kind, uid)
             return _err(str(exc), 500)
 
+    # Поля массового редактирования — ровно те, что понимают исполнители.
+    # Источник правды: _exec_bulk_edit_channels / _exec_bulk_bot_edit /
+    # _exec_bulk_update_profile. Принять поле, которое исполнитель не знает,
+    # значит «тихий успех»: операция пройдёт, а эффекта не будет.
+    _BULK_EDIT_FIELDS = {
+        "channels": {"title"},
+        "bots": {"name", "desc", "short_desc", "commands"},
+        "profile": {"username", "first_name", "last_name", "about"},
+    }
+
+    async def _bulk_edit_op(request: web.Request, kind: str) -> web.Response:
+        """Массовое редактирование каналов / ботов / профилей (паритет с ботом)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        field = str(data.get("field") or "").strip()
+        allowed = _BULK_EDIT_FIELDS[kind]
+        if field not in allowed:
+            return _err(f"Недопустимое поле. Доступны: {', '.join(sorted(allowed))}", 400)
+        value = validate_string(data.get("value"), max_len=512)
+        if not value:
+            return _err("Введите новое значение", 400)
+        if check_sql_suspicious(value):
+            return _err("Недопустимые символы в значении", 400)
+
+        if kind == "bots":
+            # Контракт бота: боты не перечисляются, операция берёт всех своих.
+            cnt = await _safe_count(
+                pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active", uid)
+            if not cnt:
+                return _err("У вас нет активных ботов", 400)
+            params = {"field": field, "value": value}
+            total = int(cnt)
+            label = f"Массовое изменение ботов: {field} ({cnt} шт.)"
+        else:
+            acc_ids = [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()]
+            rows = await _safe_fetch(
+                pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                "AND session_str IS NOT NULL"
+                + (" AND id = ANY($2::bigint[])" if acc_ids else "")
+                + " ORDER BY id",
+                *([uid, acc_ids] if acc_ids else [uid]),
+            )
+            ids = [int(r["id"]) for r in (rows or [])]
+            if not ids:
+                return _err("Нет доступных активных аккаунтов", 400)
+            params = {"account_ids": ids, "field": field, "value": value}
+            total = len(ids)
+            what = "каналов" if kind == "channels" else "профилей"
+            label = f"Массовое изменение {what}: {field} ({total} акк.)"
+
+        op_type = {"channels": "bulk_edit_channels", "bots": "bulk_bot_edit",
+                   "profile": "bulk_update_profile"}[kind]
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, op_type, params, total_items=total, label=label)
+            return _json_resp({"ok": True, "op_id": op_id, "total": total, "field": field})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("_bulk_edit_op(%s) uid=%d", kind, uid)
+            return _err(str(exc), 500)
+
+    async def channels_bulk_edit(request: web.Request) -> web.Response:
+        return await _bulk_edit_op(request, "channels")
+
+    async def bots_bulk_edit(request: web.Request) -> web.Response:
+        return await _bulk_edit_op(request, "bots")
+
+    async def accounts_bulk_profile(request: web.Request) -> web.Response:
+        return await _bulk_edit_op(request, "profile")
+
     async def groups_announce(request: web.Request) -> web.Response:
         """Объявление во все группы аккаунта (паритет с ботом).
 
@@ -11499,6 +11578,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
+    app.router.add_post("/api/miniapp/channels/bulk_edit", channels_bulk_edit)
+    app.router.add_post("/api/miniapp/bots/bulk_edit", bots_bulk_edit)
+    app.router.add_post("/api/miniapp/accounts/bulk_profile", accounts_bulk_profile)
     app.router.add_post("/api/miniapp/channels/bulk_join", channels_bulk_join)
     app.router.add_post("/api/miniapp/channels/bulk_leave", channels_bulk_leave)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
