@@ -3389,12 +3389,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div id="botFactoryStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
-    <div class="sec">Добавить бота по токену</div>
+    <div class="sec">Создание ботов</div>
+    <div style="display:flex;gap:6px;padding:6px 0 2px">
+      <button class="btn btn-s" id="bfModeNewBtn" onclick="bfSetMode('new')" style="flex:1;font-size:13px;padding:9px 6px">🏭 Создать новых</button>
+      <button class="btn btn-s" id="bfModeTokenBtn" onclick="bfSetMode('token')" style="flex:1;font-size:13px;padding:9px 6px">🔑 По токену</button>
+    </div>
     <div style="padding:8px 0">
-      <div class="field">
+      <!-- РЕЖИМ «создать новых»: аккаунт реально переписывается с @BotFather -->
+      <div id="bfNewFields">
+        <div class="field">
+          <label>Аккаунт для @BotFather *</label>
+          <select id="bfAccount" class="sel"><option value="">Загрузка...</option></select>
+          <div class="field-note">Этот аккаунт напишет @BotFather и создаст ботов. Нужен активный аккаунт с сессией.</div>
+        </div>
+        <div class="field">
+          <label>Количество ботов</label>
+          <input type="number" id="bfCount" value="1" min="1" max="10" class="inp">
+          <div class="field-note">При &gt;1 к имени/username добавится номер. Операция идёт в фоне — следите в «Операции».</div>
+        </div>
+      </div>
+      <!-- РЕЖИМ «по токену»: регистрация уже созданного бота -->
+      <div class="field" id="bfTokenField" style="display:none">
         <label>Токен бота *</label>
         <input type="text" id="bfToken" placeholder="1234567890:AAHxxxxxxxx..." class="inp">
-        <div class="field-note">Создайте бота у @BotFather и вставьте токен — здесь применим оформление (имя, описания) и привяжем к экосистеме.</div>
+        <div class="field-note">Уже создали бота у @BotFather? Вставьте токен — применим оформление и привяжем к экосистеме.</div>
       </div>
       <div class="field">
         <label>Имя бота (поддерживает спинтакс)</label>
@@ -3420,9 +3438,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <option value="">Не привязывать</option>
         </select>
       </div>
-      <div class="field-note" style="padding:6px 2px 0">Нужно создать НОВЫХ ботов пачкой через @BotFather? Это делает Фабрика ботов в самом боте — там аккаунт реально переписывается с BotFather.</div>
       <div class="field-err" id="bfErr"></div>
-      <button class="btn btn-p" id="bfBtn" onclick="submitBotFactory()" style="width:100%">➕ Добавить бота</button>
+      <button class="btn btn-p" id="bfBtn" onclick="submitBotFactory()" style="width:100%">🏭 Создать ботов</button>
     </div>
     <div class="sec" style="margin-top:8px">Последние боты</div>
     <div class="lst" id="botFactoryRecent"></div>
@@ -11784,12 +11801,40 @@ async function openContactStats() {
 }
 
 // ── Bot Factory ──────────────────────────────────────────
+// Два разных пути, которые раньше были свалены в одну форму:
+//   'new'   — РЕАЛЬНОЕ создание ботов: аккаунт переписывается с @BotFather
+//             (операция bot_factory, паритет с ботовым путём, идёт в фоне);
+//   'token' — регистрация УЖЕ созданного бота по токену + оформление.
+let _BF_MODE = 'new';
+function bfSetMode(mode) {
+  _BF_MODE = (mode === 'token') ? 'token' : 'new';
+  const isNew = _BF_MODE === 'new';
+  const nf = document.getElementById('bfNewFields');
+  const tf = document.getElementById('bfTokenField');
+  if (nf) nf.style.display = isNew ? '' : 'none';
+  if (tf) tf.style.display = isNew ? 'none' : '';
+  const bn = document.getElementById('bfModeNewBtn');
+  const bt = document.getElementById('bfModeTokenBtn');
+  if (bn) bn.className = 'btn ' + (isNew ? 'btn-p' : 'btn-s');
+  if (bt) bt.className = 'btn ' + (isNew ? 'btn-s' : 'btn-p');
+  const btn = document.getElementById('bfBtn');
+  if (btn) btn.textContent = isNew ? '🏭 Создать ботов' : '➕ Добавить бота';
+}
+
 async function openBotFactory() {
   push('s-botfactory');
   txt('botFactoryStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('botFactoryRecent','');
-  // Список аккаунтов здесь больше не грузим: селектор «аккаунт для BotFather»
-  // убран — этот экран регистрирует готовый токен, BotFather не участвует.
+  bfSetMode(_BF_MODE);
+  // Аккаунты для режима «создать новых»: этот аккаунт реально пишет @BotFather.
+  try {
+    const accs = await api('/api/miniapp/accounts');
+    const sel = document.getElementById('bfAccount');
+    const live = (accs.accounts||[]).filter(a=>a.is_active);
+    sel.innerHTML = live.map(a=>
+      `<option value="${a.id}">${esc(a.phone||a.first_name||('#'+a.id))}</option>`
+    ).join('') || '<option value="">Нет активных аккаунтов</option>';
+  } catch(_) {}
   // Load ecosystems
   try {
     const ecos = await api('/api/miniapp/ecosystems');
@@ -11831,13 +11876,34 @@ async function submitBotFactory() {
   const errEl = document.getElementById('bfErr');
   const btn = document.getElementById('bfBtn');
   errEl.textContent = '';
-  if (!token) { errEl.textContent = 'Введите токен бота'; return; }
   if (!name) { errEl.textContent = 'Введите имя бота (можно спинтакс)'; return; }
+
+  // РЕЖИМ «создать новых» — реальная операция через @BotFather (как в боте).
+  if (_BF_MODE === 'new') {
+    const accId = document.getElementById('bfAccount').value;
+    const cnt = parseInt(document.getElementById('bfCount').value) || 1;
+    if (!accId) { errEl.textContent = 'Выберите аккаунт для @BotFather'; return; }
+    if (!await askConfirm(`Создать ${cnt} бот(ов) через @BotFather с аккаунта? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
+    btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь...';
+    try {
+      const r = await api('/api/miniapp/bot_factory/create_new', {method:'POST', body:JSON.stringify({
+        acc_id: +accId, count: cnt, name_template: name, uname_template: username,
+      })});
+      tg.HapticFeedback?.notificationOccurred('success');
+      toast(`🏭 Создание ${r.count} бот(ов) запущено · операция #${r.op_id}`);
+      if (r.op_id) pollOpResult(r.op_id, 'Фабрика ботов');
+      openBotFactory();
+    } catch(e) {
+      errEl.textContent = e.message;
+      tg.HapticFeedback?.notificationOccurred('error');
+    } finally { btn.disabled = false; bfSetMode(_BF_MODE); }
+    return;
+  }
+
+  // РЕЖИМ «по токену» — регистрация уже созданного бота.
+  if (!token) { errEl.textContent = 'Введите токен бота'; return; }
   btn.disabled = true; btn.textContent = '⏳ Создание...';
   try {
-    // Шлём только то, что бэкенд реально применяет. Раньше уходили account_id
-    // («аккаунт для BotFather») и count — оба молча игнорировались хендлером:
-    // этот путь регистрирует ОДИН уже готовый токен, BotFather не участвует.
     const r = await api('/api/miniapp/bot_factory/create', {method:'POST', body:JSON.stringify({
       token, name, username, description: desc, short_description: shortDesc,
       ecosystem_id: ecosystemId ? +ecosystemId : null,
@@ -11857,7 +11923,7 @@ async function submitBotFactory() {
   } catch(e) {
     errEl.textContent = e.message;
     tg.HapticFeedback?.notificationOccurred('error');
-  } finally { btn.disabled = false; btn.textContent = '🏭 Создать ботов'; }
+  } finally { btn.disabled = false; bfSetMode(_BF_MODE); }
 }
 
 // ── Persona Hub ─────────────────────────────────────────
