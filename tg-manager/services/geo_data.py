@@ -2798,3 +2798,80 @@ def group_by_federal_district(cities: list[dict]) -> dict[str, dict[str, list[di
         level = level or ("Прочие регионы" if cc == "ru" else region)
         out.setdefault(level, {}).setdefault(region, []).append(c)
     return out
+
+
+# ── Внутригородские районы/округа (4-й уровень: город → район) ────────────────
+# Ключ — city_slug. Значение — список {name (короткое, для меток), native
+# (для подстановки в названия через {{SCOPE}}), slug (для username)}.
+# Покрыты примеры из видения: Москва (12 адм. округов), СПб (15 районов),
+# Сочи (4 района: Адлерский…). Отсутствие города = разбиение недоступно.
+CITY_DISTRICTS: dict[str, list[dict]] = {
+    "moscow": [
+        {"name": "ЦАО", "native": "Центральный округ", "slug": "cao"},
+        {"name": "САО", "native": "Северный округ", "slug": "sao"},
+        {"name": "СВАО", "native": "Северо-Восточный округ", "slug": "svao"},
+        {"name": "ВАО", "native": "Восточный округ", "slug": "vao"},
+        {"name": "ЮВАО", "native": "Юго-Восточный округ", "slug": "yuvao"},
+        {"name": "ЮАО", "native": "Южный округ", "slug": "yuao"},
+        {"name": "ЮЗАО", "native": "Юго-Западный округ", "slug": "yuzao"},
+        {"name": "ЗАО", "native": "Западный округ", "slug": "zao"},
+        {"name": "СЗАО", "native": "Северо-Западный округ", "slug": "szao"},
+        {"name": "ЗелАО", "native": "Зеленоградский округ", "slug": "zelao"},
+        {"name": "НАО", "native": "Новомосковский округ", "slug": "nao"},
+        {"name": "ТАО", "native": "Троицкий округ", "slug": "tao"},
+    ],
+    "saint_petersburg": [
+        {"name": "Адмиралтейский", "native": "Адмиралтейский район", "slug": "admiralteysky"},
+        {"name": "Василеостровский", "native": "Василеостровский район", "slug": "vasileostrovsky"},
+        {"name": "Выборгский", "native": "Выборгский район", "slug": "vyborgsky"},
+        {"name": "Калининский", "native": "Калининский район", "slug": "kalininsky"},
+        {"name": "Кировский", "native": "Кировский район", "slug": "kirovsky"},
+        {"name": "Колпинский", "native": "Колпинский район", "slug": "kolpinsky"},
+        {"name": "Красногвардейский", "native": "Красногвардейский район", "slug": "krasnogvardeysky"},
+        {"name": "Красносельский", "native": "Красносельский район", "slug": "krasnoselsky"},
+        {"name": "Московский", "native": "Московский район", "slug": "moskovsky"},
+        {"name": "Невский", "native": "Невский район", "slug": "nevsky"},
+        {"name": "Петроградский", "native": "Петроградский район", "slug": "petrogradsky"},
+        {"name": "Приморский", "native": "Приморский район", "slug": "primorsky"},
+        {"name": "Пушкинский", "native": "Пушкинский район", "slug": "pushkinsky"},
+        {"name": "Фрунзенский", "native": "Фрунзенский район", "slug": "frunzensky"},
+        {"name": "Центральный", "native": "Центральный район", "slug": "tsentralny"},
+    ],
+    "sochi": [
+        {"name": "Адлерский", "native": "Адлерский район", "slug": "adler"},
+        {"name": "Хостинский", "native": "Хостинский район", "slug": "khosta"},
+        {"name": "Центральный", "native": "Центральный район", "slug": "tsentralny"},
+        {"name": "Лазаревский", "native": "Лазаревский район", "slug": "lazarevskoe"},
+    ],
+}
+
+
+def city_districts(city_slug: str) -> list[dict]:
+    """Список районов/округов города (пусто, если разбиение недоступно)."""
+    return CITY_DISTRICTS.get((city_slug or "").strip().lower(), [])
+
+
+def expand_city_to_districts(city: dict) -> list[dict]:
+    """Развернуть город в узлы-районы (4-й уровень дерева).
+
+    Совместимо со scope-моделью presence_planner: у каждого узла проставлены
+    scope/scope_slug (имя района) — шаблон «Новости {{SCOPE}}» даст «Новости
+    Адлерский район», а city_slug = город_район делает username уникальным.
+    Город без данных о районах → возвращается сам город (без разбиения).
+    """
+    from services.username_engine import slugify
+    slug = city.get("city_slug") or slugify(city.get("city", ""))
+    districts = city_districts(slug)
+    if not districts:
+        return [city]
+    out: list[dict] = []
+    for d in districts:
+        out.append({
+            **city,
+            "scope": d["native"],
+            "scope_slug": d["slug"],
+            "district": d["native"],
+            "district_slug": d["slug"],
+            "city_slug": f"{slug}_{d['slug']}",
+        })
+    return out
