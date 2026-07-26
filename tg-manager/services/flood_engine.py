@@ -205,6 +205,26 @@ _INVITE_LIMIT_FLOOR = 5
 _INVITE_LIMIT_CEILING = 50
 
 
+def _phone_country(phone) -> str | None:
+    """Страна по коду номера. Отдельная обёртка, чтобы сбой импорта
+    account_manager (тяжёлый модуль с telethon) не ронял расчёт риска."""
+    try:
+        from services.account_manager import country_code_from_phone
+        return country_code_from_phone(phone)
+    except Exception:
+        return None
+
+
+def _locale_country(lang_code) -> str | None:
+    """Страна из локали вида `ru-RU`/`en-US`. Голый `ru` страны не задаёт —
+    возвращаем None, чтобы не выдумать рассогласование на пустом месте."""
+    raw = (lang_code or "").strip().replace("_", "-")
+    if "-" not in raw:
+        return None
+    tail = raw.split("-")[-1].upper()
+    return tail if len(tail) == 2 and tail.isalpha() else None
+
+
 async def account_risk_factors(pool, account_id: int) -> dict:
     """Свойства самого аккаунта, влияющие на безопасный объём.
 
@@ -217,11 +237,17 @@ async def account_risk_factors(pool, account_id: int) -> dict:
       * возраст — из `reg_check_cache.reg_date` (оценка по интерполяции
         Telegram-ID, метод уже используется модулем reg_check);
       * заполненность профиля — есть ли имя и username;
-      * зрелость у нас — `warmup_level`.
-    ЧЕГО НЕТ и что поэтому НЕ участвует: Premium-статус, наличие аватарки,
-    страна регистрации (в `tg_accounts` таких колонок нет; `lang_code` — слишком
-    слабый прокси, чтобы на нём резать лимиты). Домысливать эти факторы значило
-    бы считать риск по выдуманным данным — вреднее, чем не считать вовсе.
+      * зрелость у нас — `warmup_level`;
+      * Premium и наличие аватара — `tg_accounts.is_premium/has_photo`, которые
+        снимаются при обычной проверке здоровья (schema_v160). NULL здесь = «не
+        проверяли»: такой аккаунт НЕ штрафуется, иначе он платил бы за пробел в
+        НАШИХ данных;
+      * согласованность страны — страна номера (по коду) против страны локали
+        аккаунта. Штрафуем не «плохую страну», а РАССОГЛАСОВАНИЕ отпечатка:
+        российский номер с en-US на устройстве — это несостыковка, которую видно
+        и снаружи.
+    Домысливать факторы, которых нет, нельзя: риск по выдуманным данным ведёт к
+    уверенным неверным решениям и вреднее, чем не считать вовсе.
 
     Возвращает {multiplier, notes}: multiplier ≤ 1.0 — во сколько урезать объём,
     notes — список человекочитаемых причин.
@@ -232,6 +258,8 @@ async def account_risk_factors(pool, account_id: int) -> dict:
     try:
         row = await pool.fetchrow(
             """SELECT a.first_name, a.username, a.warmup_level, a.tg_user_id,
+                      a.is_premium, a.has_photo, a.profile_checked_at,
+                      a.phone, a.lang_code, a.system_lang_code,
                       r.reg_date
                FROM tg_accounts a
                LEFT JOIN reg_check_cache r
@@ -278,6 +306,24 @@ async def account_risk_factors(pool, account_id: int) -> dict:
             notes.append("аккаунт не прогрет")
     except (TypeError, ValueError):
         pass
+
+    # Premium/аватар — только если профиль ДЕЙСТВИТЕЛЬНО снимали. Без отметки
+    # времени False неотличим от «не спрашивали», и аккаунт получил бы штраф за
+    # то, что мы его не проверили.
+    if row.get("profile_checked_at") is not None:
+        if row.get("is_premium"):
+            mult *= 1.2
+            notes.append("Telegram Premium — доверия больше")
+        if row.get("has_photo") is False:
+            mult *= 0.75
+            notes.append("нет аватара")
+
+    # Рассогласование отпечатка: страна номера против страны локали.
+    country = _phone_country(row.get("phone"))
+    locale_country = _locale_country(row.get("system_lang_code") or row.get("lang_code"))
+    if country and locale_country and country != locale_country:
+        mult *= 0.8
+        notes.append(f"номер {country}, а локаль {locale_country} — отпечаток не сходится")
 
     return {"multiplier": round(max(0.2, min(mult, 1.3)), 3), "notes": notes}
 

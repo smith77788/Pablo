@@ -2262,12 +2262,26 @@ async def check_account_status_full(
         display_name = me.first_name or (
             f"@{me.username}" if me.username else str(me.id)
         )
+        # Профильные факты снимаются ЗДЕСЬ, потому что `me` уже в руках: Premium
+        # и наличие аватара нельзя узнать из БД, а отдельный вызов ради них — это
+        # лишний коннект с аккаунта, то есть лишний след. Ключ добавочный: старые
+        # потребители читают status/reason/display_name и его не замечают.
+        profile = {
+            "tg_user_id": getattr(me, "id", None),
+            "username": getattr(me, "username", None),
+            "first_name": getattr(me, "first_name", None) or "",
+            "last_name": getattr(me, "last_name", None) or "",
+            "phone": getattr(me, "phone", None),
+            "is_premium": bool(getattr(me, "premium", False)),
+            "has_photo": getattr(me, "photo", None) is not None,
+        }
 
         if not check_spambot:
             return {
                 "status": "active",
                 "reason": "Аккаунт активен",
                 "display_name": display_name,
+                "profile": profile,
             }
 
         # Check SpamBot for spamblock detection
@@ -2292,12 +2306,14 @@ async def check_account_status_full(
                         "status": "active",
                         "reason": "Аккаунт активен, ограничений нет",
                         "display_name": display_name,
+                        "profile": profile,
                     }
                 if spambot_status == "spamblock":
                     return {
                         "status": "spamblock",
                         "reason": f"SpamBot: {reply_text[:120]}",
                         "display_name": display_name,
+                        "profile": profile,
                     }
         except asyncio.TimeoutError:
             log_exc_swallow(
@@ -2310,6 +2326,7 @@ async def check_account_status_full(
             "status": "active",
             "reason": "Аккаунт активен",
             "display_name": display_name,
+            "profile": profile,
         }
 
     except Exception as e:

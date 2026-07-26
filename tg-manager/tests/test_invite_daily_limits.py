@@ -217,10 +217,111 @@ def test_missing_reg_date_does_not_penalise():
     assert no_reg >= _limit_for(_mature(warmup_level=0))["limit"]
 
 
-def test_absent_factors_not_fabricated():
-    """Premium/аватар/страна в tg_accounts не хранятся — их НЕ должно быть в
-    расчёте: считать риск по выдуманным данным вреднее, чем не считать."""
+def test_unchecked_profile_is_not_penalised():
+    """Premium/аватар теперь ЕСТЬ в схеме (schema_v160), но пока профиль не
+    снимали — `profile_checked_at IS NULL`, и False неотличим от «не спрашивали».
+    Аккаунт не должен платить за пробел в НАШИХ данных."""
+    unchecked = _limit_for(_mature(is_premium=False, has_photo=False,
+                                   profile_checked_at=None))["limit"]
+    assert unchecked == _limit_for(_mature())["limit"], (
+        "непроверенный профиль обязан считаться нейтральным, а не худшим"
+    )
+
+
+# ── уровень 1: реальные профильные факторы (Premium/аватар/страна) ───────────
+# Раньше эти три фактора не считались ВООБЩЕ — не из принципа, а потому что
+# данных не было: Premium и аватар живут только в объекте `me` из Telethon и
+# нигде не сохранялись. schema_v160 добавила колонки, проверка здоровья их
+# заполняет (лишнего коннекта нет — `get_me()` там уже вызывался).
+
+def _checked(**over):
+    """Аккаунт со СНЯТЫМ профилем: is_premium/has_photo значат то, что значат."""
+    import datetime as d
+    return _mature(profile_checked_at=d.datetime.now(d.timezone.utc), **over)
+
+
+def test_premium_account_gets_bigger_limit():
+    assert (_limit_for(_checked(is_premium=True, has_photo=True))["limit"]
+            > _limit_for(_checked(is_premium=False, has_photo=True))["limit"]), (
+        "Premium — сильный признак живого владельца, объём можно дать выше"
+    )
+
+
+def test_missing_avatar_cuts_limit():
+    assert (_limit_for(_checked(has_photo=False))["limit"]
+            < _limit_for(_checked(has_photo=True))["limit"]), (
+        "профиль без аватара — классический спам-признак"
+    )
+
+
+def test_avatar_penalty_explained():
+    r = _limit_for(_checked(has_photo=False))
+    assert any("аватар" in n for n in r["factors"]["notes"]), (
+        "причина среза должна быть названа человеку, а не спрятана в множителе"
+    )
+
+
+def test_country_locale_mismatch_cuts_limit():
+    """Штрафуем не «плохую страну», а рассогласование отпечатка: российский
+    номер с локалью en-US — несостыковка, которую видно и снаружи."""
+    match = _limit_for(_checked(phone="+79991234567", system_lang_code="ru-RU"))["limit"]
+    mismatch = _limit_for(_checked(phone="+79991234567", system_lang_code="en-US"))["limit"]
+    assert mismatch < match, "несходящийся отпечаток обязан снижать объём"
+
+
+def test_bare_lang_code_is_not_a_mismatch():
+    """`ru` без региона страны не задаёт — выдумывать рассогласование нельзя."""
+    assert (_limit_for(_checked(phone="+79991234567", system_lang_code="ru"))["limit"]
+            == _limit_for(_checked(phone="+79991234567", system_lang_code="ru-RU"))["limit"])
+
+
+def test_unknown_phone_country_is_neutral():
+    assert (_limit_for(_checked(phone="", system_lang_code="en-US"))["limit"]
+            == _limit_for(_checked(phone=None, system_lang_code="en-US"))["limit"])
+
+
+def test_locale_country_parser():
+    assert fe._locale_country("ru-RU") == "RU"
+    assert fe._locale_country("en_US") == "US"
+    assert fe._locale_country("ru") is None
+    assert fe._locale_country("") is None
+    assert fe._locale_country(None) is None
+
+
+# ── проводка: факты обязаны реально собираться и сохраняться ─────────────────
+
+def test_status_check_returns_profile_facts():
+    """Без этого колонки остались бы вечно пустыми, а факторы — мёртвыми."""
     import inspect
-    src = inspect.getsource(fe.account_risk_factors)
-    for ghost in ("premium", "avatar", "photo"):
-        assert f'"{ghost}"' not in src.lower(), f"{ghost} нет в схеме — не выдумывать"
+    from services import account_manager
+    src = inspect.getsource(account_manager.check_account_status_full)
+    assert '"is_premium"' in src and '"has_photo"' in src, (
+        "профильные факты снимаются из уже полученного `me`"
+    )
+    assert src.count('"profile": profile') >= 3, (
+        "факты должны возвращаться на ВСЕХ ветках, где `me` уже получен, "
+        "иначе половина проверок молча ничего не сохранит"
+    )
+
+
+def test_health_check_persists_profile_facts():
+    import inspect
+    from services import op_worker
+    src = inspect.getsource(op_worker._exec_check_accounts_health)
+    assert "profile_checked_at=NOW()" in src, "иначе факты негде взять"
+    assert "isinstance(_prof, dict)" in src, (
+        "писать только когда проверка их реально добыла: пустая запись сделала бы "
+        "'не проверяли' неотличимым от 'нет Premium'"
+    )
+
+
+def test_schema_migration_present():
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parents[1] / "schema_v160.sql").read_text(encoding="utf-8")
+    for col in ("is_premium", "has_photo", "profile_checked_at"):
+        assert col in sql, f"колонка {col} обязана быть в миграции"
+    main = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+    assert "ADD COLUMN IF NOT EXISTS profile_checked_at" in main, (
+        "self-heal DDL: риск-движок читает эти колонки на КАЖДОМ батче инвайта, "
+        "лаг миграции ронял бы операцию"
+    )

@@ -501,6 +501,12 @@ async def main() -> None:
         # было, а get_account_for_telethon/_ACCOUNT_COLS её селектят → падал ВЕСЬ путь
         # загрузки аккаунта (синк контактов «column a.cf_relay_url does not exist»).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cf_relay_url TEXT",
+        # Профильные факты для риск-движка инвайтинга (schema_v160). Их читает
+        # flood_engine.account_risk_factors в КАЖДОМ расчёте суточного лимита —
+        # при лаге миграции запрос падал бы на каждом батче инвайта.
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS is_premium BOOLEAN",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS has_photo BOOLEAN",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS profile_checked_at TIMESTAMPTZ",
         # cf_worker_pool + уникальный индекс (для деплоя CF-пула) — по той же причине.
         "CREATE TABLE IF NOT EXISTS cf_worker_pool ("
         "id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, worker_url TEXT NOT NULL, "

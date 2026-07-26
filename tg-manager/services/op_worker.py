@@ -7255,6 +7255,23 @@ async def _exec_check_accounts_health(
         status = result.get("status", "unknown")
         status_counts[status] = status_counts.get(status, 0) + 1
 
+        # Профильные факты (Premium, аватар) сохраняем, когда проверка их реально
+        # добыла. Отдельно ради них аккаунт не дёргаем: это лишний коннект, то
+        # есть лишний след. Пишем только при наличии `profile` — иначе NULL
+        # означал бы «нет Premium», хотя на деле это «не проверяли», и риск-движок
+        # штрафовал бы аккаунт за пробел в НАШИХ данных.
+        _prof = result.get("profile")
+        if isinstance(_prof, dict):
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_premium=$2, has_photo=$3, "
+                    "profile_checked_at=NOW() WHERE id=$1",
+                    acc["id"], bool(_prof.get("is_premium")), bool(_prof.get("has_photo")),
+                )
+            except Exception as e:
+                log.warning("check_accounts_health: profile save acc %s failed: %s",
+                            acc["id"], e)
+
         if result.get("auth_error"):
             try:
                 await pool.execute("UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"])
@@ -8216,6 +8233,29 @@ async def _exec_mass_invite(
             log.debug("mass_invite: adaptive pause unavailable, using fixed")
             return _batch_delay
 
+    async def _humanize(acc: dict) -> None:
+        """Разбавить след аккаунта человеческим действием между батчами.
+
+        Адаптивная пауза делает РИТМ похожим на человеческий, но не меняет
+        состава следа: аккаунт, у которого в API только InviteToChannel × N,
+        отделяется от живого тривиально — по набору вызовов, а не по их темпу.
+        Поэтому в паузу иногда вплетается обычное действие клиента (онлайн,
+        список диалогов, чтение своего диалога).
+
+        Сбой здесь не имеет права влиять на инвайт: это улучшение следа, а не
+        обязательство. Модуль сам ничего не бросает, но мы страхуемся и тут.
+        """
+        try:
+            from services import invite_behavior
+            done = await invite_behavior.humanize(dict(acc))
+            if done:
+                log.debug("mass_invite op=%d acc=%s: вплетено действие %s",
+                          op_id, acc.get("id"), done)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.debug("mass_invite: humanize failed acc=%s", acc.get("id"))
+
     async def _invite_learn_ok(acc_id: int, ok_count: int) -> None:
         """Замкнуть петлю обучения: успешный батч снижает риск-штраф аккаунта.
 
@@ -8405,6 +8445,7 @@ async def _exec_mass_invite(
             await _invite_learn_ok(acc_id, ok_n)
             if budget[acc_id] <= 0:
                 retired.add(acc_id)
+            await _humanize(acc)
             await asyncio.sleep(_invite_pause(acc_id))
 
         if not progressed:
