@@ -137,7 +137,8 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
                 last = last.replace(tzinfo=timezone.utc)
             days_absent = (datetime.now(timezone.utc) - last).total_seconds() / 86400
             if days_absent >= 7:
-                asyncio.create_task(_record_reentry_safe(pool, uid, days_absent))
+                from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+                spawn(_record_reentry_safe(pool, uid, days_absent))
     except Exception:
         log_exc_swallow(log, "Не удалось зарегистрировать или обновить пользователя")
 

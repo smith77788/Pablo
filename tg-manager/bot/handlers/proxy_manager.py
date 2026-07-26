@@ -1040,4 +1040,5 @@ async def cb_free_pool_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         except Exception:
             log_exc_swallow(log, "_refresh_bg: сбой финального сообщения")
 
-    asyncio.create_task(_refresh_bg())
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+    spawn(_refresh_bg())

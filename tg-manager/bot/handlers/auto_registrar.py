@@ -533,7 +533,8 @@ async def cb_autoreg_start(cb: CallbackQuery, callback_data: AutoRegCb, state: F
             f"📦 <b>Батч-регистрация</b> · {cnt} аккаунтов · {country}\n\n⏳ Запускаю…",
             parse_mode="HTML",
         )
-        asyncio.create_task(_do_batch_register(
+        from services.bg_tasks import spawn  # strong-ссылка (класс #14): регистрация не должна умереть от GC
+        spawn(_do_batch_register(
             pool=pool,
             owner_id=cb.from_user.id,
             country=country,
@@ -604,7 +605,8 @@ async def _start_single_register(
     )
 
     # 3. Фоновое ожидание SMS + подтверждение
-    asyncio.create_task(_wait_and_confirm(
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+    spawn(_wait_and_confirm(
         pool=pool,
         owner_id=owner_id,
         phone=phone,

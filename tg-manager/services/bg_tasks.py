@@ -19,14 +19,15 @@ from typing import Any, Coroutine
 _bg_tasks: "set[asyncio.Task]" = set()
 
 
-def spawn(coro: Coroutine[Any, Any, Any]) -> "asyncio.Task | None":
+def spawn(coro: Coroutine[Any, Any, Any], *, name: str | None = None) -> "asyncio.Task | None":
     """Запустить корутину как фоновую задачу, удержав ссылку до завершения.
 
     Возвращает Task, либо None если нет запущенного event loop (sync-контекст) —
     вызывающий side-effect best-effort, отсутствие цикла не должно ронять поток.
+    ``name`` — необязательная метка задачи (для отладки), как у create_task.
     """
     try:
-        task = asyncio.create_task(coro)
+        task = asyncio.create_task(coro, name=name)
     except RuntimeError:
         # Нет запущенного event loop — закрываем корутину, чтобы не течь.
         try:

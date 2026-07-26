@@ -17,6 +17,7 @@ import logging
 from html import escape
 
 from services.logger import log_exc_swallow
+from services.bg_tasks import spawn  # strong-ссылка для fire-and-forget (класс #14)
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -315,7 +316,7 @@ async def cb_topo_acc_view(
     for ch in channels:
         chan_id = ch.get("channel_id") or ch.get("id")
         if chan_id:
-            asyncio.create_task(
+            spawn(
                 behavioral_engine.record_cross_nav(
                     pool,
                     owner_id=owner_id,
@@ -475,7 +476,7 @@ async def cb_topo_chan_view(
     acc = await db.get_tg_account(pool, ch.get("acc_id"), owner_id) if ch.get("acc_id") else None
 
     if acc:
-        asyncio.create_task(
+        spawn(
             behavioral_engine.record_cross_nav(
                 pool,
                 owner_id=owner_id,

@@ -1074,7 +1074,8 @@ async def cb_ai_confirm_action(
             except Exception as e:
                 log.warning("handler error in _do_action: %s", e)
 
-    asyncio.create_task(_do_action())
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+    spawn(_do_action())
 
 
 @router.callback_query(AiCb.filter(F.action == "cancel_action"))

@@ -958,7 +958,8 @@ async def _show_result(
 
     # Фоновое обогащение: Telethon → обновляем то же сообщение через edit_text
     peer = auto_resolve_peer or (username if username else rc.canonical_peer_id(entity_id))
-    asyncio.create_task(
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+    spawn(
         _enrich_metadata(sent, pool, entity_id, entity_type, name, username, peer, kb, reg_pool_name)
     )
 

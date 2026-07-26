@@ -759,7 +759,10 @@ async def cb_qr_login(
         reply_markup=kb.as_markup(),
     )
 
-    asyncio.create_task(
+    # spawn держит strong-ссылку (класс #14): ожидание сканирования QR длится до
+    # 120с — несохранённый create_task мог быть собран GC → QR-логин молча умирал.
+    from services.bg_tasks import spawn
+    spawn(
         _qr_wait_task(
             bot,
             user_id,

@@ -3679,7 +3679,8 @@ async def cb_adm_gate_notify_all(
     user_ids = [r["user_id"] for r in rows]
     total = len(user_ids)
 
-    asyncio.create_task(
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14): рассылка не должна умереть от GC
+    spawn(
         _gate_notify_all_task(callback.bot, pool, callback.from_user.id, user_ids, channels)
     )
 

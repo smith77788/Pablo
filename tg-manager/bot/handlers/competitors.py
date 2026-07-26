@@ -339,7 +339,8 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
                 log, "comp_refresh: не удалось обновить сообщение о результате"
             )
 
-    asyncio.create_task(_refresh_bg())
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+    spawn(_refresh_bg())
 
 
 @router.callback_query(CompCb.filter(F.action == "delete"))

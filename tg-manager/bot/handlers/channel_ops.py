@@ -5677,8 +5677,8 @@ async def _show_my_chans_page(
                         except Exception:
                             log_exc_swallow(log, "promote_botmother_bg: disconnect client")
                             pass
-                import asyncio as _asyncio
-                _asyncio.create_task(
+                from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+                spawn(
                     _promote_botmother_bg(session_str, raw),
                     name=f"botmother-admin-inject-acc{acc_id}",
                 )

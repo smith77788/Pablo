@@ -543,7 +543,10 @@ async def cb_sp_run_now(
            VALUES($1,'channel_post',$2) RETURNING id""",
         tpl["id"], user_id,
     )
-    asyncio.create_task(
+    # spawn держит strong-ссылку (класс #14): бэкграунд-постинг не должен быть
+    # собран GC до завершения цикла (иначе рассылка молча оборвётся).
+    from services.bg_tasks import spawn
+    spawn(
         _post_to_channels_bg(callback.bot, pool, user_id, run_id, int(tpl["id"]), channels, content)
     )
     kb = InlineKeyboardBuilder()

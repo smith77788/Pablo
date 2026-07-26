@@ -272,7 +272,8 @@ async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
         except Exception:
             log_exc_swallow(log, "gift scan background task failed")
 
-    asyncio.create_task(_scan_bg())
+    from services.bg_tasks import spawn  # strong-ссылка: скан не должен умереть от GC (класс #14)
+    spawn(_scan_bg())
     await state.set_state(GiftTransferFSM.scanning_gifts)
 
 

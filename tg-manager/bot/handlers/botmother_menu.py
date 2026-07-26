@@ -118,6 +118,7 @@ from bot.keyboards import subscription_locked_markup
 from database import db
 from services.logger import log_exc_swallow
 from services import operation_bus
+from services.bg_tasks import spawn  # strong-ссылка для fire-and-forget (класс #14)
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
@@ -489,7 +490,7 @@ async def cb_main(
         if status_line:
             await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
 
-    asyncio.create_task(_push_stats())
+    spawn(_push_stats())
 
 
 # ── Assets ────────────────────────────────────────────────────────────────
@@ -500,7 +501,7 @@ async def cb_assets(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    asyncio.create_task(
+    spawn(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0)
     )
     await _edit(
@@ -524,7 +525,7 @@ async def cb_infrastructure(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    asyncio.create_task(
+    spawn(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0)
     )
     await _edit(
@@ -548,7 +549,7 @@ async def cb_analytics(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    asyncio.create_task(
+    spawn(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "analytics", 0)
     )
     user_plan = await _get_user_plan(pool, callback.from_user.id)
@@ -600,7 +601,7 @@ async def cb_operations(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    asyncio.create_task(
+    spawn(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0)
     )
 

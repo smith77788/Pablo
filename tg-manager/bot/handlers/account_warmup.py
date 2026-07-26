@@ -297,7 +297,8 @@ async def cb_warmup_create_all_plans(
         except Exception:
             log_exc_swallow(log, "warmup create_all: не удалось обновить сообщение")
 
-    asyncio.create_task(_create_bg())
+    from services.bg_tasks import spawn  # strong-ссылка (класс #14)
+    spawn(_create_bg())
 
 
 @router.callback_query(WarmupCb.filter(F.action == "start"))
