@@ -1116,8 +1116,86 @@ async def cb_gp_geo_preset(
         return
     await safe_answer(callback)
     await state.update_data(geo_preset=preset_key, geo_list=preset["cities"])
+    # Если для городов пресета есть данные о населении — предложить фильтр
+    # «города > N» (сценарий «все города с населением >50 000»). Иначе сразу далее.
+    from services.geo_data import city_population
+    if any(city_population(c.get("city_slug", "")) for c in preset["cities"]):
+        await _show_pop_filter_step(callback, state)
+        return
     await state.set_state(GlobalPresenceFSM.choosing_accounts)
     await _show_accounts_step(callback, state, pool, page=0)
+
+
+async def _show_pop_filter_step(callback: CallbackQuery, state: FSMContext) -> None:
+    """Фильтр по населению для пресета с данными о населении."""
+    from services.geo_data import filter_by_population
+    sd = await state.get_data()
+    preset = GEO_PRESETS.get(sd.get("geo_preset", ""), {})
+    cities = preset.get("cities", [])
+    thresholds = [
+        ("Все города", 0),
+        ("> 1 млн", 1_000_000),
+        ("> 500 тыс", 500_000),
+        ("> 100 тыс", 100_000),
+        ("> 50 тыс", 50_000),
+    ]
+    kb = InlineKeyboardBuilder()
+    for label, thr in thresholds:
+        n = len(filter_by_population(cities, thr)) if thr else len(cities)
+        if thr and n == 0:
+            continue  # не показываем пустые пороги
+        kb.button(
+            text=f"{label} ({n})",
+            callback_data=GeoPresenceCb(action="pop", item=str(thr)),
+        )
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_geo"))
+    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        "🌍 <b>Global Presence Factory</b>\n\n"
+        f"<b>Шаг 5/8 — Население</b>\n"
+        f"Пресет: <b>{html.escape(preset.get('label', ''))}</b>\n\n"
+        "Отфильтровать по размеру города? Города без данных о населении "
+        "остаются только в «Все города».",
+        markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "pop"), GlobalPresenceFSM.choosing_geo
+)
+async def cb_gp_pop_filter(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+    try:
+        thr = int(callback_data.item or 0)
+    except (TypeError, ValueError):
+        thr = 0
+    sd = await state.get_data()
+    preset = GEO_PRESETS.get(sd.get("geo_preset", ""), {})
+    cities = preset.get("cities", [])
+    if thr > 0:
+        from services.geo_data import filter_by_population
+        cities = filter_by_population(cities, thr)
+    if not cities:
+        await callback.answer("Нет городов под этот порог", show_alert=True)
+        return
+    await state.update_data(geo_list=cities)
+    await state.set_state(GlobalPresenceFSM.choosing_accounts)
+    await _show_accounts_step(callback, state, pool, page=0)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "back_to_geo"), GlobalPresenceFSM.choosing_geo
+)
+async def cb_gp_back_to_geo(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await _show_geo_step(callback, state)
 
 
 @router.callback_query(
