@@ -2596,3 +2596,78 @@ def country_display_name(geo: dict) -> str:
     if code and code in COUNTRY_NATIVE_RU:
         return COUNTRY_NATIVE_RU[code]
     return (geo.get("country") or "").strip()
+
+
+# ── Население городов (для фильтра «города с населением > N») ─────────────────
+# Ключ — city_slug (совпадает с записями в *_CITIES). Значение — население
+# (человек, округлённо). Отдельная таблица (а не поле в каждом dict), чтобы
+# добавление не трогало сотни существующих записей. Отсутствие города в таблице
+# = население неизвестно (фильтр по населению его пропускает при заданном min_pop).
+CITY_POPULATION: dict[str, int] = {
+    # Россия — города-миллионники и крупные центры
+    "moscow": 13_100_000,
+    "saint_petersburg": 5_600_000,
+    "novosibirsk": 1_630_000,
+    "yekaterinburg": 1_540_000,
+    "kazan": 1_310_000,
+    "nizhny_novgorod": 1_230_000,
+    "krasnoyarsk": 1_190_000,
+    "chelyabinsk": 1_180_000,
+    "samara": 1_140_000,
+    "ufa": 1_140_000,
+    "rostov_on_don": 1_140_000,
+    "omsk": 1_110_000,
+    "krasnodar": 1_050_000,
+    "voronezh": 1_050_000,
+    "perm": 1_050_000,
+    "volgograd": 1_020_000,
+    "saratov": 830_000,
+    "tyumen": 830_000,
+    "tolyatti": 685_000,
+    "izhevsk": 645_000,
+    "barnaul": 630_000,
+    "irkutsk": 615_000,
+    "khabarovsk": 610_000,
+    "yaroslavl": 605_000,
+    "makhachkala": 605_000,
+    "vladivostok": 600_000,
+    "tomsk": 570_000,
+    "orenburg": 550_000,
+    "kemerovo": 550_000,
+    "sochi": 465_000,
+}
+
+
+def city_population(city_slug: str) -> int | None:
+    """Население города по city_slug (или None, если неизвестно)."""
+    return CITY_POPULATION.get((city_slug or "").strip().lower())
+
+
+def enrich_with_population(cities: list[dict]) -> list[dict]:
+    """Проставить поле `population` каждому городу по city_slug (in-place-safe копия)."""
+    from services.username_engine import slugify
+    out: list[dict] = []
+    for c in cities:
+        slug = c.get("city_slug") or slugify(c.get("city", ""))
+        out.append({**c, "population": city_population(slug)})
+    return out
+
+
+def filter_by_population(cities: list[dict], min_pop: int) -> list[dict]:
+    """Оставить города с известным населением >= min_pop.
+
+    Города без данных о населении ИСКЛЮЧАЮТСЯ (нельзя честно утверждать, что они
+    проходят порог) — так «города >50 000» не тянет случайные записи без данных.
+    min_pop<=0 → фильтр не применяется (вернуть как есть).
+    """
+    if min_pop <= 0:
+        return list(cities)
+    from services.username_engine import slugify
+    out: list[dict] = []
+    for c in cities:
+        pop = c.get("population")
+        if pop is None:
+            pop = city_population(c.get("city_slug") or slugify(c.get("city", "")))
+        if pop is not None and pop >= min_pop:
+            out.append(c)
+    return out
