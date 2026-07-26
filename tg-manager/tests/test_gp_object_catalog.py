@@ -38,6 +38,14 @@ async def test_objects_query_is_owner_scoped_and_filters():
 
 
 @pytest.mark.asyncio
+async def test_objects_plan_filter():
+    pool = RecPool()
+    await db.get_owner_presence_objects(pool, 1, plan_id=42)
+    q, args = pool.calls[-1]
+    assert "gpt.plan_id=" in q and 42 in args
+
+
+@pytest.mark.asyncio
 async def test_objects_default_status_done():
     pool = RecPool()
     await db.get_owner_presence_objects(pool, 1)

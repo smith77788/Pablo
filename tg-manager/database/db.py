@@ -4122,15 +4122,16 @@ async def get_owner_presence_objects(
     *,
     asset_type: str | None = None,
     region: str | None = None,
+    plan_id: int | None = None,
     status: str | None = "done",
     limit: int = 50,
     offset: int = 0,
 ) -> list[asyncpg.Record]:
     """Каталог созданных объектов присутствия владельца (по всем планам-проектам).
 
-    Скоуп по owner_id через JOIN на planы. Фильтры (тип/регион/статус) опциональны.
-    Использует только колонки базовой схемы (v35), чтобы не падать при лаге v159.
-    status=None → без фильтра по статусу; по умолчанию 'done' (реально созданные).
+    Скоуп по owner_id через JOIN на planы. Фильтры (тип/регион/проект/статус)
+    опциональны. Использует только колонки базовой схемы (v35), чтобы не падать
+    при лаге v159. status=None → без фильтра по статусу; по умолчанию 'done'.
     """
     conds = ["gpp.owner_id=$1"]
     args: list = [owner_id]
@@ -4143,6 +4144,9 @@ async def get_owner_presence_objects(
     if region:
         args.append(region)
         conds.append(f"gpt.region=${len(args)}")
+    if plan_id:
+        args.append(int(plan_id))
+        conds.append(f"gpt.plan_id=${len(args)}")
     args.append(max(1, min(int(limit), 200)))
     lim = f"${len(args)}"
     args.append(max(0, int(offset)))

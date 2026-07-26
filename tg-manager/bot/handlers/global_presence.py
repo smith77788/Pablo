@@ -3537,33 +3537,49 @@ async def cb_gp_catalog(
 ) -> None:
     await safe_answer(callback)
     uid = callback.from_user.id
-    # item кодирует фильтр типа: "" = все, иначе asset_type
+    # item = фильтр типа ("" = все); plan_id = фильтр проекта (0 = все проекты).
     type_filter = callback_data.item or ""
+    plan_filter = callback_data.plan_id or 0
     try:
         counts = await db.get_owner_presence_type_counts(pool, uid, status="done")
         objs = await db.get_owner_presence_objects(
-            pool, uid, asset_type=type_filter or None, status="done", limit=15
+            pool, uid, asset_type=type_filter or None,
+            plan_id=plan_filter or None, status="done", limit=15,
         )
+        plans = await db.get_global_presence_plans(pool, uid, limit=6)
     except Exception:
         log_exc_swallow(log, "cb_gp_catalog: query failed")
-        counts, objs = {}, []
+        counts, objs, plans = {}, [], []
 
     total = sum(counts.values())
     kb = InlineKeyboardBuilder()
-    # Фильтры по типу (только существующие типы + «Все»)
+    # Фильтры по типу (сохраняют выбранный проект)
     kb.button(
         text=("✅ " if not type_filter else "") + f"Все ({total})",
-        callback_data=GeoPresenceCb(action="catalog", item=""),
+        callback_data=GeoPresenceCb(action="catalog", item="", plan_id=plan_filter),
     )
     for atype, n in sorted(counts.items()):
         lbl = _CATALOG_TYPE_LABELS.get(atype, atype)
         kb.button(
             text=("✅ " if type_filter == atype else "") + f"{lbl} ({n})",
-            callback_data=GeoPresenceCb(action="catalog", item=atype),
+            callback_data=GeoPresenceCb(action="catalog", item=atype, plan_id=plan_filter),
         )
+    # Фильтр по проекту (сохраняет выбранный тип). Показываем при >1 проекте.
+    if len(plans) > 1:
+        kb.button(
+            text=("✅ " if not plan_filter else "") + "🗂 Все проекты",
+            callback_data=GeoPresenceCb(action="catalog", item=type_filter, plan_id=0),
+        )
+        import re as _re2
+        for p in plans:
+            pname = _re2.sub(r"\{\{[^}]+\}\}", "", p["name_pattern"] or "").strip()[:16] or f"#{p['id']}"
+            kb.button(
+                text=("✅ " if plan_filter == p["id"] else "") + f"📁 {pname}",
+                callback_data=GeoPresenceCb(action="catalog", item=type_filter, plan_id=p["id"]),
+            )
     kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="menu"))
-    kb.adjust(1, 3, 1, 1)
+    kb.adjust(1, 3, 2, 1, 1)
 
     if not objs:
         body = (
