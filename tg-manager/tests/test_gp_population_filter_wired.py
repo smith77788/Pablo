@@ -28,6 +28,22 @@ def test_back_from_pop_returns_to_geo():
     assert 'F.action == "back_to_geo"' in SRC
 
 
+def test_federal_district_selection_wired():
+    assert 'F.action == "districts"' in SRC and 'F.action == "district"' in SRC
+    assert "_show_district_step" in SRC
+    assert "group_by_federal_district" in SRC
+    # выбор округа фильтрует города по federal_district
+    assert "federal_district(c.get" in SRC
+
+
+def test_district_index_is_stable():
+    """Индекс округа в callback берётся из стабильного (sorted) порядка."""
+    from services import geo_data as g
+    d1 = sorted(g.group_by_federal_district(g.RUSSIA_CITIES).keys())
+    d2 = sorted(g.group_by_federal_district(g.RUSSIA_CITIES).keys())
+    assert d1 == d2 and "Южный ФО" in d1
+
+
 def test_geo_data_filter_still_correct():
     """Санити: сам фильтр по населению работает (данные под UI)."""
     from services import geo_data as g

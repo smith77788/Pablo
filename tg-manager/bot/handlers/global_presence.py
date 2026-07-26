@@ -1148,18 +1148,99 @@ async def _show_pop_filter_step(callback: CallbackQuery, state: FSMContext) -> N
             text=f"{label} ({n})",
             callback_data=GeoPresenceCb(action="pop", item=str(thr)),
         )
+    # Выбор по федеральным округам (дерево ФО→регион→город) — если данные есть.
+    from services.geo_data import federal_district
+    if any(federal_district(c.get("region", "")) for c in cities):
+        kb.button(text="🗂 По федеральным округам", callback_data=GeoPresenceCb(action="districts"))
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_geo"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
     await _edit(
         callback,
         "🌍 <b>Global Presence Factory</b>\n\n"
-        f"<b>Шаг 5/8 — Население</b>\n"
+        f"<b>Шаг 5/8 — Уточнение географии</b>\n"
         f"Пресет: <b>{html.escape(preset.get('label', ''))}</b>\n\n"
-        "Отфильтровать по размеру города? Города без данных о населении "
-        "остаются только в «Все города».",
+        "Отфильтровать по размеру города или выбрать федеральный округ? "
+        "Города без данных о населении остаются только в «Все города».",
         markup=kb.as_markup(),
     )
+
+
+def _sorted_districts(cities: list[dict]) -> list[str]:
+    """Стабильный порядок федеральных округов пресета (для индексации в callback)."""
+    from services.geo_data import group_by_federal_district
+    return sorted(group_by_federal_district(cities).keys())
+
+
+async def _show_district_step(callback: CallbackQuery, state: FSMContext) -> None:
+    from services.geo_data import group_by_federal_district
+    sd = await state.get_data()
+    preset = GEO_PRESETS.get(sd.get("geo_preset", ""), {})
+    cities = preset.get("cities", [])
+    tree = group_by_federal_district(cities)
+    districts = sorted(tree.keys())
+    kb = InlineKeyboardBuilder()
+    for i, d in enumerate(districts):
+        n = sum(len(v) for v in tree[d].values())
+        kb.button(text=f"{d} ({n})", callback_data=GeoPresenceCb(action="district", item=str(i)))
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_pop"))
+    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        "🌍 <b>Global Presence Factory</b>\n\n"
+        "<b>Шаг 5/8 — Федеральный округ</b>\n\n"
+        "Выберите округ — в проект войдут все его города:",
+        markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "districts"), GlobalPresenceFSM.choosing_geo
+)
+async def cb_gp_districts(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await _show_district_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "district"), GlobalPresenceFSM.choosing_geo
+)
+async def cb_gp_district_pick(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+    from services.geo_data import federal_district
+    sd = await state.get_data()
+    preset = GEO_PRESETS.get(sd.get("geo_preset", ""), {})
+    cities = preset.get("cities", [])
+    districts = _sorted_districts(cities)
+    try:
+        picked = districts[int(callback_data.item or -1)]
+    except (TypeError, ValueError, IndexError):
+        await callback.answer("Округ не найден", show_alert=True)
+        return
+    filtered = [
+        c for c in cities
+        if (federal_district(c.get("region", "")) or c.get("region")) == picked
+    ]
+    if not filtered:
+        await callback.answer("В округе нет городов", show_alert=True)
+        return
+    await state.update_data(geo_list=filtered)
+    await state.set_state(GlobalPresenceFSM.choosing_accounts)
+    await _show_accounts_step(callback, state, pool, page=0)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "back_to_pop"), GlobalPresenceFSM.choosing_geo
+)
+async def cb_gp_back_to_pop(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await _show_pop_filter_step(callback, state)
 
 
 @router.callback_query(
