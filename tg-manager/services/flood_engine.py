@@ -198,6 +198,92 @@ def recommended_delay(account_id: int, action_type: str = "default") -> float:
     return min(base * multiplier * pacing_mult, 900.0)
 
 
+# Дневные ориентиры инвайта: консервативный старт для аккаунта без истории и
+# жёсткий потолок, выше которого не поднимаемся даже при идеальной статистике.
+_INVITE_LIMIT_COLD_START = 15
+_INVITE_LIMIT_FLOOR = 5
+_INVITE_LIMIT_CEILING = 50
+
+
+async def recommended_daily_limit(pool, account_id: int) -> dict:
+    """Сколько инвайтов в сутки безопасно для ЭТОГО аккаунта — по его истории.
+
+    Раньше лимит задавался вручную одним числом на всю операцию: «по 20 с
+    каждого», независимо от того, что один аккаунт год работает без единого
+    флуда, а другой словил его вчера. Здесь лимит выводится из фактов
+    `account_daily_stats` за последние 7 суток:
+
+      * растим лимит, если аккаунт стабильно отрабатывал БЕЗ флудов;
+      * режем, если флуды были — тем сильнее, чем их больше;
+      * учитываем долю успеха: много отказов = цель/аккаунт «не заходят»,
+        гнать объём бессмысленно и рискованно.
+
+    Возвращает {limit, used_today, remaining, basis} — `basis` объясняет решение
+    человеку, чтобы число не выглядело магией. Ошибка БД → консервативный
+    холодный старт (лучше недобрать, чем спалить аккаунт).
+    """
+    cold = {
+        "limit": _INVITE_LIMIT_COLD_START,
+        "used_today": 0,
+        "remaining": _INVITE_LIMIT_COLD_START,
+        "basis": "нет истории — консервативный старт",
+    }
+    if not pool or not account_id:
+        return cold
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                   COALESCE(SUM(invites_ok), 0)                        AS inv_ok,
+                   COALESCE(SUM(actions_fail), 0)                      AS fails,
+                   COALESCE(SUM(flood_events), 0)                      AS floods,
+                   COUNT(*) FILTER (WHERE invites_ok > 0)              AS active_days,
+                   COALESCE(MAX(invites_ok), 0)                        AS best_day,
+                   COALESCE(SUM(invites_ok) FILTER (
+                       WHERE stat_date = CURRENT_DATE), 0)             AS today
+               FROM account_daily_stats
+               WHERE account_id = $1
+                 AND stat_date >= CURRENT_DATE - INTERVAL '7 days'""",
+            int(account_id),
+        )
+    except Exception:
+        log.debug("recommended_daily_limit: query failed acc=%s", account_id, exc_info=True)
+        return cold
+    if not row or not int(row["active_days"] or 0):
+        return cold
+
+    inv_ok = int(row["inv_ok"] or 0)
+    fails = int(row["fails"] or 0)
+    floods = int(row["floods"] or 0)
+    best_day = int(row["best_day"] or 0)
+    today = int(row["today"] or 0)
+
+    # База — лучший спокойный день, но не ниже холодного старта.
+    limit = max(_INVITE_LIMIT_COLD_START, best_day)
+    if floods == 0:
+        # Чистая неделя — осторожный рост (+30%), а не рывок.
+        limit = int(limit * 1.3)
+        basis = f"7 дней без флудов, лучший день {best_day}"
+    else:
+        # Каждый флуд срезает треть; два и больше — половину и ниже.
+        limit = int(limit / (1.0 + 0.5 * floods))
+        basis = f"флудов за неделю: {floods} — лимит снижен"
+
+    total = inv_ok + fails
+    if total >= 10:
+        success = inv_ok / total
+        if success < 0.5:
+            limit = int(limit * 0.6)
+            basis += f"; доля успеха {success:.0%} — объём урезан"
+
+    limit = max(_INVITE_LIMIT_FLOOR, min(limit, _INVITE_LIMIT_CEILING))
+    return {
+        "limit": limit,
+        "used_today": today,
+        "remaining": max(0, limit - today),
+        "basis": basis,
+    }
+
+
 def gaussian_delay(
     mean_seconds: float,
     *,

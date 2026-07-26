@@ -672,6 +672,46 @@ async def _maybe_requeue(
     return True
 
 
+async def bump_daily_stats(
+    pool: asyncpg.Pool,
+    account_id: int,
+    *,
+    ok: int = 0,
+    fail: int = 0,
+    floods: int = 0,
+    invites: int = 0,
+) -> None:
+    """Накопить суточные счётчики аккаунта в `account_daily_stats`.
+
+    Таблица существовала с schema_v41, но НИКОГДА не заполнялась — это прямо
+    признано в комментарии `infra_analytics.cb_infra_daily_stats`, где запрос
+    пришлось переписать на operation_audit в обход неё. Из-за этого у системы не
+    было суточной истории «сколько приглашено / сколько успешно / сколько флудов»
+    на аккаунт, а без неё невозможны ни самообучающийся лимитер, ни карточка
+    аккаунта, ни аналитика по флоту.
+
+    UPSERT по (account_id, stat_date): счётчики накапливаются за сутки.
+    Никогда не бросает — статистика не должна ронять массовую операцию.
+    """
+    if not account_id or not (ok or fail or floods or invites):
+        return
+    try:
+        await pool.execute(
+            """INSERT INTO account_daily_stats(
+                   account_id, stat_date, actions_ok, actions_fail,
+                   flood_events, invites_ok)
+               VALUES($1, CURRENT_DATE, $2, $3, $4, $5)
+               ON CONFLICT (account_id, stat_date) DO UPDATE SET
+                   actions_ok   = account_daily_stats.actions_ok   + EXCLUDED.actions_ok,
+                   actions_fail = account_daily_stats.actions_fail + EXCLUDED.actions_fail,
+                   flood_events = account_daily_stats.flood_events + EXCLUDED.flood_events,
+                   invites_ok   = account_daily_stats.invites_ok   + EXCLUDED.invites_ok""",
+            int(account_id), int(ok), int(fail), int(floods), int(invites),
+        )
+    except Exception:
+        log.debug("bump_daily_stats failed acc=%s", account_id, exc_info=True)
+
+
 async def _audit(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -7781,11 +7821,30 @@ async def _exec_mass_invite(
         u_chunk = acc_user_chunks[acc_idx]
         p_chunk = acc_phone_chunks[acc_idx]
 
-        # Лимит на аккаунт за прогон: обрезаем работу аккаунта (сначала users,
-        # телефонам остаётся остаток бюджета).
-        if _per_acc_limit:
-            u_chunk = u_chunk[:_per_acc_limit]
-            p_chunk = p_chunk[:max(0, _per_acc_limit - len(u_chunk))]
+        # Лимит на аккаунт: берём СТРОЖАЙШИЙ из двух — заданного пользователем и
+        # рекомендованного по фактической истории самого аккаунта. Ручное число
+        # одно на всю операцию и не знает, что один аккаунт год работает чисто, а
+        # другой словил флуд вчера; рекомендация это знает. Уже израсходованное за
+        # сегодня вычитается, поэтому повторный запуск не удваивает суточный объём.
+        _acc_cap = _per_acc_limit
+        try:
+            from services.flood_engine import recommended_daily_limit
+            _rec = await recommended_daily_limit(pool, int(acc["id"]))
+            _remaining = int(_rec.get("remaining") or 0)
+            _acc_cap = _remaining if not _acc_cap else min(_acc_cap, _remaining)
+            if _remaining <= 0:
+                log.info(
+                    "mass_invite op=%d acc=%s: суточный лимит исчерпан (%d/%d, %s)",
+                    op_id, acc.get("id"), _rec.get("used_today"), _rec.get("limit"),
+                    _rec.get("basis"),
+                )
+                continue
+        except Exception:
+            log.debug("mass_invite: daily limit unavailable acc=%s", acc.get("id"))
+
+        if _acc_cap:
+            u_chunk = u_chunk[:_acc_cap]
+            p_chunk = p_chunk[:max(0, _acc_cap - len(u_chunk))]
 
         if not u_chunk and not p_chunk:
             continue
@@ -7812,8 +7871,13 @@ async def _exec_mass_invite(
                             "mass_invite op=%d acc=%s %s — cooldown+switch", op_id, acc.get("id"),
                             "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
                         )
+                        await bump_daily_stats(pool, acc["id"], floods=1,
+                                               fail=res.get("failed") or 0)
                         await _rest_invite_account(acc["id"], res)
                         break
+                    await bump_daily_stats(
+                        pool, acc["id"], ok=res.get("ok") or 0,
+                        fail=res.get("failed") or 0, invites=res.get("ok") or 0)
                     await _invite_learn_ok(acc["id"], res.get("ok") or 0)
                     await asyncio.sleep(_invite_pause(acc["id"]))
                 except Exception as exc:
@@ -7842,8 +7906,13 @@ async def _exec_mass_invite(
                             "mass_invite op=%d acc=%s %s (phones) — cooldown+switch", op_id, acc.get("id"),
                             "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
                         )
+                        await bump_daily_stats(pool, acc["id"], floods=1,
+                                               fail=res.get("failed") or 0)
                         await _rest_invite_account(acc["id"], res)
                         break
+                    await bump_daily_stats(
+                        pool, acc["id"], ok=res.get("ok") or 0,
+                        fail=res.get("failed") or 0, invites=res.get("ok") or 0)
                     await _invite_learn_ok(acc["id"], res.get("ok") or 0)
                     await asyncio.sleep(_invite_pause(acc["id"]))
                 except Exception as exc:
