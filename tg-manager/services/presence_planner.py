@@ -6,14 +6,34 @@ from services.username_engine import slugify
 
 
 def render_pattern(pattern: str, geo: dict) -> str:
-    """Replace {{PLACEHOLDER}} tokens in pattern with geo values. Never crashes."""
-    city_slug = geo.get("city_slug") or slugify(geo.get("city", ""))
+    """Replace {{PLACEHOLDER}} tokens in pattern with geo values. Never crashes.
+
+    `scope` — имя географического узла на его уровне (страна / регион / город).
+    Оно же служит запасным значением для {{CITY}}/{{CITY_NAME}}, чтобы один
+    шаблон «Новости {{CITY_NAME}}» корректно работал и на федеральном узле,
+    где города нет: иначе название схлопнулось бы в «Новости».
+    """
+    scope = (geo.get("scope") or "").strip()
+    scope_slug = geo.get("scope_slug") or slugify(scope)
+    city = geo.get("city") or scope
+    city_slug = geo.get("city_slug") or slugify(geo.get("city", "")) or scope_slug
     country_slug = geo.get("country_slug") or slugify(geo.get("country", ""))
     # {{CITY_NAME}} = нативное название (Москва, Київ, Wien), fallback → английское
-    city_native = geo.get("city_native") or geo.get("city") or ""
+    city_native = geo.get("city_native") or geo.get("city") or scope or ""
+    # Падежи нужны, чтобы шаблон читался по-русски: «Работа в {{CITY_LOC}}» →
+    # «Работа в Москве», «Новости города {{CITY_GEN}}» → «…города Самары».
+    # Для нерусских названий склонятели возвращают исходную форму.
+    from services import ru_morph
+
     replacements = {
-        "{{CITY}}": geo.get("city") or "",
+        "{{CITY}}": city,
         "{{CITY_NAME}}": city_native,
+        "{{CITY_GEN}}": ru_morph.genitive(city_native),
+        "{{CITY_LOC}}": ru_morph.prepositional(city_native),
+        "{{SCOPE}}": scope or city_native,
+        "{{SCOPE_GEN}}": ru_morph.genitive(scope or city_native),
+        "{{SCOPE_LOC}}": ru_morph.prepositional(scope or city_native),
+        "{{SCOPE_SLUG}}": scope_slug or city_slug,
         "{{COUNTRY}}": geo.get("country") or "",
         "{{REGION}}": geo.get("region") or "",
         "{{LANGUAGE}}": geo.get("language") or "",
