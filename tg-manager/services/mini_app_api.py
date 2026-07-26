@@ -10374,6 +10374,69 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("global_presence_launch uid=%d plan=%d", uid, plan_id)
             return _err(str(exc), 500)
 
+    async def global_presence_bulk_apply(request: web.Request) -> web.Response:
+        """Пакетное оформление объектов проекта: описания и/или аватары.
+
+        Значение вычисляется для каждого объекта отдельно (по его городу, роли
+        и seed), поэтому «обновить описания» не превращает сеть в одинаковые
+        карточки — этим операция и отличается от общего bulk-редактирования.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        action = (body.get("action") or "both").strip()
+        if action not in ("about", "avatar", "both"):
+            return _err("action must be one of: about, avatar, both", 400)
+        about_template = (body.get("about_template") or "").strip()
+
+        try:
+            plan = await pool.fetchrow(
+                "SELECT id FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+                plan_id,
+                uid,
+            )
+            if not plan:
+                return _err("Plan not found", 404)
+
+            n_targets = await pool.fetchval(
+                "SELECT COUNT(*) FROM global_presence_targets "
+                " WHERE plan_id=$1 AND status='done' AND asset_type<>'bot'",
+                plan_id,
+            )
+            if not n_targets:
+                return _err("В проекте нет созданных объектов для применения", 400)
+
+            params = {"plan_id": plan_id, "action": action}
+            if about_template:
+                params["about_template"] = about_template[:500]
+            if action in ("avatar", "both"):
+                # Без сдвига seed перерисовка вернула бы те же картинки:
+                # генерация детерминирована.
+                import random as _rnd
+
+                params["seed_shift"] = _rnd.randrange(1, 10**6)
+
+            from services import operation_bus
+
+            op_id = await operation_bus.submit(
+                pool, uid, "gp_bulk_apply", params, total_items=n_targets
+            )
+            return _json_resp(
+                {"ok": True, "op_id": op_id, "plan_id": plan_id, "targets": n_targets}
+            )
+        except Exception as exc:
+            log.exception("global_presence_bulk_apply uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
+
     # ── Mass Ops ──────────────────────────────────────────────────────────────
 
     async def mass_ops_overview(request: web.Request) -> web.Response:
@@ -12201,6 +12264,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/global_presence", global_presence_create)
     app.router.add_get("/api/miniapp/geo_presets", geo_presets)
     app.router.add_post("/api/miniapp/global_presence/{plan_id}/launch", global_presence_launch)
+    app.router.add_post(
+        "/api/miniapp/global_presence/{plan_id}/bulk_apply", global_presence_bulk_apply
+    )
     # Mass Ops
     app.router.add_get("/api/miniapp/mass_ops", mass_ops_overview)
     # Ecosystems

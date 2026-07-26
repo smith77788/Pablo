@@ -2401,9 +2401,22 @@ async def cb_gp_report(
         stats = await db.get_global_presence_stats(
             pool, plan_id, owner_id=callback.from_user.id
         )
+        # Разбивка по ролям и типам — «что именно получилось», а не одно число.
+        by_role = await pool.fetch(
+            "SELECT COALESCE(role,'—') AS role, asset_type, "
+            "       COUNT(*) FILTER (WHERE status='done')   AS done, "
+            "       COUNT(*) FILTER (WHERE status='failed') AS failed, "
+            "       COUNT(*) FILTER (WHERE avatar_applied)  AS with_avatar, "
+            "       COUNT(*) FILTER (WHERE final_username IS NOT NULL) AS with_uname "
+            "  FROM global_presence_targets WHERE plan_id=$1 "
+            " GROUP BY 1,2 ORDER BY 1",
+            plan_id,
+        )
         done_targets = await pool.fetch(
-            "SELECT city, planned_name, planned_username, result_asset_id "
-            "FROM global_presence_targets WHERE plan_id=$1 AND status='done' ORDER BY id LIMIT 20",
+            "SELECT city, planned_name, final_username, planned_username, "
+            "       result_asset_id, avatar_applied, role "
+            "  FROM global_presence_targets WHERE plan_id=$1 AND status='done' "
+            " ORDER BY id LIMIT 10",
             plan_id,
         )
         failed_targets = await pool.fetch(
@@ -2414,30 +2427,38 @@ async def cb_gp_report(
     except Exception:
         log_exc_swallow(log, "cb_gp_report: stats/targets fetch failed")
         stats = {"total": 0, "done": 0, "failed": 0, "pending": 0}
-        done_targets = []
-        failed_targets = []
+        by_role, done_targets, failed_targets = [], [], []
+
+    role_lines = []
+    total_avatars = total_unames = 0
+    for r in by_role:
+        label = infra_generator.ROLE_LIBRARY.get(r["role"], {}).get("label", r["role"])
+        kind = {"channel": "канал", "group": "группа", "bot": "бот"}.get(
+            r["asset_type"], r["asset_type"]
+        )
+        total_avatars += r["with_avatar"] or 0
+        total_unames += r["with_uname"] or 0
+        fail_part = f", ошибок {r['failed']}" if r["failed"] else ""
+        role_lines.append(
+            f"  • {html.escape(str(label))} ({kind}): создано {r['done']}{fail_part}"
+        )
+    role_text = "\n".join(role_lines)
 
     done_lines = "\n".join(
         f"  ✅ {html.escape(t['city'] or '?')}: {html.escape(t['planned_name'] or '?')}"
-        + (f" (id:{t['result_asset_id']})" if t["result_asset_id"] else "")
-        for t in done_targets[:10]
+        # Показываем ФАКТИЧЕСКИЙ username: запланированный мог быть занят.
+        + (f" → @{html.escape(t['final_username'])}" if t["final_username"] else " <i>(без username)</i>")
+        + ("" if t["avatar_applied"] else " ⚠️ без аватара")
+        for t in done_targets
     )
-    if stats["done"] > 10:
-        done_lines += f"\n  … и ещё {stats['done'] - 10}"
+    if stats["done"] > len(done_targets):
+        done_lines += f"\n  … и ещё {stats['done'] - len(done_targets)}"
 
     fail_lines = "\n".join(
         f"  ❌ {html.escape(t['city'] or '?')}: {html.escape((t['error_message'] or '?')[:60])}"
         for t in failed_targets[:5]
     )
 
-    _asset_label_map = {
-        "channel": "Созданные каналы",
-        "group": "Созданные группы",
-        "bot": "Созданные боты",
-        "package": "Созданные пакеты",
-        "full_package": "Созданные пакеты",
-    }
-    asset_label = _asset_label_map.get(plan.get("asset_type", "channel"), "Созданные активы")
     _status_ru = {
         "queued": "В очереди",
         "running": "Выполняется",
@@ -2446,27 +2467,275 @@ async def cb_gp_report(
         "cancelled": "Отменён",
         "draft": "Черновик",
     }
+    # Честная сводка оформления: «создано» и «оформлено» — разные числа, и
+    # объект без аватара/username хуже ранжируется, поэтому это видно в отчёте.
+    dressing = ""
+    if stats["done"]:
+        dressing = (
+            f"🖼 С аватаром: {total_avatars} из {stats['done']}\n"
+            f"🔗 С username: {total_unames} из {stats['done']}\n"
+        )
+
     text = (
-        f"📊 <b>Отчёт: Global Presence Plan #{plan_id}</b>\n"
+        f"📊 <b>Отчёт по проекту #{plan_id}</b>\n"
         f"{'─' * 28}\n"
-        f"Паттерн: <code>{html.escape(plan['name_pattern'])}</code>\n"
-        f"Тип: {plan.get('asset_type', 'channel')}\n"
         f"Статус: {_status_ru.get(plan['status'], plan['status'])}\n\n"
-        f"📊 Итого: {stats['total']}\n"
+        f"📊 Всего объектов: {stats['total']}\n"
         f"✅ Создано: {stats['done']}\n"
         f"❌ Ошибок: {stats['failed']}\n"
-        f"⏳ Ожидают: {stats['pending']}\n\n"
-        + (f"{asset_label}:\n{done_lines}\n\n" if done_lines else "")
-        + (f"Ошибки:\n{fail_lines}" if fail_lines else "")
+        f"⏳ Ожидают: {stats['pending']}\n"
+        f"{dressing}"
+        + (f"\n<b>По тематикам:</b>\n{role_text}\n" if role_text else "")
+        + (f"\n<b>Созданные объекты:</b>\n{done_lines}\n" if done_lines else "")
+        + (f"\n<b>Ошибки:</b>\n{fail_lines}" if fail_lines else "")
     )
 
     kb = InlineKeyboardBuilder()
+    if stats["done"]:
+        kb.button(
+            text="📥 Экспорт ссылок",
+            callback_data=GeoPresenceCb(action="export", plan_id=plan_id),
+        )
+        kb.button(
+            text="🧰 Пакетные операции",
+            callback_data=GeoPresenceCb(action="bulk_menu", plan_id=plan_id),
+        )
     kb.button(
         text="◀️ Прогресс",
         callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
     )
-    kb.adjust(1)
+    kb.adjust(2, 1)
     await _edit(callback, text, markup=kb.as_markup())
+
+
+# ── Каталог: экспорт ссылок ────────────────────────────────────────────────
+
+
+@router.callback_query(GeoPresenceCb.filter(F.action == "export"))
+async def cb_gp_export(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """Выгрузка каталога объектов проекта в CSV.
+
+    Ссылки на созданное — главный практический результат проекта; без выгрузки
+    их пришлось бы переписывать с экрана вручную.
+    """
+    plan_id = callback_data.plan_id
+    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    if not plan:
+        await callback.answer("План не найден", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    try:
+        rows = await pool.fetch(
+            "SELECT t.country, t.region, t.city, t.role, t.level, t.asset_type, "
+            "       t.planned_name, COALESCE(t.final_username, t.planned_username) AS uname, "
+            "       t.result_asset_id, t.avatar_applied, t.status, t.error_message, "
+            "       a.phone "
+            "  FROM global_presence_targets t "
+            "  LEFT JOIN tg_accounts a ON a.id = t.selected_account_id "
+            " WHERE t.plan_id=$1 ORDER BY t.id",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_export: выборка целей не удалась")
+        await callback.answer("Ошибка выгрузки", show_alert=True)
+        return
+
+    if not rows:
+        await callback.answer("В плане нет объектов", show_alert=True)
+        return
+
+    import csv
+    import io as _io
+
+    buf = _io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(
+        ["Страна", "Регион", "Город", "Тематика", "Уровень", "Тип", "Название",
+         "Username", "Ссылка", "ID", "Аватар", "Статус", "Аккаунт", "Ошибка"]
+    )
+    for r in rows:
+        uname = r["uname"] or ""
+        writer.writerow(
+            [
+                r["country"] or "", r["region"] or "", r["city"] or "",
+                infra_generator.ROLE_LIBRARY.get(r["role"], {}).get("label", r["role"] or ""),
+                r["level"] or "", r["asset_type"] or "",
+                r["planned_name"] or "",
+                f"@{uname}" if uname else "",
+                f"https://t.me/{uname}" if uname else "",
+                r["result_asset_id"] or "",
+                "да" if r["avatar_applied"] else "нет",
+                r["status"] or "",
+                r["phone"] or "",
+                (r["error_message"] or "")[:200],
+            ]
+        )
+
+    from aiogram.types import BufferedInputFile
+
+    # BOM — чтобы Excel не открыл кириллицу кракозябрами.
+    data = ("﻿" + buf.getvalue()).encode("utf-8")
+    n_links = sum(1 for r in rows if r["uname"] and r["status"] == "done")
+    try:
+        await callback.message.answer_document(
+            BufferedInputFile(data, filename=f"project_{plan_id}.csv"),
+            caption=(
+                f"📥 <b>Каталог проекта #{plan_id}</b>\n"
+                f"Объектов: {len(rows)}, публичных ссылок: {n_links}"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        log.warning("cb_gp_export: отправка файла не удалась: %s", exc)
+        await callback.answer("Не удалось отправить файл", show_alert=True)
+
+
+# ── Каталог: пакетные операции ─────────────────────────────────────────────
+
+
+@router.callback_query(GeoPresenceCb.filter(F.action == "bulk_menu"))
+async def cb_gp_bulk_menu(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
+) -> None:
+    plan_id = callback_data.plan_id
+    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    if not plan:
+        await callback.answer("План не найден", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    try:
+        row = await pool.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE status='done' AND asset_type<>'bot') AS applicable, "
+            "       COUNT(*) FILTER (WHERE status='done' AND NOT avatar_applied "
+            "                        AND asset_type<>'bot') AS no_avatar "
+            "  FROM global_presence_targets WHERE plan_id=$1",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_bulk_menu: подсчёт целей не удался")
+        row = None
+    applicable = (row["applicable"] if row else 0) or 0
+    no_avatar = (row["no_avatar"] if row else 0) or 0
+
+    kb = InlineKeyboardBuilder()
+    if applicable:
+        kb.button(
+            text="📝 Обновить описания",
+            callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="about"),
+        )
+        kb.button(
+            text="🖼 Перерисовать аватары",
+            callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="avatar"),
+        )
+        kb.button(
+            text="🎨 Оформить всё (описание + аватар)",
+            callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="both"),
+        )
+    kb.button(
+        text="◀️ К отчёту", callback_data=GeoPresenceCb(action="report", plan_id=plan_id)
+    )
+    kb.adjust(2, 1, 1)
+
+    if not applicable:
+        body = (
+            "В проекте пока нет созданных каналов и групп, к которым можно "
+            "применить оформление."
+        )
+    else:
+        body = (
+            f"Объектов под применение: <b>{applicable}</b>\n"
+            + (f"⚠️ Без аватара сейчас: {no_avatar}\n" if no_avatar else "")
+            + "\n📝 <b>Обновить описания</b> — заново применит описание каждого "
+            "объекта (у каждого своё, по его городу и тематике).\n"
+            "🖼 <b>Перерисовать аватары</b> — новый набор картинок, по-прежнему "
+            "разных.\n\n"
+            "<i>Операция идёт через общую очередь: аккаунты в карантине "
+            "пропускаются, прогресс и повтор — как у остальных операций.</i>"
+        )
+
+    await _edit(
+        callback,
+        f"🧰 <b>Пакетные операции — проект #{plan_id}</b>\n{'─' * 28}\n{body}",
+        markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(GeoPresenceCb.filter(F.action == "bulk_run"))
+async def cb_gp_bulk_run(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
+) -> None:
+    plan_id = callback_data.plan_id
+    action = callback_data.item or "both"
+    if action not in ("about", "avatar", "both"):
+        await callback.answer("Неизвестное действие", show_alert=True)
+        return
+
+    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    if not plan:
+        await callback.answer("План не найден", show_alert=True)
+        return
+
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+
+    try:
+        n_targets = await pool.fetchval(
+            "SELECT COUNT(*) FROM global_presence_targets "
+            " WHERE plan_id=$1 AND status='done' AND asset_type<>'bot'",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_bulk_run: подсчёт целей не удался")
+        n_targets = 0
+    if not n_targets:
+        await callback.answer("Нет объектов для применения", show_alert=True)
+        return
+
+    params = {"plan_id": plan_id, "action": action}
+    if action in ("avatar", "both"):
+        # Сдвиг seed делает перерисовку осмысленной: без него аватары были бы
+        # ровно теми же, что уже стоят.
+        params["seed_shift"] = random.randrange(1, 10**6)
+
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            "gp_bulk_apply",
+            params,
+            total_items=n_targets,
+        )
+    except Exception as exc:
+        log.error("cb_gp_bulk_run: постановка операции не удалась: %s", exc)
+        await callback.answer("Не удалось поставить операцию", show_alert=True)
+        return
+    if not op_id:
+        await callback.answer("Не удалось создать операцию", show_alert=True)
+        return
+
+    label = {
+        "about": "описания",
+        "avatar": "аватары",
+        "both": "описания и аватары",
+    }[action]
+    await callback.answer(
+        f"✅ Операция #{op_id} поставлена: {label} для {n_targets} объектов",
+        show_alert=True,
+    )
+    await cb_gp_bulk_menu(callback, callback_data, pool)
+
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "cancel_plan"))

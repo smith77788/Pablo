@@ -1311,6 +1311,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_global_presence_bot(
                     pool, bot, op_id, owner_id, params
                 )
+            elif op_type == "gp_bulk_apply":
+                result = await _exec_gp_bulk_apply(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_create_channels":
                 result = await _exec_bulk_create_channels(
                     pool, bot, op_id, owner_id, params
@@ -3769,6 +3771,205 @@ async def _exec_global_presence_channel(
         # и на групповых планах — итог обязан совпадать с тем, что создано.
         "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
     }
+
+
+async def _exec_gp_bulk_apply(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Пакетные операции над уже созданными объектами проекта.
+
+    Отличие от общего `bulk_edit_channels`: тот ставит ОДИН текст на все каналы
+    аккаунта. Здесь значение вычисляется для каждого объекта отдельно — по его
+    городу, роли и seed, — поэтому «обновить описания у 800 каналов» не
+    превращает сеть в 800 одинаковых карточек.
+
+    params: plan_id, action ('about' | 'avatar' | 'both'), about_template
+    (необязательный шаблон с плейсхолдерами), seed_shift (для перерисовки
+    аватаров новым набором).
+    """
+    from services import account_manager, avatar_factory, session_simulator
+    from services.presence_planner import render_pattern
+    import random
+
+    plan_id = params.get("plan_id")
+    action = params.get("action") or "both"
+    about_template = (params.get("about_template") or "").strip()
+    seed_shift = int(params.get("seed_shift") or 0)
+    if not plan_id:
+        return {"status": "failed", "reason": "Не указан plan_id"}
+    if action not in ("about", "avatar", "both"):
+        return {"status": "failed", "reason": f"Неизвестное действие: {action}"}
+
+    plan = await _safe_fetchrow(
+        pool,
+        "SELECT avatar_style FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        plan_id,
+        owner_id,
+    )
+    if not plan:
+        return {"status": "failed", "reason": "План не найден"}
+    avatar_style = plan.get("avatar_style") or None
+
+    # Только реально созданные объекты: у остальных нечего править.
+    targets = await _safe_fetch(
+        pool,
+        """SELECT t.*, m.access_hash
+             FROM global_presence_targets t
+             LEFT JOIN managed_channels m
+               ON m.owner_id = $2 AND m.channel_id = t.result_asset_id
+            WHERE t.plan_id = $1
+              AND t.status = 'done'
+              AND t.result_asset_id IS NOT NULL
+              AND t.asset_type <> 'bot'
+            ORDER BY t.id""",
+        plan_id,
+        owner_id,
+    )
+    if not targets:
+        return {
+            "status": "done",
+            "ok": 0,
+            "fail": 0,
+            "summary": "Нет созданных объектов для применения",
+        }
+
+    acc_ids = list({t["selected_account_id"] for t in targets if t["selected_account_id"]})
+    accounts_rows = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=acc_ids, respect_cooldown=False
+    )
+    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
+
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2",
+        len(targets), op_id,
+    )
+
+    ok_about = ok_avatar = 0
+    failed = skipped = 0
+
+    for target in targets:
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_about + ok_avatar,
+                "fail": failed,
+                "summary": f"Отменено. Описаний: {ok_about}, аватаров: {ok_avatar}, ошибок: {failed}",
+            }
+
+        acc = acc_by_id.get(target["selected_account_id"])
+        if not acc or not acc.get("session_str"):
+            skipped += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            continue
+
+        # Единый гейт здоровья: правка оформления — тоже действие от лица
+        # аккаунта, и с зафлуженного/ограниченного её делать нельзя.
+        if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+            skipped += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            continue
+
+        channel_id = target["result_asset_id"]
+        access_hash = int(target.get("access_hash") or 0)
+        title = target.get("planned_name") or ""
+        item_failed = False
+
+        if action in ("about", "both"):
+            if about_template:
+                # Шаблон разворачивается ДЛЯ КАЖДОГО объекта: «Новости
+                # {{CITY_GEN}}» даёт свой текст в каждом городе, а не один
+                # общий на всю сеть.
+                new_about = render_pattern(about_template, dict(target))[:255]
+            else:
+                new_about = (target.get("planned_about") or "").strip()
+            if new_about:
+                try:
+                    ok = await account_manager.edit_channel_about(
+                        acc["session_str"], channel_id, new_about, _acc=acc
+                    )
+                    if ok:
+                        ok_about += 1
+                        await _safe_execute(
+                            pool,
+                            "UPDATE global_presence_targets SET planned_about=$1 WHERE id=$2",
+                            new_about,
+                            target["id"],
+                        )
+                    else:
+                        item_failed = True
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log_exc_swallow(log, f"gp_bulk_apply about target={target['id']}: {exc}")
+                    item_failed = True
+                await asyncio.sleep(random.uniform(3, 8) * session_simulator.chaos_factor())
+
+        if action in ("avatar", "both"):
+            base_seed = target.get("avatar_seed")
+            if base_seed is None:
+                # У целей из планов до генератора seed'а нет — выводим его из
+                # id, чтобы перерисовка оставалась воспроизводимой.
+                base_seed = target["id"] * 2654435761 % (2**31)
+            try:
+                photo = await asyncio.to_thread(
+                    avatar_factory.generate_avatar,
+                    int(base_seed) + seed_shift,
+                    title,
+                    style=target.get("avatar_style") or avatar_style,
+                )
+                ph_err = await account_manager.set_channel_photo(
+                    acc["session_str"], channel_id, photo, access_hash=access_hash, _acc=acc
+                )
+                if ph_err:
+                    item_failed = True
+                    log.info(
+                        "gp_bulk_apply: аватар не применён target=%s: %s",
+                        target["id"], ph_err[:120],
+                    )
+                else:
+                    ok_avatar += 1
+                    await _safe_execute(
+                        pool,
+                        "UPDATE global_presence_targets SET avatar_applied=TRUE WHERE id=$1",
+                        target["id"],
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, f"gp_bulk_apply avatar target={target['id']}: {exc}")
+                item_failed = True
+            await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
+
+        if item_failed:
+            failed += 1
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+
+    parts = []
+    if action in ("about", "both"):
+        parts.append(f"описаний: {ok_about}")
+    if action in ("avatar", "both"):
+        parts.append(f"аватаров: {ok_avatar}")
+    if skipped:
+        # Пропуски показываем отдельно от ошибок: «аккаунт в карантине» — это
+        # не сбой применения, и смешивать их в одном счётчике нечестно.
+        parts.append(f"пропущено (карантин/нет сессии): {skipped}")
+    if failed:
+        parts.append(f"ошибок: {failed}")
+
+    return {
+        "status": "done",
+        "ok": ok_about + ok_avatar,
+        "fail": failed,
+        "plan_id": plan_id,
+        "summary": "🧰 Пакетное применение — " + ", ".join(parts),
+    }
+
 
 
 async def _exec_global_presence_bot(

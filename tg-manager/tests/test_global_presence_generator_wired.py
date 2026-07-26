@@ -241,3 +241,94 @@ def test_no_username_flag_reaches_generator():
     assert "no_username=True" in skip
     accept = _func_src(HANDLER, "cb_gp_accept_uname")
     assert "no_username=False" in accept
+
+
+# ── Каталог и пакетные операции ────────────────────────────────────────────
+
+BUS = ROOT / "services" / "operation_bus.py"
+
+
+def test_bulk_apply_registered_in_bus():
+    """op_type обязан быть в OP_REGISTRY, иначе submit падает ValueError.
+
+    Для пользователя это выглядит как мёртвая кнопка: нажал «применить» —
+    ничего не произошло.
+    """
+    assert '"gp_bulk_apply"' in _src(BUS)
+
+
+def test_bulk_apply_dispatched_in_worker():
+    src = _src(WORKER)
+    assert 'op_type == "gp_bulk_apply"' in src
+    assert "_exec_gp_bulk_apply(" in src
+
+
+def test_bulk_apply_respects_quarantine():
+    # Правка оформления — тоже действие от лица аккаунта: с зафлуженного или
+    # ограниченного его делать нельзя.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "is_account_quarantined" in src
+
+
+def test_bulk_apply_separates_skipped_from_failed():
+    # «Аккаунт в карантине» — не сбой применения. Смешать их в одном счётчике
+    # значит соврать пользователю о качестве прогона.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "skipped" in src and "failed" in src
+    assert "пропущено" in src
+
+
+def test_bulk_apply_generates_per_object_values():
+    """Значения вычисляются ДЛЯ КАЖДОГО объекта, а не один текст на всех.
+
+    Именно этим операция отличается от общего bulk_edit_channels — иначе
+    «обновить описания» превратило бы сеть в одинаковые карточки.
+    """
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "render_pattern(about_template" in src
+    assert "generate_avatar" in src
+
+
+def test_avatar_redraw_shifts_seed():
+    """Перерисовка без сдвига seed вернула бы те же картинки — тихий обман.
+
+    Генерация детерминирована, поэтому «новый набор» обязан менять вход.
+    """
+    handler = _func_src(HANDLER, "cb_gp_bulk_run")
+    assert "seed_shift" in handler
+    worker = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "seed_shift" in worker
+
+
+def test_bulk_apply_skips_bots():
+    # У ботов нет ни описания канала, ни аватара через этот путь: попытка
+    # применить к ним оформление дала бы фальшивые ошибки в счётчике.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "asset_type <> 'bot'" in src
+
+
+def test_export_uses_final_username():
+    """Выгрузка обязана нести ФАКТИЧЕСКИЙ username: запланированный мог быть
+    занят, и ссылка из файла вела бы в никуда."""
+    src = _func_src(HANDLER, "cb_gp_export")
+    assert "COALESCE(t.final_username, t.planned_username)" in src
+    assert "https://t.me/" in src
+
+
+def test_export_csv_has_bom_for_excel():
+    # Без BOM Excel открывает кириллицу кракозябрами — файл формально верный,
+    # а практически нечитаемый.
+    src = _func_src(HANDLER, "cb_gp_export")
+    assert "﻿" in src
+
+
+def test_report_shows_dressing_honestly():
+    """Отчёт разделяет «создано» и «оформлено».
+
+    Объект без аватара/username хуже ранжируется, поэтому число обязано быть
+    на экране, а не прятаться за общим «создано N».
+    """
+    src = _func_src(HANDLER, "cb_gp_report")
+    assert "avatar_applied" in src
+    assert "final_username" in src
+    assert "без аватара" in src
