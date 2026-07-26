@@ -3721,6 +3721,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">Сегодня по флоту</div>
     <div id="invAnalytics" style="padding:6px 0 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec">Разбор и рекомендации</div>
+    <div id="invAdvice" style="padding:6px 14px 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec">Настройка инвайта</div>
     <div style="padding:8px 0">
       <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
@@ -3783,6 +3785,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:8px">История операций</div>
     <div class="lst" id="massInviteHistory"></div>
+  </div>
+</div>
+
+<!-- ══════════════════ SCREEN: КАРТОЧКА АККАУНТА (ИНВАЙТ) ══════════════════ -->
+<div class="screen" id="s-invacc">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👤 Аккаунт в инвайте</div>
+  </div>
+  <div class="sub-sb">
+    <div id="invAccBody" style="padding:12px 16px"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -12622,10 +12635,94 @@ async function loadInviteAnalytics() {
   }
 }
 
+// Разбор и рекомендации: аналитика отвечает «что произошло», это — «что делать».
+// Цифры сами по себе не подсказывают, что три конкретных аккаунта пора вывести
+// из ротации или что флота не хватит под аудиторию.
+const ADV_STYLE = {
+  danger: ['#ef4444', 'var(--bg-red-16,rgba(239,68,68,.12))', '🛑'],
+  warn:   ['#f59e0b', 'rgba(245,158,11,.12)', '⚠️'],
+  info:   ['var(--hint)', 'var(--bg-select)', 'ℹ️'],
+  good:   ['#22c55e', 'rgba(34,197,94,.12)', '✅'],
+};
+async function loadInviteAdvice() {
+  try {
+    const d = await api('/api/miniapp/invite/advice');
+    const adv = d.advice || [];
+    if (!adv.length) {
+      // Пустой разбор — тоже ответ, но он должен отличаться от «нет данных».
+      txt('invAdvice', `<div style="font-size:13px;color:var(--hint);padding:4px 2px">${
+        d.has_data
+          ? '✅ Поводов вмешаться нет — проверено: ' + (d.checked || []).join(', ') + '.'
+          : 'Разбор появится после первого инвайта — пока не на чем считать.'
+      }</div>`);
+      return;
+    }
+    txt('invAdvice', adv.map(a => {
+      const [col, bg, ico] = ADV_STYLE[a.severity] || ADV_STYLE.info;
+      const accs = (a.accounts || []).map(x =>
+        `<span onclick="openInviteAccount(${x.id})" style="color:var(--accent);cursor:pointer">${esc(x.label)}</span>`
+      ).join(', ');
+      return `<div style="background:${bg};border-left:3px solid ${col};border-radius:8px;padding:8px 10px;margin-bottom:6px">
+        <div style="font-size:13px;font-weight:600;color:${col}">${ico} ${esc(a.title)}</div>
+        <div style="font-size:12px;color:var(--hint);margin-top:3px;line-height:1.45">${esc(a.detail)}</div>
+        ${accs ? `<div style="font-size:12px;margin-top:5px">${accs}</div>` : ''}
+      </div>`;
+    }).join(''));
+  } catch (e) {
+    txt('invAdvice', `<div style="font-size:13px;color:var(--hint);padding:4px 2px">Разбор недоступен · <span onclick="loadInviteAdvice()" style="color:var(--accent);cursor:pointer">повторить</span></div>`);
+  }
+}
+
+// Карточка аккаунта: почему движок даёт ему именно такой лимит и такую паузу.
+// Без неё «аккаунт пропущен» и «лимит 12» выглядели произволом системы.
+async function openInviteAccount(accId) {
+  push('s-invacc');
+  txt('invAccBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/invite/account/' + accId);
+    const w = d.week || {};
+    const kpi = (v, l, c) => `<div class="kpi-card"><div class="kpi-val"${c?` style="color:${c}"`:''}>${v}</div><div class="kpi-lbl">${l}</div></div>`;
+    const age = d.age_days == null ? '—' : num(d.age_days) + ' дн.';
+    const lim = d.recommended_limit == null ? '—' : num(d.recommended_limit);
+    const rem = d.remaining_today == null ? '—' : num(d.remaining_today);
+    const pause = d.recommended_pause_s == null ? '—' : d.recommended_pause_s + ' с';
+    const notes = ((d.limit_factors || {}).notes) || [];
+    txt('invAccBody', `
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">${esc(d.label || ('#'+accId))}</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        ${kpi(lim, 'Лимит/сутки')}
+        ${kpi(rem, 'Осталось', (d.remaining_today === 0 ? '#f59e0b' : ''))}
+        ${kpi(pause, 'Пауза')}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        ${kpi(num(w.ok || 0), 'Успешно / 7дн', '#22c55e')}
+        ${kpi(num(w.floods || 0), 'Флудов / 7дн', (w.floods ? '#ef4444' : ''))}
+        ${kpi(age, 'Возраст')}
+      </div>
+      ${d.limit_basis ? `<div style="background:var(--bg-select);border-radius:8px;padding:9px 10px;margin-bottom:8px">
+        <div style="font-size:12px;color:var(--hint);margin-bottom:3px">Почему такой лимит</div>
+        <div style="font-size:13px;line-height:1.45">${esc(d.limit_basis)}</div>
+      </div>` : ''}
+      ${notes.length ? `<div style="background:var(--bg-select);border-radius:8px;padding:9px 10px;margin-bottom:8px">
+        <div style="font-size:12px;color:var(--hint);margin-bottom:4px">Что учтено в аккаунте</div>
+        ${notes.map(n=>`<div style="font-size:13px;line-height:1.5">• ${esc(n)}</div>`).join('')}
+      </div>` : ''}
+      <div style="font-size:12px;color:var(--hint);line-height:1.5;padding:2px">
+        Лимит и пауза считаются движком по фактам этого аккаунта и не задаются
+        вручную: ручное число одно на всю операцию и не знает, что один аккаунт
+        год работает чисто, а другой словил флуд вчера.
+      </div>
+    `);
+  } catch (e) {
+    txt('invAccBody', empty('⚠️','Не удалось загрузить карточку', (e.message||'').substring(0,80)));
+  }
+}
+
 async function openMassInvite() {
   push('s-massinvite');
   INV_PARSE_RUN = null;
   loadInviteAnalytics();
+  loadInviteAdvice();
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
@@ -12645,10 +12742,16 @@ async function openMassInvite() {
         ? ' <span title="На паузе (риск-пульс) — будет пропущен для защиты" style="color:#ef4444">🛑</span>'
         : a.health_status==='at_risk'
         ? ' <span title="Под риском — будет пропущен для защиты" style="color:#f59e0b">⚠️</span>' : '';
-    wrap.innerHTML = accs.map(a=>`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:13px">
-      <input type="checkbox" value="${a.id}" style="accent-color:var(--btn)">
-      <span>${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span>${riskBadge(a)}</span>
-    </label>`).join('');
+    // «ⓘ» открывает карточку: почему движок даёт этому аккаунту такой лимит и
+    // такую паузу. Кнопка вынесена из <label>, иначе тап по ней переключал бы
+    // чекбокс вместо перехода.
+    wrap.innerHTML = accs.map(a=>`<div style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:13px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0">
+        <input type="checkbox" value="${a.id}" style="accent-color:var(--btn)">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span>${riskBadge(a)}</span>
+      </label>
+      <span onclick="openInviteAccount(${a.id})" title="Лимит, пауза и риск этого аккаунта" style="color:var(--accent);cursor:pointer;padding:0 4px;flex:none">ⓘ</span>
+    </div>`).join('');
     const flagged = accs.filter(a=>a.health_status==='quarantine'||a.health_status==='at_risk').length;
     if (flagged) {
       wrap.insertAdjacentHTML('afterbegin', `<div style="font-size:12px;color:var(--hint);padding:2px 4px 6px;border-bottom:1px solid var(--sep);margin-bottom:4px">🛡 ${flagged} аккаунт(ов) под риск-пульсом — их пропустят для защиты от бана</div>`);

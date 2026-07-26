@@ -5300,6 +5300,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "has_data": bool(ranked),
         })
 
+    async def invite_advice(request: web.Request) -> web.Response:
+        """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
+
+        Аналитика показывает цифры; они не подсказывают, что три конкретных
+        аккаунта пора вывести из ротации, что у половины флота пустой профиль и
+        он поэтому сам себе режет лимит, или что аккаунтов не хватит под
+        заявленную аудиторию. Разбор детерминированный, по БД: каждая
+        рекомендация несёт числа, на которых построена, и её можно перепроверить.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            audience = max(0, int(request.query.get("audience") or 0))
+        except (TypeError, ValueError):
+            audience = 0
+        try:
+            from services import invite_advisor
+            data = await invite_advisor.build_advice(pool, uid, audience_size=audience)
+        except Exception:
+            log.warning("invite_advice failed uid=%s", uid, exc_info=True)
+            return _err("Не удалось собрать разбор", 500)
+        return _json_resp(data)
+
     async def invite_account_card(request: web.Request) -> web.Response:
         """Карточка аккаунта для инвайтинга: лимит, пауза, риск — с объяснением."""
         uid = _get_uid(request)
@@ -5355,6 +5379,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "used_today": limit_info.get("used_today"),
             "remaining_today": limit_info.get("remaining"),
             "limit_basis": limit_info.get("basis"),
+            # Факторы отдаём отдельным полем: пользователь должен видеть не только
+            # ЧТО система решила, но и по каким признакам аккаунта.
+            "limit_factors": limit_info.get("factors") or {},
             "recommended_pause_s": pause_s,
             "risk": risk,
             "week": {k: int(week.get(k) or 0) for k in ("ok", "failed", "floods")},
@@ -11960,6 +11987,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
+    app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/channels/bulk_post", channels_bulk_post)
