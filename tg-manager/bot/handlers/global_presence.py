@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import random
 
 import asyncpg
 from aiogram import F, Router
@@ -20,12 +21,17 @@ from database import db
 from services.geo_data import GEO_PRESETS, parse_custom_geo_list, enrich_geo_list
 from services.presence_planner import (
     render_pattern,
-    build_targets,
     estimate_duration_minutes,
 )
 from services.username_engine import slugify
 from services.logger import log_exc_swallow
-from services import operation_bus, infra_orchestrator, intelligence_engine
+from services import (
+    operation_bus,
+    infra_orchestrator,
+    intelligence_engine,
+    infra_generator,
+    avatar_factory,
+)
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
@@ -162,23 +168,30 @@ async def cb_gp_menu(
         text="🌐 Полный пакет (К+Г+Б)",
         callback_data=GeoPresenceCb(action="asset", item="full_package"),
     )
+    kb.button(
+        text="🏗 Своя структура города",
+        callback_data=GeoPresenceCb(action="asset", item="custom"),
+    )
     if recent_plans:
         kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
-    kb.adjust(2, 1, 1, 1, 1)
+    kb.adjust(2, 1, 1, 1, 1, 1)
     await callback.message.edit_text(
         f"🌍 <b>Гео-сеть: создать</b> (Global Presence)\n"
         f"{'─' * 28}\n"
         f"Бот <b>создаёт НОВУЮ</b> Telegram-инфраструктуру сразу в сотнях городов — "
-        f"каналы, группы и боты с локализованными названиями и username.\n"
+        f"каналы, группы и боты с локализованными названиями, username, "
+        f"описаниями и аватарами.\n"
         f"<i>Если нужно объединить уже существующие активы — это «🔗 Связки».</i>\n"
         f"{plans_hint}\n"
-        f"<b>Шаг 1/8 — Выберите тип актива:</b>\n"
+        f"<b>Шаг 1 — Что создаём в каждом городе:</b>\n"
         f"📡 <b>Каналы</b> — публичные каналы под каждый город\n"
         f"👥 <b>Группы</b> — супергруппы для обсуждений\n"
         f"🤖 <b>Боты</b> — боты через BotFather (нужны аккаунты)\n"
         f"📦 <b>Пакет</b> — канал <i>и</i> группа на каждый город\n"
-        f"🌐 <b>Полный пакет</b> — канал + группа + бот на каждый город",
+        f"🌐 <b>Полный пакет</b> — канал + группа + бот на каждый город\n"
+        f"🏗 <b>Своя структура</b> — выбрать тематики: новости, чат, работа, "
+        f"афиша, барахолка, недвижимость, авто, услуги…",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
@@ -194,13 +207,149 @@ async def cb_gp_asset(
     pool: asyncpg.Pool,
 ) -> None:
     asset = callback_data.item or "channel"
+    if asset == "custom":
+        await safe_answer(callback)
+        await state.update_data(asset_type="custom", roles=list(_DEFAULT_ROLES))
+        await state.set_state(GlobalPresenceFSM.choosing_structure)
+        await _show_structure_step(callback, state)
+        return
     if asset not in ("channel", "group", "bot", "package", "full_package"):
         await callback.answer("Неподдерживаемый тип", show_alert=True)
         return
     await safe_answer(callback)
-    await state.update_data(asset_type=asset)
+    # Готовый тип — это тоже структура, просто предопределённая: так дальше по
+    # флоу работает ОДИН генератор, без второй ветки «старый путь».
+    await state.update_data(asset_type=asset, roles=list(ASSET_ROLE_PRESETS[asset]))
     await state.set_state(GlobalPresenceFSM.choosing_template)
     await _show_template_step(callback, state, pool, asset_type=asset, page=0)
+
+
+# ── Структура города (роли) ─────────────────────────────────────────────────
+
+# Готовые типы разложены в роли: «Пакет» — это новости + чат, «Полный пакет» —
+# ещё и бот. Дальше по флоу различий между «готовым типом» и «своей структурой»
+# нет, поэтому генератор и предпросмотр одни на всех.
+ASSET_ROLE_PRESETS: dict[str, tuple[str, ...]] = {
+    "channel": ("news",),
+    "group": ("chat",),
+    "bot": ("bot",),
+    "package": ("news", "chat"),
+    "full_package": ("news", "chat", "bot"),
+}
+
+_DEFAULT_ROLES: tuple[str, ...] = ("news", "chat")
+
+
+def _selected_roles(sd: dict) -> list[str]:
+    roles = [r for r in (sd.get("roles") or []) if r in infra_generator.ROLE_LIBRARY]
+    return roles or list(_DEFAULT_ROLES)
+
+
+async def _show_structure_step(callback: CallbackQuery, state: FSMContext) -> None:
+    sd = await state.get_data()
+    selected = _selected_roles(sd)
+
+    kb = InlineKeyboardBuilder()
+    for key, spec in infra_generator.ROLE_LIBRARY.items():
+        mark = "✅" if key in selected else "⬜"
+        type_hint = {"channel": "канал", "group": "группа", "bot": "бот"}.get(
+            spec["asset_type"], spec["asset_type"]
+        )
+        kb.button(
+            text=f"{mark} {spec['label']} ({type_hint})",
+            callback_data=GeoPresenceCb(action="role_tog", item=key),
+        )
+    kb.adjust(2)
+
+    presets = InlineKeyboardBuilder()
+    for key, preset in infra_generator.STRUCTURE_PRESETS.items():
+        presets.button(
+            text=preset["label"], callback_data=GeoPresenceCb(action="role_preset", item=key)
+        )
+    presets.adjust(2)
+    kb.attach(presets)
+
+    nav = InlineKeyboardBuilder()
+    nav.button(text="➡️ Далее", callback_data=GeoPresenceCb(action="roles_done"))
+    nav.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="menu"))
+    nav.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    nav.adjust(1, 2)
+    kb.attach(nav)
+
+    lines = []
+    for role in selected:
+        spec = infra_generator.ROLE_LIBRARY[role]
+        example = spec["name_patterns"][0].replace("{{CITY_NAME}}", "Самара")
+        example = example.replace("{{CITY_LOC}}", "Самаре").replace("{{CITY_GEN}}", "Самары")
+        lines.append(f"  • {spec['label']} → <i>{html.escape(example)}</i>")
+    structure_text = "\n".join(lines) if lines else "  <i>ничего не выбрано</i>"
+
+    await _edit(
+        callback,
+        f"🏗 <b>Структура города</b>\n"
+        f"{'─' * 28}\n"
+        f"Отметьте, какие объекты создать <b>в каждом городе</b>. "
+        f"У каждой тематики свои названия, username и описания — "
+        f"их не нужно придумывать.\n\n"
+        f"<b>Выбрано ({len(selected)} на город):</b>\n{structure_text}\n\n"
+        f"<i>Пример показан для Самары.</i>",
+        markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "role_tog"), GlobalPresenceFSM.choosing_structure
+)
+async def cb_gp_role_toggle(
+    callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    role = callback_data.item or ""
+    if role not in infra_generator.ROLE_LIBRARY:
+        return
+    sd = await state.get_data()
+    roles = list(sd.get("roles") or [])
+    if role in roles:
+        roles.remove(role)
+    else:
+        roles.append(role)
+    await state.update_data(roles=roles)
+    await _show_structure_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "role_preset"), GlobalPresenceFSM.choosing_structure
+)
+async def cb_gp_role_preset(
+    callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    preset = infra_generator.STRUCTURE_PRESETS.get(callback_data.item or "")
+    if not preset:
+        return
+    await state.update_data(roles=list(preset["roles"]))
+    await _show_structure_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "roles_done"), GlobalPresenceFSM.choosing_structure
+)
+async def cb_gp_roles_done(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    sd = await state.get_data()
+    if not [r for r in (sd.get("roles") or []) if r in infra_generator.ROLE_LIBRARY]:
+        await callback.answer("⚠️ Выберите хотя бы одну тематику", show_alert=True)
+        return
+    await safe_answer(callback)
+    # Структуру можно править и с экрана предпросмотра — тогда туда и
+    # возвращаемся, а не отправляем пользователя заново по всему мастеру.
+    if sd.get("geo_list") and sd.get("selected_acc_ids"):
+        await state.set_state(GlobalPresenceFSM.previewing)
+        await _show_preview(callback, state, pool)
+        return
+    await state.set_state(GlobalPresenceFSM.choosing_template)
+    await _show_template_step(callback, state, pool, asset_type="channel", page=0)
 
 
 # ── Step 2: Template ────────────────────────────────────────────────────────
@@ -411,10 +560,10 @@ async def _show_name_pattern_step(
     }
     asset_noun = _asset_noun.get(asset_type, "актива")
     examples = [
-        "Crypto News {{CITY}}",
-        "AI Jobs {{CITY}}",
-        "{{CITY}} Business Hub",
-        "Trading {{COUNTRY_CODE}} {{CITY}}",
+        "Новости {{CITY_NAME}}",
+        "Работа в {{CITY_LOC}}",
+        "{{CITY_NAME}} • Афиша",
+        "Crypto {{CITY}} {{COUNTRY_CODE}}",
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
     bot_note = (
@@ -422,21 +571,39 @@ async def _show_name_pattern_step(
         if asset_type in ("bot", "full_package")
         else ""
     )
+    roles = _selected_roles(sd)
+    lib_preview = []
+    for role in roles[:3]:
+        spec = infra_generator.ROLE_LIBRARY[role]
+        n_names = len(spec["name_patterns"])
+        lib_preview.append(f"  • {spec['label']}: {n_names} вариантов названий")
+    lib_text = "\n".join(lib_preview)
+
     kb = InlineKeyboardBuilder()
+    # Библиотека — рекомендуемый путь: пул из 5–10 названий на тематику даёт
+    # разнообразие, которого один введённый паттерн дать не может физически.
+    kb.button(
+        text="📚 Взять из библиотеки (рекомендуется)",
+        callback_data=GeoPresenceCb(action="use_library"),
+    )
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_tpl"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
-    kb.adjust(2)
+    kb.adjust(1, 2)
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"
-        f"<b>Шаг 3/8 — Паттерн названия</b>\n"
-        f"Введите шаблон для названия {asset_noun}.\n\n"
-        f"Доступные плейсхолдеры:\n"
-        f"  <code>{{{{CITY}}}}</code> — город (English)\n"
-        f"  <code>{{{{CITY_NAME}}}}</code> — название на языке страны (Москва, Київ, Wien…)\n"
-        f"  <code>{{{{COUNTRY}}}}</code> — страна\n"
-        f"  <code>{{{{COUNTRY_CODE}}}}</code> — код страны (DE, FR…)\n"
-        f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг города (для username)\n"
+        f"<b>Шаг — Названия</b>\n\n"
+        f"📚 <b>Библиотека тематик</b> подберёт названия сама, разные для "
+        f"каждого города:\n{lib_text}\n"
+        f"<i>Одинаковые названия на сотнях объектов — первое, по чему сеть "
+        f"опознаётся. Библиотека этого избегает.</i>\n\n"
+        f"Либо введите <b>свой шаблон</b> для названия {asset_noun}:\n"
+        f"  <code>{{{{CITY_NAME}}}}</code> — город на родном языке (Москва, Київ)\n"
+        f"  <code>{{{{CITY_GEN}}}}</code> — родительный падеж (Москвы, Самары)\n"
+        f"  <code>{{{{CITY_LOC}}}}</code> — предложный падеж (Москве, Самаре)\n"
+        f"  <code>{{{{CITY}}}}</code> — город латиницей\n"
+        f"  <code>{{{{COUNTRY}}}}</code> / <code>{{{{COUNTRY_CODE}}}}</code> — страна / код\n"
+        f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг (для username)\n"
         f"  <code>{{{{INDEX}}}}</code> — порядковый номер\n\n"
         f"Примеры:\n{ex_text}"
         + bot_note
@@ -646,6 +813,7 @@ async def cb_gp_accept_uname(
     await state.update_data(
         username_pattern=sd.get("username_pattern_pending", ""),
         username_pattern_pending=None,
+        no_username=False,
     )
     await state.set_state(GlobalPresenceFSM.choosing_geo)
     await _show_geo_step(callback, state)
@@ -668,9 +836,243 @@ async def cb_gp_retry_uname(
 @router.callback_query(GeoPresenceCb.filter(F.action == "skip_uname"))
 async def cb_gp_skip_uname(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
-    await state.update_data(username_pattern=None, username_pattern_pending=None)
+    # no_username — ОСОЗНАННЫЙ отказ. Пустой username_pattern сам по себе
+    # означает «возьми шаблоны из библиотеки», поэтому нужен отдельный флаг:
+    # иначе «Без username» молча выдавал бы имена из библиотеки тематики.
+    await state.update_data(
+        username_pattern=None, username_pattern_pending=None, no_username=True
+    )
     await state.set_state(GlobalPresenceFSM.choosing_geo)
     await _show_geo_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "use_library"),
+    GlobalPresenceFSM.entering_name_pattern,
+)
+async def cb_gp_use_library(callback: CallbackQuery, state: FSMContext) -> None:
+    """Пулы названий/username/описаний берутся из библиотеки выбранных тематик.
+
+    Пустые пулы = сигнал генератору «используй библиотечные», поэтому здесь
+    достаточно их обнулить и пропустить оба шага ручного ввода.
+    """
+    await safe_answer(callback)
+    await state.update_data(
+        name_pattern=None,
+        username_pattern=None,
+        name_pattern_pending=None,
+        username_pattern_pending=None,
+        no_username=False,
+        use_library=True,
+    )
+    await state.set_state(GlobalPresenceFSM.choosing_geo)
+    await _show_geo_step(callback, state)
+
+
+# ── Уровни географии ───────────────────────────────────────────────────────
+
+
+def _selected_levels(sd: dict) -> list[str]:
+    levels = [lv for lv in (sd.get("levels") or []) if lv in infra_generator.LEVELS]
+    return levels or [infra_generator.LEVEL_CITY]
+
+
+async def _show_levels_step(callback: CallbackQuery, state: FSMContext) -> None:
+    sd = await state.get_data()
+    selected = _selected_levels(sd)
+    geo_list = sd.get("geo_list") or []
+    roles = _selected_roles(sd)
+
+    # Показываем реальное число объектов на каждом уровне — «сколько это будет»
+    # должно быть видно ДО запуска, а не выясняться в процессе.
+    counts = {}
+    for lv in infra_generator.LEVELS:
+        nodes = infra_generator.expand_geo_levels(geo_list, [lv])
+        counts[lv] = len(nodes) * len(roles)
+
+    kb = InlineKeyboardBuilder()
+    for key, spec in infra_generator.LEVELS.items():
+        mark = "✅" if key in selected else "⬜"
+        kb.button(
+            text=f"{mark} {spec['label']} — {counts.get(key, 0)} шт.",
+            callback_data=GeoPresenceCb(action="lvl_tog", item=key),
+        )
+    kb.button(text="➡️ Далее", callback_data=GeoPresenceCb(action="lvl_done"))
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_geo"))
+    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    kb.adjust(1, 1, 1, 1, 2)
+
+    total = sum(counts.get(lv, 0) for lv in selected)
+    await _edit(
+        callback,
+        f"🗺 <b>Уровни присутствия</b>\n"
+        f"{'─' * 28}\n"
+        f"Объекты можно создать не только по городам, но и «зонтиками» "
+        f"над ними:\n\n"
+        f"🏛 <b>Федеральный</b> — один объект на страну\n"
+        f"🗺 <b>Региональный</b> — один на область/край\n"
+        f"🏙 <b>Городской</b> — на каждый город\n\n"
+        f"<i>Регионы берутся из гео-данных; у городов без указанного региона "
+        f"региональный уровень пропускается.</i>\n\n"
+        f"<b>Итого к созданию: {total}</b>",
+        markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "lvl_tog"), GlobalPresenceFSM.choosing_levels
+)
+async def cb_gp_level_toggle(
+    callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    lv = callback_data.item or ""
+    if lv not in infra_generator.LEVELS:
+        return
+    sd = await state.get_data()
+    levels = list(sd.get("levels") or [infra_generator.LEVEL_CITY])
+    if lv in levels:
+        levels.remove(lv)
+    else:
+        levels.append(lv)
+    await state.update_data(levels=levels)
+    await _show_levels_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "lvl_done"), GlobalPresenceFSM.choosing_levels
+)
+async def cb_gp_levels_done(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    sd = await state.get_data()
+    if not [lv for lv in (sd.get("levels") or []) if lv in infra_generator.LEVELS]:
+        await callback.answer("⚠️ Выберите хотя бы один уровень", show_alert=True)
+        return
+    await safe_answer(callback)
+    await state.set_state(GlobalPresenceFSM.previewing)
+    await _show_preview(callback, state, pool)
+
+
+# ── Стиль аватаров ─────────────────────────────────────────────────────────
+
+
+async def _show_avatar_step(callback: CallbackQuery, state: FSMContext) -> None:
+    sd = await state.get_data()
+    current = sd.get("avatar_style") or avatar_factory.DEFAULT_STYLE
+
+    kb = InlineKeyboardBuilder()
+    for key, spec in avatar_factory.AVATAR_STYLES.items():
+        mark = "✅" if key == current else "⬜"
+        kb.button(
+            text=f"{mark} {spec['label']}",
+            callback_data=GeoPresenceCb(action="av_style", item=key),
+        )
+    kb.adjust(2)
+    nav = InlineKeyboardBuilder()
+    nav.button(text="👁 Показать примеры", callback_data=GeoPresenceCb(action="av_preview"))
+    nav.button(text="🚫 Без аватаров", callback_data=GeoPresenceCb(action="av_style", item="none"))
+    nav.button(text="◀️ К предпросмотру", callback_data=GeoPresenceCb(action="back_to_preview"))
+    nav.adjust(1)
+    kb.attach(nav)
+
+    if current == "none":
+        note = (
+            "⚠️ <b>Без аватаров.</b> Канал без фото Telegram считает заготовкой: "
+            "хуже ранжируется и чаще ловит ограничения."
+        )
+    else:
+        space = avatar_factory.variant_space(current)
+        note = f"Комбинаций в этом стиле: <b>{space:,}</b>".replace(",", " ")
+
+    font_warn = (
+        ""
+        if avatar_factory.fonts_available()
+        else "\n\n⚠️ <i>В системе нет шрифтов — инициалы на аватаре будут нечитаемы. "
+        "Сообщите администратору.</i>"
+    )
+
+    await _edit(
+        callback,
+        f"🖼 <b>Аватары</b>\n"
+        f"{'─' * 28}\n"
+        f"Каждый объект получит <b>свою</b> картинку в едином стиле проекта. "
+        f"Одинаковый аватар на сотнях каналов ищется по хешу изображения и "
+        f"выдаёт всю сеть разом.\n\n"
+        f"{note}{font_warn}",
+        markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "av_style"), GlobalPresenceFSM.choosing_avatar
+)
+async def cb_gp_avatar_style(
+    callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    style = callback_data.item or avatar_factory.DEFAULT_STYLE
+    if style != "none" and style not in avatar_factory.AVATAR_STYLES:
+        style = avatar_factory.DEFAULT_STYLE
+    await state.update_data(avatar_style=style)
+    await _show_avatar_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "av_preview"), GlobalPresenceFSM.choosing_avatar
+)
+async def cb_gp_avatar_preview(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Контактный лист аватаров: пользователь видит разнообразие до запуска."""
+    await safe_answer(callback)
+    sd = await state.get_data()
+    style = sd.get("avatar_style") or avatar_factory.DEFAULT_STYLE
+    if style == "none":
+        await callback.answer("Аватары отключены", show_alert=True)
+        return
+
+    try:
+        targets = await _generate_targets(sd, pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_avatar_preview: сборка целей не удалась")
+        targets = []
+    if not targets:
+        await callback.answer(
+            "Сначала выберите географию — примеры строятся по реальным городам",
+            show_alert=True,
+        )
+        return
+
+    sample = targets[:8]
+    try:
+        sheet = await asyncio.to_thread(
+            avatar_factory.generate_preview_sheet,
+            [t["avatar_seed"] for t in sample],
+            [t["planned_name"] for t in sample],
+            style=style,
+            cell=180,
+        )
+    except Exception as exc:
+        log.warning("global_presence: не удалось построить лист аватаров: %s", exc)
+        await callback.answer("Не удалось построить примеры", show_alert=True)
+        return
+
+    from aiogram.types import BufferedInputFile
+
+    caption_names = "\n".join(f"  • {html.escape(t['planned_name'])}" for t in sample[:8])
+    try:
+        await callback.message.answer_photo(
+            BufferedInputFile(sheet, filename="avatars.png"),
+            caption=f"🖼 <b>Примеры аватаров</b> (стиль: "
+            f"{avatar_factory.AVATAR_STYLES[style]['label']})\n\n{caption_names}\n\n"
+            f"<i>Именно эти картинки и встанут на объекты — генерация "
+            f"детерминирована.</i>",
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        log.warning("global_presence: отправка листа аватаров не удалась: %s", exc)
+        await callback.answer("Не удалось отправить примеры", show_alert=True)
 
 
 # ── Step 5: Geo Selection ──────────────────────────────────────────────────
@@ -1121,138 +1523,234 @@ async def cb_gp_acc_done(
 # ── Step 7: Preview ────────────────────────────────────────────────────────
 
 
+def _ensure_plan_seed(sd: dict) -> int:
+    """Зерно плана. Оно определяет ВСЁ содержимое (имена, описания, аватары),
+    поэтому фиксируется один раз и переживает возвраты по мастеру — иначе
+    каждое открытие предпросмотра показывало бы новый набор объектов."""
+    seed = sd.get("plan_seed")
+    if not seed:
+        seed = random.randrange(1, 2**31)
+    return int(seed)
+
+
+async def _generate_targets(sd: dict, pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+    """Собрать цели плана генератором. Пустой список — гео ещё не выбрано.
+
+    Занятые username подтягиваются из БД, чтобы аллокатор не выдал имя, уже
+    стоящее на канале владельца: такую коллизию видно заранее, и падать из-за
+    неё в бою незачем.
+    """
+    geo_list = enrich_geo_list(sd.get("geo_list") or [])
+    if not geo_list:
+        return []
+
+    name_pattern = (sd.get("name_pattern") or "").strip()
+    username_pattern = (sd.get("username_pattern") or "").strip()
+    avatar_style = sd.get("avatar_style") or avatar_factory.DEFAULT_STYLE
+
+    taken = await db.get_taken_usernames(pool, owner_id)
+
+    return infra_generator.build_project_targets(
+        geo_list,
+        roles=_selected_roles(sd),
+        levels=_selected_levels(sd),
+        name_pool=[name_pattern] if name_pattern else None,
+        username_pool=[username_pattern] if username_pattern else None,
+        account_ids=sd.get("selected_acc_ids") or [],
+        plan_seed=_ensure_plan_seed(sd),
+        taken_usernames=taken,
+        avatar_style=None if avatar_style == "none" else avatar_style,
+        assign_usernames=not sd.get("no_username"),
+    )
+
+
+def _structure_line(sd: dict) -> str:
+    roles = _selected_roles(sd)
+    return ", ".join(
+        infra_generator.ROLE_LIBRARY[r]["label"] for r in roles
+    ) or "—"
+
+
+def _levels_line(sd: dict) -> str:
+    return ", ".join(
+        infra_generator.LEVELS[lv]["label"] for lv in _selected_levels(sd)
+    )
+
+
 async def _show_preview(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     sd = await state.get_data()
-    asset_type = sd.get("asset_type", "channel")
-    name_pattern = sd.get("name_pattern", "")
-    username_pattern = sd.get("username_pattern")
+    seed = _ensure_plan_seed(sd)
+    if sd.get("plan_seed") != seed:
+        await state.update_data(plan_seed=seed)
+        sd["plan_seed"] = seed
+
     geo_preset = sd.get("geo_preset", "")
-    geo_list: list[dict] = sd.get("geo_list") or []
-    # Enrich with city_native for proper localization
-    geo_list = enrich_geo_list(geo_list)
     selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
     template_name = sd.get("template_name") or "Нет"
+    avatar_style = sd.get("avatar_style") or avatar_factory.DEFAULT_STYLE
 
-    # Load account phones for display
+    try:
+        targets = await _generate_targets(sd, pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "_show_preview: сборка целей не удалась")
+        targets = []
+
+    if not targets:
+        kb_empty = InlineKeyboardBuilder()
+        kb_empty.button(text="✏️ Выбрать гео", callback_data=GeoPresenceCb(action="back_to_geo"))
+        kb_empty.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+        kb_empty.adjust(1)
+        await _edit(
+            callback,
+            "🌍 <b>Предпросмотр</b>\n\n"
+            "⚠️ Не удалось собрать ни одного объекта.\n"
+            "Обычно причина — не выбрана география или в списке нет городов.",
+            markup=kb_empty.as_markup(),
+        )
+        return
+
+    summary = infra_generator.summarize_targets(targets)
+
+    # Аккаунты — для строки «кем создаём».
+    acc_phones: list[str] = []
     if selected_acc_ids:
         try:
             acc_rows = await pool.fetch(
                 "SELECT phone FROM tg_accounts WHERE id = ANY($1)", selected_acc_ids
             )
+            acc_phones = [r["phone"] for r in acc_rows]
         except Exception:
-            log_exc_swallow(log, "_show_preview: pool.fetch accounts failed")
-            acc_rows = []
-        acc_phones = [r["phone"] for r in acc_rows]
-    else:
-        acc_phones = []
+            log_exc_swallow(log, "_show_preview: загрузка аккаунтов не удалась")
 
     geo_label = GEO_PRESETS.get(geo_preset, {}).get(
         "label", geo_preset or "Кастомный список"
     )
-    n_cities = len(geo_list)
-    n_countries = len(
-        {g.get("country_code") for g in geo_list if g.get("country_code")}
-    )
-    estimated = estimate_duration_minutes(n_cities)
-
-    # Sample preview (first 3 cities)
-    sample = geo_list[:3]
-    preview_lines = []
-    for i, geo in enumerate(sample):
-        name = render_pattern(name_pattern, {**geo, "index": i + 1})
-        if username_pattern:
-            uname = (
-                "@"
-                + slugify(render_pattern(username_pattern, {**geo, "index": i + 1}))[
-                    :32
-                ]
-            )
-        else:
-            uname = "(без username)"
-        preview_lines.append(f"  📡 {name} → <code>{uname}</code>")
-    preview_text = "\n".join(preview_lines)
-    if n_cities > 3:
-        preview_text += f"\n  … и ещё {n_cities - 3} городов"
-
-    accs_text = ", ".join(acc_phones[:5])
-    if len(acc_phones) > 5:
-        accs_text += f" (+{len(acc_phones) - 5})"
-
-    asset_emoji = {
-        "channel": "📡",
-        "group": "👥",
-        "bot": "🤖",
-        "package": "📦",
-        "full_package": "📦",
-    }.get(asset_type, "📦")
-    _asset_label = {
-        "channel": "Каналы",
-        "group": "Группы",
-        "bot": "Боты (BotFather)",
-        "package": "Пакет (Канал+Группа)",
-        "full_package": "Полный пакет (Канал+Группа+Бот)",
-    }
-    _asset_count_label = {
-        "channel": "каналов",
-        "group": "групп",
-        "bot": "ботов",
-        "package": "пакетов (×2 актива)",
-        "full_package": "пакетов (×3 актива)",
-    }
-    asset_type_label = _asset_label.get(asset_type, asset_type.capitalize())
-    count_label = _asset_count_label.get(asset_type, "активов")
-    hours = estimated // 60
-    mins = estimated % 60
+    estimated = estimate_duration_minutes(summary["total"])
+    hours, mins = estimated // 60, estimated % 60
     duration_str = f"{hours}ч {mins}м" if hours else f"{mins}м"
-    bot_note = (
-        "\n💡 <i>Username ботов должен заканчиваться на _bot</i>"
-        if asset_type in ("bot", "full_package")
-        else ""
+
+    # Разбивка по типам активов — «что именно» создастся, а не общее число.
+    asset_names = {"channel": "каналов", "group": "групп", "bot": "ботов"}
+    breakdown = "\n".join(
+        f"  • {asset_names.get(k, k)}: <b>{v}</b>"
+        for k, v in sorted(summary["by_asset"].items(), key=lambda kv: -kv[1])
     )
-    pkg_note = (
-        "\n📦 <i>Пакет создаст канал И группу для каждого города</i>"
-        if asset_type == "package"
-        else ""
+
+    # Примеры — реальные цели плана, а не выдуманные образцы: те же имена
+    # уйдут в исполнение, потому что генерация детерминирована по seed.
+    sample_lines = []
+    for t in targets[:4]:
+        uname = f"@{t['planned_username']}" if t["planned_username"] else "(без username)"
+        role_label = infra_generator.ROLE_LIBRARY.get(t["role"], {}).get("label", t["role"])
+        sample_lines.append(
+            f"  {role_label}\n"
+            f"  ├ <b>{html.escape(t['planned_name'])}</b>\n"
+            f"  ├ <code>{html.escape(uname)}</code>\n"
+            f"  └ <i>{html.escape((t['planned_about'] or '—')[:70])}</i>"
+        )
+    sample_text = "\n\n".join(sample_lines)
+    if summary["total"] > 4:
+        sample_text += f"\n\n  <i>… и ещё {summary['total'] - 4} объектов</i>"
+
+    accs_text = ", ".join(acc_phones[:4]) or "—"
+    if len(acc_phones) > 4:
+        accs_text += f" (+{len(acc_phones) - 4})"
+
+    avatar_label = (
+        "🚫 без аватаров"
+        if avatar_style == "none"
+        else avatar_factory.AVATAR_STYLES.get(avatar_style, {}).get("label", avatar_style)
     )
-    fullpkg_note = (
-        "\n📦 <i>Полный пакет создаст канал, группу И бота для каждого города</i>"
-        if asset_type == "full_package"
-        else ""
-    )
+
+    # Честное предупреждение о целях без username: они станут приватными.
+    uname_warn = ""
+    if summary["missing_username"]:
+        uname_warn = (
+            f"\n⚠️ Без username останется {summary['missing_username']} объектов "
+            f"(будут приватными)."
+        )
 
     text = (
-        f"🌍 <b>Global Presence Plan — Предпросмотр</b>\n"
+        f"🌍 <b>План проекта — предпросмотр</b>\n"
         f"{'─' * 28}\n"
-        f"{asset_emoji} Тип: {asset_type_label}\n"
-        f"📍 Гео: {geo_label}\n"
-        f"🗺️ Охват: {n_countries} стран / {n_cities} городов\n"
-        f"📋 Шаблон: {template_name}\n"
-        f"🔤 Название: <code>{name_pattern}</code>\n"
-        f"🔗 Username: <code>{username_pattern or '—'}</code>\n"
-        f"👤 Аккаунты: {accs_text} (round-robin)\n"
-        f"⏱️ Длительность: ~{duration_str} (safe mode)\n\n"
-        f"Примеры:\n{preview_text}\n\n"
-        f"⚠️ Это создаст <b>{n_cities} {count_label}</b> в Telegram."
-        + bot_note
-        + pkg_note
-        + fullpkg_note
+        f"📍 Гео: {html.escape(geo_label)} — {summary['cities']} городов / "
+        f"{summary['countries']} стран\n"
+        f"🗺 Уровни: {_levels_line(sd)}\n"
+        f"🏗 Структура: {html.escape(_structure_line(sd))}\n"
+        f"📋 Шаблон оформления: {html.escape(template_name)}\n"
+        f"🖼 Аватары: {avatar_label}\n"
+        f"👤 Аккаунты: {html.escape(accs_text)} (round-robin)\n"
+        f"⏱️ Длительность: ~{duration_str} (безопасный режим)\n"
+        f"{'─' * 28}\n"
+        f"<b>Будет создано: {summary['total']}</b>\n{breakdown}{uname_warn}\n"
+        f"{'─' * 28}\n"
+        f"<b>Примеры (реальные объекты плана):</b>\n\n{sample_text}"
     )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Подтвердить", callback_data=GeoPresenceCb(action="confirm"))
-    kb.button(text="✏️ Изменить гео", callback_data=GeoPresenceCb(action="back_to_geo"))
-    kb.button(
-        text="📋 Изменить шаблон", callback_data=GeoPresenceCb(action="back_to_tpl")
-    )
-    kb.button(
-        text="👤 Изменить аккаунты", callback_data=GeoPresenceCb(action="back_to_acc")
-    )
-    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
+    edit_row = InlineKeyboardBuilder()
+    edit_row.button(text="🏗 Структура", callback_data=GeoPresenceCb(action="edit_roles"))
+    edit_row.button(text="🗺 Уровни", callback_data=GeoPresenceCb(action="edit_levels"))
+    edit_row.button(text="🖼 Аватары", callback_data=GeoPresenceCb(action="edit_avatar"))
+    edit_row.button(text="🎲 Другой набор", callback_data=GeoPresenceCb(action="reroll"))
+    edit_row.adjust(2, 2)
+    kb.attach(edit_row)
+
+    nav_row = InlineKeyboardBuilder()
+    nav_row.button(text="✏️ Гео", callback_data=GeoPresenceCb(action="back_to_geo"))
+    nav_row.button(text="📋 Шаблон", callback_data=GeoPresenceCb(action="back_to_tpl"))
+    nav_row.button(text="👤 Аккаунты", callback_data=GeoPresenceCb(action="back_to_acc"))
+    nav_row.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    nav_row.adjust(3, 1)
+    kb.attach(nav_row)
+
     await _edit(callback, text, markup=kb.as_markup())
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "reroll"), GlobalPresenceFSM.previewing
+)
+async def cb_gp_reroll(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Пересобрать план с новым зерном — «не нравятся названия, дай другие»."""
+    await safe_answer(callback)
+    await state.update_data(plan_seed=random.randrange(1, 2**31))
+    await _show_preview(callback, state, pool)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "edit_roles"), GlobalPresenceFSM.previewing
+)
+async def cb_gp_edit_roles(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(GlobalPresenceFSM.choosing_structure)
+    await _show_structure_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "edit_levels"), GlobalPresenceFSM.previewing
+)
+async def cb_gp_edit_levels(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(GlobalPresenceFSM.choosing_levels)
+    await _show_levels_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "edit_avatar"), GlobalPresenceFSM.previewing
+)
+async def cb_gp_edit_avatar(callback: CallbackQuery, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.set_state(GlobalPresenceFSM.choosing_avatar)
+    await _show_avatar_step(callback, state)
+
+
 
 
 @router.callback_query(
@@ -1282,12 +1780,7 @@ async def _cb_gp_confirm_preview_impl(
     pool: asyncpg.Pool,
 ) -> None:
     sd = await state.get_data()
-    asset_type = sd.get("asset_type", "channel")
-    name_pattern = sd.get("name_pattern", "")
-    username_pattern = sd.get("username_pattern")
-    geo_list: list[dict] = sd.get("geo_list") or []
-    # Enrich with city_native for proper localization
-    geo_list = enrich_geo_list(geo_list)
+    geo_list: list[dict] = enrich_geo_list(sd.get("geo_list") or [])
     selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
     template_name = sd.get("template_name") or "Нет"
     geo_preset = sd.get("geo_preset", "")
@@ -1298,33 +1791,39 @@ async def _cb_gp_confirm_preview_impl(
         "label", geo_preset or "Кастомный список"
     )
 
-    _asset_label = {
-        "channel": "Каналы",
-        "group": "Группы",
-        "bot": "Боты (BotFather)",
-        "package": "Пакет (Канал+Группа)",
-        "full_package": "Полный пакет (Канал+Группа+Бот)",
-    }
-    _asset_count_label = {
-        "channel": "каналов",
-        "group": "групп",
-        "bot": "ботов",
-        "package": "пакетов (×2 актива)",
-        "full_package": "пакетов (×3 актива)",
-    }
-    asset_type_label = _asset_label.get(asset_type, asset_type)
-    count_label = _asset_count_label.get(asset_type, "активов")
+    # Число объектов считается по РЕАЛЬНЫМ целям: города × тематики × уровни.
+    # Раньше здесь стояло число городов — на структуре из 4 тематик экран
+    # обещал вчетверо меньше объектов, чем создавалось.
+    try:
+        targets = await _generate_targets(sd, pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "_cb_gp_confirm_preview_impl: сборка целей не удалась")
+        targets = []
+    if not targets:
+        await _edit(
+            callback,
+            "❌ <b>Не удалось собрать объекты плана</b>\n\n"
+            "Проверьте географию и структуру.",
+        )
+        return
 
-    estimated = estimate_duration_minutes(n_cities)
+    summary = infra_generator.summarize_targets(targets)
+    n_targets = summary["total"]
+    asset_names = {"channel": "каналов", "group": "групп", "bot": "ботов"}
+    breakdown = ", ".join(
+        f"{v} {asset_names.get(k, k)}" for k, v in sorted(summary["by_asset"].items())
+    )
+
+    estimated = estimate_duration_minutes(n_targets)
     hours = estimated // 60
     mins = estimated % 60
     duration_str = f"~{hours}ч {mins}м" if hours else f"~{mins}м"
 
     warning = ""
-    if n_cities > 20:
+    if n_targets > 20:
         warning = (
-            f"\n\n⚠️ <b>Внимание:</b> Вы создаёте {n_cities} {count_label}. "
-            f"Это займёт значительное время. Убедитесь что у вас достаточно аккаунтов ({n_accs})."
+            f"\n\n⚠️ <b>Внимание:</b> будет создано {n_targets} объектов. "
+            f"Это займёт значительное время. Убедитесь, что аккаунтов достаточно ({n_accs})."
         )
 
     # Intelligence block — fetch and decision check are separated so that
@@ -1337,7 +1836,7 @@ async def _cb_gp_confirm_preview_impl(
                 pool,
                 callback.from_user.id,
                 "global_presence",
-                n_cities,
+                n_targets,
                 account_ids=selected_acc_ids if selected_acc_ids else None,
             ),
             timeout=30.0,
@@ -1380,22 +1879,27 @@ async def _cb_gp_confirm_preview_impl(
 
     # Escape user-provided strings to prevent HTML parse errors
     safe_geo_label = html.escape(geo_label)
-    safe_name_pattern = html.escape(name_pattern)
-    safe_username = html.escape(username_pattern or "—")
     safe_template = html.escape(template_name)
+    safe_structure = html.escape(_structure_line(sd))
+    pattern_line = (sd.get("name_pattern") or "").strip()
+    pattern_display = (
+        f"<code>{html.escape(pattern_line)}</code>"
+        if pattern_line
+        else "библиотека тематик (разные названия)"
+    )
 
     await callback.message.edit_text(
         f"🌍 <b>Финальное подтверждение</b>\n"
         f"{'─' * 28}\n\n"
         f"<b>Что будет создано:</b>\n"
-        f"📦 Тип: {asset_type_label}\n"
+        f"🏗 Структура: {safe_structure}\n"
+        f"🗺 Уровни: {_levels_line(sd)}\n"
         f"📍 Гео: {safe_geo_label} ({n_cities} городов)\n"
-        f"🔤 Паттерн: <code>{safe_name_pattern}</code>\n"
-        f"🔗 Username: <code>{safe_username}</code>\n"
+        f"🔤 Названия: {pattern_display}\n"
         f"📋 Шаблон: {safe_template}\n"
         f"👤 Аккаунтов: {n_accs} (round-robin)\n"
-        f"⏱️ ETA: {duration_str} (safe mode)\n\n"
-        f"🔢 Итого: <b>{n_cities} {count_label}</b> будет создано.\n"
+        f"⏱️ ETA: {duration_str} (безопасный режим)\n\n"
+        f"🔢 Итого: <b>{n_targets} объектов</b> — {breakdown}.\n"
         f"Операция запустится через очередь — вы получите уведомление о завершении."
         f"{warning}"
         f"{intel_section}\n\n"
@@ -1406,6 +1910,58 @@ async def _cb_gp_confirm_preview_impl(
 
 
 # ── Step 8: Launch ─────────────────────────────────────────────────────────
+
+
+async def _submit_plan(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    sd: dict,
+    targets: list[dict],
+    op_type: str,
+    plan_asset_type: str,
+) -> tuple[int | None, int | None]:
+    """Создать план, записать цели, поставить операцию. → (plan_id, op_id).
+
+    op_id = None означает: план в БД есть, но в очередь он не встал. Вызывающий
+    обязан это показать — «тихий успех» здесь стоил бы пользователю ожидания
+    операции, которой не существует.
+    """
+    plan_id = await db.create_global_presence_plan(
+        pool,
+        owner_id=owner_id,
+        asset_type=plan_asset_type,
+        # name_pattern — NOT NULL в схеме; при работе от библиотеки конкретного
+        # паттерна нет, поэтому пишем честную пометку, а не пустую строку.
+        name_pattern=(sd.get("name_pattern") or "").strip() or "[библиотека тематик]",
+        username_pattern=(sd.get("username_pattern") or "").strip() or None,
+        geo_selection={
+            "preset": sd.get("geo_preset", ""),
+            "count": len(sd.get("geo_list") or []),
+        },
+        account_selection={"account_ids": sd.get("selected_acc_ids") or []},
+        template_id=sd.get("template_id"),
+        roles=_selected_roles(sd),
+        levels=_selected_levels(sd),
+        name_pool=[sd["name_pattern"]] if (sd.get("name_pattern") or "").strip() else None,
+        username_pool=[sd["username_pattern"]]
+        if (sd.get("username_pattern") or "").strip()
+        else None,
+        avatar_style=(sd.get("avatar_style") or avatar_factory.DEFAULT_STYLE),
+        plan_seed=sd.get("plan_seed"),
+    )
+    await db.create_global_presence_targets(pool, plan_id, targets)
+
+    try:
+        op_id = await operation_bus.submit(
+            pool, owner_id, op_type, {"plan_id": plan_id}, total_items=len(targets)
+        )
+    except Exception as exc:
+        log.error("global_presence: постановка операции %s не удалась: %s", op_type, exc)
+        return plan_id, None
+
+    if op_id:
+        await db.link_plan_to_operation(pool, plan_id, op_id)
+    return plan_id, op_id
 
 
 @router.callback_query(
@@ -1427,260 +1983,137 @@ async def cb_gp_launch(
     await callback.answer(warn or "⏳ Создаём план…", show_alert=bool(warn))
 
     sd = await state.get_data()
-
+    owner_id = callback.from_user.id
     asset_type = sd.get("asset_type", "channel")
-    name_pattern = sd.get("name_pattern", "Channel {{CITY}}")
-    username_pattern = sd.get("username_pattern")
-    geo_list: list[dict] = sd.get("geo_list") or []
-    # Enrich with city_native for proper localization
-    geo_list = enrich_geo_list(geo_list)
-    selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
-    template_id = sd.get("template_id")
-    geo_preset = sd.get("geo_preset", "")
 
-    if not geo_list or not selected_acc_ids:
+    if not (sd.get("geo_list") and sd.get("selected_acc_ids")):
         log.warning(
-            "global_presence launch rejected: missing data user_id=%s geo_count=%d selected_accounts=%d",
-            callback.from_user.id,
-            len(geo_list),
-            len(selected_acc_ids),
+            "global_presence launch rejected: missing data user_id=%s geo=%d accounts=%d",
+            owner_id,
+            len(sd.get("geo_list") or []),
+            len(sd.get("selected_acc_ids") or []),
         )
         await _edit(callback, "❌ Недостаточно данных для запуска. Начните сначала.")
         await state.clear()
         return
 
-    # Determine op_type
-    if asset_type == "bot":
-        _op_type = "global_presence_bot"
-        _effective_asset = "bot"
-    elif asset_type == "package":
-        _op_type = "global_presence_package"
-        _effective_asset = "package"
-    elif asset_type == "full_package":
-        _op_type = "global_presence_full_package"
-        _effective_asset = "full_package"
-    elif asset_type == "group":
-        _op_type = "global_presence_group"
-        _effective_asset = "group"
-    else:
-        _op_type = "global_presence_channel"
-        _effective_asset = asset_type
-
-    # Build targets (for package/full_package: channel targets first)
-    targets = build_targets(
-        geo_list,
-        "channel" if asset_type in ("package", "full_package") else _effective_asset,
-        name_pattern,
-        username_pattern,
-        selected_acc_ids,
-    )
-
-    # Create plan in DB
-    plan_id = await db.create_global_presence_plan(
-        pool,
-        owner_id=callback.from_user.id,
-        asset_type=_effective_asset,
-        name_pattern=name_pattern,
-        username_pattern=username_pattern,
-        geo_selection={"preset": geo_preset, "count": len(geo_list)},
-        account_selection={"account_ids": selected_acc_ids},
-        template_id=template_id,
-    )
-
-    # Insert targets
-    await db.create_global_presence_targets(pool, plan_id, targets)
-
-    # Queue the primary operation
     try:
-        op_id = await operation_bus.submit(
+        targets = await _generate_targets(sd, pool, owner_id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_launch: сборка целей не удалась")
+        targets = []
+
+    if not targets:
+        await _edit(
+            callback,
+            "❌ <b>Не удалось собрать объекты плана</b>\n\n"
+            "Проверьте географию и структуру и попробуйте снова.",
+        )
+        return
+
+    # Боты создаются через BotFather отдельным исполнителем, каналы и группы —
+    # общим. Поэтому план делится по этой границе, а не по каждому типу актива:
+    # каналы и чаты одной структуры остаются в одной операции.
+    bot_targets = [t for t in targets if t.get("asset_type") == "bot"]
+    main_targets = [t for t in targets if t.get("asset_type") != "bot"]
+
+    launched: list[tuple[str, int, int | None]] = []  # (подпись, plan_id, op_id)
+    primary_plan_id: int | None = None
+
+    if main_targets:
+        plan_id, op_id = await _submit_plan(
             pool,
-            callback.from_user.id,
-            _op_type,
-            {"plan_id": plan_id},
-            total_items=len(targets),
+            owner_id,
+            sd,
+            main_targets,
+            "global_presence_channel",
+            "channel",
         )
-    except Exception as _sub_err:
-        log.error("global_presence submit primary op failed: %s", _sub_err)
-        await callback.message.edit_text(
-            "❌ <b>Не удалось поставить операцию в очередь</b>\n\nПопробуйте ещё раз.",
-            parse_mode="HTML",
+        primary_plan_id = plan_id
+        launched.append(("📡 Каналы и группы", plan_id, op_id))
+
+    if bot_targets:
+        plan_id_b, op_id_b = await _submit_plan(
+            pool, owner_id, sd, bot_targets, "global_presence_bot", "bot"
+        )
+        if primary_plan_id is None:
+            primary_plan_id = plan_id_b
+        launched.append(("🤖 Боты", plan_id_b, op_id_b))
+
+    if not launched or primary_plan_id is None:
+        await _edit(
+            callback,
+            "❌ <b>Не удалось создать план</b>\n\nПовторите попытку.",
         )
         return
 
-    if not op_id:
-        await callback.message.edit_text(
-            "❌ <b>Не удалось создать операцию</b>\n\nПовторите попытку.",
-            parse_mode="HTML",
-        )
-        return
-
-    # Link operation to plan
-    await db.link_plan_to_operation(pool, plan_id, op_id)
     log.info(
-        "global_presence launch queued: user_id=%s asset_type=%s plan_id=%s op_id=%s targets=%d accounts=%d",
-        callback.from_user.id,
+        "global_presence launch: user=%s asset_type=%s targets=%d (bots=%d) plans=%s",
+        owner_id,
         asset_type,
-        plan_id,
-        op_id,
         len(targets),
-        len(selected_acc_ids),
+        len(bot_targets),
+        [(p, o) for _, p, o in launched],
     )
 
-    # Auto-create ecosystem for this GP plan
-    _eco_id: int | None = None
+    # Экосистема под проект — чтобы созданные активы сразу были сгруппированы,
+    # а не растворились в общем списке каналов.
     try:
         from services import ecosystem_brain as _eb
 
-        _asset_labels = {
-            "channel": "Каналы",
-            "group": "Группы",
-            "bot": "Боты",
-            "package": "Пакет",
-            "full_package": "Полный пакет",
-        }
-        _asset_label = _asset_labels.get(asset_type, "Активы")
         _geo_label = (
-            geo_preset.replace("_", " ").title()
-            if geo_preset
-            else f"{len(geo_list)} регионов"
+            GEO_PRESETS.get(sd.get("geo_preset", ""), {}).get("label")
+            or f"{len(sd.get('geo_list') or [])} городов"
         )
-        _eco_name = f"GP: {_asset_label} — {_geo_label}"
         _eco_id = await _eb.create_ecosystem(
             pool,
-            callback.from_user.id,
-            _eco_name,
+            owner_id,
+            f"GP: {_structure_line(sd)} — {_geo_label}"[:120],
             ecosystem_type="global_presence",
-            region=geo_preset or None,
+            region=sd.get("geo_preset") or None,
         )
-        await pool.execute(
-            "UPDATE global_presence_plans SET ecosystem_id=$1 WHERE id=$2",
-            _eco_id,
-            plan_id,
-        )
+        for _, _pid, _ in launched:
+            await pool.execute(
+                "UPDATE global_presence_plans SET ecosystem_id=$1 WHERE id=$2",
+                _eco_id,
+                _pid,
+            )
         await _eb.record_event(
             pool,
             _eco_id,
-            callback.from_user.id,
+            owner_id,
             "plan_started",
-            f"GP план #{plan_id} запущен",
+            f"GP план #{primary_plan_id} запущен ({len(targets)} объектов)",
             severity="info",
-            details={"plan_id": plan_id, "asset_type": asset_type},
-        )
-        log.info(
-            "global_presence: created ecosystem eco_id=%d for plan_id=%d",
-            _eco_id,
-            plan_id,
+            details={"plan_id": primary_plan_id, "asset_type": asset_type},
         )
     except Exception as _eco_err:
-        log.debug("global_presence: ecosystem auto-create failed: %s", _eco_err)
-
-    # For package/full_package: also queue group (and bot for full) creation
-    op_id2, op_id3 = None, None
-    if asset_type in ("package", "full_package"):
-        grp_targets = build_targets(
-            geo_list, "group", name_pattern, username_pattern, selected_acc_ids
-        )
-        plan_id2 = await db.create_global_presence_plan(
-            pool,
-            owner_id=callback.from_user.id,
-            asset_type="group",
-            name_pattern=name_pattern,
-            username_pattern=username_pattern,
-            geo_selection={"preset": geo_preset, "count": len(geo_list)},
-            account_selection={"account_ids": selected_acc_ids},
-            template_id=template_id,
-        )
-        await db.create_global_presence_targets(pool, plan_id2, grp_targets)
-        try:
-            op_id2 = await operation_bus.submit(
-                pool,
-                callback.from_user.id,
-                "global_presence_group",
-                {"plan_id": plan_id2},
-                total_items=len(grp_targets),
-            )
-        except Exception as _sub_err2:
-            log.error("global_presence submit group op failed: %s", _sub_err2)
-            op_id2 = None
-        if op_id2:
-            await db.link_plan_to_operation(pool, plan_id2, op_id2)
-        log.info(
-            "global_presence package group queued: user_id=%s plan_id=%s op_id=%s targets=%d",
-            callback.from_user.id,
-            plan_id2,
-            op_id2,
-            len(grp_targets),
-        )
-
-    # For full_package: also queue bot creation
-    if asset_type == "full_package":
-        bot_targets = build_targets(
-            geo_list, "bot", name_pattern, username_pattern, selected_acc_ids
-        )
-        plan_id3 = await db.create_global_presence_plan(
-            pool,
-            owner_id=callback.from_user.id,
-            asset_type="bot",
-            name_pattern=name_pattern,
-            username_pattern=username_pattern,
-            geo_selection={"preset": geo_preset, "count": len(geo_list)},
-            account_selection={"account_ids": selected_acc_ids},
-            template_id=template_id,
-        )
-        await db.create_global_presence_targets(pool, plan_id3, bot_targets)
-        try:
-            op_id3 = await operation_bus.submit(
-                pool,
-                callback.from_user.id,
-                "global_presence_bot",
-                {"plan_id": plan_id3},
-                total_items=len(bot_targets),
-            )
-        except Exception as _sub_err3:
-            log.error("global_presence submit bot op failed: %s", _sub_err3)
-            op_id3 = None
-        if op_id3:
-            await db.link_plan_to_operation(pool, plan_id3, op_id3)
-        log.info(
-            "global_presence full_package bot queued: user_id=%s plan_id=%s op_id=%s targets=%d",
-            callback.from_user.id,
-            plan_id3,
-            op_id3,
-            len(bot_targets),
-        )
+        log.debug("global_presence: авто-создание экосистемы не удалось: %s", _eco_err)
 
     await state.clear()
 
-    # Build result message
-    _type_emoji = {
-        "channel": "📡",
-        "group": "👥",
-        "bot": "🤖",
-        "package": "📦",
-        "full_package": "📦",
-    }
-    _type_label = {
-        "channel": "каналов",
-        "group": "групп",
-        "bot": "ботов",
-        "package": "пакетов",
-        "full_package": "пакетов",
-    }
-    emoji = _type_emoji.get(asset_type, "📦")
-    label = _type_label.get(asset_type, "активов")
-    pkg_lines = []
-    if op_id2:
-        pkg_lines.append(f"👥 + Группы в очереди: #{op_id2}")
-    if op_id3:
-        pkg_lines.append(f"🤖 + Боты в очереди: #{op_id3}")
-    pkg_line = "\n".join(pkg_lines) if pkg_lines else ""
-    if pkg_line:
-        pkg_line = "\n" + pkg_line
+    summary = infra_generator.summarize_targets(targets)
+    asset_names = {"channel": "каналов", "group": "групп", "bot": "ботов"}
+    breakdown = "\n".join(
+        f"  • {asset_names.get(k, k)}: <b>{v}</b>" for k, v in sorted(summary["by_asset"].items())
+    )
+    queue_lines = []
+    for label, plan_id_x, op_id_x in launched:
+        if op_id_x:
+            queue_lines.append(f"{label}: план #{plan_id_x}, операция #{op_id_x}")
+        else:
+            # Честно: план сохранён, но в очередь не встал — иначе пользователь
+            # будет ждать выполнения, которого не начнётся.
+            queue_lines.append(
+                f"{label}: план #{plan_id_x} — ⚠️ <b>не встал в очередь</b>, "
+                f"запустите повтор из «Мои планы»"
+            )
+    queue_text = "\n".join(queue_lines)
 
     kb = InlineKeyboardBuilder()
     kb.button(
         text="📊 Прогресс",
-        callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
+        callback_data=GeoPresenceCb(action="progress", plan_id=primary_plan_id),
     )
     kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.button(text="◀️ Назад к меню", callback_data=GeoPresenceCb(action="cancel"))
@@ -1688,13 +2121,15 @@ async def cb_gp_launch(
 
     await _edit(
         callback,
-        f"✅ <b>Global Presence Plan #{plan_id} запущен!</b>\n\n"
-        f"{emoji} {label.capitalize()} для создания: {len(targets)}\n"
-        f"🔢 Операция в очереди: #{op_id}{pkg_line}\n\n"
+        f"✅ <b>Проект запущен</b>\n"
+        f"{'─' * 28}\n"
+        f"Всего объектов: <b>{summary['total']}</b>\n{breakdown}\n\n"
+        f"{queue_text}\n\n"
         f"Вы получите уведомление по завершении.\n"
         f"Нажмите «Прогресс» для отслеживания.",
         markup=kb.as_markup(),
     )
+
 
 
 # ── Progress & Report ──────────────────────────────────────────────────────

@@ -3194,7 +3194,10 @@ async def _exec_global_presence_channel(
         return {"status": "failed", "reason": "План не найден"}
 
     asset_type = plan.get("asset_type", "channel")
-    is_group = asset_type == "group"
+    # Тип плана — лишь запасной вариант. Решает тип КАЖДОЙ цели: проект-генератор
+    # кладёт в один план каналы (новости, работа, афиша) и группы (чат, барахолка)
+    # вперемешку, и общий флаг превратил бы половину структуры не в тот тип актива.
+    plan_is_group = asset_type == "group"
 
     await _safe_execute(
             pool,
@@ -3254,6 +3257,8 @@ async def _exec_global_presence_channel(
                 "failed": failed_count,
                 "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
             }
+
+        is_group = (target.get("asset_type") or asset_type) == "group"
 
         acc_id = target["selected_account_id"]
         acc = acc_by_id.get(acc_id)
@@ -3341,12 +3346,18 @@ async def _exec_global_presence_channel(
             target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
         )
 
-        # Генерируем описание: пустое описание = немедленный spam-сигнал для Telegram
+        # Описание: пустое = немедленный spam-сигнал для Telegram. Приоритет у
+        # сгенерированного (planned_about) — оно уникально для объекта и уже
+        # показано пользователю в предпросмотре. Запасной вариант — прежняя
+        # общая строка: она одинакова на всю сеть, поэтому только как fallback
+        # для планов, собранных до генератора.
         _geo_label = (target.get("city") or target.get("country") or "").strip()
-        if is_group:
-            _about = f"Группа для общения и обмена информацией.{(' ' + _geo_label) if _geo_label else ''}"
-        else:
-            _about = f"Актуальные новости и обновления.{(' ' + _geo_label) if _geo_label else ''}"
+        _about = (target.get("planned_about") or "").strip()
+        if not _about:
+            if is_group:
+                _about = f"Группа для общения и обмена информацией.{(' ' + _geo_label) if _geo_label else ''}"
+            else:
+                _about = f"Актуальные новости и обновления.{(' ' + _geo_label) if _geo_label else ''}"
 
         # ── Умная задержка перед созданием ──
         await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
@@ -3443,6 +3454,10 @@ async def _exec_global_presence_channel(
 
         username_error = None
         planned_username = target.get("planned_username")
+        # Какой username РЕАЛЬНО встал. Раньше в каталог писался planned_*
+        # независимо от исхода: при занятом имени канал уходил в managed_channels
+        # с username, которого у него нет, — ссылки из отчёта вели в никуда.
+        applied_username: str | None = None
         if planned_username and channel_id:
             # Пауза 90-180с перед установкой username — Telegram детектирует мгновенное
             # присвоение username как автоматизацию и применяет geo-ban / shadow-ban
@@ -3456,6 +3471,8 @@ async def _exec_global_presence_channel(
             err = await account_manager.set_channel_username(
                 acc["session_str"], channel_id, planned_username, _acc=acc
             )
+            if not err:
+                applied_username = planned_username
             if err:
                 log.info(
                     "op_worker gp_channel: username '%s' failed (%s), trying variants",
@@ -3519,6 +3536,7 @@ async def _exec_global_presence_channel(
                             variant,
                         )
                         success_variant = variant
+                        applied_username = variant
                         err = None
                         break
                     log.info(
@@ -3539,28 +3557,70 @@ async def _exec_global_presence_channel(
                         await asyncio.sleep(fw)
                 username_error = err if not success_variant else None
 
+        # ── Аватар: канал без фото Telegram трактует как заготовку — хуже
+        # ранжируется и чаще ловит ограничения. Картинка детерминирована по
+        # avatar_seed, поэтому ставится ровно та, что была в предпросмотре.
+        avatar_ok = False
+        _avatar_seed = target.get("avatar_seed")
+        if _avatar_seed is not None and channel_id:
+            try:
+                from services import avatar_factory
+
+                _photo = await asyncio.to_thread(
+                    avatar_factory.generate_avatar,
+                    int(_avatar_seed),
+                    title,
+                    style=target.get("avatar_style") or None,
+                )
+                await asyncio.sleep(random.uniform(4, 11) * session_simulator.chaos_factor())
+                _ph_err = await account_manager.set_channel_photo(
+                    acc["session_str"],
+                    channel_id,
+                    _photo,
+                    access_hash=int(channel_access_hash or 0),
+                    _acc=acc,
+                )
+                avatar_ok = not _ph_err
+                if _ph_err:
+                    log.info(
+                        "op_worker gp: avatar not applied for target %d: %s",
+                        target["id"],
+                        _ph_err[:120],
+                    )
+            except Exception as _av_err:
+                # Аватар — оформление, а не суть объекта: его сбой не должен
+                # ронять уже созданный канал в 'failed'.
+                log.warning("op_worker gp: avatar generation failed: %s", _av_err)
+
         # ── Атомарная запись: обновить targets + вставить в managed_channels одной транзакцией.
         # Если Telethon создал канал, но DB-запись падает, канал станет «призраком» без записи.
         # Транзакция гарантирует: либо оба write успешны, либо оба откатываются.
+        # В каталог пишется ФАКТИЧЕСКИ вставший username (planned мог быть занят
+        # и заменён вариантом либо не примениться вовсе) и корректный тип: группы
+        # с type='channel' не попадали ни в один групповой фильтр.
         async with pool.acquire() as _conn:
             async with _conn.transaction():
                 await _conn.execute(
-                    "UPDATE global_presence_targets SET status='done', result_asset_id=$1 WHERE id=$2",
+                    "UPDATE global_presence_targets "
+                    "SET status='done', result_asset_id=$1, final_username=$2, avatar_applied=$3 "
+                    "WHERE id=$4",
                     channel_id,
+                    applied_username,
+                    avatar_ok,
                     target["id"],
                 )
                 await _conn.execute(
                     """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
                        VALUES($1,$2,$3,$4,$5,$6,$7)
                        ON CONFLICT(owner_id, channel_id) DO UPDATE
-                       SET title=$4, access_hash=$6, type=$7""",
+                       SET title=$4, username=$5, access_hash=$6, type=$7""",
                     owner_id,
                     acc["id"],
                     channel_id,
                     title,
-                    target.get("planned_username") or None,
+                    applied_username,
                     int(channel_access_hash or 0),
-                    "channel",
+                    "group" if is_group else "channel",
                 )
 
         _infra_mem.record_account_op(
@@ -3699,12 +3759,15 @@ async def _exec_global_presence_channel(
         plan_id,
     )
 
+    _unit = "групп" if plan_is_group else "активов"
     return {
         "status": "done",
         "created": created_count,
         "failed": failed_count,
         "plan_id": plan_id,
-        "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+        # «каналов» врало на планах со смешанной структурой (каналы + чаты)
+        # и на групповых планах — итог обязан совпадать с тем, что создано.
+        "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
     }
 
 

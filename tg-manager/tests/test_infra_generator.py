@@ -368,3 +368,16 @@ def test_role_library_templates_are_usable():
 
 def test_parse_pattern_pool_dedupes_and_trims():
     assert ig.parse_pattern_pool(" A \n\n A \nB\n") == ["A", "B"]
+
+
+def test_no_usernames_when_explicitly_disabled():
+    # «Без username» — осознанный выбор (объекты будут приватными). Пустой пул
+    # означает другое: «возьми из библиотеки». Путать их нельзя, иначе кнопка
+    # «Без username» молча выдаёт имена.
+    targets = ig.build_project_targets(
+        _GEO, roles=["news"], plan_seed=1, assign_usernames=False
+    )
+    assert all(t["planned_username"] is None for t in targets)
+    # А при пустом пуле — наоборот, имена обязаны появиться из библиотеки.
+    with_names = ig.build_project_targets(_GEO, roles=["news"], plan_seed=1)
+    assert all(t["planned_username"] for t in with_names)

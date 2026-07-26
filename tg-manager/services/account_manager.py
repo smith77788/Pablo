@@ -2919,6 +2919,48 @@ async def edit_channel_about(
             log_exc_swallow(log, "Сбой в edit_channel_about")
 
 
+async def set_channel_photo(
+    session_string: str,
+    channel_id: int,
+    photo_bytes: bytes,
+    access_hash: int = 0,
+    _acc: dict | None = None,
+) -> str:
+    """Поставить аватар каналу/группе. '' — успех, иначе текст ошибки.
+
+    Канал без аватара Telegram трактует как заготовку: он хуже ранжируется в
+    поиске и чаще ловит ограничения. Поэтому фото ставится в общем конвейере
+    создания, а не «когда-нибудь потом».
+    """
+    import io
+
+    from telethon.tl.functions.channels import EditPhotoRequest
+    from telethon.tl.types import InputChatUploadedPhoto
+
+    if not session_string:
+        return "session_str отсутствует — сессия недоступна"
+    if not photo_bytes:
+        return "пустое изображение"
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await _resolve_channel_peer(client, channel_id, access_hash)
+        buf = io.BytesIO(photo_bytes)
+        buf.name = "avatar.png"
+        uploaded = await client.upload_file(buf, file_name="avatar.png")
+        await client(EditPhotoRequest(channel=entity, photo=InputChatUploadedPhoto(uploaded)))
+        return ""
+    except Exception as e:
+        log.warning("set_channel_photo error: %s", e)
+        return str(e)[:200]
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в set_channel_photo")
+
+
 async def set_channel_username(
     session_string: str,
     channel_id: int,

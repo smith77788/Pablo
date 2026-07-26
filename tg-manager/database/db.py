@@ -3938,15 +3938,35 @@ async def create_global_presence_plan(
     geo_selection: dict,
     account_selection: dict,
     template_id: int | None = None,
+    *,
+    project_name: str | None = None,
+    roles: list[str] | None = None,
+    levels: list[str] | None = None,
+    name_pool: list[str] | None = None,
+    username_pool: list[str] | None = None,
+    about_pool: list[str] | None = None,
+    avatar_style: str | None = None,
+    plan_seed: int | None = None,
 ) -> int:
-    """Create a plan and return its id."""
+    """Create a plan and return its id.
+
+    Поля генератора (roles/levels/пулы/seed) необязательны: планы, собранные
+    старым путём «один паттерн», продолжают работать без них.
+    """
     import json
+
+    def _j(value):
+        return json.dumps(value, ensure_ascii=False) if value else None
 
     return await pool.fetchval(
         """INSERT INTO global_presence_plans
                (owner_id, asset_type, name_pattern, username_pattern,
-                geo_selection, account_selection, template_id, status)
-           VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,'queued')
+                geo_selection, account_selection, template_id, status,
+                project_name, roles, levels, name_pool, username_pool,
+                about_pool, avatar_style, plan_seed)
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,'queued',
+                   $8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,
+                   $13::jsonb,$14,$15)
            RETURNING id""",
         owner_id,
         asset_type,
@@ -3955,6 +3975,14 @@ async def create_global_presence_plan(
         json.dumps(geo_selection, ensure_ascii=False),
         json.dumps(account_selection, ensure_ascii=False),
         template_id,
+        project_name,
+        _j(roles),
+        _j(levels),
+        _j(name_pool),
+        _j(username_pool),
+        _j(about_pool),
+        avatar_style,
+        plan_seed,
     )
 
 
@@ -3969,8 +3997,9 @@ async def create_global_presence_targets(
             """INSERT INTO global_presence_targets
                    (plan_id, country, country_code, region, city, city_slug,
                     language, timezone, asset_type, planned_name, planned_username,
-                    selected_account_id)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
+                    selected_account_id, role, level, planned_about,
+                    avatar_seed, avatar_style)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
             [
                 (
                     plan_id,
@@ -3985,11 +4014,50 @@ async def create_global_presence_targets(
                     t.get("planned_name"),
                     t.get("planned_username"),
                     t.get("selected_account_id"),
+                    t.get("role"),
+                    t.get("level"),
+                    t.get("planned_about"),
+                    t.get("avatar_seed"),
+                    t.get("avatar_style"),
                 )
                 for t in targets
             ],
         )
     return len(targets)
+
+
+async def get_taken_usernames(pool: asyncpg.Pool, owner_id: int, limit: int = 20000) -> set[str]:
+    """Username, которые владелец уже занял или запланировал.
+
+    Нужен аллокатору ДО запуска: без этого списка новый проект спокойно
+    сгенерирует имя, уже стоящее на канале того же владельца, и цель упадёт
+    в бою «username занят» — при том что коллизию было видно заранее.
+
+    Fail-open: при ошибке возвращаем пустое множество. Потерять подсказку
+    хуже, чем не дать запустить проект.
+    """
+    taken: set[str] = set()
+    try:
+        rows = await pool.fetch(
+            """SELECT username AS u FROM managed_channels
+                   WHERE owner_id=$1 AND username IS NOT NULL AND username<>''
+               UNION
+               SELECT COALESCE(t.final_username, t.planned_username) AS u
+                   FROM global_presence_targets t
+                   JOIN global_presence_plans p ON p.id = t.plan_id
+                   WHERE p.owner_id=$1
+                     AND COALESCE(t.final_username, t.planned_username) IS NOT NULL
+               LIMIT $2""",
+            owner_id,
+            limit,
+        )
+        for r in rows:
+            val = (r["u"] or "").strip().lstrip("@").lower()
+            if val:
+                taken.add(val)
+    except Exception:
+        log.warning("get_taken_usernames failed for owner=%s", owner_id, exc_info=True)
+    return taken
 
 
 async def get_global_presence_plan(

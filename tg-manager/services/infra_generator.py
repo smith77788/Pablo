@@ -472,12 +472,17 @@ def build_project_targets(
     plan_seed: int = 0,
     taken_usernames=None,
     avatar_style: str | None = None,
+    assign_usernames: bool = True,
 ) -> list[dict]:
     """Раскрыть проект в плоский список целей.
 
     Пулы, переданные явно, ПЕРЕКРЫВАЮТ библиотечные для всех ролей — так
     работает «свой шаблон на весь проект». Не передали — каждая роль берёт
     свои (новости получают новостные тексты, барахолка — свои).
+
+    `assign_usernames=False` — объекты создаются приватными, без username.
+    Это отдельный флаг, а не «пустой пул»: пустой пул означает «возьми из
+    библиотеки», и путать его с осознанным отказом нельзя.
 
     Возвращает цели в формате `global_presence_targets` + поля генератора
     (`role`, `level`, `planned_about`, `avatar_seed`).
@@ -512,6 +517,7 @@ def build_project_targets(
             abouts = user_about_pool or spec["about_patterns"]
             about = render_text(pick_from_pool(abouts, rng), geo_ctx, rng).strip()[:255]
 
+            username = None
             uname_ctx = {
                 "city": node.get("scope_slug") or node.get("city_slug") or "",
                 "city_slug": node.get("scope_slug") or node.get("city_slug") or "",
@@ -521,8 +527,9 @@ def build_project_targets(
                 "index": slot + 1,
                 "role": role,
             }
-            uname_templates = user_uname_pool or spec["username_templates"]
-            username = allocator.allocate(uname_templates, uname_ctx)
+            if assign_usernames:
+                uname_templates = user_uname_pool or spec["username_templates"]
+                username = allocator.allocate(uname_templates, uname_ctx)
 
             targets.append(
                 {

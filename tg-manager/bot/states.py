@@ -423,6 +423,9 @@ class QuickPostFSM(StatesGroup):
 
 class GlobalPresenceFSM(StatesGroup):
     choosing_asset_type = State()
+    choosing_structure = State()      # какие тематики создаём в каждом городе
+    choosing_levels = State()         # федеральный / региональный / городской
+    choosing_avatar = State()         # стиль генерируемых аватаров
     choosing_template = State()
     entering_name_pattern = State()
     entering_username_pattern = State()
