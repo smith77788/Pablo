@@ -5214,6 +5214,167 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("_bulk_edit_op(%s) uid=%d", kind, uid)
             return _err(str(exc), 500)
 
+    async def _alive_accounts(uid: int, wanted: list[int] | None = None) -> list[int]:
+        """Свои активные аккаунты с сессией; пустой wanted = все."""
+        rows = await _safe_fetch(
+            pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+            "AND session_str IS NOT NULL"
+            + (" AND id = ANY($2::bigint[])" if wanted else "")
+            + " ORDER BY id",
+            *([uid, wanted] if wanted else [uid]),
+        )
+        return [int(r["id"]) for r in (rows or [])]
+
+    async def dm_adhoc_send(request: web.Request) -> web.Response:
+        """Разовая рассылка в ЛС по списку @username (паритет с ботом)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        raw = data.get("usernames") or []
+        if isinstance(raw, str):
+            raw = re.split(r"[\s,;]+", raw)
+        usernames = [u.strip().lstrip("@") for u in raw
+                     if isinstance(u, str) and u.strip()][:1000]
+        if not usernames:
+            return _err("Укажите хотя бы один @username", 400)
+        text = validate_string(data.get("text"), max_len=4096)
+        if not text:
+            return _err("Введите текст сообщения", 400)
+        if check_sql_suspicious(text):
+            return _err("Недопустимые символы в тексте", 400)
+        delay = min(max(validate_integer(data.get("delay", 30), min_val=5, max_val=600) or 30, 5), 600)
+
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()])
+        if not acc_ids:
+            return _err("Нет доступных активных аккаунтов", 400)
+
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "bulk_dm_adhoc",
+                {"account_ids": acc_ids, "usernames": usernames,
+                 "text": text, "delay": delay},
+                total_items=len(usernames),
+                label=f"Рассылка ЛС: {len(usernames)} получателей × {len(acc_ids)} акк.",
+            )
+            return _json_resp({"ok": True, "op_id": op_id,
+                               "recipients": len(usernames), "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("dm_adhoc_send uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def channels_bulk_post(request: web.Request) -> web.Response:
+        """Пост во все (или выбранные) каналы одного аккаунта (паритет с ботом)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        acc_id = validate_integer(data.get("acc_id"), min_val=1)
+        if not acc_id:
+            return _err("Выберите аккаунт", 400)
+        text = validate_string(data.get("text"), max_len=4096)
+        if not text:
+            return _err("Введите текст поста", 400)
+        if check_sql_suspicious(text):
+            return _err("Недопустимые символы в тексте", 400)
+
+        wanted = [int(x) for x in (data.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
+        rows = await _safe_fetch(
+            pool,
+            "SELECT channel_id FROM managed_channels WHERE owner_id=$1 AND acc_id=$2"
+            + (" AND channel_id = ANY($3::bigint[])" if wanted else ""),
+            *([uid, int(acc_id), wanted] if wanted else [uid, int(acc_id)]),
+        )
+        channel_ids = [int(r["channel_id"]) for r in (rows or [])]
+        if not channel_ids:
+            return _err("У этого аккаунта нет каналов — сначала импортируйте их", 400)
+
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "bulk_post_chans",
+                {"acc_id": int(acc_id), "channel_ids": channel_ids, "text": text},
+                total_items=len(channel_ids),
+                label=f"Пост в {len(channel_ids)} каналов аккаунта #{acc_id}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "channels": len(channel_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("channels_bulk_post uid=%d", uid)
+            return _err(str(exc), 500)
+
+    _REPORT_REASONS = {"spam", "violence", "porn", "drugs", "fake", "personal", "other"}
+
+    async def mass_report_submit(request: web.Request) -> web.Response:
+        """Массовая жалоба на цель (паритет с ботом).
+
+        Самая баноопасная операция после Strike: жалоба идёт с реальных аккаунтов.
+        Поэтому — гейт давления инфраструктуры перед постановкой (как у bulk_join),
+        а карантин аккаунтов уважает сам исполнитель. В отличие от ботового пути,
+        ставим через operation_bus (бот делает прямой INSERT — обход шины).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+
+        target = validate_string(data.get("target"), max_len=256)
+        if not target:
+            return _err("Укажите цель жалобы (@username или ссылку)", 400)
+        reason = str(data.get("reason") or "spam")
+        if reason not in _REPORT_REASONS:
+            return _err(f"Недопустимая причина. Доступны: {', '.join(sorted(_REPORT_REASONS))}", 400)
+        mode = "msg" if str(data.get("mode")) == "msg" else "peer"
+        report_text = validate_string(data.get("report_text"), max_len=512) or ""
+        msg_ids = [int(x) for x in (data.get("msg_ids") or []) if str(x).isdigit()][:50]
+
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()])
+        if not acc_ids:
+            return _err("Нет доступных активных аккаунтов", 400)
+
+        try:
+            from services import infra_orchestrator
+            ready, reason_txt = await infra_orchestrator.is_ready_for_op(pool, uid, "mass_report")
+            if not ready:
+                return _err(f"Инфраструктура перегружена: {reason_txt}", 429)
+        except Exception:
+            log.warning("mass_report_submit: pressure check failed", exc_info=True)
+
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "mass_report",
+                {"mode": mode, "target": target, "reason": reason,
+                 "report_text": report_text, "msg_ids": msg_ids,
+                 "account_ids": acc_ids},
+                total_items=len(acc_ids),
+                label=f"Жалобы: {target} [{reason}] × {len(acc_ids)} акк.",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("mass_report_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def channels_bulk_edit(request: web.Request) -> web.Response:
         return await _bulk_edit_op(request, "channels")
 
@@ -11578,6 +11739,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
+    app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
+    app.router.add_post("/api/miniapp/channels/bulk_post", channels_bulk_post)
+    app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
     app.router.add_post("/api/miniapp/channels/bulk_edit", channels_bulk_edit)
     app.router.add_post("/api/miniapp/bots/bulk_edit", bots_bulk_edit)
     app.router.add_post("/api/miniapp/accounts/bulk_profile", accounts_bulk_profile)
