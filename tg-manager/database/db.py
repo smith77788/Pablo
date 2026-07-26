@@ -4116,6 +4116,66 @@ async def get_global_presence_stats(
     )
 
 
+async def get_owner_presence_objects(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    *,
+    asset_type: str | None = None,
+    region: str | None = None,
+    status: str | None = "done",
+    limit: int = 50,
+    offset: int = 0,
+) -> list[asyncpg.Record]:
+    """Каталог созданных объектов присутствия владельца (по всем планам-проектам).
+
+    Скоуп по owner_id через JOIN на planы. Фильтры (тип/регион/статус) опциональны.
+    Использует только колонки базовой схемы (v35), чтобы не падать при лаге v159.
+    status=None → без фильтра по статусу; по умолчанию 'done' (реально созданные).
+    """
+    conds = ["gpp.owner_id=$1"]
+    args: list = [owner_id]
+    if status:
+        args.append(status)
+        conds.append(f"gpt.status=${len(args)}")
+    if asset_type:
+        args.append(asset_type)
+        conds.append(f"gpt.asset_type=${len(args)}")
+    if region:
+        args.append(region)
+        conds.append(f"gpt.region=${len(args)}")
+    args.append(max(1, min(int(limit), 200)))
+    lim = f"${len(args)}"
+    args.append(max(0, int(offset)))
+    off = f"${len(args)}"
+    return await pool.fetch(
+        f"""SELECT gpt.id, gpt.plan_id, gpt.asset_type, gpt.region, gpt.city,
+                   gpt.planned_name, gpt.planned_username, gpt.status, gpt.created_at,
+                   gpp.name_pattern
+            FROM global_presence_targets gpt
+            JOIN global_presence_plans gpp ON gpp.id = gpt.plan_id
+            WHERE {' AND '.join(conds)}
+            ORDER BY gpt.created_at DESC
+            LIMIT {lim} OFFSET {off}""",
+        *args,
+    )
+
+
+async def get_owner_presence_type_counts(
+    pool: asyncpg.Pool, owner_id: int, status: str | None = "done"
+) -> dict:
+    """{asset_type: count} по созданным объектам владельца — для кнопок-фильтров."""
+    rows = await pool.fetch(
+        """SELECT gpt.asset_type, COUNT(*) AS n
+           FROM global_presence_targets gpt
+           JOIN global_presence_plans gpp ON gpp.id = gpt.plan_id
+           WHERE gpp.owner_id=$1 AND ($2::text IS NULL OR gpt.status=$2)
+           GROUP BY gpt.asset_type""",
+        owner_id,
+        status,
+    )
+    return {r["asset_type"]: r["n"] for r in rows}
+
+
 async def reset_failed_targets(
     pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None
 ) -> int:

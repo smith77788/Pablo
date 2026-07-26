@@ -174,6 +174,7 @@ async def cb_gp_menu(
     )
     if recent_plans:
         kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
+        kb.button(text="🗂 Каталог объектов", callback_data=GeoPresenceCb(action="catalog"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2, 1, 1, 1, 1, 1)
     await callback.message.edit_text(
@@ -3017,6 +3018,88 @@ async def cb_gp_plans_list(
         callback,
         "🌍 <b>Global Presence — Мои планы</b>\n\n"
         "Нажмите на план для просмотра прогресса:",
+        markup=kb.as_markup(),
+    )
+
+
+# ── Каталог созданных объектов (фильтры: тип, статус) ───────────────────────
+
+_CATALOG_TYPE_LABELS = {
+    "channel": "📡 Каналы",
+    "group": "👥 Группы",
+    "bot": "🤖 Боты",
+}
+
+
+@router.callback_query(GeoPresenceCb.filter(F.action == "catalog"))
+async def cb_gp_catalog(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await safe_answer(callback)
+    uid = callback.from_user.id
+    # item кодирует фильтр типа: "" = все, иначе asset_type
+    type_filter = callback_data.item or ""
+    try:
+        counts = await db.get_owner_presence_type_counts(pool, uid, status="done")
+        objs = await db.get_owner_presence_objects(
+            pool, uid, asset_type=type_filter or None, status="done", limit=15
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_catalog: query failed")
+        counts, objs = {}, []
+
+    total = sum(counts.values())
+    kb = InlineKeyboardBuilder()
+    # Фильтры по типу (только существующие типы + «Все»)
+    kb.button(
+        text=("✅ " if not type_filter else "") + f"Все ({total})",
+        callback_data=GeoPresenceCb(action="catalog", item=""),
+    )
+    for atype, n in sorted(counts.items()):
+        lbl = _CATALOG_TYPE_LABELS.get(atype, atype)
+        kb.button(
+            text=("✅ " if type_filter == atype else "") + f"{lbl} ({n})",
+            callback_data=GeoPresenceCb(action="catalog", item=atype),
+        )
+    kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="menu"))
+    kb.adjust(1, 3, 1, 1)
+
+    if not objs:
+        body = (
+            "Пока нет созданных объектов"
+            + (f" типа «{_CATALOG_TYPE_LABELS.get(type_filter, type_filter)}»" if type_filter else "")
+            + ".\nСоздайте план присутствия — готовые объекты появятся здесь."
+        )
+    else:
+        lines = []
+        for o in objs:
+            emoji = {"channel": "📡", "group": "👥", "bot": "🤖"}.get(o["asset_type"], "•")
+            uname = f"@{o['planned_username']}" if o.get("planned_username") else "—"
+            region = o.get("region") or o.get("city") or ""
+            name = (o.get("planned_name") or "").strip()[:28]
+            lines.append(
+                f"{emoji} <b>{html.escape(name)}</b> · <code>{html.escape(uname)}</code>"
+                + (f" · {html.escape(str(region))}" if region else "")
+            )
+        shown = len(objs)
+        more = (
+            f"\n\n<i>Показаны последние {shown}"
+            + (f" из {total}" if total > shown else "")
+            + "</i>"
+            if total > shown
+            else ""
+        )
+        body = "\n".join(lines) + more
+
+    await _edit(
+        callback,
+        "🌍 <b>Global Presence — Каталог объектов</b>\n\n"
+        f"Всего создано: <b>{total}</b>\n\n"
+        f"{body}",
         markup=kb.as_markup(),
     )
 
