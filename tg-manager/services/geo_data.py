@@ -2671,3 +2671,76 @@ def filter_by_population(cities: list[dict], min_pop: int) -> list[dict]:
         if pop is not None and pop >= min_pop:
             out.append(c)
     return out
+
+
+# ── Федеральные округа РФ (иерархия «Федеральный → Региональный → Городской») ──
+# Регион хранится по-английски (как в RUSSIA_CITIES). Округ — по-русски (для
+# отображения дерева). Отсутствие региона в карте → округ неизвестен (None).
+RU_FEDERAL_DISTRICTS: dict[str, str] = {
+    # Центральный
+    "Moscow": "Центральный ФО",
+    "Voronezh Oblast": "Центральный ФО",
+    "Yaroslavl Oblast": "Центральный ФО",
+    # Северо-Западный
+    "Saint Petersburg": "Северо-Западный ФО",
+    # Южный
+    "Krasnodar Krai": "Южный ФО",
+    "Rostov Oblast": "Южный ФО",
+    "Volgograd Oblast": "Южный ФО",
+    # Северо-Кавказский
+    "Dagestan": "Северо-Кавказский ФО",
+    # Приволжский
+    "Bashkortostan": "Приволжский ФО",
+    "Nizhny Novgorod Oblast": "Приволжский ФО",
+    "Orenburg Oblast": "Приволжский ФО",
+    "Perm Krai": "Приволжский ФО",
+    "Samara Oblast": "Приволжский ФО",
+    "Saratov Oblast": "Приволжский ФО",
+    "Tatarstan": "Приволжский ФО",
+    "Udmurtia": "Приволжский ФО",
+    # Уральский
+    "Chelyabinsk Oblast": "Уральский ФО",
+    "Sverdlovsk Oblast": "Уральский ФО",
+    "Tyumen Oblast": "Уральский ФО",
+    # Сибирский
+    "Altai Krai": "Сибирский ФО",
+    "Irkutsk Oblast": "Сибирский ФО",
+    "Kemerovo Oblast": "Сибирский ФО",
+    "Krasnoyarsk Krai": "Сибирский ФО",
+    "Novosibirsk Oblast": "Сибирский ФО",
+    "Omsk Oblast": "Сибирский ФО",
+    "Tomsk Oblast": "Сибирский ФО",
+    # Дальневосточный
+    "Khabarovsk Krai": "Дальневосточный ФО",
+    "Primorsky Krai": "Дальневосточный ФО",
+}
+
+
+def federal_district(region: str) -> str | None:
+    """Федеральный округ РФ по названию региона (или None, если не РФ/неизвестен)."""
+    return RU_FEDERAL_DISTRICTS.get((region or "").strip())
+
+
+def group_by_region(cities: list[dict]) -> dict[str, list[dict]]:
+    """{регион: [города]} — сохраняет порядок появления регионов."""
+    out: dict[str, list[dict]] = {}
+    for c in cities:
+        out.setdefault(c.get("region") or "—", []).append(c)
+    return out
+
+
+def group_by_federal_district(cities: list[dict]) -> dict[str, dict[str, list[dict]]]:
+    """{федеральный округ: {регион: [города]}} для РФ.
+
+    Регионы без известного округа собираются под «Прочие регионы», чтобы ни один
+    город не потерялся из дерева. Города не-РФ группируются под своим регионом
+    как есть (округ им не применим).
+    """
+    out: dict[str, dict[str, list[dict]]] = {}
+    for c in cities:
+        region = c.get("region") or "—"
+        cc = (c.get("country_code") or "").lower()
+        level = federal_district(region) if cc == "ru" else None
+        level = level or ("Прочие регионы" if cc == "ru" else region)
+        out.setdefault(level, {}).setdefault(region, []).append(c)
+    return out
