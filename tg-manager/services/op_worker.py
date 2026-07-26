@@ -7703,6 +7703,50 @@ async def _exec_mass_invite(
         except Exception:
             log_exc_swallow(log, "mass_invite: rest-account cooldown failed")
 
+    def _invite_pause(acc_id: int) -> float:
+        """Адаптивная пауза перед следующим батчем ЭТОГО аккаунта.
+
+        Раньше пауза была фиксированной: 3с × множитель режима, одинаковая для
+        всех аккаунтов и не меняющаяся от их состояния. Это ровно то, что делают
+        конкуренты, и это палевно: ровный интервал у десятков аккаунтов — сам по
+        себе координационный признак.
+
+        Теперь темп считает `flood_engine.recommended_delay(acc, "invite")`,
+        который уже учитывает: базовую ставку действия, ВЫУЧЕННУЮ поправку по
+        прошлым флудам этого аккаунта, хвост активного cooldown, затухание
+        штрафа со временем и глобальный флотовый темп (pacing_engine). Поверх
+        накладывается `gaussian_delay` — интервалы получаются неровными
+        (18/31/24/42…), как у живого человека, а не по метроному.
+
+        Режим пользователя (slow/normal/fast) остаётся СМЕЩЕНИЕМ поверх расчёта,
+        а не заменой: «быстро» ускоряет относительно безопасного темпа, но не
+        отменяет ни cooldown, ни выученный штраф.
+        Сбой движка → прежняя фиксированная пауза (темп важнее, чем упасть).
+        """
+        try:
+            from services import flood_engine as _fe
+            base = _fe.recommended_delay(int(acc_id), "invite")
+            base = max(1.0, base * _pace_mult)
+            return _fe.gaussian_delay(base, spread=0.22, minimum=1.0, maximum=900.0)
+        except Exception:
+            log.debug("mass_invite: adaptive pause unavailable, using fixed")
+            return _batch_delay
+
+    async def _invite_learn_ok(acc_id: int, ok_count: int) -> None:
+        """Замкнуть петлю обучения: успешный батч снижает риск-штраф аккаунта.
+
+        Без этого система умела только НАКАЗЫВАТЬ (record_flood), но никогда не
+        реабилитировала: аккаунт, однажды словивший флуд, навсегда оставался
+        «медленным», даже отработав сотни инвайтов без единой проблемы.
+        """
+        if ok_count <= 0:
+            return
+        try:
+            from services.flood_engine import record_success
+            await record_success(int(acc_id), "invite")
+        except Exception:
+            log.debug("mass_invite: record_success failed acc=%s", acc_id)
+
     total_ok, total_fail = 0, 0
     all_users = list(user_refs)
     all_phones = list(phones)
@@ -7767,7 +7811,8 @@ async def _exec_mass_invite(
                         )
                         await _rest_invite_account(acc["id"], res)
                         break
-                    await asyncio.sleep(_batch_delay)
+                    await _invite_learn_ok(acc["id"], res.get("ok") or 0)
+                    await asyncio.sleep(_invite_pause(acc["id"]))
                 except Exception as exc:
                     log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
                     total_fail += len(batch)
@@ -7796,7 +7841,8 @@ async def _exec_mass_invite(
                         )
                         await _rest_invite_account(acc["id"], res)
                         break
-                    await asyncio.sleep(_batch_delay)
+                    await _invite_learn_ok(acc["id"], res.get("ok") or 0)
+                    await asyncio.sleep(_invite_pause(acc["id"]))
                 except Exception as exc:
                     log.warning("mass_invite op=%d acc=%s phones error: %s", op_id, acc.get("id"), exc)
                     total_fail += len(batch)
