@@ -6147,7 +6147,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Список пуст или невалиден", 400)
         # Настройки безопасности/темпа.
         pace = (body.get("pace") or "normal").strip()
-        if pace not in ("slow", "normal", "fast"):
+        # "auto" — темп считает движок по состоянию флота за сегодня, а не три
+        # числа, выбранные вслепую (flood_engine.auto_strategy).
+        if pace not in ("slow", "normal", "fast", "auto"):
             pace = "normal"
         def _clamp(v, lo, hi, d):
             try:

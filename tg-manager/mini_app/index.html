@@ -3751,10 +3751,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field">
         <label>Темп инвайта</label>
         <select id="massInvitePace" class="sel">
+          <option value="auto" selected>🤖 Авто — темп по состоянию флота</option>
           <option value="slow">🐢 Медленно — безопаснее от банов</option>
-          <option value="normal" selected>⚖️ Обычный</option>
+          <option value="normal">⚖️ Обычный</option>
           <option value="fast">⚡ Быстро — выше риск</option>
         </select>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px">
+          В режиме «Авто» темп и размер батча считаются по фактам за сегодня по
+          всему флоту: были флуды — замедлимся все вместе, день чистый — ускоримся.
+          Причина решения будет в итоге операции.
+        </div>
       </div>
       <details style="margin-bottom:12px">
         <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:6px 0">⚙️ Лимиты (защита от бана)</summary>

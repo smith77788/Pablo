@@ -672,6 +672,40 @@ async def _maybe_requeue(
     return True
 
 
+def interleave_by_source(pairs: list) -> list:
+    """Разложить цели так, чтобы соседние шли из РАЗНЫХ источников.
+
+    Аудитория приходит из БД сгруппированной: сначала все, кого спарсили из
+    одного канала, потом все из следующего. При инвайте это заметная подпись:
+    аккаунт подряд приглашает сорок человек из @channelX, потом другой аккаунт —
+    сорок из @channelY. Люди из одного источника похожи между собой (близкие
+    id, общая подписка, часто общий интерес), и такой залп читается ровно как
+    то, чем является: выгрузили список и залили пачкой.
+
+    Перемешиваем не случайно, а РАВНОМЕРНО: каждому элементу даётся дробная
+    позиция внутри своего источника, и всё сортируется по ней. Так источник из
+    двух человек не слипнется в начале, а источник из двухсот не осядет
+    сплошным хвостом — что случилось бы при простом круговом обходе, когда
+    маленькие вёдра кончаются раньше.
+
+    Один источник (или ни одного) — возвращаем как есть: перетасовывать нечего,
+    а лишняя перестановка только сломала бы понятный пользователю порядок.
+    """
+    buckets: dict[str, list] = {}
+    for ref, src in pairs:
+        buckets.setdefault(str(src or ""), []).append(ref)
+    if len(buckets) <= 1:
+        return [ref for ref, _ in pairs]
+
+    ranked: list[tuple[float, str, object]] = []
+    for key, items in buckets.items():
+        n = len(items)
+        for i, ref in enumerate(items):
+            ranked.append(((i + 0.5) / n, key, ref))
+    ranked.sort(key=lambda t: (t[0], t[1]))
+    return [ref for _, _, ref in ranked]
+
+
 async def bump_daily_stats(
     pool: asyncpg.Pool,
     account_id: int,
@@ -8069,7 +8103,9 @@ async def _exec_mass_invite(
     phones: list[str] = list(params.get("phones") or [])
     batch_size: int = int(params.get("batch_size") or 5)
     # Темп: множитель паузы между батчами (инвайт — самая баноопасная операция).
-    _pace_mult = {"slow": 2.5, "normal": 1.0, "fast": 0.5}.get(params.get("pace") or "normal", 1.0)
+    _pace = params.get("pace") or "normal"
+    _pace_mult = {"slow": 2.5, "normal": 1.0, "fast": 0.5}.get(_pace, 1.0)
+    _auto_reason = ""
     _batch_delay = 3.0 * _pace_mult
     # Максимум инвайтов за прогон (0 = без лимита) и лимит на аккаунт за прогон.
     try:
@@ -8083,6 +8119,26 @@ async def _exec_mass_invite(
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
+
+    if _pace == "auto":
+        # Режим «авто»: темп берётся не из трёх чисел, выбранных вслепую, а из
+        # состояния ВСЕГО флота за сегодня. Telegram смотрит на аккаунты как на
+        # группу, поэтому и решение общее: флуд у одного тормозит всех.
+        try:
+            from services.flood_engine import auto_strategy
+            _st = await auto_strategy(pool, owner_id)
+            _pace_mult = float(_st.get("pace_mult") or 1.0)
+            _batch_delay = 3.0 * _pace_mult
+            if _st.get("batch_size"):
+                batch_size = min(batch_size, int(_st["batch_size"]))
+            _auto_reason = str(_st.get("reason") or "")
+            log.info("mass_invite op=%d: авто-стратегия ×%.2f, батч %d (%s)",
+                     op_id, _pace_mult, batch_size, _auto_reason)
+        except Exception:
+            # «Авто» не имеет права быть опаснее обычного режима: сбой расчёта →
+            # базовый темп, а не самый быстрый.
+            log.debug("mass_invite: auto strategy unavailable op=%d", op_id)
+            _pace_mult, _batch_delay = 1.0, 3.0
 
     # Audience may be passed explicitly (bot handler sends user_refs/phones) OR
     # referenced by source (Mini App sends only {group, source}). When no explicit
@@ -8099,21 +8155,27 @@ async def _exec_mass_invite(
             if _pr:
                 rows = await _safe_fetch(
                     pool,
-                    "SELECT username, tg_user_id FROM parsed_audiences "
+                    "SELECT username, tg_user_id, source_username, source_id "
+                    "FROM parsed_audiences "
                     "WHERE owner_id=$1 AND parse_run_id=$2 ORDER BY parsed_at DESC LIMIT 2000",
                     owner_id, _pr,
                 )
             else:
                 rows = await _safe_fetch(
                     pool,
-                    "SELECT username, tg_user_id FROM parsed_audiences "
+                    "SELECT username, tg_user_id, source_username, source_id "
+                    "FROM parsed_audiences "
                     "WHERE owner_id=$1 ORDER BY parsed_at DESC LIMIT 2000",
                     owner_id,
                 )
-            user_refs = [
-                ("@" + r["username"]) if r["username"] else r["tg_user_id"]
+            # Источник каждой цели известен (из какого канала её спарсили) —
+            # раскладываем вперемешку, чтобы аккаунт не приглашал подряд сорок
+            # человек из одного канала. Подробности — в interleave_by_source.
+            user_refs = interleave_by_source([
+                (("@" + r["username"]) if r["username"] else r["tg_user_id"],
+                 r.get("source_username") or r.get("source_id"))
                 for r in rows if r["username"] or r["tg_user_id"]
-            ]
+            ])
         elif source == "crm":
             rows = await _safe_fetch(
                     pool,
@@ -8130,12 +8192,14 @@ async def _exec_mass_invite(
         elif source == "bot_users":
             rows = await _safe_fetch(
                     pool,
-                "SELECT DISTINCT bu.user_id FROM bot_users bu "
+                "SELECT DISTINCT bu.user_id, bu.bot_id FROM bot_users bu "
                 "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
                 "WHERE mb.added_by=$1 AND bu.is_active=TRUE LIMIT 2000",
                 owner_id,
             )
-            user_refs = [r["user_id"] for r in rows]
+            # Разные боты — разные источники аудитории, раскладываем так же.
+            user_refs = interleave_by_source(
+                [(r["user_id"], r.get("bot_id")) for r in rows])
 
     if not user_refs and not phones:
         return {
@@ -8457,6 +8521,7 @@ async def _exec_mass_invite(
         f"👥 Инвайтер: {group}\n"
         f"✅ Добавлено: {total_ok}/{total}"
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
+        + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
         + ("\n🚫 Группа недоступна — операция остановлена" if group_broken else "")
         + (f"\n⏸ Осталось в очереди: {_left} (аккаунты исчерпали лимит на сегодня)"
            if _left and not group_broken else "")

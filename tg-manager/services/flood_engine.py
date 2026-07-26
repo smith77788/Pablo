@@ -328,6 +328,73 @@ async def account_risk_factors(pool, account_id: int) -> dict:
     return {"multiplier": round(max(0.2, min(mult, 1.3)), 3), "notes": notes}
 
 
+async def auto_strategy(pool, owner_id: int) -> dict:
+    """Автоматический темп по состоянию ВСЕГО флота за сегодня.
+
+    Ручные slow/normal/fast — это три числа, выбранные вслепую: пользователь не
+    знает, сколько флудов флот словил за последний час, и не пересматривает
+    выбор по ходу. Хуже того, выбор делается на аккаунт, а Telegram смотрит на
+    аккаунты как на ГРУППУ: несколько флудов за сутки — сигнал по всему флоту, и
+    замедляться должен весь флот, а не только пострадавший.
+
+    Поэтому «авто» считает не по аккаунту (это уже делает
+    `recommended_daily_limit`), а по общей картине владельца за сегодня:
+      * флот чист и объём набран — можно идти быстрее базового;
+      * появились флуды — тормозим, тем сильнее, чем их больше, и режем батч,
+        чтобы обрыв стоил меньше целей;
+      * много отказов при заметном объёме — гнать бессмысленно и рискованно;
+      * данных за сегодня нет — базовый темп, ничего не выдумываем.
+
+    Возвращает {pace_mult, batch_size, reason}. `reason` — человеческий текст:
+    автоматика, которая не объясняет решение, неотличима от произвола.
+    Ошибка расчёта → нейтральный базовый темп: «авто» не имеет права быть
+    опаснее обычного режима.
+    """
+    neutral = {"pace_mult": 1.0, "batch_size": None,
+               "reason": "нет данных за сегодня — базовый темп"}
+    if not pool or not owner_id:
+        return neutral
+    try:
+        row = await pool.fetchrow(
+            """SELECT COALESCE(SUM(s.invites_ok), 0)   AS ok,
+                      COALESCE(SUM(s.actions_fail), 0) AS fails,
+                      COALESCE(SUM(s.flood_events), 0) AS floods
+               FROM account_daily_stats s
+               JOIN tg_accounts a ON a.id = s.account_id
+               WHERE a.owner_id = $1 AND s.stat_date = CURRENT_DATE""",
+            int(owner_id),
+        )
+    except Exception:
+        log.debug("auto_strategy: query failed owner=%s", owner_id, exc_info=True)
+        return neutral
+    if not row:
+        return neutral
+
+    ok = int(row.get("ok") or 0)
+    fails = int(row.get("fails") or 0)
+    floods = int(row.get("floods") or 0)
+    attempts = ok + fails
+
+    if floods:
+        # Каждый флуд по флоту — общий сигнал, а не частный случай пострадавшего.
+        mult = min(4.0, 1.0 + 0.8 * floods)
+        batch = 1 if floods >= 3 else 3
+        return {"pace_mult": round(mult, 2), "batch_size": batch,
+                "reason": f"флудов за сегодня: {floods} — замедляемся всем флотом"}
+
+    if attempts >= 10 and ok / attempts < 0.5:
+        return {"pace_mult": 1.8, "batch_size": 3,
+                "reason": f"конверсия {round(ok / attempts * 100)}% — гнать объём "
+                          f"бессмысленно и рискованно"}
+
+    if attempts >= 20 and ok / attempts >= 0.8:
+        return {"pace_mult": 0.75, "batch_size": None,
+                "reason": f"флот сегодня чист ({ok} успешных, флудов нет) — "
+                          f"можно быстрее базового"}
+
+    return neutral
+
+
 async def recommended_daily_limit(pool, account_id: int) -> dict:
     """Сколько инвайтов в сутки безопасно для ЭТОГО аккаунта — по его истории.
 
