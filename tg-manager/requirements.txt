@@ -24,6 +24,10 @@ anthropic>=0.69.0
 telethon>=1.36.0
 PySocks>=1.7.1
 qrcode[pil]>=7.4
+# Pillow приходил транзитивно через qrcode[pil]; теперь это ПРЯМАЯ зависимость
+# (services/avatar_factory.py рисует аватары), поэтому пин явный — иначе смена
+# экстры в qrcode тихо унесла бы генератор аватаров.
+Pillow>=10.0.0
 aiohttp-socks>=0.7.3
 pypdf>=4.3.1
 python-docx>=1.1.2
