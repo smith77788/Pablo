@@ -368,7 +368,11 @@ def render_text(pattern: str, geo: dict, rng: random.Random) -> str:
     """
     from services.presence_planner import render_pattern
 
-    rendered = render_pattern(pattern or "", geo)
+    # rng передаётся ОБЯЗАТЕЛЬНО: render_pattern раскрывает и токены
+    # уникальности ({2}, {rand4}). Без сида они берутся из свежего Random, и
+    # предпросмотр перестаёт совпадать с исполнением — ровно тот обман, ради
+    # исключения которого весь генератор детерминирован по plan_seed.
+    rendered = render_pattern(pattern or "", geo, rng)
     if "{" not in rendered or "|" not in rendered:
         return rendered
     try:

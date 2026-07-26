@@ -65,11 +65,40 @@ def _seeded_rng(*parts: object) -> random.Random:
     return random.Random(_seed_int(*parts))
 
 
+def _split_top_level(line: str, sep: str = "|") -> list[str]:
+    """Разбить строку по `sep`, ИГНОРИРУЯ разделители внутри фигурных скобок.
+
+    `|` служит сразу двум механизмам вариативности: разделяет шаблоны в пуле и
+    альтернативы в spintax-группе `{Новости|Вести}`. Наивный `split("|")` рвал
+    группу на мусор (`'{Новости'` + `'Вести} …'`), и заметно это было только по
+    кривым названиям уже созданных каналов.
+    """
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for ch in line:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+        if ch == sep and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return parts
+
+
 def split_pool(text: str) -> list[str]:
-    """Пул шаблонов из текста: по строкам и `|`, без пустых. Один шаблон → [шаблон]."""
+    """Пул шаблонов из текста: по строкам и `|`, без пустых. Один шаблон → [шаблон].
+
+    Разделитель `|` внутри `{...}` не считается границей шаблона — это
+    spintax-альтернатива, а не второй шаблон пула.
+    """
     out: list[str] = []
     for line in (text or "").replace("\r", "").split("\n"):
-        for part in line.split("|"):
+        for part in _split_top_level(line):
             p = part.strip()
             if p:
                 out.append(p)

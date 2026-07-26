@@ -381,3 +381,57 @@ def test_no_usernames_when_explicitly_disabled():
     # А при пустом пуле — наоборот, имена обязаны появиться из библиотеки.
     with_names = ig.build_project_targets(_GEO, roles=["news"], plan_seed=1)
     assert all(t["planned_username"] for t in with_names)
+
+
+# ── Стык двух механизмов вариативности ──────────────────────────────────────
+# Пул шаблонов и spintax-группа оба используют «|», а токены уникальности
+# ({2}, {rand4}) живут в том же render_pattern, что и гео-плейсхолдеры.
+# Здесь защищается их мирное сосуществование.
+
+def test_uniqueness_tokens_stay_deterministic():
+    """Регресс: {2}/{rand4} в пользовательском паттерне раскрывались свежим
+    Random, и предпросмотр переставал совпадать с исполнением.
+
+    Детерминизм — основа обещания «вы видите то, что создастся», поэтому он
+    обязан держаться и на токенах уникальности, а не только на выборе шаблона.
+    """
+    geo = [{"city": "Samara", "city_native": "Самара", "city_slug": "samara",
+            "country": "Russia", "country_code": "ru"}]
+    kw = dict(roles=["news"], name_pool=["Новости {{CITY_NAME}} {2}"], plan_seed=777)
+    a = ig.build_project_targets(geo, **kw)
+    b = ig.build_project_targets(geo, **kw)
+    assert a[0]["planned_name"] == b[0]["planned_name"]
+    # И токен действительно раскрыт, а не оставлен в тексте.
+    assert "{2}" not in a[0]["planned_name"]
+
+
+def test_spintax_group_not_split_as_pool():
+    """Регресс: split_pool рвал `{Новости|Вести}` на `'{Новости'` + `'Вести} …'`.
+
+    Заметить это можно было только по кривым названиям уже созданных каналов:
+    оба механизма используют «|», и наивный split ломал spintax молча.
+    """
+    from services.presence_planner import split_pool
+
+    assert split_pool("{Новости|Вести} {{CITY_NAME}}") == ["{Новости|Вести} {{CITY_NAME}}"]
+    # При этом пул по-прежнему разделяется — и строками, и «|» верхнего уровня.
+    assert split_pool("Новости {{CITY}}\nВести {{CITY}}") == [
+        "Новости {{CITY}}", "Вести {{CITY}}"
+    ]
+    assert split_pool("{Новости|Вести} {{CITY}}|Афиша {{CITY}}") == [
+        "{Новости|Вести} {{CITY}}", "Афиша {{CITY}}"
+    ]
+
+
+def test_spintax_expands_through_generator():
+    geo = [{"city": "Samara", "city_native": "Самара", "city_slug": "samara"}]
+    out = {
+        ig.build_project_targets(
+            geo, roles=["news"], name_pool=["{Новости|Вести|Сводка} {{CITY_NAME}}"],
+            plan_seed=s,
+        )[0]["planned_name"]
+        for s in range(30)
+    }
+    # Группа раскрыта (скобок не осталось) и даёт больше одного варианта.
+    assert all("{" not in n for n in out), out
+    assert len(out) > 1, out
