@@ -435,3 +435,59 @@ def test_spintax_expands_through_generator():
     # Группа раскрыта (скобок не осталось) и даёт больше одного варианта.
     assert all("{" not in n for n in out), out
     assert len(out) > 1, out
+
+
+# ── Внутригородские районы (4-й уровень) ────────────────────────────────────
+
+def test_districts_keep_their_own_scope():
+    """Регресс: expand_geo_levels затирал scope узла именем города.
+
+    Районы приходят из geo_data уже со своим scope («Адлерский район»).
+    Перезапись давала четыре канала «Новости Сочи» с разными username —
+    одинаковые названия на сетке видно сразу.
+    """
+    from services.geo_data import expand_city_to_districts
+
+    sochi = {"city": "Sochi", "city_native": "Сочи", "city_slug": "sochi",
+             "country": "Russia", "country_code": "ru", "region": "Краснодарский край"}
+    nodes = expand_city_to_districts(sochi)
+    assert len(nodes) > 1, "у Сочи должны быть районы"
+
+    targets = ig.build_project_targets(nodes, roles=["news"], levels=["city"], plan_seed=3)
+    names = [t["planned_name"] for t in targets]
+    unames = [t["planned_username"] for t in targets]
+    assert len(set(names)) == len(names), f"названия районов совпали: {names}"
+    assert len(set(unames)) == len(unames)
+    # И район реально попал в название, а не только в username.
+    assert any("район" in n.lower() for n in names), names
+
+
+def test_district_names_declined_correctly():
+    from services.geo_data import expand_city_to_districts
+
+    moscow = {"city": "Moscow", "city_native": "Москва", "city_slug": "moscow",
+              "country": "Russia", "country_code": "ru", "region": "Москва"}
+    nodes = expand_city_to_districts(moscow)
+    targets = ig.build_project_targets(nodes, roles=["chat"], levels=["city"], plan_seed=1)
+    abouts = " ".join(t["planned_about"] or "" for t in targets)
+    # Родительный падеж составного названия сохраняет регистр обеих частей:
+    # «Северо-восточного» — потерянная прописная после дефиса.
+    assert "Северо-восточного" not in abouts, abouts[:200]
+
+
+def test_hyphenated_case_preserved():
+    assert ru_morph.genitive("Северо-Восточный округ") == "Северо-Восточного округа"
+    assert ru_morph.prepositional("Юго-Западный округ") == "Юго-Западном округе"
+
+
+def test_preposition_o_before_vowel():
+    # «о Адлерском» читается как опечатка; правило «о/об» без исключений.
+    assert ru_morph.fix_prepositions("Всё важное о Адлерском районе") == \
+        "Всё важное об Адлерском районе"
+    assert ru_morph.fix_prepositions("Всё важное о Москве") == "Всё важное о Москве"
+    assert ru_morph.fix_prepositions("") == ""
+
+
+def test_preposition_fix_applied_in_render():
+    geo = {"city": "Omsk", "city_native": "Омск", "city_slug": "omsk"}
+    assert render_pattern("Всё важное о {{CITY_LOC}}", geo) == "Всё важное об Омске"

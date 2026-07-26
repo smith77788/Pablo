@@ -449,14 +449,24 @@ def expand_geo_levels(geo_list: list[dict], levels) -> list[dict]:
             city = (geo.get("city") or "").strip()
             if not city:
                 continue
-            out.append(
-                {
-                    **geo,
-                    "level": LEVEL_CITY,
-                    "scope": geo.get("city_native") or city,
-                    "scope_slug": geo.get("city_slug") or slugify(city),
-                }
-            )
+            # Узел уже может нести СВОЙ scope — так приходят внутригородские
+            # районы («Адлерский район» внутри Сочи). Затирать его именем
+            # города нельзя: все районы получили бы одинаковое название при
+            # разных username, то есть четыре канала «Новости Сочи».
+            district = (geo.get("district") or "").strip()
+            node_scope = (geo.get("scope") or "").strip() or geo.get("city_native") or city
+            node = {
+                **geo,
+                "level": LEVEL_CITY,
+                "scope": node_scope,
+                "scope_slug": geo.get("scope_slug") or geo.get("city_slug") or slugify(city),
+            }
+            if district:
+                # Библиотечные шаблоны написаны через {{CITY_NAME}}, поэтому у
+                # районного узла «именем города» становится сам район —
+                # иначе тематические шаблоны игнорировали бы разбиение.
+                node["city_native"] = district
+            out.append(node)
 
     return out
 

@@ -163,6 +163,9 @@ def render_pattern(pattern: str, geo: dict, rng: random.Random | None = None) ->
     }
     for key, val in replacements.items():
         pattern = pattern.replace(key, val)
+    # «о Адлерском» → «об Адлерском»: выбрать форму предлога можно только
+    # ПОСЛЕ подстановки — в шаблоне на этом месте стоит плейсхолдер.
+    pattern = ru_morph.fix_prepositions(pattern)
     return expand_random_tokens(pattern, rng or random.Random())
 
 

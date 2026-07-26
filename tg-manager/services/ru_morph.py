@@ -68,9 +68,21 @@ def is_russian_declinable(text: str) -> bool:
 
 
 def _match_case(source: str, result: str) -> str:
-    """Сохранить регистр первой буквы исходного слова."""
+    """Сохранить регистр исходного слова, включая части после дефиса.
+
+    «Северо-Восточный» склоняется целиком в нижнем регистре, и восстановление
+    только первой буквы давало «Северо-восточного» — вторая часть теряла
+    прописную. Для составных названий это видно сразу.
+    """
     if not result:
         return result
+    src_parts = source.split("-")
+    res_parts = result.split("-")
+    if len(src_parts) == len(res_parts) and len(src_parts) > 1:
+        out = []
+        for s, r in zip(src_parts, res_parts):
+            out.append(r[0].upper() + r[1:] if (s[:1].isupper() and r) else r)
+        return "-".join(out)
     if source[:1].isupper():
         return result[0].upper() + result[1:]
     return result
@@ -232,3 +244,20 @@ def prepositional(name: str) -> str:
     if not name or not is_russian_declinable(name):
         return name
     return _decline_phrase(name, "loc")
+
+
+# Предлоги, у которых форма зависит от следующего слова. Полный набор правил
+# («в/во», «с/со») требует знания сочетаний согласных и даёт ошибки чаще, чем
+# пользы, поэтому здесь только «о/об» — правило без исключений для топонимов.
+_RE_O_BEFORE_VOWEL = re.compile(r"(?<![а-яёА-ЯЁ])о\s+(?=[аэиоуыАЭИОУЫ])")
+
+
+def fix_prepositions(text: str) -> str:
+    """«о Адлерском» → «об Адлерском». Остальной текст не трогается.
+
+    Применяется после подстановки падежей: до неё в шаблоне стоит
+    плейсхолдер, и предлог выбрать невозможно.
+    """
+    if not text or " о " not in f" {text}":
+        return text
+    return _RE_O_BEFORE_VOWEL.sub("об ", text)
