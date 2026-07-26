@@ -1823,6 +1823,44 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div id="mjErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
+    <div class="sec">Рассылка в личные сообщения</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <textarea id="daUsers" rows="2" placeholder="@user1, @user2, @user3" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <textarea id="daText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст сообщения…" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input type="number" id="daDelay" value="30" min="5" max="600" title="Задержка между сообщениями, сек" style="flex:0 0 100px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · spintax обязателен</div>
+      </div>
+      <button class="btn btn-p" style="width:100%" onclick="submitDmAdhoc()">✉️ Разослать в ЛС</button>
+      <div id="daErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+    </div>
+
+    <div class="sec">Пост во все каналы аккаунта</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <select id="bpAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт...</option></select>
+      <textarea id="bpText" rows="3" placeholder="{{Новость|Обновление}}: текст поста…" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <button class="btn btn-p" style="width:100%" onclick="submitBulkPostChans()">📤 Опубликовать во все</button>
+      <div id="bpErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+    </div>
+
+    <div class="sec">🚨 Массовая жалоба</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <input type="text" id="mrTarget" placeholder="@target или t.me/target" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="mrReason" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+        <option value="spam">🗑 Спам</option>
+        <option value="violence">⚔️ Насилие</option>
+        <option value="porn">🔞 Порнография</option>
+        <option value="drugs">💊 Наркотики</option>
+        <option value="fake">🎭 Фейк</option>
+        <option value="personal">🔓 Личные данные</option>
+        <option value="other">📋 Другое</option>
+      </select>
+      <input type="text" id="mrText" placeholder="Пояснение (необязательно)" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">⚠️ Жалобы идут с ваших реальных аккаунтов — самая рискованная операция после Strike. При перегрузке инфраструктуры запуск будет отклонён.</div>
+      <button class="btn btn-d" style="width:100%" onclick="submitMassReport()">🚨 Отправить жалобы</button>
+      <div id="mrErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
+    </div>
+
     <div class="sec">Массовое редактирование</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <select id="beTarget" onchange="beSyncFields()" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
@@ -14651,6 +14689,71 @@ const MASS_OP_LABELS = {
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
+// Разовая рассылка в ЛС — операция bulk_dm_adhoc, как в боте.
+async function submitDmAdhoc() {
+  const errEl = document.getElementById('daErr');
+  errEl.textContent = '';
+  const raw = (document.getElementById('daUsers')?.value || '').trim();
+  const usernames = raw.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean);
+  const text = (document.getElementById('daText')?.value || '').trim();
+  const delay = parseInt(document.getElementById('daDelay')?.value) || 30;
+  if (!usernames.length) { errEl.textContent = 'Укажите хотя бы один @username'; return; }
+  if (!text) { errEl.textContent = 'Введите текст сообщения'; return; }
+  const accIds = [...document.querySelectorAll('.mj-acc-cb:checked')].map(cb=>+cb.value);
+  if (!await askConfirm(`Разослать сообщение ${usernames.length} получателям?\n\nСообщения уйдут реальным людям — отменить отправку нельзя.\nЗадержка: ${delay}с между отправками.`)) return;
+  try {
+    const r = await api('/api/miniapp/dm/adhoc_send', {method:'POST', body:JSON.stringify({
+      usernames, text, delay, account_ids: accIds,
+    })});
+    toast(`✉️ Рассылка запущена · ${r.recipients} получателей × ${r.accounts} акк. · #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Рассылка в ЛС');
+    document.getElementById('daUsers').value = '';
+    openMassOps();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+}
+
+// Пост во все каналы аккаунта — операция bulk_post_chans, как в боте.
+async function submitBulkPostChans() {
+  const errEl = document.getElementById('bpErr');
+  errEl.textContent = '';
+  const accId = document.getElementById('bpAccount')?.value;
+  const text = (document.getElementById('bpText')?.value || '').trim();
+  if (!accId) { errEl.textContent = 'Выберите аккаунт'; return; }
+  if (!text) { errEl.textContent = 'Введите текст поста'; return; }
+  if (!await askConfirm('Опубликовать во ВСЕ каналы этого аккаунта?\n\nПосты появятся в Telegram — массово отменить нельзя.')) return;
+  try {
+    const r = await api('/api/miniapp/channels/bulk_post', {method:'POST', body:JSON.stringify({
+      acc_id: +accId, text,
+    })});
+    toast(`📤 Публикация запущена · каналов: ${r.channels} · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Пост во все каналы');
+    document.getElementById('bpText').value = '';
+    openMassOps();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+}
+
+// Массовая жалоба — операция mass_report. Самая рискованная после Strike.
+async function submitMassReport() {
+  const errEl = document.getElementById('mrErr');
+  errEl.textContent = '';
+  const target = (document.getElementById('mrTarget')?.value || '').trim();
+  const reason = document.getElementById('mrReason')?.value || 'spam';
+  const reportText = (document.getElementById('mrText')?.value || '').trim();
+  if (!target) { errEl.textContent = 'Укажите цель жалобы'; return; }
+  const accIds = [...document.querySelectorAll('.mj-acc-cb:checked')].map(cb=>+cb.value);
+  const scope = accIds.length ? `${accIds.length} выбранных аккаунтов` : 'ВСЕХ ваших активных аккаунтов';
+  if (!await askConfirm(`Отправить жалобы на ${target} с ${scope}?\n\nЭто рискованная операция: жалобы идут с реальных аккаунтов и могут привести к ограничениям. Отменить отправленные жалобы нельзя.`)) return;
+  try {
+    const r = await api('/api/miniapp/mass_report', {method:'POST', body:JSON.stringify({
+      target, reason, report_text: reportText, account_ids: accIds,
+    })});
+    toast(`🚨 Жалобы запущены · ${r.accounts} акк. · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Массовая жалоба');
+    document.getElementById('mrTarget').value = '';
+    openMassOps();
+  } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
+}
+
 // Массовое редактирование: каналы / боты / профили. Поля ровно те, что понимают
 // исполнители — иначе получился бы «тихий успех» (операция прошла, эффекта нет).
 const BE_FIELDS = {
@@ -14776,10 +14879,13 @@ async function openMassOps() {
           ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
       : '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>');
     beSyncFields();
-    const ga = document.getElementById('gaAccount');
-    if (ga) ga.innerHTML = live.length
+    const accOpts = live.length
       ? live.map(a=>`<option value="${a.id}">${esc(a.phone||a.first_name||('#'+a.id))}</option>`).join('')
       : '<option value="">Нет активных аккаунтов</option>';
+    for (const id of ['gaAccount', 'bpAccount']) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = accOpts;
+    }
   } catch(_) { txt('mjAccounts','<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'); }
   try {
     const rows = await api('/api/miniapp/mass_ops');
