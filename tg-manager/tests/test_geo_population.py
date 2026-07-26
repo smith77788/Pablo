@@ -46,6 +46,22 @@ def test_filter_min_pop_zero_returns_all():
     assert g.filter_by_population(cities, 0) == cities
 
 
+def test_preset_options_carry_population_and_district():
+    opts = g.preset_city_options("russia")
+    moscow = next(o for o in opts if o["city"] == "Moscow")
+    assert moscow["population"] == g.city_population("moscow")
+    assert moscow["federal_district"] == "Центральный ФО"
+    # обратная совместимость: старые поля на месте
+    assert {"city", "city_native", "city_slug", "country"} <= set(opts[0])
+
+
+def test_preset_options_min_population_filter():
+    big = g.preset_city_options("russia", min_population=1_000_000)
+    assert big and all(o["population"] >= 1_000_000 for o in big)
+    # без фильтра городов больше
+    assert len(big) < len(g.preset_city_options("russia"))
+
+
 def test_population_keys_match_known_city_slugs():
     """Ключи таблицы населения — валидные slug'и (нижний регистр, без пробелов)."""
     for slug in g.CITY_POPULATION:

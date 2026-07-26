@@ -2408,20 +2408,31 @@ def parse_custom_geo_list(text: str) -> list[dict]:
     return enrich_geo_list(cities)
 
 
-def preset_city_options(preset_key: str) -> list[dict]:
+def preset_city_options(preset_key: str, min_population: int = 0) -> list[dict]:
     """Компактный список городов пресета для выбора галочками в UI:
-    [{city, city_native, city_slug, country}]. Пустой список — неизвестный пресет."""
+    [{city, city_native, city_slug, country, population, federal_district}].
+    Пустой список — неизвестный пресет.
+
+    population/federal_district добавлены, чтобы UI мог показывать население,
+    сортировать/группировать по федеральному округу и фильтровать «города > N».
+    min_population>0 → оставить только города с известным населением >= порога
+    (по умолчанию 0 — фильтр выключен, обратная совместимость)."""
     preset = GEO_PRESETS.get(preset_key)
     if not preset:
         return []
     out = []
     for c in preset.get("cities", []):
+        slug = c.get("city_slug", "")
         out.append({
             "city": c.get("city", ""),
             "city_native": c.get("city_native", "") or c.get("city", ""),
-            "city_slug": c.get("city_slug", ""),
+            "city_slug": slug,
             "country": c.get("country", ""),
+            "population": city_population(slug),
+            "federal_district": federal_district(c.get("region", "")),
         })
+    if min_population > 0:
+        out = [o for o in out if o["population"] and o["population"] >= min_population]
     return out
 
 
