@@ -205,6 +205,83 @@ _INVITE_LIMIT_FLOOR = 5
 _INVITE_LIMIT_CEILING = 50
 
 
+async def account_risk_factors(pool, account_id: int) -> dict:
+    """Свойства самого аккаунта, влияющие на безопасный объём.
+
+    История действий (флуды, конверсия) отвечает на вопрос «как он себя вёл»,
+    но не на «насколько он вообще похож на живого человека». Молодой аккаунт с
+    пустым профилем ограничат быстрее, чем годовалый с заполненной анкетой, —
+    даже при одинаковой истории.
+
+    Считаем ТОЛЬКО по данным, которые в системе реально есть:
+      * возраст — из `reg_check_cache.reg_date` (оценка по интерполяции
+        Telegram-ID, метод уже используется модулем reg_check);
+      * заполненность профиля — есть ли имя и username;
+      * зрелость у нас — `warmup_level`.
+    ЧЕГО НЕТ и что поэтому НЕ участвует: Premium-статус, наличие аватарки,
+    страна регистрации (в `tg_accounts` таких колонок нет; `lang_code` — слишком
+    слабый прокси, чтобы на нём резать лимиты). Домысливать эти факторы значило
+    бы считать риск по выдуманным данным — вреднее, чем не считать вовсе.
+
+    Возвращает {multiplier, notes}: multiplier ≤ 1.0 — во сколько урезать объём,
+    notes — список человекочитаемых причин.
+    """
+    neutral = {"multiplier": 1.0, "notes": []}
+    if not pool or not account_id:
+        return neutral
+    try:
+        row = await pool.fetchrow(
+            """SELECT a.first_name, a.username, a.warmup_level, a.tg_user_id,
+                      r.reg_date
+               FROM tg_accounts a
+               LEFT JOIN reg_check_cache r
+                      ON r.entity_id = a.tg_user_id AND r.entity_type = 'user'
+               WHERE a.id = $1""",
+            int(account_id),
+        )
+    except Exception:
+        log.debug("account_risk_factors: query failed acc=%s", account_id, exc_info=True)
+        return neutral
+    if not row:
+        return neutral
+
+    mult, notes = 1.0, []
+
+    reg_date = row.get("reg_date")
+    if reg_date is not None:
+        try:
+            import datetime as _dt
+            age_days = (_dt.datetime.now(_dt.timezone.utc) - reg_date).days
+            if age_days < 14:
+                mult *= 0.4
+                notes.append(f"аккаунт совсем новый ({age_days} дн.)")
+            elif age_days < 60:
+                mult *= 0.7
+                notes.append(f"молодой аккаунт ({age_days} дн.)")
+            elif age_days > 365:
+                mult *= 1.15
+                notes.append(f"возраст {age_days // 365} г. — доверия больше")
+        except Exception:
+            pass
+
+    if not (row.get("first_name") or "").strip():
+        mult *= 0.6
+        notes.append("пустое имя профиля")
+    if not (row.get("username") or "").strip():
+        mult *= 0.85
+        notes.append("нет username")
+
+    try:
+        warm = int(row.get("warmup_level") or 0)
+        if warm <= 0:
+            mult *= 0.7
+            notes.append("аккаунт не прогрет")
+    except (TypeError, ValueError):
+        pass
+
+    return {"multiplier": round(max(0.2, min(mult, 1.3)), 3), "notes": notes}
+
+
 async def recommended_daily_limit(pool, account_id: int) -> dict:
     """Сколько инвайтов в сутки безопасно для ЭТОГО аккаунта — по его истории.
 
@@ -275,12 +352,22 @@ async def recommended_daily_limit(pool, account_id: int) -> dict:
             limit = int(limit * 0.6)
             basis += f"; доля успеха {success:.0%} — объём урезан"
 
+    # Свойства самого аккаунта (возраст/профиль/прогрев) — поверх истории:
+    # история говорит «как он себя вёл», факторы — «насколько он вообще похож
+    # на живого». Молодой аккаунт с пустым профилем ограничат быстрее даже при
+    # идентичной истории.
+    factors = await account_risk_factors(pool, account_id)
+    if factors.get("notes"):
+        limit = int(limit * float(factors.get("multiplier") or 1.0))
+        basis += "; " + ", ".join(factors["notes"])
+
     limit = max(_INVITE_LIMIT_FLOOR, min(limit, _INVITE_LIMIT_CEILING))
     return {
         "limit": limit,
         "used_today": today,
         "remaining": max(0, limit - today),
         "basis": basis,
+        "factors": factors,
     }
 
 

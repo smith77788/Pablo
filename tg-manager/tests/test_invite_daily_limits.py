@@ -27,11 +27,21 @@ WORKER = Path(__file__).resolve().parents[1] / "services" / "op_worker.py"
 
 
 class _Pool:
+    """Пул для проверки расчёта ПО ИСТОРИИ.
+
+    Важно: `recommended_daily_limit` делает ДВА разных запроса — статистику и
+    факторы аккаунта. Наивный пул, отвечающий одной строкой на оба, подставлял бы
+    строку статистики как профиль аккаунта и ложно срезал лимит. Поэтому на
+    запрос факторов отвечаем None (= данных о профиле нет → нейтрально).
+    """
+
     def __init__(self, row):
         self.row = row
         self.executed: list[tuple] = []
 
     async def fetchrow(self, q, *a):
+        if "reg_check_cache" in q:
+            return None
         return self.row
 
     async def execute(self, q, *a):
@@ -145,3 +155,72 @@ def test_invite_applies_strictest_limit():
     assert "recommended_daily_limit" in src, "рекомендация должна реально применяться"
     assert "min(_acc_cap" in src, "берём СТРОЖАЙШИЙ из ручного и рекомендованного"
     assert "_remaining <= 0" in src, "исчерпанный суточный лимит обязан пропускать аккаунт"
+
+
+# ── факторы самого аккаунта (уровень 1: возраст/профиль/прогрев) ─────────────
+
+class _FactorPool:
+    """Пул, отвечающий разными строками на запрос статистики и на запрос факторов."""
+
+    def __init__(self, stats, acc):
+        self.stats, self.acc = stats, acc
+
+    async def fetchrow(self, q, *a):
+        return self.acc if "reg_check_cache" in q else self.stats
+
+
+def _mature(**over):
+    import datetime as d
+    base = {
+        "first_name": "Иван", "username": "ivan", "warmup_level": 3, "tg_user_id": 1,
+        "reg_date": d.datetime.now(d.timezone.utc) - d.timedelta(days=500),
+    }
+    base.update(over)
+    return base
+
+
+_CLEAN = {"inv_ok": 80, "fails": 5, "floods": 0, "active_days": 5, "best_day": 20, "today": 0}
+
+
+def _limit_for(acc):
+    return _run(fe.recommended_daily_limit(_FactorPool(_CLEAN, acc), 1))
+
+
+def test_young_account_gets_smaller_limit():
+    import datetime as d
+    young = _mature(reg_date=d.datetime.now(d.timezone.utc) - d.timedelta(days=10))
+    assert _limit_for(young)["limit"] < _limit_for(_mature())["limit"], (
+        "молодой аккаунт ограничат быстрее даже при той же истории"
+    )
+
+
+def test_empty_profile_gets_smaller_limit():
+    assert _limit_for(_mature(first_name="", username=""))["limit"] < _limit_for(_mature())["limit"], (
+        "пустой профиль — спам-признак"
+    )
+
+
+def test_unwarmed_account_gets_smaller_limit():
+    assert _limit_for(_mature(warmup_level=0))["limit"] < _limit_for(_mature())["limit"]
+
+
+def test_factors_are_explained_to_human():
+    r = _limit_for(_mature(first_name=""))
+    assert "профил" in r["basis"], "причина среза должна быть видна человеку"
+    assert r.get("factors", {}).get("notes"), "факторы возвращаются отдельным полем"
+
+
+def test_missing_reg_date_does_not_penalise():
+    """Нет оценки возраста — не выдумываем: аккаунт не наказывается за пробел
+    в наших данных."""
+    no_reg = _limit_for(_mature(reg_date=None))["limit"]
+    assert no_reg >= _limit_for(_mature(warmup_level=0))["limit"]
+
+
+def test_absent_factors_not_fabricated():
+    """Premium/аватар/страна в tg_accounts не хранятся — их НЕ должно быть в
+    расчёте: считать риск по выдуманным данным вреднее, чем не считать."""
+    import inspect
+    src = inspect.getsource(fe.account_risk_factors)
+    for ghost in ("premium", "avatar", "photo"):
+        assert f'"{ghost}"' not in src.lower(), f"{ghost} нет в схеме — не выдумывать"
