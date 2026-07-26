@@ -61,7 +61,7 @@ def test_pause_is_per_account_and_adaptive():
     assert "recommended_delay" in src, "темп должен считать риск-движок"
     assert "gaussian_delay" in src, "интервалы обязаны быть неровными, а не по метроному"
     # пауза берётся ДЛЯ КОНКРЕТНОГО аккаунта, а не одна на всех
-    assert re.search(r"_invite_pause\(\s*acc\[.id.\]\s*\)", src), (
+    assert re.search(r"_invite_pause\(\s*(acc\[.id.\]|acc_id)\s*\)", src), (
         "пауза должна вычисляться на аккаунт, а не глобально"
     )
 
@@ -91,22 +91,24 @@ def test_learning_not_called_after_flood():
     """Успех фиксируется ПОСЛЕ проверки флуда: словивший флуд батч не должен
     одновременно понижать штраф."""
     src = _exec_src()
-    # Блоки-циклы = те, где есть И обработка флуда, И учёт успеха. Первое
+    # Блок-цикл = тот, где есть И обработка флуда, И учёт успеха. Первое
     # совпадение по peer_flood лежит внутри самого _rest_invite_account —
     # это не цикл, его отсеиваем.
     blocks = [b for b in re.findall(r'if res\.get\("peer_flood"\).*?_invite_pause', src, re.DOTALL)
               if "_rest_invite_account" in b and "_invite_learn_ok" in b]
-    assert len(blocks) == 2, (
-        f"ожидались два цикла инвайта (users и phones), найдено {len(blocks)}"
+    assert len(blocks) == 1, (
+        f"после перехода на общую очередь цикл инвайта один, найдено {len(blocks)}"
     )
-    for block in blocks:
-        assert block.find("_rest_invite_account") < block.find("_invite_learn_ok"), (
-            "порядок должен быть: обработать флуд → break; успех учитывать только "
-            "если флуда не было"
-        )
-        assert "break" in block.split("_invite_learn_ok")[0], (
-            "после обработки флуда обязателен break — иначе успех зачтётся тому же батчу"
-        )
+    block = blocks[0]
+    assert block.find("_rest_invite_account") < block.find("_invite_learn_ok"), (
+        "порядок должен быть: обработать флуд → выйти; успех учитывать только "
+        "если флуда не было"
+    )
+    head = block.split("_invite_learn_ok")[0]
+    assert "continue" in head or "break" in head, (
+        "после обработки флуда обязателен выход из итерации — иначе успех "
+        "зачтётся тому же батчу"
+    )
 
 
 def test_pause_fail_safe():

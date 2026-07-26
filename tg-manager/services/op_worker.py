@@ -7866,6 +7866,8 @@ async def _exec_mass_invite(
     Распределяет user_refs и phones между аккаунтами равномерно.
     При PeerFlood у аккаунта — переключается на следующий.
     """
+    from collections import deque
+
     from services import mass_inviter_engine as inv
 
     group = params.get("group", "")
@@ -8057,39 +8059,45 @@ async def _exec_mass_invite(
     total_ok, total_fail = 0, 0
     all_users = list(user_refs)
     all_phones = list(phones)
-    n_accs = len(accounts)
 
-    # Разбиваем пользователей по аккаунтам
-    def _chunks(lst, n):
-        size = max(1, (len(lst) + n - 1) // n)
-        for i in range(0, len(lst), size):
-            yield lst[i:i + size]
+    # ── Очередь-планировщик ──────────────────────────────────────────────────
+    # Раньше аудитория НАРЕЗАЛАСЬ по аккаунтам заранее (_chunks). Цену платил
+    # пользователь, причём дважды:
+    #   • аккаунт словил флуд на середине своего куска — весь его хвост исчезал
+    #     НАВСЕГДА, хотя рядом стояли свежие аккаунты;
+    #   • аккаунт, чей кусок кончился или был срезан суточным лимитом, просто
+    #     простаивал, пока другие догрызали свои куски.
+    # Теперь цели лежат в ОДНОЙ общей очереди, аккаунты разбирают её по батчу за
+    # круг, а неотработанный хвост возвращается в голову очереди. Побочный — и
+    # для anti-detection не менее важный — эффект: круговая ротация вместо
+    # «выжать один аккаунт досуха, потом взяться за следующий» размазывает
+    # нагрузку по флоту, а не рисует всплеск на одном аккаунте.
+    q_users: deque = deque(all_users)
+    q_phones: deque = deque(all_phones)
+    retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
+    budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
+    group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
 
-    acc_user_chunks = list(_chunks(all_users, n_accs)) if all_users else [[] for _ in accounts]
-    acc_phone_chunks = list(_chunks(all_phones, n_accs)) if all_phones else [[] for _ in accounts]
+    def _take(q: deque, n: int) -> list:
+        out: list = []
+        while q and len(out) < n:
+            out.append(q.popleft())
+        return out
 
-    # Выравниваем длину списков
-    while len(acc_user_chunks) < n_accs:
-        acc_user_chunks.append([])
-    while len(acc_phone_chunks) < n_accs:
-        acc_phone_chunks.append([])
+    def _give_back(q: deque, items: list) -> None:
+        """Вернуть неотработанное в ГОЛОВУ очереди — порядок аудитории сохраняется."""
+        for it in reversed(items):
+            q.appendleft(it)
 
-    step = 0
-    for acc_idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            break
-        if _max_invites and step >= _max_invites:
-            log.info("mass_invite op=%d: достигнут лимит за прогон (%d)", op_id, _max_invites)
-            break
+    async def _acc_budget(acc) -> int:
+        """Сколько инвайтов аккаунт вправе сделать за прогон (0 = выбыл).
 
-        u_chunk = acc_user_chunks[acc_idx]
-        p_chunk = acc_phone_chunks[acc_idx]
-
-        # Лимит на аккаунт: берём СТРОЖАЙШИЙ из двух — заданного пользователем и
-        # рекомендованного по фактической истории самого аккаунта. Ручное число
-        # одно на всю операцию и не знает, что один аккаунт год работает чисто, а
-        # другой словил флуд вчера; рекомендация это знает. Уже израсходованное за
-        # сегодня вычитается, поэтому повторный запуск не удваивает суточный объём.
+        Берём СТРОЖАЙШИЙ из двух — заданного пользователем и рекомендованного по
+        фактической истории самого аккаунта. Ручное число одно на всю операцию и
+        не знает, что один аккаунт год работает чисто, а другой словил флуд
+        вчера; рекомендация это знает. Уже израсходованное за сегодня
+        вычитается, поэтому повторный запуск не удваивает суточный объём.
+        """
         _acc_cap = _per_acc_limit
         try:
             from services.flood_engine import recommended_daily_limit
@@ -8098,100 +8106,147 @@ async def _exec_mass_invite(
             _acc_cap = _remaining if not _acc_cap else min(_acc_cap, _remaining)
             if _remaining <= 0:
                 log.info(
-                    "mass_invite op=%d acc=%s: суточный лимит исчерпан (%d/%d, %s)",
+                    "mass_invite op=%d acc=%s: суточный лимит исчерпан (%s/%s, %s)",
                     op_id, acc.get("id"), _rec.get("used_today"), _rec.get("limit"),
                     _rec.get("basis"),
                 )
-                continue
+                return 0
         except Exception:
             log.debug("mass_invite: daily limit unavailable acc=%s", acc.get("id"))
+        # Ни ручного лимита, ни рекомендации — потолком служит сама очередь.
+        return _acc_cap if _acc_cap else (len(all_users) + len(all_phones))
 
-        if _acc_cap:
-            u_chunk = u_chunk[:_acc_cap]
-            p_chunk = p_chunk[:max(0, _acc_cap - len(u_chunk))]
+    step = 0
+    while (q_users or q_phones) and not group_broken:
+        if await _is_cancelled(pool, op_id):
+            break
+        if _max_invites and step >= _max_invites:
+            log.info("mass_invite op=%d: достигнут лимит за прогон (%d)", op_id, _max_invites)
+            break
+        active = [a for a in accounts if int(a["id"]) not in retired]
+        if not active:
+            log.info(
+                "mass_invite op=%d: свободных аккаунтов не осталось, в очереди %d целей",
+                op_id, len(q_users) + len(q_phones),
+            )
+            break
 
-        if not u_chunk and not p_chunk:
-            continue
+        progressed = False
+        for acc in active:
+            if group_broken:
+                break
+            if not q_users and not q_phones:
+                break
+            if await _is_cancelled(pool, op_id):
+                break
+            if _max_invites and step >= _max_invites:
+                break
 
-        # Инвайт по user_refs батчами
-        if u_chunk:
-            for i in range(0, len(u_chunk), batch_size):
-                if await _is_cancelled(pool, op_id):
-                    break
-                if _max_invites and step >= _max_invites:
-                    break
-                batch = u_chunk[i:i + batch_size]
-                try:
-                    res = await inv.invite_batch(acc["session_str"], dict(acc), group, batch)
-                    total_ok += res["ok"]
-                    total_fail += res["failed"]
-                    step += len(batch)
-                    await pool.execute(
-                        "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
-                        op_id, len(batch),
-                    )
-                    if res.get("peer_flood") or res.get("flood_wait"):
-                        log.warning(
-                            "mass_invite op=%d acc=%s %s — cooldown+switch", op_id, acc.get("id"),
-                            "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
-                        )
-                        await bump_daily_stats(pool, acc["id"], floods=1,
-                                               fail=res.get("failed") or 0)
-                        await _rest_invite_account(acc["id"], res)
-                        break
-                    await bump_daily_stats(
-                        pool, acc["id"], ok=res.get("ok") or 0,
-                        fail=res.get("failed") or 0, invites=res.get("ok") or 0)
-                    await _invite_learn_ok(acc["id"], res.get("ok") or 0)
-                    await asyncio.sleep(_invite_pause(acc["id"]))
-                except Exception as exc:
-                    log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
-                    total_fail += len(batch)
+            acc_id = int(acc["id"])
+            if acc_id not in budget:
+                budget[acc_id] = await _acc_budget(acc)
+            cap = budget[acc_id]
+            if cap <= 0:
+                retired.add(acc_id)
+                continue
 
-        # Инвайт по телефонам батчами
-        if p_chunk:
-            for i in range(0, len(p_chunk), batch_size):
-                if await _is_cancelled(pool, op_id):
-                    break
-                if _max_invites and step >= _max_invites:
-                    break
-                batch = p_chunk[i:i + batch_size]
-                try:
+            take_n = min(batch_size, cap)
+            if _max_invites:
+                take_n = min(take_n, _max_invites - step)
+            if take_n <= 0:
+                break
+
+            # Сначала опустошаем очередь user_refs, потом телефоны: телефоны
+            # дороже (импорт контакта) и оставлять их на конец безопаснее.
+            by_phone = not q_users
+            queue = q_phones if by_phone else q_users
+            batch = _take(queue, take_n)
+            if not batch:
+                continue
+            progressed = True
+
+            try:
+                if by_phone:
                     res = await inv.invite_by_phones(acc["session_str"], dict(acc), group, batch)
-                    total_ok += res["ok"]
-                    total_fail += res["failed"]
-                    step += len(batch)
-                    await pool.execute(
-                        "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
-                        op_id, len(batch),
-                    )
-                    if res.get("peer_flood") or res.get("flood_wait"):
-                        log.warning(
-                            "mass_invite op=%d acc=%s %s (phones) — cooldown+switch", op_id, acc.get("id"),
-                            "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
-                        )
-                        await bump_daily_stats(pool, acc["id"], floods=1,
-                                               fail=res.get("failed") or 0)
-                        await _rest_invite_account(acc["id"], res)
-                        break
-                    await bump_daily_stats(
-                        pool, acc["id"], ok=res.get("ok") or 0,
-                        fail=res.get("failed") or 0, invites=res.get("ok") or 0)
-                    await _invite_learn_ok(acc["id"], res.get("ok") or 0)
-                    await asyncio.sleep(_invite_pause(acc["id"]))
-                except Exception as exc:
-                    log.warning("mass_invite op=%d acc=%s phones error: %s", op_id, acc.get("id"), exc)
-                    total_fail += len(batch)
+                else:
+                    res = await inv.invite_batch(acc["session_str"], dict(acc), group, batch)
+            except Exception as exc:
+                # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
+                # другой аккаунт), а этот выводим из круга, чтобы не зациклиться.
+                log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
+                _give_back(queue, batch)
+                retired.add(acc_id)
+                continue
 
-        await asyncio.sleep(5.0)
+            ok_n = int(res.get("ok") or 0)
+            fail_n = int(res.get("failed") or 0)
+            # Движок обрывает батч на флуде/закрытой группе — хвост НЕ пробовали.
+            attempted = max(0, min(len(batch), ok_n + fail_n))
+            leftover = batch[attempted:]
+            total_ok += ok_n
+            total_fail += fail_n
+            step += attempted
+            budget[acc_id] = max(0, cap - attempted)
+            if attempted:
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                    op_id, attempted,
+                )
+            if leftover:
+                _give_back(queue, leftover)
+
+            # Группа закрыта/нет прав — это не про аккаунт, это про цель. Раньше
+            # об неё по очереди разбивался весь флот; теперь останавливаемся сразу.
+            if any(str(e).startswith("group error") for e in (res.get("errors") or [])):
+                group_broken = True
+                log.warning(
+                    "mass_invite op=%d: группа %s недоступна — остановка, чтобы не жечь флот",
+                    op_id, group,
+                )
+                await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
+                break
+
+            if res.get("peer_flood") or res.get("flood_wait"):
+                log.warning(
+                    "mass_invite op=%d acc=%s %s — cooldown+switch", op_id, acc.get("id"),
+                    "PeerFlood" if res.get("peer_flood") else f"FloodWait {res.get('flood_wait')}s",
+                )
+                await bump_daily_stats(pool, acc_id, floods=1, ok=ok_n,
+                                       fail=fail_n, invites=ok_n)
+                await _rest_invite_account(acc["id"], res)
+                retired.add(acc_id)
+                continue
+
+            if attempted == 0:
+                # Ни одной попытки без флуда = аккаунт не смог подключиться.
+                log.warning(
+                    "mass_invite op=%d acc=%s: батч не отработан (%s) — выведен из круга",
+                    op_id, acc.get("id"), "; ".join(str(e) for e in (res.get("errors") or []))[:120],
+                )
+                retired.add(acc_id)
+                continue
+
+            await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
+            await _invite_learn_ok(acc_id, ok_n)
+            if budget[acc_id] <= 0:
+                retired.add(acc_id)
+            await asyncio.sleep(_invite_pause(acc_id))
+
+        if not progressed:
+            break
 
     total = total_ok + total_fail
+    _left = len(q_users) + len(q_phones)
     summary = (
         f"👥 Инвайтер: {group}\n"
         f"✅ Добавлено: {total_ok}/{total}"
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
+        + ("\n🚫 Группа недоступна — операция остановлена" if group_broken else "")
+        + (f"\n⏸ Осталось в очереди: {_left} (аккаунты исчерпали лимит на сегодня)"
+           if _left and not group_broken else "")
     )
-    return {"status": "done", "ok": total_ok, "failed": total_fail, "summary": summary}
+    return {"status": "done", "ok": total_ok, "failed": total_fail,
+            "left": _left, "summary": summary}
 
 
 # ── Сеттер профилей ───────────────────────────────────────────────────────────
