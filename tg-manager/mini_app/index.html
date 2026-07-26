@@ -3719,6 +3719,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">📨 Массовый инвайт</div>
   </div>
   <div class="sub-sb">
+    <div class="sec">Сегодня по флоту</div>
+    <div id="invAnalytics" style="padding:6px 0 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec">Настройка инвайта</div>
     <div style="padding:8px 0">
       <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
@@ -12577,9 +12579,47 @@ function startInviteFromParse(runId) {
   toast('➕ Инвайт аудитории: '+(r.source||'парсер')+' · '+num(r.total_saved||0)+' — укажите группу');
 }
 
+// Аналитика инвайтинга по флоту: считается из суточных фактов
+// (account_daily_stats), которые до этого в системе никто не писал.
+async function loadInviteAnalytics() {
+  try {
+    const d = await api('/api/miniapp/invite/analytics');
+    if (!d.has_data) {
+      txt('invAnalytics', '<div style="font-size:13px;color:var(--hint);padding:4px 2px">Пока нет истории инвайтов — статистика появится после первого запуска.</div>');
+      return;
+    }
+    const t = d.today || {};
+    // Конверсия null при нуле попыток: честнее показать «—», чем 0%.
+    const conv = (t.conversion_pct === null || t.conversion_pct === undefined) ? '—' : t.conversion_pct + '%';
+    const floodCls = (t.floods || 0) > 0 ? 'var(--red)' : 'var(--green)';
+    const wk = (d.week || []);
+    const maxOk = Math.max(1, ...wk.map(w => +w.ok || 0));
+    const bars = wk.map(w => {
+      const h = Math.max(3, Math.round((+w.ok || 0) / maxOk * 34));
+      const c = (+w.floods || 0) > 0 ? 'var(--red)' : 'var(--accent)';
+      return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px" title="${esc(w.day)}: ${w.ok} инвайтов, флудов ${w.floods}">
+        <div style="width:70%;height:${h}px;background:${c};border-radius:2px 2px 0 0"></div></div>`;
+    }).join('');
+    txt('invAnalytics', `
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${num(t.ok||0)}</div><div class="kpi-lbl">Успешно</div></div>
+        <div class="kpi-card"><div class="kpi-val" style="color:${floodCls}">${num(t.floods||0)}</div><div class="kpi-lbl">Флудов</div></div>
+        <div class="kpi-card"><div class="kpi-val">${conv}</div><div class="kpi-lbl">Конверсия</div></div>
+      </div>
+      ${wk.length ? `<div style="display:flex;gap:3px;align-items:flex-end;height:38px;margin-bottom:6px">${bars}</div>
+      <div style="font-size:11px;color:var(--hint);margin-bottom:8px">7 дней · красный столбец = были флуды</div>` : ''}
+      ${d.best ? `<div style="font-size:12px;color:var(--hint)">🏅 Лучший: ${esc(d.best.label)} — ${d.best.ok} инвайтов, флудов ${d.best.floods}</div>` : ''}
+      ${d.worst && (+d.worst.floods > 0) ? `<div style="font-size:12px;color:var(--red);margin-top:2px">⚠️ Проблемный: ${esc(d.worst.label)} — флудов ${d.worst.floods}</div>` : ''}
+    `);
+  } catch(e) {
+    txt('invAnalytics', `<div style="font-size:13px;color:var(--hint);padding:4px 2px">Статистика недоступна · <span onclick="loadInviteAnalytics()" style="color:var(--accent);cursor:pointer">повторить</span></div>`);
+  }
+}
+
 async function openMassInvite() {
   push('s-massinvite');
   INV_PARSE_RUN = null;
+  loadInviteAnalytics();
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});

@@ -5226,6 +5226,140 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return [int(r["id"]) for r in (rows or [])]
 
+    async def invite_analytics(request: web.Request) -> web.Response:
+        """Аналитика инвайтинга по флоту: факты за сегодня и за 7 дней.
+
+        Раньше пользователь видел только итог одной операции («добавлено 40/50»)
+        и не мог ответить на главные вопросы: растёт ли риск, какие аккаунты
+        тянут флот вниз, можно ли ускоряться. Здесь всё считается из
+        `account_daily_stats` — тех самых суточных фактов, которые до этого
+        никто не писал.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+
+        today = await _safe_fetchrow(
+            pool,
+            """SELECT COALESCE(SUM(s.invites_ok), 0)   AS ok,
+                      COALESCE(SUM(s.actions_fail), 0) AS failed,
+                      COALESCE(SUM(s.flood_events), 0) AS floods,
+                      COUNT(DISTINCT s.account_id)     AS accounts
+               FROM account_daily_stats s
+               JOIN tg_accounts a ON a.id = s.account_id
+               WHERE a.owner_id = $1 AND s.stat_date = CURRENT_DATE""",
+            uid,
+        ) or {}
+        week = await _safe_fetch(
+            pool,
+            """SELECT s.stat_date::text AS day,
+                      COALESCE(SUM(s.invites_ok), 0)   AS ok,
+                      COALESCE(SUM(s.flood_events), 0) AS floods
+               FROM account_daily_stats s
+               JOIN tg_accounts a ON a.id = s.account_id
+               WHERE a.owner_id = $1 AND s.stat_date >= CURRENT_DATE - INTERVAL '6 days'
+               GROUP BY s.stat_date ORDER BY s.stat_date""",
+            uid,
+        )
+        # Лучший/худший за неделю: лучший — больше всего успешных при нуле флудов,
+        # худший — больше всего флудов. Показываем ФАКТ, а не «оценку».
+        ranked = await _safe_fetch(
+            pool,
+            """SELECT s.account_id,
+                      COALESCE(a.phone, a.first_name, '#' || a.id::text) AS label,
+                      COALESCE(SUM(s.invites_ok), 0)   AS ok,
+                      COALESCE(SUM(s.actions_fail), 0) AS failed,
+                      COALESCE(SUM(s.flood_events), 0) AS floods
+               FROM account_daily_stats s
+               JOIN tg_accounts a ON a.id = s.account_id
+               WHERE a.owner_id = $1 AND s.stat_date >= CURRENT_DATE - INTERVAL '6 days'
+               GROUP BY s.account_id, a.phone, a.first_name, a.id
+               ORDER BY floods DESC, ok DESC""",
+            uid,
+        ) or []
+
+        ok_t = int((today or {}).get("ok") or 0)
+        fail_t = int((today or {}).get("failed") or 0)
+        total_t = ok_t + fail_t
+        best = min(ranked, key=lambda r: (int(r["floods"]), -int(r["ok"])), default=None)
+        worst = max(ranked, key=lambda r: (int(r["floods"]), int(r["failed"])), default=None)
+
+        return _json_resp({
+            "today": {
+                "ok": ok_t,
+                "failed": fail_t,
+                "floods": int((today or {}).get("floods") or 0),
+                "accounts": int((today or {}).get("accounts") or 0),
+                # Конверсия честная: доля успеха среди ПОПЫТОК, а не «сколько
+                # запросили». Нет попыток — показываем null, а не 0%.
+                "conversion_pct": round(ok_t / total_t * 100, 1) if total_t else None,
+            },
+            "week": [dict(r) for r in (week or [])],
+            "best": dict(best) if best else None,
+            "worst": dict(worst) if worst else None,
+            "has_data": bool(ranked),
+        })
+
+    async def invite_account_card(request: web.Request) -> web.Response:
+        """Карточка аккаунта для инвайтинга: лимит, пауза, риск — с объяснением."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad account id", 400)
+
+        acc = await _safe_fetchrow(
+            pool,
+            "SELECT id, phone, first_name, is_active, trust_score, created_at, "
+            "cooldown_until FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id, uid,
+        )
+        if not acc:
+            return _err("Аккаунт не найден", 404)
+
+        limit_info, pause_s, risk = {}, None, {}
+        try:
+            from services import flood_engine as _fe
+            limit_info = await _fe.recommended_daily_limit(pool, acc_id)
+            pause_s = round(_fe.recommended_delay(acc_id, "invite"), 1)
+            risk = _fe.get_risk_summary([acc_id]).get(acc_id, {})
+        except Exception:
+            log.warning("invite_account_card: engine unavailable acc=%s", acc_id, exc_info=True)
+
+        week = await _safe_fetchrow(
+            pool,
+            """SELECT COALESCE(SUM(invites_ok), 0)   AS ok,
+                      COALESCE(SUM(actions_fail), 0) AS failed,
+                      COALESCE(SUM(flood_events), 0) AS floods
+               FROM account_daily_stats
+               WHERE account_id=$1 AND stat_date >= CURRENT_DATE - INTERVAL '6 days'""",
+            acc_id,
+        ) or {}
+
+        age_days = None
+        if acc.get("created_at"):
+            try:
+                import datetime as _d
+                age_days = (_d.datetime.now(_d.timezone.utc) - acc["created_at"]).days
+            except Exception:
+                age_days = None
+
+        return _json_resp({
+            "id": acc["id"],
+            "label": acc.get("phone") or acc.get("first_name") or f"#{acc['id']}",
+            "age_days": age_days,
+            "trust_score": acc.get("trust_score"),
+            "recommended_limit": limit_info.get("limit"),
+            "used_today": limit_info.get("used_today"),
+            "remaining_today": limit_info.get("remaining"),
+            "limit_basis": limit_info.get("basis"),
+            "recommended_pause_s": pause_s,
+            "risk": risk,
+            "week": {k: int(week.get(k) or 0) for k in ("ok", "failed", "floods")},
+        })
+
     async def dm_adhoc_send(request: web.Request) -> web.Response:
         """Разовая рассылка в ЛС по списку @username (паритет с ботом)."""
         uid = _get_uid(request)
@@ -11739,6 +11873,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
+    app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
+    app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/channels/bulk_post", channels_bulk_post)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
