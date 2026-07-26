@@ -10194,11 +10194,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not plan:
                 return _err("not found", 404)
             targets = await pool.fetch(
-                "SELECT country, city, language, asset_type, planned_name, status, error_message "
+                "SELECT country, region, city, language, asset_type, planned_name, status, "
+                "       error_message, role, level, "
+                # Фактический username: запланированный мог быть занят и
+                # заменён вариантом — ссылка обязана вести на реальный объект.
+                "       COALESCE(final_username, planned_username) AS username, "
+                "       final_username, avatar_applied "
                 "FROM global_presence_targets WHERE plan_id=$1 ORDER BY status, country, city LIMIT 100",
                 plan_id,
             )
-            return _json_resp({"plan": dict(plan), "targets": [dict(t) for t in targets]})
+            # Сводка оформления: «создано» и «оформлено» — разные числа, и
+            # объект без аватара/username хуже ранжируется.
+            dressing = await pool.fetchrow(
+                "SELECT COUNT(*) FILTER (WHERE status='done') AS done, "
+                "       COUNT(*) FILTER (WHERE status='done' AND avatar_applied) AS with_avatar, "
+                "       COUNT(*) FILTER (WHERE status='done' AND final_username IS NOT NULL) AS with_username, "
+                "       COUNT(*) FILTER (WHERE status='done' AND asset_type<>'bot') AS applicable "
+                "  FROM global_presence_targets WHERE plan_id=$1",
+                plan_id,
+            )
+            return _json_resp(
+                {
+                    "plan": dict(plan),
+                    "targets": [dict(t) for t in targets],
+                    "dressing": dict(dressing) if dressing else {},
+                }
+            )
         except Exception as exc:
             log.exception("global_presence_plan_detail uid=%d plan=%d", uid, plan_id)
             return _err(str(exc), 500)

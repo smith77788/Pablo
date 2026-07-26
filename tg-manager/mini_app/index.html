@@ -14669,14 +14669,33 @@ async function openGpDetail(planId, planName) {
     const d = await api(`/api/miniapp/global_presence/${planId}`);
     const p = d.plan;
     const targets = d.targets||[];
+    const dr = d.dressing||{};
     const stCls = {done:'b-gr',failed:'b-rd',running:'b-or',pending:'b-gy',skipped:'b-gy'};
+    const roles = Array.isArray(p.roles) ? p.roles : (p.roles?JSON.parse(p.roles):null);
+    const rolesLine = roles && roles.length ? roles.map(r=>GP_ROLE_LABELS[r]||r).join(', ') : null;
+    // «Создано» и «оформлено» — разные числа: объект без аватара/username хуже
+    // ранжируется, поэтому показываем оба, а не одно общее «создано N».
+    const dressLine = dr.done
+      ? `${dr.with_avatar||0} из ${dr.done} с аватаром · ${dr.with_username||0} с username`
+      : null;
     let html = `
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${GP_TYPES[p.asset_type]||p.asset_type}</div></div></div>
+        ${rolesLine?`<div class="row"><div class="row-body"><div class="row-name">Тематики</div><div class="row-val">${esc(rolesLine)}</div></div></div>`:''}
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${p.status}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Паттерн</div><div class="row-val">${esc(p.name_pattern)}</div></div></div>
         ${p.username_pattern?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">${esc(p.username_pattern)}</div></div></div>`:''}
+        ${dressLine?`<div class="row"><div class="row-body"><div class="row-name">Оформление</div><div class="row-val">${esc(dressLine)}</div></div></div>`:''}
       </div>
+      ${dr.applicable ? `
+      <div class="sec" style="margin-top:8px">Пакетные операции</div>
+      <div style="padding:0 16px;display:flex;flex-wrap:wrap;gap:8px">
+        <button class="btn" onclick="gpBulkApply(${p.id},'about')">📝 Описания</button>
+        <button class="btn" onclick="gpBulkApply(${p.id},'avatar')">🖼 Аватары</button>
+        <button class="btn" onclick="gpBulkApply(${p.id},'both')">🎨 Оформить всё</button>
+      </div>
+      <div class="hint" style="padding:6px 16px 0">Значения считаются для каждого объекта отдельно — по его городу и тематике.</div>
+      ` : ''}
       <div class="sec" style="margin-top:8px">Цели (${targets.length})</div>
       <div class="lst" style="margin:0 16px">
     `;
@@ -14689,6 +14708,7 @@ async function openGpDetail(planId, planName) {
             <div class="row-body">
               <div class="row-name">${t.country?esc(t.country):'—'} ${t.city?'· '+esc(t.city):''}</div>
               <div class="row-val">${esc(t.planned_name||'—')} · <span class="badge ${stCls[t.status]||'b-gy'}">${t.status}</span></div>
+              ${t.final_username?`<div class="row-val"><a href="https://t.me/${esc(t.final_username)}" target="_blank">@${esc(t.final_username)}</a>${t.avatar_applied?'':' · <span style="color:var(--or)">без аватара</span>'}</div>`:(t.status==='done'?`<div class="row-val" style="opacity:.7">без username (приватный)</div>`:'')}
               ${t.error_message?`<div class="row-val" style="color:var(--red)">${esc(t.error_message)}</div>`:''}
             </div>
           </div>
@@ -14701,6 +14721,24 @@ async function openGpDetail(planId, planName) {
     }
     txt('gpdetail-body', html);
   } catch(e) { txt('gpdetail-body', empty('⚠️','Ошибка',e.message)); }
+}
+
+const GP_ROLE_LABELS = {
+  news:'📰 Новости', chat:'💬 Чат', jobs:'💼 Работа', afisha:'🎭 Афиша',
+  market:'🛒 Барахолка', realty:'🏠 Недвижимость', auto:'🚗 Авто',
+  services:'🔧 Услуги', dating:'❤️ Знакомства', bot:'🤖 Бот',
+};
+const GP_BULK_LABELS = { about:'описания', avatar:'аватары', both:'описания и аватары' };
+
+async function gpBulkApply(planId, action) {
+  const label = GP_BULK_LABELS[action] || action;
+  if (!await askConfirm(`Применить ${label} ко всем созданным объектам проекта?`)) return;
+  try {
+    const r = await api(`/api/miniapp/global_presence/${planId}/bulk_apply`,
+                        {method:'POST', body: JSON.stringify({action})});
+    toast(`🧰 Операция #${r.op_id}: ${label} для ${r.targets} объектов`);
+    openGpDetail(planId);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function launchGpPlan(planId) {
