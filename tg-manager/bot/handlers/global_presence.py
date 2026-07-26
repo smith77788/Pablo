@@ -1150,9 +1150,17 @@ async def _show_pop_filter_step(callback: CallbackQuery, state: FSMContext) -> N
             callback_data=GeoPresenceCb(action="pop", item=str(thr)),
         )
     # Выбор по федеральным округам (дерево ФО→регион→город) — если данные есть.
-    from services.geo_data import federal_district
+    from services.geo_data import federal_district, city_districts
     if any(federal_district(c.get("region", "")) for c in cities):
         kb.button(text="🗂 По федеральным округам", callback_data=GeoPresenceCb(action="districts"))
+    # Разбить крупные города на внутригородские районы (4-й уровень дерева).
+    _splittable = [c for c in cities if city_districts(c.get("city_slug", ""))]
+    if _splittable:
+        _names = ", ".join(c.get("city", "") for c in _splittable[:3])
+        kb.button(
+            text=f"🏘 Разбить на районы ({_names})",
+            callback_data=GeoPresenceCb(action="split_dist"),
+        )
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_geo"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
@@ -1242,6 +1250,32 @@ async def cb_gp_district_pick(
 async def cb_gp_back_to_pop(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await _show_pop_filter_step(callback, state)
+
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "split_dist"), GlobalPresenceFSM.choosing_geo
+)
+async def cb_gp_split_districts(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Развернуть крупные города текущего пресета во внутригородские районы."""
+    await safe_answer(callback)
+    from services.geo_data import expand_city_to_districts
+    sd = await state.get_data()
+    preset = GEO_PRESETS.get(sd.get("geo_preset", ""), {})
+    cities = preset.get("cities", [])
+    expanded: list[dict] = []
+    for c in cities:
+        expanded.extend(expand_city_to_districts(c))
+    if not expanded:
+        await callback.answer("Нет городов для разбиения", show_alert=True)
+        return
+    await state.update_data(geo_list=expanded)
+    await state.set_state(GlobalPresenceFSM.choosing_accounts)
+    await _show_accounts_step(callback, state, pool, page=0)
 
 
 @router.callback_query(

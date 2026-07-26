@@ -36,6 +36,12 @@ def test_federal_district_selection_wired():
     assert "federal_district(c.get" in SRC
 
 
+def test_split_into_city_districts_wired():
+    assert 'F.action == "split_dist"' in SRC, "нет обработчика разбиения на районы"
+    assert "expand_city_to_districts" in SRC
+    assert 'action="split_dist"' in SRC, "нет кнопки разбиения на районы"
+
+
 def test_district_index_is_stable():
     """Индекс округа в callback берётся из стабильного (sorted) порядка."""
     from services import geo_data as g
