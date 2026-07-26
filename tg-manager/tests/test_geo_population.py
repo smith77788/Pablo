@@ -62,6 +62,17 @@ def test_preset_options_min_population_filter():
     assert len(big) < len(g.preset_city_options("russia"))
 
 
+def test_cis_presets_have_population_coverage():
+    """Каждый город UA/BY имеет население → фильтр «>N» работает и для СНГ."""
+    for preset in ("ukraine", "belarus"):
+        opts = g.preset_city_options(preset)
+        missing = [o["city"] for o in opts if o["population"] is None]
+        assert not missing, f"{preset}: города без населения: {missing}"
+    # ключевые столицы СНГ известны
+    for slug in ("kyiv", "minsk", "almaty", "astana", "baku", "tbilisi"):
+        assert g.city_population(slug) and g.city_population(slug) > 100_000
+
+
 def test_population_keys_match_known_city_slugs():
     """Ключи таблицы населения — валидные slug'и (нижний регистр, без пробелов)."""
     for slug in g.CITY_POPULATION:
