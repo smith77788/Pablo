@@ -180,7 +180,10 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
     defer = max(int(cooldown_s), 0) + 5
     await _safe_execute(
         pool,
-        "UPDATE operation_queue SET status='pending', started_at=NULL, "
+        # done_items=0: как retry/watchdog-requeue — при повторном прогоне после
+        # cooldown исполнитель считает прогресс заново, иначе done копится поверх
+        # прошлого прогона → счётчик done>total (класс #8).
+        "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
         op_id,
         float(defer),

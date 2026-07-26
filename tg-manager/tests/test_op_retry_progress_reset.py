@@ -45,6 +45,29 @@ def test_stale_running_requeue_resets_done_items():
         assert "done_items = 0" in src, f"{fn.__name__} должен сбрасывать done_items при requeue"
 
 
+def test_circuit_release_resets_done_items():
+    """Пере-подхват после открытия circuit breaker (_release_op_for_circuit) —
+    тоже requeue в pending, обязан сбрасывать done_items (иначе done>total при
+    повторном прогоне после cooldown). Раньше единственный requeue-путь без сброса."""
+    src = inspect.getsource(op_worker._release_op_for_circuit)
+    assert "status='pending'" in src
+    assert "done_items=0" in src, "circuit-release requeue должен сбрасывать done_items"
+
+
+def test_circuit_release_actually_issues_reset(monkeypatch):
+    """Функционально: UPDATE при circuit-release реально содержит done_items=0."""
+    captured = {}
+
+    async def _fake_execute(pool, sql, *a, **k):
+        if "status='pending'" in sql:
+            captured["sql"] = sql
+        return "UPDATE 1"
+
+    monkeypatch.setattr(op_worker, "_safe_execute", _fake_execute)
+    _run(op_worker._release_op_for_circuit(None, 42, 1800))
+    assert "done_items=0" in captured.get("sql", ""), captured
+
+
 def test_maybe_requeue_actually_issues_reset(monkeypatch):
     """Функционально: при ретраевой ошибке requeue-UPDATE реально содержит done_items=0."""
     captured = {}
