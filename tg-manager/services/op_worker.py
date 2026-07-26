@@ -3773,6 +3773,19 @@ async def _exec_global_presence_channel(
     }
 
 
+# Пакетные действия над объектами проекта. Значение каждого вычисляется ДЛЯ
+# КАЖДОГО объекта — этим операция отличается от общего bulk_edit_channels,
+# который ставит один текст на все каналы аккаунта.
+GP_BULK_ACTIONS: dict[str, dict] = {
+    "about": {"label": "описания", "needs_admin_rights": False},
+    "avatar": {"label": "аватары", "needs_admin_rights": False},
+    "both": {"label": "описания и аватары", "needs_admin_rights": False},
+    "post_pin": {"label": "пост с закрепом", "needs_admin_rights": False},
+    "admin": {"label": "назначение админа", "needs_admin_rights": True},
+    "username": {"label": "username", "needs_admin_rights": False},
+}
+
+
 async def _exec_gp_bulk_apply(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -3783,26 +3796,39 @@ async def _exec_gp_bulk_apply(
     городу, роли и seed, — поэтому «обновить описания у 800 каналов» не
     превращает сеть в 800 одинаковых карточек.
 
-    params: plan_id, action ('about' | 'avatar' | 'both'), about_template
-    (необязательный шаблон с плейсхолдерами), seed_shift (для перерисовки
-    аватаров новым набором).
+    params:
+      plan_id      — проект;
+      action       — из GP_BULK_ACTIONS;
+      about_template / post_template — шаблоны с плейсхолдерами (необязательны);
+      admin_user_id — кого назначить админом (для action='admin');
+      seed_shift    — сдвиг seed для перерисовки аватаров;
+      only_missing  — для action='username': доназначить только тем, у кого его
+                      нет (по умолчанию True — это безопаснее, чем менять всем).
     """
     from services import account_manager, avatar_factory, session_simulator
     from services.presence_planner import render_pattern
+    from services.username_engine import UsernameAllocator
     import random
 
     plan_id = params.get("plan_id")
     action = params.get("action") or "both"
     about_template = (params.get("about_template") or "").strip()
+    post_template = (params.get("post_template") or "").strip()
+    admin_user_id = params.get("admin_user_id")
     seed_shift = int(params.get("seed_shift") or 0)
+    only_missing = params.get("only_missing", True)
+
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
-    if action not in ("about", "avatar", "both"):
+    if action not in GP_BULK_ACTIONS:
         return {"status": "failed", "reason": f"Неизвестное действие: {action}"}
+    if action == "admin" and not admin_user_id:
+        return {"status": "failed", "reason": "Не указан пользователь для назначения админом"}
 
     plan = await _safe_fetchrow(
         pool,
-        "SELECT avatar_style FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        "SELECT avatar_style, username_pool FROM global_presence_plans "
+        " WHERE id=$1 AND owner_id=$2",
         plan_id,
         owner_id,
     )
@@ -3811,16 +3837,22 @@ async def _exec_gp_bulk_apply(
     avatar_style = plan.get("avatar_style") or None
 
     # Только реально созданные объекты: у остальных нечего править.
+    # Для username — при only_missing берём лишь те, где его так и не встало
+    # (частый исход: имя было занято и все варианты исчерпались).
+    extra_where = ""
+    if action == "username" and only_missing:
+        extra_where = " AND t.final_username IS NULL"
+
     targets = await _safe_fetch(
         pool,
-        """SELECT t.*, m.access_hash
+        f"""SELECT t.*, m.access_hash
              FROM global_presence_targets t
              LEFT JOIN managed_channels m
                ON m.owner_id = $2 AND m.channel_id = t.result_asset_id
             WHERE t.plan_id = $1
               AND t.status = 'done'
               AND t.result_asset_id IS NOT NULL
-              AND t.asset_type <> 'bot'
+              AND t.asset_type <> 'bot'{extra_where}
             ORDER BY t.id""",
         plan_id,
         owner_id,
@@ -3830,7 +3862,7 @@ async def _exec_gp_bulk_apply(
             "status": "done",
             "ok": 0,
             "fail": 0,
-            "summary": "Нет созданных объектов для применения",
+            "summary": "Нет подходящих объектов для применения",
         }
 
     acc_ids = list({t["selected_account_id"] for t in targets if t["selected_account_id"]})
@@ -3839,21 +3871,42 @@ async def _exec_gp_bulk_apply(
     )
     acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
+    # Аллокатор для доназначения username: он обязан видеть все уже занятые
+    # имена владельца, иначе выдаст то, что у нас же и стоит.
+    allocator = None
+    uname_templates: list[str] = []
+    if action == "username":
+        from database import db as _db
+
+        allocator = UsernameAllocator(
+            taken=await _db.get_taken_usernames(pool, owner_id), seed=seed_shift or None
+        )
+        raw_pool = plan.get("username_pool")
+        if raw_pool:
+            try:
+                import json as _json
+
+                uname_templates = (
+                    raw_pool if isinstance(raw_pool, list) else _json.loads(raw_pool)
+                )
+            except Exception:
+                uname_templates = []
+
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2",
         len(targets), op_id,
     )
 
-    ok_about = ok_avatar = 0
+    counters = {"about": 0, "avatar": 0, "post": 0, "pin": 0, "admin": 0, "username": 0}
     failed = skipped = 0
 
     for target in targets:
         if await _is_cancelled(pool, op_id):
             return {
                 "status": "cancelled",
-                "ok": ok_about + ok_avatar,
+                "ok": sum(counters.values()),
                 "fail": failed,
-                "summary": f"Отменено. Описаний: {ok_about}, аватаров: {ok_avatar}, ошибок: {failed}",
+                "summary": f"Отменено. Применено: {sum(counters.values())}, ошибок: {failed}",
             }
 
         acc = acc_by_id.get(target["selected_account_id"])
@@ -3892,7 +3945,7 @@ async def _exec_gp_bulk_apply(
                         acc["session_str"], channel_id, new_about, _acc=acc
                     )
                     if ok:
-                        ok_about += 1
+                        counters["about"] += 1
                         await _safe_execute(
                             pool,
                             "UPDATE global_presence_targets SET planned_about=$1 WHERE id=$2",
@@ -3931,7 +3984,7 @@ async def _exec_gp_bulk_apply(
                         target["id"], ph_err[:120],
                     )
                 else:
-                    ok_avatar += 1
+                    counters["avatar"] += 1
                     await _safe_execute(
                         pool,
                         "UPDATE global_presence_targets SET avatar_applied=TRUE WHERE id=$1",
@@ -3944,27 +3997,149 @@ async def _exec_gp_bulk_apply(
                 item_failed = True
             await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
 
+        if action == "post_pin":
+            # Пост тоже индивидуален: одинаковый текст в 800 каналах — прямой
+            # спам-сигнал, ровно то, ради чего существует генератор.
+            text = render_pattern(post_template, dict(target)).strip() if post_template else ""
+            if not text:
+                text = (target.get("planned_about") or title).strip()
+            if not text:
+                skipped += 1
+            else:
+                try:
+                    res = await account_manager.post_to_channel(
+                        acc["session_str"],
+                        channel_id,
+                        text[:4000],
+                        access_hash=access_hash,
+                        username=target.get("final_username") or "",
+                        _acc=acc,
+                    )
+                    if isinstance(res, dict) and res.get("error"):
+                        item_failed = True
+                        log.info(
+                            "gp_bulk_apply: пост не отправлен target=%s: %s",
+                            target["id"], str(res["error"])[:120],
+                        )
+                    else:
+                        counters["post"] += 1
+                        await asyncio.sleep(
+                            random.uniform(3, 7) * session_simulator.chaos_factor()
+                        )
+                        pin = await account_manager.pin_last_channel_post(
+                            acc["session_str"],
+                            channel_id,
+                            access_hash=access_hash,
+                            username=target.get("final_username") or "",
+                            _acc=acc,
+                        )
+                        # Пост опубликован, закреп не удался — это НЕ провал
+                        # элемента: контент на месте, счётчики разные.
+                        if isinstance(pin, dict) and not pin.get("error"):
+                            counters["pin"] += 1
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log_exc_swallow(log, f"gp_bulk_apply post target={target['id']}: {exc}")
+                    item_failed = True
+                await asyncio.sleep(random.uniform(20, 45) * session_simulator.chaos_factor())
+
+        if action == "admin":
+            try:
+                ok = await account_manager.promote_to_admin(
+                    acc["session_str"],
+                    channel_id,
+                    int(admin_user_id),
+                    _acc=acc,
+                    access_hash=access_hash,
+                    post_messages=True,
+                    invite_users=True,
+                    pin_messages=True,
+                )
+                if ok:
+                    counters["admin"] += 1
+                else:
+                    item_failed = True
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, f"gp_bulk_apply admin target={target['id']}: {exc}")
+                item_failed = True
+            await asyncio.sleep(random.uniform(5, 12) * session_simulator.chaos_factor())
+
+        if action == "username":
+            ctx = {
+                "city": target.get("city_slug") or "",
+                "city_slug": target.get("city_slug") or "",
+                "country": target.get("country") or "",
+                "country_code": target.get("country_code") or "",
+                "region": target.get("region") or "",
+                "role": target.get("role") or "",
+                "index": target["id"],
+            }
+            candidate = allocator.allocate(uname_templates, ctx) if allocator else None
+            if not candidate:
+                skipped += 1
+            else:
+                try:
+                    err = await account_manager.set_channel_username(
+                        acc["session_str"], channel_id, candidate, _acc=acc
+                    )
+                    if err:
+                        item_failed = True
+                        # Имя занято кем-то снаружи — резервируем, чтобы
+                        # следующим объектам оно не предлагалось повторно.
+                        allocator.reserve(candidate)
+                        log.info(
+                            "gp_bulk_apply: username '%s' не встал target=%s: %s",
+                            candidate, target["id"], err[:120],
+                        )
+                    else:
+                        counters["username"] += 1
+                        async with pool.acquire() as _c:
+                            async with _c.transaction():
+                                await _c.execute(
+                                    "UPDATE global_presence_targets "
+                                    "SET final_username=$1 WHERE id=$2",
+                                    candidate, target["id"],
+                                )
+                                await _c.execute(
+                                    "UPDATE managed_channels SET username=$1 "
+                                    " WHERE owner_id=$2 AND channel_id=$3",
+                                    candidate, owner_id, channel_id,
+                                )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log_exc_swallow(log, f"gp_bulk_apply username target={target['id']}: {exc}")
+                    item_failed = True
+                # Присвоение username — самое чувствительное к темпу действие:
+                # Telegram трактует частые UpdateUsername как автоматизацию.
+                await asyncio.sleep(random.uniform(90, 180) * session_simulator.chaos_factor())
+
         if item_failed:
             failed += 1
         await _safe_execute(
             pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
         )
 
-    parts = []
-    if action in ("about", "both"):
-        parts.append(f"описаний: {ok_about}")
-    if action in ("avatar", "both"):
-        parts.append(f"аватаров: {ok_avatar}")
+    labels = {
+        "about": "описаний", "avatar": "аватаров", "post": "постов",
+        "pin": "закреплено", "admin": "назначений", "username": "username",
+    }
+    parts = [f"{labels[k]}: {v}" for k, v in counters.items() if v]
+    if not parts:
+        parts.append("применено: 0")
     if skipped:
         # Пропуски показываем отдельно от ошибок: «аккаунт в карантине» — это
         # не сбой применения, и смешивать их в одном счётчике нечестно.
-        parts.append(f"пропущено (карантин/нет сессии): {skipped}")
+        parts.append(f"пропущено: {skipped}")
     if failed:
         parts.append(f"ошибок: {failed}")
 
     return {
         "status": "done",
-        "ok": ok_about + ok_avatar,
+        "ok": sum(counters.values()),
         "fail": failed,
         "plan_id": plan_id,
         "summary": "🧰 Пакетное применение — " + ", ".join(parts),

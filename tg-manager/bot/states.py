@@ -426,6 +426,8 @@ class GlobalPresenceFSM(StatesGroup):
     choosing_structure = State()      # какие тематики создаём в каждом городе
     choosing_levels = State()         # федеральный / региональный / городской
     choosing_avatar = State()         # стиль генерируемых аватаров
+    entering_bulk_post = State()      # текст поста для пакетного закрепа
+    entering_bulk_admin = State()     # ID пользователя для назначения админом
     choosing_template = State()
     entering_name_pattern = State()
     entering_username_pattern = State()

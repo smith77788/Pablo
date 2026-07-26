@@ -294,7 +294,7 @@ def test_avatar_redraw_shifts_seed():
 
     Генерация детерминирована, поэтому «новый набор» обязан менять вход.
     """
-    handler = _func_src(HANDLER, "cb_gp_bulk_run")
+    handler = _func_src(HANDLER, "_submit_bulk")
     assert "seed_shift" in handler
     worker = _func_src(WORKER, "_exec_gp_bulk_apply")
     assert "seed_shift" in worker
@@ -332,3 +332,159 @@ def test_report_shows_dressing_honestly():
     assert "avatar_applied" in src
     assert "final_username" in src
     assert "без аватара" in src
+
+
+# ── Пакетные операции: пост, админ, username ────────────────────────────────
+
+def test_bulk_actions_registry_matches_ui():
+    """Меню и исполнитель обязаны знать один и тот же набор действий.
+
+    Расхождение = кнопка, которую исполнитель отвергнет как «неизвестное
+    действие» уже после постановки в очередь.
+    """
+    worker = _src(WORKER)
+    m = re.search(r"GP_BULK_ACTIONS:\s*dict\[str, dict\]\s*=\s*\{(.*?)\n\}", worker, re.DOTALL)
+    assert m, "GP_BULK_ACTIONS не найден"
+    worker_actions = set(re.findall(r'"(\w+)":\s*\{', m.group(1)))
+
+    handler = _src(HANDLER)
+    m2 = re.search(r"_BULK_LABELS:\s*dict\[str, str\]\s*=\s*\{(.*?)\n\}", handler, re.DOTALL)
+    assert m2, "_BULK_LABELS не найден"
+    ui_actions = set(re.findall(r'"(\w+)":', m2.group(1)))
+
+    assert worker_actions == ui_actions, (
+        f"расхождение: только в воркере {worker_actions - ui_actions}, "
+        f"только в UI {ui_actions - worker_actions}"
+    )
+
+
+def test_actions_needing_input_go_through_fsm():
+    """«Пост» и «админ» без ввода запускать нельзя — пустая операция обошла бы
+    всю сеть вхолостую и потратила лимиты аккаунтов."""
+    src = _func_src(HANDLER, "cb_gp_bulk_run")
+    assert "entering_bulk_post" in src and "entering_bulk_admin" in src
+    # И оба ввода обязаны иметь обработчик сообщения.
+    handler = _src(HANDLER)
+    assert "GlobalPresenceFSM.entering_bulk_post" in handler
+    assert "GlobalPresenceFSM.entering_bulk_admin" in handler
+
+
+def test_username_batch_paces_conservatively():
+    """Присвоение username — самое чувствительное к темпу действие.
+
+    Telegram трактует частые UpdateUsername как автоматизацию, поэтому пауза
+    здесь обязана быть на порядок больше, чем у правки описания.
+    """
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    idx = src.find('if action == "username"')
+    assert idx > 0
+    tail = src[idx:]
+    assert "random.uniform(90, 180)" in tail
+
+
+def test_username_batch_reserves_taken_names():
+    # Имя, отвергнутое Telegram, обязано попасть в занятые: иначе аллокатор
+    # предложит его следующему объекту и повторит ту же ошибку.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "allocator.reserve(candidate)" in src
+
+
+def test_username_batch_updates_both_tables():
+    # Новый username обязан появиться и в цели, и в каталоге — иначе ссылки
+    # в managed_channels остаются устаревшими.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    idx = src.find('if action == "username"')
+    tail = src[idx:]
+    assert "UPDATE global_presence_targets " in tail
+    assert "UPDATE managed_channels SET username" in tail
+
+
+def test_pin_failure_not_counted_as_item_failure():
+    """Пост опубликован, закреп не удался — контент на месте.
+
+    Считать это провалом элемента значит занижать реальный результат.
+    """
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    idx = src.find('if action == "post_pin"')
+    tail = src[idx : idx + 2500]
+    assert 'counters["pin"] += 1' in tail
+    # После неудачного закрепа item_failed не выставляется.
+    pin_block = tail[tail.find("pin_last_channel_post") :]
+    assert "item_failed = True" not in pin_block.split("except asyncio.CancelledError")[0]
+
+
+def test_post_template_rendered_per_object():
+    # Одинаковый текст в сотнях каналов — прямой спам-сигнал.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "render_pattern(post_template" in src
+
+
+def test_admin_action_requires_user_id():
+    # Без получателя прав операция обошла бы всю сеть впустую.
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert "Не указан пользователь для назначения админом" in src
+
+
+def test_username_batch_defaults_to_missing_only():
+    """По умолчанию доназначаем, а не меняем всем.
+
+    Массовая СМЕНА username у работающих каналов ломает существующие ссылки —
+    такое не должно случаться по умолчанию.
+    """
+    src = _func_src(WORKER, "_exec_gp_bulk_apply")
+    assert 'params.get("only_missing", True)' in src
+    assert "t.final_username IS NULL" in src
+
+
+# ── Каталог: фильтры ────────────────────────────────────────────────────────
+
+def test_catalog_filter_roundtrip_and_sanitized():
+    """Фильтр едет в callback_data, поэтому парсер обязан быть устойчив к мусору:
+    иначе подделанный callback уронит экран или пролезет в SQL."""
+    # Значения вне белого списка обязаны схлопываться в «любой»: роль
+    # сверяется с библиотекой, тип и статус — с явными перечнями.
+    fn = _func_src(HANDLER, "_parse_catalog_filter")
+    assert "infra_generator.ROLE_LIBRARY" in fn
+    assert '"channel", "group", "bot"' in fn
+    assert "_CAT_STATUS_LABELS" in fn
+    # И недостающие части фильтра не должны ронять разбор.
+    assert "parts += [_CAT_ANY]" in fn
+
+
+def test_catalog_builds_parameterized_sql():
+    """Фильтры подставляются параметрами, а не конкатенацией значений.
+
+    Значения приходят из callback_data — то есть извне.
+    """
+    src = _func_src(HANDLER, "cb_gp_catalog")
+    assert "args.append(role)" in src and "args.append(status)" in src
+    assert 'where.append(f"role = ${len(args)}")' in src
+    # Значение фильтра не должно попадать в строку запроса напрямую.
+    assert 'f"role = \'{role}\'"' not in src
+
+
+def test_catalog_callback_data_fits_telegram_limit():
+    """callback_data Telegram — 64 байта. Фильтр + план + страница обязаны
+    влезать в худшем случае, иначе кнопка молча не отрисуется."""
+    from itertools import product
+
+    roles = ["services", "-"]
+    assets = ["channel", "-"]
+    statuses = ["pending", "-"]
+    worst = max(
+        len(f"gp:catalog:{999999}:{999}:{r}|{a}|{s}".encode("utf-8"))
+        for r, a, s in product(roles, assets, statuses)
+    )
+    assert worst <= 64, f"худший случай {worst} байт"
+
+
+def test_catalog_reachable_from_report():
+    src = _func_src(HANDLER, "cb_gp_report")
+    assert 'action="catalog"' in src
+
+
+def test_catalog_shows_only_present_filters():
+    # Фильтр по тематике, которой в проекте нет, обещал бы пустой экран.
+    src = _func_src(HANDLER, "cb_gp_catalog")
+    assert "SELECT DISTINCT role, asset_type" in src
+    assert "present_roles" in src and "present_assets" in src

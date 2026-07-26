@@ -2691,6 +2691,10 @@ async def cb_gp_report(
             callback_data=GeoPresenceCb(action="export", plan_id=plan_id),
         )
         kb.button(
+            text="🗂 Каталог",
+            callback_data=GeoPresenceCb(action="catalog", plan_id=plan_id),
+        )
+        kb.button(
             text="🧰 Пакетные операции",
             callback_data=GeoPresenceCb(action="bulk_menu", plan_id=plan_id),
         )
@@ -2698,7 +2702,7 @@ async def cb_gp_report(
         text="◀️ Прогресс",
         callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
     )
-    kb.adjust(2, 1)
+    kb.adjust(2, 1, 1)
     await _edit(callback, text, markup=kb.as_markup())
 
 
@@ -2789,7 +2793,272 @@ async def cb_gp_export(
         await callback.answer("Не удалось отправить файл", show_alert=True)
 
 
+# ── Каталог объектов: фильтры и просмотр ───────────────────────────────────
+#
+# Экспорт CSV отвечает на «отдай мне всё», каталог — на «покажи конкретное»:
+# какие объекты в Краснодарском крае упали, где не встал username, что вышло по
+# тематике «Работа». Без фильтров на 1500 объектах отчёт нечитаем.
+
+_CAT_PAGE_SIZE = 8
+_CAT_ANY = "-"  # значение фильтра «любой»
+
+_CAT_STATUS_LABELS = {
+    "done": "✅ созданные",
+    "failed": "❌ ошибки",
+    "pending": "⏳ ожидают",
+    "running": "🔄 в работе",
+}
+
+
+def _parse_catalog_filter(item: str | None) -> tuple[str, str, str]:
+    """item = 'role|asset|status'. Пропуски и мусор → «любой».
+
+    Фильтр едет в callback_data (64 байта), поэтому кодируется строкой, а не
+    хранится в FSM: каталог должен открываться из отчёта и после перезапуска
+    бота, где состояния мастера уже нет.
+    """
+    parts = (item or "").split("|")
+    parts += [_CAT_ANY] * (3 - len(parts))
+    role, asset, status = (p.strip() or _CAT_ANY for p in parts[:3])
+    if role != _CAT_ANY and role not in infra_generator.ROLE_LIBRARY:
+        role = _CAT_ANY
+    if asset not in (_CAT_ANY, "channel", "group", "bot"):
+        asset = _CAT_ANY
+    if status not in (_CAT_ANY, *_CAT_STATUS_LABELS):
+        status = _CAT_ANY
+    return role, asset, status
+
+
+def _catalog_item(role: str, asset: str, status: str) -> str:
+    return f"{role}|{asset}|{status}"
+
+
+@router.callback_query(GeoPresenceCb.filter(F.action == "catalog"))
+async def cb_gp_catalog(
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
+) -> None:
+    plan_id = callback_data.plan_id
+    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    if not plan:
+        await callback.answer("План не найден", show_alert=True)
+        return
+    await safe_answer(callback)
+
+    role, asset, status = _parse_catalog_filter(callback_data.item)
+    page = max(0, callback_data.page)
+
+    where = ["plan_id = $1"]
+    args: list = [plan_id]
+    if role != _CAT_ANY:
+        args.append(role)
+        where.append(f"role = ${len(args)}")
+    if asset != _CAT_ANY:
+        args.append(asset)
+        where.append(f"asset_type = ${len(args)}")
+    if status != _CAT_ANY:
+        args.append(status)
+        where.append(f"status = ${len(args)}")
+    where_sql = " AND ".join(where)
+
+    try:
+        total = await pool.fetchval(
+            f"SELECT COUNT(*) FROM global_presence_targets WHERE {where_sql}", *args
+        )
+        rows = await pool.fetch(
+            f"SELECT city, region, planned_name, final_username, planned_username, "
+            f"       status, role, asset_type, avatar_applied, error_message "
+            f"  FROM global_presence_targets WHERE {where_sql} "
+            f" ORDER BY id LIMIT {_CAT_PAGE_SIZE + 1} OFFSET {page * _CAT_PAGE_SIZE}",
+            *args,
+        )
+        # Тематики и типы, которые в плане ЕСТЬ: показывать фильтр по роли,
+        # которой в проекте нет, — обещать пустой экран.
+        present = await pool.fetch(
+            "SELECT DISTINCT role, asset_type FROM global_presence_targets WHERE plan_id=$1",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_catalog: выборка не удалась")
+        await callback.answer("Ошибка загрузки каталога", show_alert=True)
+        return
+
+    total = total or 0
+    has_more = len(rows) > _CAT_PAGE_SIZE
+    rows = rows[:_CAT_PAGE_SIZE]
+
+    present_roles = sorted({r["role"] for r in present if r["role"]})
+    present_assets = sorted({r["asset_type"] for r in present if r["asset_type"]})
+
+    kb = InlineKeyboardBuilder()
+
+    if len(present_roles) > 1:
+        role_row = InlineKeyboardBuilder()
+        role_row.button(
+            text=("• Все тематики" if role == _CAT_ANY else "Все тематики"),
+            callback_data=GeoPresenceCb(
+                action="catalog", plan_id=plan_id, item=_catalog_item(_CAT_ANY, asset, status)
+            ),
+        )
+        for r in present_roles:
+            label = infra_generator.ROLE_LIBRARY.get(r, {}).get("label", r)
+            role_row.button(
+                text=("• " if r == role else "") + str(label),
+                callback_data=GeoPresenceCb(
+                    action="catalog", plan_id=plan_id, item=_catalog_item(r, asset, status)
+                ),
+            )
+        role_row.adjust(2)
+        kb.attach(role_row)
+
+    if len(present_assets) > 1:
+        asset_row = InlineKeyboardBuilder()
+        asset_labels = {"channel": "📡 Каналы", "group": "👥 Группы", "bot": "🤖 Боты"}
+        asset_row.button(
+            text=("• Все типы" if asset == _CAT_ANY else "Все типы"),
+            callback_data=GeoPresenceCb(
+                action="catalog", plan_id=plan_id, item=_catalog_item(role, _CAT_ANY, status)
+            ),
+        )
+        for a in present_assets:
+            asset_row.button(
+                text=("• " if a == asset else "") + asset_labels.get(a, a),
+                callback_data=GeoPresenceCb(
+                    action="catalog", plan_id=plan_id, item=_catalog_item(role, a, status)
+                ),
+            )
+        asset_row.adjust(3)
+        kb.attach(asset_row)
+
+    st_row = InlineKeyboardBuilder()
+    st_row.button(
+        text=("• Любой статус" if status == _CAT_ANY else "Любой статус"),
+        callback_data=GeoPresenceCb(
+            action="catalog", plan_id=plan_id, item=_catalog_item(role, asset, _CAT_ANY)
+        ),
+    )
+    for st, label in _CAT_STATUS_LABELS.items():
+        st_row.button(
+            text=("• " if st == status else "") + label,
+            callback_data=GeoPresenceCb(
+                action="catalog", plan_id=plan_id, item=_catalog_item(role, asset, st)
+            ),
+        )
+    st_row.adjust(3, 2)
+    kb.attach(st_row)
+
+    nav = InlineKeyboardBuilder()
+    cur_item = _catalog_item(role, asset, status)
+    if page > 0:
+        nav.button(
+            text="◀️",
+            callback_data=GeoPresenceCb(
+                action="catalog", plan_id=plan_id, item=cur_item, page=page - 1
+            ),
+        )
+    if has_more:
+        nav.button(
+            text="▶️",
+            callback_data=GeoPresenceCb(
+                action="catalog", plan_id=plan_id, item=cur_item, page=page + 1
+            ),
+        )
+    if page > 0 or has_more:
+        nav.adjust(2)
+        kb.attach(nav)
+
+    tail = InlineKeyboardBuilder()
+    tail.button(
+        text="📥 Экспорт всего проекта",
+        callback_data=GeoPresenceCb(action="export", plan_id=plan_id),
+    )
+    tail.button(
+        text="◀️ К отчёту", callback_data=GeoPresenceCb(action="report", plan_id=plan_id)
+    )
+    tail.adjust(1)
+    kb.attach(tail)
+
+    # Список: ссылка там, где username реально встал; причина — там, где упало.
+    lines = []
+    for r in rows:
+        mark = {"done": "✅", "failed": "❌", "pending": "⏳", "running": "🔄"}.get(
+            r["status"], "•"
+        )
+        name = html.escape((r["planned_name"] or "—")[:38])
+        uname = r["final_username"]
+        if uname:
+            link = f'\n     🔗 <a href="https://t.me/{uname}">@{html.escape(uname)}</a>'
+        elif r["status"] == "done":
+            link = "\n     <i>без username (приватный)</i>"
+        else:
+            link = ""
+        avatar_note = (
+            "" if (r["avatar_applied"] or r["status"] != "done") else " ⚠️ без аватара"
+        )
+        err = (
+            f"\n     <i>{html.escape((r['error_message'] or '')[:70])}</i>"
+            if r["status"] == "failed" and r["error_message"]
+            else ""
+        )
+        city = html.escape(r["city"] or r["region"] or "—")
+        lines.append(f"{mark} <b>{name}</b>{avatar_note}\n     📍 {city}{link}{err}")
+    body = "\n\n".join(lines) if lines else "<i>Под фильтр ничего не подошло.</i>"
+
+    filt_parts = []
+    if role != _CAT_ANY:
+        filt_parts.append(str(infra_generator.ROLE_LIBRARY.get(role, {}).get("label", role)))
+    if asset != _CAT_ANY:
+        filt_parts.append({"channel": "каналы", "group": "группы", "bot": "боты"}[asset])
+    if status != _CAT_ANY:
+        filt_parts.append(_CAT_STATUS_LABELS[status])
+    filt_line = " · ".join(filt_parts) if filt_parts else "все объекты"
+
+    shown_from = page * _CAT_PAGE_SIZE + 1 if rows else 0
+    shown_to = page * _CAT_PAGE_SIZE + len(rows)
+
+    await _edit(
+        callback,
+        f"🗂 <b>Каталог проекта #{plan_id}</b>\n"
+        f"{'─' * 28}\n"
+        f"Фильтр: {html.escape(filt_line)}\n"
+        f"Найдено: <b>{total}</b>"
+        + (f" · показаны {shown_from}–{shown_to}" if rows else "")
+        + f"\n{'─' * 28}\n\n{body}",
+        markup=kb.as_markup(),
+    )
+
+
 # ── Каталог: пакетные операции ─────────────────────────────────────────────
+
+# Подписи действий. Единый источник для меню, подтверждения и тоста — иначе
+# кнопка обещает одно, а итог рапортует другое.
+_BULK_LABELS: dict[str, str] = {
+    "about": "описания",
+    "avatar": "аватары",
+    "both": "описания и аватары",
+    "post_pin": "пост с закрепом",
+    "admin": "назначение админа",
+    "username": "доназначение username",
+}
+
+
+async def _bulk_counts(pool: asyncpg.Pool, plan_id: int) -> dict:
+    """Сколько объектов под каждое действие. Пустой словарь — при сбое."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE status='done' AND asset_type<>'bot') AS applicable, "
+            "       COUNT(*) FILTER (WHERE status='done' AND NOT avatar_applied "
+            "                        AND asset_type<>'bot') AS no_avatar, "
+            "       COUNT(*) FILTER (WHERE status='done' AND final_username IS NULL "
+            "                        AND asset_type<>'bot') AS no_username "
+            "  FROM global_presence_targets WHERE plan_id=$1",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "_bulk_counts: подсчёт целей не удался")
+        return {}
+    return dict(row) if row else {}
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "bulk_menu"))
@@ -2805,19 +3074,10 @@ async def cb_gp_bulk_menu(
         return
     await safe_answer(callback)
 
-    try:
-        row = await pool.fetchrow(
-            "SELECT COUNT(*) FILTER (WHERE status='done' AND asset_type<>'bot') AS applicable, "
-            "       COUNT(*) FILTER (WHERE status='done' AND NOT avatar_applied "
-            "                        AND asset_type<>'bot') AS no_avatar "
-            "  FROM global_presence_targets WHERE plan_id=$1",
-            plan_id,
-        )
-    except Exception:
-        log_exc_swallow(log, "cb_gp_bulk_menu: подсчёт целей не удался")
-        row = None
-    applicable = (row["applicable"] if row else 0) or 0
-    no_avatar = (row["no_avatar"] if row else 0) or 0
+    counts = await _bulk_counts(pool, plan_id)
+    applicable = counts.get("applicable") or 0
+    no_avatar = counts.get("no_avatar") or 0
+    no_username = counts.get("no_username") or 0
 
     kb = InlineKeyboardBuilder()
     if applicable:
@@ -2830,13 +3090,30 @@ async def cb_gp_bulk_menu(
             callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="avatar"),
         )
         kb.button(
-            text="🎨 Оформить всё (описание + аватар)",
+            text="🎨 Оформить всё",
             callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="both"),
         )
+        kb.button(
+            text="📌 Пост + закреп",
+            callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="post_pin"),
+        )
+        kb.button(
+            text="👑 Назначить админа",
+            callback_data=GeoPresenceCb(action="bulk_run", plan_id=plan_id, item="admin"),
+        )
+        if no_username:
+            # Кнопка показывается только когда есть кому доназначать: иначе она
+            # обещала бы работу, которой нет.
+            kb.button(
+                text=f"🔗 Доназначить username ({no_username})",
+                callback_data=GeoPresenceCb(
+                    action="bulk_run", plan_id=plan_id, item="username"
+                ),
+            )
     kb.button(
         text="◀️ К отчёту", callback_data=GeoPresenceCb(action="report", plan_id=plan_id)
     )
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 1, 2, 1, 1)
 
     if not applicable:
         body = (
@@ -2844,15 +3121,24 @@ async def cb_gp_bulk_menu(
             "применить оформление."
         )
     else:
+        gaps = []
+        if no_avatar:
+            gaps.append(f"без аватара: {no_avatar}")
+        if no_username:
+            gaps.append(f"без username: {no_username}")
+        gaps_line = ("⚠️ " + ", ".join(gaps) + "\n") if gaps else ""
         body = (
-            f"Объектов под применение: <b>{applicable}</b>\n"
-            + (f"⚠️ Без аватара сейчас: {no_avatar}\n" if no_avatar else "")
-            + "\n📝 <b>Обновить описания</b> — заново применит описание каждого "
-            "объекта (у каждого своё, по его городу и тематике).\n"
-            "🖼 <b>Перерисовать аватары</b> — новый набор картинок, по-прежнему "
-            "разных.\n\n"
-            "<i>Операция идёт через общую очередь: аккаунты в карантине "
-            "пропускаются, прогресс и повтор — как у остальных операций.</i>"
+            f"Объектов под применение: <b>{applicable}</b>\n{gaps_line}\n"
+            "📝 <b>Описания</b> — заново применит описание каждого объекта "
+            "(у каждого своё, по его городу и тематике).\n"
+            "🖼 <b>Аватары</b> — новый набор картинок, по-прежнему разных.\n"
+            "📌 <b>Пост + закреп</b> — опубликует пост по вашему шаблону "
+            "(с подстановкой города) и закрепит его.\n"
+            "👑 <b>Админ</b> — выдаст права указанному пользователю во всех "
+            "объектах проекта.\n"
+            "🔗 <b>Username</b> — доназначит имя тем, у кого его не встало.\n\n"
+            "<i>Операции идут через общую очередь: аккаунты в карантине "
+            "пропускаются, прогресс и повтор — как у остальных.</i>"
         )
 
     await _edit(
@@ -2862,15 +3148,69 @@ async def cb_gp_bulk_menu(
     )
 
 
+async def _submit_bulk(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    plan_id: int,
+    action: str,
+    extra: dict | None = None,
+) -> tuple[int | None, int, str]:
+    """Поставить пакетную операцию. → (op_id, число целей, текст ошибки).
+
+    op_id=None означает, что операция НЕ создана; текст ошибки обязан дойти до
+    пользователя, иначе он будет ждать выполнения, которого не начнётся.
+    """
+    try:
+        if action == "username":
+            n_targets = await pool.fetchval(
+                "SELECT COUNT(*) FROM global_presence_targets "
+                " WHERE plan_id=$1 AND status='done' AND asset_type<>'bot' "
+                "   AND final_username IS NULL",
+                plan_id,
+            )
+        else:
+            n_targets = await pool.fetchval(
+                "SELECT COUNT(*) FROM global_presence_targets "
+                " WHERE plan_id=$1 AND status='done' AND asset_type<>'bot'",
+                plan_id,
+            )
+    except Exception:
+        log_exc_swallow(log, "_submit_bulk: подсчёт целей не удался")
+        return None, 0, "Не удалось посчитать объекты"
+
+    n_targets = n_targets or 0
+    if not n_targets:
+        return None, 0, "Нет подходящих объектов"
+
+    params: dict = {"plan_id": plan_id, "action": action}
+    params.update(extra or {})
+    if action in ("avatar", "both", "username"):
+        # Сдвиг seed делает перерисовку осмысленной, а для username задаёт
+        # ветвление аллокатора: без него повтор дал бы те же кандидаты.
+        params["seed_shift"] = random.randrange(1, 10**6)
+
+    try:
+        op_id = await operation_bus.submit(
+            pool, owner_id, "gp_bulk_apply", params, total_items=n_targets
+        )
+    except Exception as exc:
+        log.error("_submit_bulk: постановка операции не удалась: %s", exc)
+        return None, n_targets, "Не удалось поставить операцию в очередь"
+    if not op_id:
+        return None, n_targets, "Не удалось создать операцию"
+    return op_id, n_targets, ""
+
+
 @router.callback_query(GeoPresenceCb.filter(F.action == "bulk_run"))
 async def cb_gp_bulk_run(
     callback: CallbackQuery,
     callback_data: GeoPresenceCb,
+    state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
     plan_id = callback_data.plan_id
     action = callback_data.item or "both"
-    if action not in ("about", "avatar", "both"):
+    if action not in _BULK_LABELS:
         await callback.answer("Неизвестное действие", show_alert=True)
         return
 
@@ -2884,51 +3224,174 @@ async def cb_gp_bulk_run(
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
 
-    try:
-        n_targets = await pool.fetchval(
-            "SELECT COUNT(*) FROM global_presence_targets "
-            " WHERE plan_id=$1 AND status='done' AND asset_type<>'bot'",
-            plan_id,
+    # Действия, требующие ввода, уходят в FSM — запускать их «пустыми» нельзя.
+    if action == "post_pin":
+        await safe_answer(callback)
+        await state.set_state(GlobalPresenceFSM.entering_bulk_post)
+        await state.update_data(bulk_plan_id=plan_id)
+        await _edit(
+            callback,
+            "📌 <b>Пост с закрепом</b>\n"
+            f"{'─' * 28}\n"
+            "Введите текст поста. Плейсхолдеры подставятся для каждого объекта:\n"
+            "  <code>{{CITY_NAME}}</code> — город (Москва, Сочи)\n"
+            "  <code>{{CITY_GEN}}</code> — родительный (Москвы, Сочи)\n"
+            "  <code>{{CITY_LOC}}</code> — предложный (Москве, Сочи)\n"
+            "  <code>{{COUNTRY}}</code> — страна\n\n"
+            "Пример:\n"
+            "<code>Добро пожаловать! Здесь только новости {{CITY_GEN}}. "
+            "Пишите в комментарии, что обсудить.</code>\n\n"
+            "<i>Одинаковый текст в сотнях каналов — прямой спам-сигнал, "
+            "поэтому подставляйте город.</i>",
+            markup=_back_cancel_kb("bulk_menu", plan_id),
         )
-    except Exception:
-        log_exc_swallow(log, "cb_gp_bulk_run: подсчёт целей не удался")
-        n_targets = 0
-    if not n_targets:
-        await callback.answer("Нет объектов для применения", show_alert=True)
         return
 
-    params = {"plan_id": plan_id, "action": action}
-    if action in ("avatar", "both"):
-        # Сдвиг seed делает перерисовку осмысленной: без него аватары были бы
-        # ровно теми же, что уже стоят.
-        params["seed_shift"] = random.randrange(1, 10**6)
-
-    try:
-        op_id = await operation_bus.submit(
-            pool,
-            callback.from_user.id,
-            "gp_bulk_apply",
-            params,
-            total_items=n_targets,
+    if action == "admin":
+        await safe_answer(callback)
+        await state.set_state(GlobalPresenceFSM.entering_bulk_admin)
+        await state.update_data(bulk_plan_id=plan_id)
+        await _edit(
+            callback,
+            "👑 <b>Назначить админа</b>\n"
+            f"{'─' * 28}\n"
+            "Введите числовой Telegram ID пользователя, которому выдать права "
+            "во всех объектах проекта.\n\n"
+            "Права: публикация, приглашения, закрепы.\n\n"
+            "⚠️ <b>Пользователь должен быть участником</b> каждого канала — "
+            "Telegram не назначает админом того, кого нет в канале. "
+            "Для остальных объектов операция честно вернёт ошибку.",
+            markup=_back_cancel_kb("bulk_menu", plan_id),
         )
-    except Exception as exc:
-        log.error("cb_gp_bulk_run: постановка операции не удалась: %s", exc)
-        await callback.answer("Не удалось поставить операцию", show_alert=True)
         return
+
+    op_id, n_targets, err = await _submit_bulk(
+        pool, callback.from_user.id, plan_id, action
+    )
     if not op_id:
-        await callback.answer("Не удалось создать операцию", show_alert=True)
+        await callback.answer(f"⚠️ {err}", show_alert=True)
         return
 
-    label = {
-        "about": "описания",
-        "avatar": "аватары",
-        "both": "описания и аватары",
-    }[action]
     await callback.answer(
-        f"✅ Операция #{op_id} поставлена: {label} для {n_targets} объектов",
+        f"✅ Операция #{op_id}: {_BULK_LABELS[action]} для {n_targets} объектов",
         show_alert=True,
     )
     await cb_gp_bulk_menu(callback, callback_data, pool)
+
+
+@router.message(GlobalPresenceFSM.entering_bulk_post)
+async def msg_gp_bulk_post(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await _reply(message, "⚠️ Текст поста не может быть пустым.", _cancel_kb())
+        return
+    if len(text) > 3000:
+        await _reply(
+            message, "⚠️ Слишком длинный пост (максимум 3000 символов).", _cancel_kb()
+        )
+        return
+
+    sd = await state.get_data()
+    plan_id = int(sd.get("bulk_plan_id") or 0)
+    if not plan_id:
+        await state.clear()
+        await _reply(message, "⚠️ Сессия устарела. Откройте отчёт проекта заново.")
+        return
+
+    # Показываем, как текст развернётся на реальном объекте: иначе про
+    # плейсхолдеры узнают уже по факту рассылки.
+    sample = None
+    try:
+        sample = await pool.fetchrow(
+            "SELECT * FROM global_presence_targets "
+            " WHERE plan_id=$1 AND status='done' AND asset_type<>'bot' LIMIT 1",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "msg_gp_bulk_post: выборка образца не удалась")
+
+    op_id, n_targets, err = await _submit_bulk(
+        pool, message.from_user.id, plan_id, "post_pin", {"post_template": text}
+    )
+    await state.clear()
+    if not op_id:
+        await _reply(message, f"⚠️ {html.escape(err)}", _cancel_kb())
+        return
+
+    preview = ""
+    if sample is not None:
+        rendered = render_pattern(text, dict(sample))
+        preview = (
+            f"\n\nПример для «{html.escape(sample['city'] or '—')}»:\n"
+            f"<i>{html.escape(rendered[:200])}</i>"
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id)
+    )
+    kb.button(
+        text="🧰 Пакетные операции",
+        callback_data=GeoPresenceCb(action="bulk_menu", plan_id=plan_id),
+    )
+    kb.adjust(1)
+    await _reply(
+        message,
+        f"✅ <b>Операция #{op_id} поставлена</b>\n"
+        f"Пост с закрепом для {n_targets} объектов.{preview}",
+        kb.as_markup(),
+    )
+
+
+@router.message(GlobalPresenceFSM.entering_bulk_admin)
+async def msg_gp_bulk_admin(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    raw = (message.text or "").strip().lstrip("@")
+    if not raw.isdigit():
+        await _reply(
+            message,
+            "⚠️ Нужен числовой Telegram ID (не @username).\n"
+            "Узнать ID можно через @userinfobot.",
+            _cancel_kb(),
+        )
+        return
+    admin_id = int(raw)
+
+    sd = await state.get_data()
+    plan_id = int(sd.get("bulk_plan_id") or 0)
+    if not plan_id:
+        await state.clear()
+        await _reply(message, "⚠️ Сессия устарела. Откройте отчёт проекта заново.")
+        return
+
+    op_id, n_targets, err = await _submit_bulk(
+        pool, message.from_user.id, plan_id, "admin", {"admin_user_id": admin_id}
+    )
+    await state.clear()
+    if not op_id:
+        await _reply(message, f"⚠️ {html.escape(err)}", _cancel_kb())
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id)
+    )
+    kb.button(
+        text="🧰 Пакетные операции",
+        callback_data=GeoPresenceCb(action="bulk_menu", plan_id=plan_id),
+    )
+    kb.adjust(1)
+    await _reply(
+        message,
+        f"✅ <b>Операция #{op_id} поставлена</b>\n"
+        f"Назначение админа <code>{admin_id}</code> в {n_targets} объектах.\n\n"
+        f"<i>Там, где пользователь не состоит в канале, Telegram откажет — "
+        f"это попадёт в счётчик ошибок операции.</i>",
+        kb.as_markup(),
+    )
 
 
 
