@@ -263,3 +263,41 @@ def test_engine_exception_returns_targets_to_queue(stand):
             handled.update(refs)
     assert handled == set(TARGETS), "упавший аккаунт не должен уносить цели с собой"
     assert res["left"] == 0
+
+
+# ── стоп-кран по флудам на весь флот ─────────────────────────────────────────
+
+def test_flood_storm_stops_operation(stand, monkeypatch):
+    """N подряд флудов без успеха → операция встаёт, чтобы не жечь аккаунты."""
+    monkeypatch.setenv("INVITE_FLOOD_STOP_STREAK", "2")
+    s = stand(lambda acc_id, refs, dry=False: _ok(0, 1, peer_flood=True))
+    res = _run(_Pool(), TARGETS)
+
+    assert res.get("flood_storm") is True, "серия флудов должна остановить операцию"
+    assert "перегрет" in res["summary"], "причина остановки должна быть названа в итоге"
+    assert res["left"] > 0, "остановка на пороге — очередь НЕ должна быть разобрана до конца"
+
+
+def test_success_resets_flood_streak(stand, monkeypatch):
+    """Успех между флудами разрывает серию — ложной остановки быть не должно."""
+    monkeypatch.setenv("INVITE_FLOOD_STOP_STREAK", "2")
+
+    def responder(acc_id, refs, dry=False):
+        if acc_id == 1:
+            return _ok(0, 1, peer_flood=True)
+        return _ok(len(refs))  # аккаунт 2 всегда успешно
+
+    s = stand(responder)
+    res = _run(_Pool(), TARGETS)
+
+    assert not res.get("flood_storm"), "успех сбрасывает серию — операция не должна вставать"
+    assert res["left"] == 0, "живой аккаунт обязан разобрать очередь до конца"
+
+
+def test_flood_stop_disabled_by_env(stand, monkeypatch):
+    """INVITE_FLOOD_STOP_STREAK=0 отключает стоп-кран (обратная совместимость)."""
+    monkeypatch.setenv("INVITE_FLOOD_STOP_STREAK", "0")
+    s = stand(lambda acc_id, refs, dry=False: _ok(0, 1, peer_flood=True))
+    res = _run(_Pool(), TARGETS)
+
+    assert not res.get("flood_storm"), "при пороге 0 стоп-кран не срабатывает"

@@ -373,11 +373,10 @@ flood-aware, preflight cooldown/flood, warmup-guard) — второй фильт
   (`account_manager.get_channel_members`) и прошлые инвайты (лог/`operation_audit`),
   fail-open. Файлы: `services/mass_inviter_engine.py`/`op_worker` (фильтр целей),
   композер (галка, вкл. по умолчанию). Тест `test_invite_dedup`.
-- [ ] **P0 — Инвайт: нет операционного стоп-крана по флудам на флот.** Есть обработка
-  на аккаунт (PeerFlood→переключить, длинный FloodWait→стоп аккаунта), но не всей
-  операции при N подряд PeerFlood по флоту. Фикс: счётчик подряд-флудов в цикле
-  `_exec_mass_invite`, порог (env) → стоп операции с честной причиной; успех сбрасывает.
-  Тест `test_invite_flood_circuit_breaker`.
+- [x] **P0 — Инвайт: операционный стоп-кран по флудам на флот.** Счётчик подряд-флудов
+  в `_exec_mass_invite`; порог `INVITE_FLOOD_STOP_STREAK` (env, дефолт 5, 0=выкл) →
+  стоп операции с честной причиной «флот перегрет»; реальный успех сбрасывает серию.
+  Тесты в `test_invite_queue_scheduler.py` (stop/reset/disabled).
 - [ ] **P1 — AI-автоответчик: владелец не видит статус/причину сбоя ИИ.** «Статус AI»
   есть только у админа (`admin.py:_adm_ai_status`, `_provider_status_line`); у владельца
   бота — тишина (сбой только в лог). Фикс: owner-scoped `ai_status`/`ai_test` (reuse

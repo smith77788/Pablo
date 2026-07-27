@@ -8356,6 +8356,16 @@ async def _exec_mass_invite(
     retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
+    # Стоп-кран по флудам на ВЕСЬ флот: Telegram смотрит на аккаунты как на группу,
+    # поэтому N подряд PeerFlood/FloodWait без единого успеха = флот перегрет,
+    # продолжать значит жечь оставшиеся аккаунты в бан. Порог из env (0 = выкл).
+    flood_storm = False
+    flood_streak = 0
+    import os as _os_env
+    try:
+        _flood_stop_streak = max(0, int(_os_env.getenv("INVITE_FLOOD_STOP_STREAK", "5")))
+    except (TypeError, ValueError):
+        _flood_stop_streak = 5
 
     def _take(q: deque, n: int) -> list:
         out: list = []
@@ -8396,7 +8406,7 @@ async def _exec_mass_invite(
         return _acc_cap if _acc_cap else (len(all_users) + len(all_phones))
 
     step = 0
-    while (q_users or q_phones) and not group_broken:
+    while (q_users or q_phones) and not group_broken and not flood_storm:
         if await _is_cancelled(pool, op_id):
             break
         if _max_invites and step >= _max_invites:
@@ -8412,7 +8422,7 @@ async def _exec_mass_invite(
 
         progressed = False
         for acc in active:
-            if group_broken:
+            if group_broken or flood_storm:
                 break
             if not q_users and not q_phones:
                 break
@@ -8494,6 +8504,17 @@ async def _exec_mass_invite(
                                        fail=fail_n, invites=ok_n)
                 await _rest_invite_account(acc["id"], res)
                 retired.add(acc_id)
+                # Стоп-кран: подряд-флуды без успеха = флот перегрет. Успех сбросил
+                # бы счётчик ниже; здесь — только флуды. При пороге останавливаем всю
+                # операцию, чтобы не жечь оставшиеся аккаунты в бан.
+                flood_streak += 1
+                if _flood_stop_streak and flood_streak >= _flood_stop_streak:
+                    flood_storm = True
+                    log.warning(
+                        "mass_invite op=%d: %d флудов подряд — стоп операции (флот перегрет)",
+                        op_id, flood_streak,
+                    )
+                    break
                 continue
 
             if attempted == 0:
@@ -8506,6 +8527,8 @@ async def _exec_mass_invite(
                 continue
 
             await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
+            if ok_n:
+                flood_streak = 0  # реальный успех разрывает серию флудов
             await _invite_learn_ok(acc_id, ok_n)
             if budget[acc_id] <= 0:
                 retired.add(acc_id)
@@ -8523,11 +8546,14 @@ async def _exec_mass_invite(
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
         + ("\n🚫 Группа недоступна — операция остановлена" if group_broken else "")
+        + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
+           "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
+           if flood_storm else "")
         + (f"\n⏸ Осталось в очереди: {_left} (аккаунты исчерпали лимит на сегодня)"
-           if _left and not group_broken else "")
+           if _left and not group_broken and not flood_storm else "")
     )
     return {"status": "done", "ok": total_ok, "failed": total_fail,
-            "left": _left, "summary": summary}
+            "left": _left, "flood_storm": flood_storm, "summary": summary}
 
 
 # ── Сеттер профилей ───────────────────────────────────────────────────────────
