@@ -301,3 +301,55 @@ def test_flood_stop_disabled_by_env(stand, monkeypatch):
     res = _run(_Pool(), TARGETS)
 
     assert not res.get("flood_storm"), "при пороге 0 стоп-кран не срабатывает"
+
+
+# ── дедуп уже-приглашённых ─────────────────────────────────────────────────────
+
+class _LogPool:
+    """Пул с реальным invite_target_log — проверяем дедуп МЕЖДУ прогонами."""
+
+    def __init__(self):
+        self.done_items = 0
+        self.log: set = set()
+
+    async def execute(self, q, *a):
+        if "done_items=done_items+" in q:
+            self.done_items += int(a[1])
+        elif "INSERT INTO invite_target_log" in q:
+            self.log.add((a[0], a[1], a[2]))
+        return "OK"
+
+    async def fetch(self, q, *a):
+        if "FROM invite_target_log" in q:
+            return [{"target": t} for (o, g, t) in self.log if o == a[0] and g == a[1]]
+        return []
+
+    async def fetchrow(self, q, *a):
+        return None
+
+
+def test_invite_dedup_skips_already_invited_on_rerun(stand):
+    """Повторный прогон по той же группе не тычет уже обработанные цели."""
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    pool = _LogPool()
+
+    r1 = _run(pool, list(TARGETS))
+    assert r1["ok"] == len(TARGETS), "первый прогон приглашает всех"
+    assert len(pool.log) == len(TARGETS), "обработанные цели должны записаться в лог"
+    first_calls = len(s.calls)
+
+    r2 = _run(pool, list(TARGETS))  # та же группа @g, та же аудитория
+    assert s.calls[first_calls:] == [], "второй прогон не должен приглашать заново"
+    assert r2["ok"] == 0
+    assert "уже приглашались" in r2["summary"], "причина пустого прогона должна быть названа"
+
+
+def test_invite_dedup_off_reinvites(stand):
+    """skip_invited=False отключает дедуп — полный контроль у пользователя."""
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    pool = _LogPool()
+    _run(pool, list(TARGETS))
+    before = len(s.calls)
+    r2 = _run(pool, list(TARGETS), skip_invited=False)
+    assert len(s.calls) > before, "без дедупа второй прогон снова приглашает"
+    assert r2["ok"] == len(TARGETS)

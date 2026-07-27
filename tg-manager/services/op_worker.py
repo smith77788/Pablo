@@ -8084,6 +8084,50 @@ async def _exec_boost_bot_starts(
 
 # ── Инвайтер ──────────────────────────────────────────────────────────────────
 
+# Дедуп уже-приглашённых: повторный прогон по той же группе не должен снова тыкать
+# тех, кого уже обрабатывали — это сжигает суточный лимит и растит PeerFlood.
+# Ключ — (владелец, нормализованная группа). Пишем цели, которые РЕАЛЬНО отдали
+# движку (успех/отказ равно «уже трогали» — повторно поке не подлежат).
+_INVITE_LOG_DDL = (
+    "CREATE TABLE IF NOT EXISTS invite_target_log("
+    "owner_id BIGINT NOT NULL, group_key TEXT NOT NULL, target TEXT NOT NULL, "
+    "op_id BIGINT, created_at TIMESTAMPTZ DEFAULT now(), "
+    "PRIMARY KEY(owner_id, group_key, target))"
+)
+
+
+async def _load_invited_targets(pool, owner_id: int, group_key: str) -> set:
+    """Кого уже приглашали в эту группу. Fail-open: при сбое — пустой набор
+    (лучше не дедупить, чем сорвать инвайт)."""
+    try:
+        await pool.execute(_INVITE_LOG_DDL)
+        rows = await pool.fetch(
+            "SELECT target FROM invite_target_log WHERE owner_id=$1 AND group_key=$2",
+            owner_id, group_key,
+        )
+        return {r["target"] for r in (rows or [])}
+    except Exception:
+        log_exc_swallow(log, "invite dedup: load failed")
+        return set()
+
+
+async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: int, targets) -> None:
+    """Запомнить обработанные цели (best-effort, не роняет операцию)."""
+    uniq = {str(t) for t in targets if t is not None}
+    if not uniq:
+        return
+    try:
+        await pool.execute(_INVITE_LOG_DDL)
+        for t in uniq:
+            await pool.execute(
+                "INSERT INTO invite_target_log(owner_id, group_key, target, op_id) "
+                "VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+                owner_id, group_key, t, op_id,
+            )
+    except Exception:
+        log_exc_swallow(log, "invite dedup: record failed")
+
+
 async def _exec_mass_invite(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -8205,6 +8249,24 @@ async def _exec_mass_invite(
         return {
             "status": "failed",
             "summary": f"⚠️ Аудитория пуста — нечего добавлять (источник: {source or 'не задан'})",
+        }
+
+    # Дедуп уже-приглашённых в ЭТУ группу (вкл. по умолчанию, отключается
+    # skip_invited=False). Ключ — нормализованная группа, чтобы повторный прогон
+    # не тыкал тех же людей. Телефоны не дедупим (номер→user неизвестен заранее).
+    _group_key = inv.parse_group_ref(group)
+    _deduped = 0
+    if params.get("skip_invited", True) and user_refs:
+        _already = await _load_invited_targets(pool, owner_id, _group_key)
+        if _already:
+            _before = len(user_refs)
+            user_refs = [r for r in user_refs if str(r) not in _already]
+            _deduped = _before - len(user_refs)
+    if not user_refs and not phones:
+        return {
+            "status": "done", "ok": 0, "failed": 0, "left": 0,
+            "summary": (f"♻️ Все цели ({_deduped}) уже приглашались в эту группу — "
+                        "новых нет. Соберите свежую аудиторию или отключите дедуп."),
         }
 
     # account_ids is optional in the Mini App ("не выбрано = все активные"):
@@ -8361,6 +8423,7 @@ async def _exec_mass_invite(
     # продолжать значит жечь оставшиеся аккаунты в бан. Порог из env (0 = выкл).
     flood_storm = False
     flood_streak = 0
+    invited_this_run: set = set()  # цели, реально отданные движку — для дедупа впредь
     import os as _os_env
     try:
         _flood_stop_streak = max(0, int(_os_env.getenv("INVITE_FLOOD_STOP_STREAK", "5")))
@@ -8472,6 +8535,8 @@ async def _exec_mass_invite(
             # Движок обрывает батч на флуде/закрытой группе — хвост НЕ пробовали.
             attempted = max(0, min(len(batch), ok_n + fail_n))
             leftover = batch[attempted:]
+            if not by_phone and attempted:
+                invited_this_run.update(batch[:attempted])
             total_ok += ok_n
             total_fail += fail_n
             step += attempted
@@ -8538,11 +8603,15 @@ async def _exec_mass_invite(
         if not progressed:
             break
 
+    # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
+    await _record_invited_targets(pool, owner_id, _group_key, op_id, invited_this_run)
+
     total = total_ok + total_fail
     _left = len(q_users) + len(q_phones)
     summary = (
         f"👥 Инвайтер: {group}\n"
         f"✅ Добавлено: {total_ok}/{total}"
+        + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
         + ("\n🚫 Группа недоступна — операция остановлена" if group_broken else "")
