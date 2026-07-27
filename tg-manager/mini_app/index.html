@@ -187,6 +187,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Toast ──────────────────────────────────────────────────── */
 #toast{position:fixed;bottom:calc(var(--tab-h)+var(--safe-b)+14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Плашка итога операции: тот же слой, что и тост, но кликабельная и живёт
+   дольше — итог массовой операции нужно успеть прочитать и открыть детали. */
+#opDone{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:16px;right:16px;background:rgba(30,41,55,.97);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:11px 14px;border-radius:14px;font-size:13px;opacity:0;transform:translateY(10px);transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:401;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+#opDone.show{opacity:1;transform:translateY(0);pointer-events:auto}
+#opDone .od-title{font-weight:600;margin-bottom:3px}
+#opDone .od-sum{color:var(--hint);font-size:12px;line-height:1.4;white-space:pre-wrap;max-height:64px;overflow:hidden}
+#opDone .od-x{position:absolute;top:6px;right:10px;color:var(--hint);font-size:16px;cursor:pointer;padding:2px 6px}
 
 /* ─── Modal ──────────────────────────────────────────────────── */
 .mbg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;display:none;align-items:flex-end}
@@ -4365,6 +4372,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <div id="toast"></div>
+<div id="opDone"></div>
 
 <!-- ══════════════════════ MODAL: BROADCAST ══════════════════════ -->
 <div class="mbg" id="bcastMbg" onclick="if(event.target===this)closeBcast()">
@@ -5603,6 +5611,14 @@ function openSSE() {
   SSE.addEventListener('op_progress', e => {
     try { renderOpProgress((JSON.parse(e.data).items)||[]); } catch(_) {}
   });
+  // Бэкенд слал op_complete с самого начала, а подписчика не было: событие
+  // считалось, сериализовалось, уходило по проводу — и выбрасывалось. Для
+  // пользователя это значило, что операция, запущенная из мини-аппа, просто
+  // исчезала из прогресса; итог приходил только в чат бота. Теперь итог виден
+  // там же, где операция запускалась, и ведёт в детали одним тапом.
+  SSE.addEventListener('op_complete', e => {
+    try { showOpComplete(JSON.parse(e.data)); } catch(_) {}
+  });
   SSE.onopen = () => {
     _sseRetry = 0;
     const hLive = document.getElementById('hLive');
@@ -5618,6 +5634,40 @@ function openSSE() {
     _sseRetry = Math.min(_sseRetry + 1, 5);
     setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
   };
+}
+
+// Итог завершённой операции прямо в мини-аппе.
+// Раньше пользователь, запустивший массовую операцию из мини-аппа, видел её в
+// «⏳ Выполняется», а потом она просто исчезала: что получилось — знал только чат
+// бота. Плашка живёт дольше тоста (итог надо успеть прочитать) и ведёт в детали.
+let _opDoneTimer = null;
+function hideOpDone() {
+  const el = document.getElementById('opDone');
+  if (el) el.classList.remove('show');
+  clearTimeout(_opDoneTimer);
+}
+function showOpComplete(op) {
+  const el = document.getElementById('opDone');
+  if (!el || !op || !op.id) return;
+  const ok = op.status === 'done';
+  const head = `${ok ? '✅' : '⚠️'} ${esc(op.label || op.op_type || 'Операция')}`;
+  // Честный итог: сначала summary операции, иначе причина ошибки, иначе счётчик.
+  // Пустой плашки быть не должно — «завершилась» без результата это тот же
+  // тихий успех, только в новом месте.
+  const body = (op.summary || op.error_msg || `${op.done || 0}/${op.total || 0}`)
+    .toString().trim().split('\n').slice(0, 3).join('\n');
+  el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()">×</span>
+    <div class="od-title">${head}</div>
+    <div class="od-sum">${esc(body)}</div>
+    <div style="font-size:12px;color:var(--accent);margin-top:5px">Открыть детали →</div>`;
+  el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
+  el.classList.add('show');
+  clearTimeout(_opDoneTimer);
+  _opDoneTimer = setTimeout(hideOpDone, 12000);
+  try {
+    const h = tg && tg.HapticFeedback;
+    if (h) h.notificationOccurred(ok ? 'success' : 'error');
+  } catch(_) {}
 }
 
 let _hadOpProgress = false;

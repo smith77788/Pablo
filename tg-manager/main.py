@@ -724,6 +724,14 @@ async def main() -> None:
         asyncio.create_task(_resilient("audience_dna", _audience_dna.run, pool, bot))
         from services import cf_pool_manager as _cf_pool_manager
         asyncio.create_task(_resilient("cf_pool_monitor", _cf_pool_manager.run, pool, bot))
+        # Ban Weather, Фаза 1 (schema_v146). Триггер БД trg_immunity_capture_status
+        # пишет КАЖДУЮ смену acc_status в account_status_events с самого развёртывания
+        # схемы, но обработчик никогда не запускался: processed_at оставался NULL
+        # навсегда, автопсий не появлялось, а таблица росла. Движок готов и покрыт
+        # тестами — ему не хватало ровно этой строки. Fail-soft по устройству:
+        # сбой обработки одного события не роняет цикл и не влияет на операции.
+        from services import immunity_engine as _immunity_engine
+        asyncio.create_task(_resilient("immunity_engine", _immunity_engine.start, pool))
         # Докатить рассылки, оборванные предыдущим рестартом (status running/pending).
         # broadcaster.run пропускает уже доставленных через delivery log — без дублей.
         from services import broadcaster as _broadcaster

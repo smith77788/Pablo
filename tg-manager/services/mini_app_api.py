@@ -12074,7 +12074,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 rows = await pool.fetch(
                     """SELECT id, op_type, COALESCE(label, op_type) AS label,
-                              total_items, done_items, status, error_msg
+                              total_items, done_items, status, error_msg,
+                              COALESCE(result->>'summary', result->>'reason') AS summary
                        FROM operation_queue WHERE owner_id=$1 AND status IN ('done','failed')
                          AND finished_at > now() - make_interval(minutes => 30)
                        ORDER BY finished_at DESC LIMIT 20""",
@@ -12108,6 +12109,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             "total": op["total_items"],
                             "done": op["done_items"],
                             "error_msg": op.get("error_msg"),
+                            # Итог операции — тот же текст, что уходит в бот.
+                            # Без него мини-апп мог сказать только «завершилась»,
+                            # но не «что получилось».
+                            "summary": op.get("summary"),
                         })
                 if len(_seen_completed) > 500:
                     _seen_completed.clear()
