@@ -11842,6 +11842,12 @@ async function syncContacts() {
 }
 
 async function detectDuplicates() {
+  // Экран открывается ЗДЕСЬ, а не в вызывающем: функция служит и входом с плитки
+  // «🔍 Дубликаты», и кнопкой «🔄 Проверить» внутри самого экрана. Без push плитка
+  // была немой: запрос уходил, HTML писался в скрытый экран, пользователь не видел
+  // ничего. Соседние плитки (openUchConflicts/openUchGraph/openUchSmartTags) push
+  // делают — эта одна выпадала из ряда. push на уже открытый экран идемпотентен.
+  push('s-uchduplicates');
   txt('dupBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/uch/duplicates');

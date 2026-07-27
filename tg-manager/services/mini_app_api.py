@@ -641,6 +641,22 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
 
 
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
+    @web.middleware
+    async def plan_gate_middleware(request, handler):
+        """Отказ по тарифу → 403 с причиной, а не 500.
+
+        `operation_bus.submit` поднимает PlanRequiredError (наследник
+        PermissionError), когда у владельца нет нужной подписки. Это НЕ сбой
+        сервера: пользователь должен увидеть, что операция платная, а не
+        «внутреннюю ошибку». Хендлеры ловят это сами; middleware — страховка на
+        случай, если новый хендлер добавят без перехвата.
+        """
+        try:
+            return await handler(request)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+
+    app.middlewares.append(plan_gate_middleware)
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
 
@@ -2050,6 +2066,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "bulk_access_hash": int(ch.get("access_hash") or 0),
             }, total_items=1, scheduled_for=sched)
             return _json_resp({"ok": True, "op_id": op_id, "scheduled_minutes": schedule_minutes})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("post_to_channel ch=%d uid=%d", ch_id, uid)
             return _err("Failed to enqueue post", 500)
@@ -2077,6 +2097,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "access_hash": int(ch.get("access_hash") or 0),
             }, total_items=1)
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("pin_channel_last_post ch=%d uid=%d", ch_id, uid)
             return _err("Failed to enqueue pin", 500)
@@ -2895,6 +2919,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await _obus.submit(
                 pool, uid, "bulk_set_profile", params,
                 total_items=len(account_ids), label=label)
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("profile_setter_submit insert uid=%d", uid)
             return _err(str(exc), 500)
@@ -2961,6 +2989,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
                 uid, op, _json.dumps({"account_id": account_id}), label,
             )
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("cleaner_submit insert uid=%d", uid)
             return _err(str(exc), 500)
@@ -3238,6 +3270,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов",
             )
             return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("accounts_check uid=%d", uid)
             return _err(str(exc), 500)
@@ -3395,6 +3431,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     uid, _json.dumps(params), n, f"{label}: {n} акк.")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             return _err("Неизвестная операция", 400)
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("accounts_mass uid=%d op=%s", uid, op)
             return _err(str(exc), 500)
@@ -3707,6 +3747,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "promote_all_admins", params,
                 total_items=1, label="Назначение админов")
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
             return _err(str(exc), 500)
@@ -3779,6 +3823,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
             return _err("Неизвестная операция", 400)
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("channels_mass uid=%d op=%s", uid, op)
             return _err(str(exc), 500)
@@ -4149,6 +4197,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {"account_ids": [acc_id], "check_spambot": True},
                 total_items=1, label="Проверка аккаунта")
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("account_check_one uid=%d acc=%d", uid, acc_id)
             return _err(str(exc), 500)
@@ -4338,6 +4390,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     uid, op_type, _json.dumps(params), total, label,
                 )
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "accounts": len(account_ids)})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("boost_submit uid=%d type=%s", uid, btype)
             return _err(str(exc), 500)
@@ -4385,6 +4441,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("growth_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -4432,6 +4492,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _json.dumps({"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count}),
                 len(channels), label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "channels": len(channels)})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("ai_comment_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -4474,6 +4538,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {"resources": resources, "per_resource_limit": per_limit, "acc_count": acc_count},
                 total_items=len(resources), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "resources": len(resources)})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("compliance_scan_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -4521,6 +4589,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, _json.dumps({"target": target, "reason": reason}), acc_count, label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("reporter_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -4582,6 +4654,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     uid, _params, len(channel_ids), label,
                 )
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "scheduled_minutes": schedule_minutes})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("quick_post_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -4683,9 +4759,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not chan_ids:
             return _err("Нет каналов с SEO-предложениями для применения", 400)
         from services import operation_bus as _obus
-        op_id = await _obus.submit(
-            pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids},
-            total_items=len(chan_ids), label=f"SEO по сетке: {len(chan_ids)} каналов")
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids},
+                total_items=len(chan_ids), label=f"SEO по сетке: {len(chan_ids)} каналов")
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
         return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
 
     async def seo_apply_bot(request: web.Request) -> web.Response:
@@ -5813,6 +5892,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"Авторег {count} акк. ({country})",
             )
             return _json_resp({"ok": True, "op_id": op_id, "count": count})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("autoreg_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -5845,6 +5928,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "phone_check", {"phones": phones},
                 total_items=len(phones), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(phones)})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("phone_check_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -6126,6 +6213,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await _obus.submit(
                 pool, uid, "gift_scan", {}, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("gift_scan_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -6213,6 +6304,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, _json.dumps(params), label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("mass_inviter_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -6531,6 +6626,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await _obus.submit(
                 pool, uid, "reg_check", {"target": target}, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("reg_check_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -7296,6 +7395,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "ad_intel_scan", {"channel": channel},
                 total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("ad_intel_add_channel uid=%d", uid)
             return _err(str(exc), 500)
@@ -8143,6 +8246,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                  "limit": limit, "days_back": days_back},
                 total_items=limit, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("submit_parse_job uid=%d", uid)
             return _err(str(exc), 500)
@@ -9355,6 +9462,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                  scheduled_for=scheduled_for)
             return _json_resp({"ok": True, "op_id": op_id, "total": total,
                                "scheduled_for": scheduled_for})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("mass_publish uid=%d", uid)
             return _err("Failed to enqueue mass publish", 500)
@@ -10141,6 +10252,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 total_items=len(ch_ids),
             )
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("presence_pack_seed uid=%d pack_id=%d", uid, pack_id)
             return _err(str(exc), 500)
@@ -10176,6 +10291,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 total_items=len(all_asset_ids),
             )
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("presence_pack_promote uid=%d pack_id=%d", uid, pack_id)
             return _err(str(exc), 500)
@@ -10420,6 +10539,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 total_items=0,
             )
             return _json_resp({"ok": True, "op_id": op_id, "plan_id": plan_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("global_presence_launch uid=%d plan=%d", uid, plan_id)
             return _err(str(exc), 500)
@@ -10483,6 +10606,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp(
                 {"ok": True, "op_id": op_id, "plan_id": plan_id, "targets": n_targets}
             )
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("global_presence_bulk_apply uid=%d plan=%d", uid, plan_id)
             return _err(str(exc), 500)
@@ -10671,6 +10798,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"Создать канал: {title}",
             )
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("channel_factory_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -10725,6 +10856,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"Создать группу: {title}",
             )
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("group_factory_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -10952,6 +11087,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"Клонировать контент: {source} → {len(target_refs)} канал(ов)",
             )
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("content_cloner_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -11074,6 +11213,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"Clone: @{src_name} → @{tgt_name}",
             )
             return _json_resp({"op_id": op_id, "ok": True})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("clone_adapt_submit uid=%d", uid)
             return _err(str(exc), 500)
@@ -11852,6 +11995,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 scheduled_for=scheduled_at,
             )
             return _json_resp({"status": "scheduled", "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
+            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as e:
             log.exception("schedule_post uid=%s", uid)
             return _err(str(e), 500)
