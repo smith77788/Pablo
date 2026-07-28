@@ -73,6 +73,19 @@ def test_cis_presets_have_population_coverage():
         assert g.city_population(slug) and g.city_population(slug) > 100_000
 
 
+def test_foreign_presets_have_full_population_coverage():
+    """Пресеты дальнего зарубежья — 100% покрытие населением (фильтр «>N» полезен)."""
+    for preset in ("eu_capitals", "world_capitals", "tier1", "dach", "latam"):
+        opts = g.preset_city_options(preset)
+        assert opts, f"{preset}: пусто"
+        missing = [o["city"] for o in opts if o["population"] is None]
+        assert not missing, f"{preset}: города без населения: {missing}"
+    # фильтр реально режет
+    eu_all = g.preset_city_options("eu_capitals")
+    eu_big = g.preset_city_options("eu_capitals", min_population=1_000_000)
+    assert 0 < len(eu_big) < len(eu_all)
+
+
 def test_population_keys_match_known_city_slugs():
     """Ключи таблицы населения — валидные slug'и (нижний регистр, без пробелов)."""
     for slug in g.CITY_POPULATION:

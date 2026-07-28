@@ -2691,6 +2691,59 @@ CITY_POPULATION: dict[str, int] = {
     "tbilisi": 1_200_000,
 }
 
+# Дальнее зарубежье (столицы/мегаполисы, приблизительно) — отдельным блоком,
+# чтобы фильтр «города > N» работал и для пресетов Европа/Мир/Tier-1/DACH/LATAM.
+# Значения — городская агломерация/город; точность достаточна для порогов.
+_INTL_POPULATION: dict[str, int] = {
+    # Европа
+    "vienna": 1_900_000, "brussels": 1_200_000, "sofia": 1_240_000, "zagreb": 770_000,
+    "nicosia": 200_000, "prague": 1_300_000, "copenhagen": 640_000, "tallinn": 440_000,
+    "helsinki": 660_000, "paris": 2_100_000, "berlin": 3_770_000, "athens": 660_000,
+    "budapest": 1_700_000, "dublin": 550_000, "rome": 2_800_000, "riga": 610_000,
+    "vilnius": 580_000, "luxembourg": 130_000, "valletta": 6_000, "amsterdam": 870_000,
+    "warsaw": 1_790_000, "lisbon": 550_000, "bucharest": 1_830_000, "bratislava": 440_000,
+    "ljubljana": 285_000, "madrid": 3_300_000, "stockholm": 980_000, "bern": 135_000,
+    "london": 8_900_000, "oslo": 700_000, "reykjavik": 130_000, "tirana": 420_000,
+    "sarajevo": 275_000, "podgorica": 150_000, "skopje": 545_000, "chisinau": 640_000,
+    "monaco": 38_000, "pristina": 200_000, "belgrade": 1_390_000,
+    "andorra_la_vella": 22_000, "vaduz": 5_000, "san_marino": 4_000,
+    # Мир
+    "washington_dc": 700_000, "ottawa": 1_000_000, "mexico_city": 9_200_000,
+    "brasilia": 3_000_000, "buenos_aires": 3_050_000, "santiago": 6_200_000,
+    "bogota": 7_400_000, "lima": 9_700_000, "caracas": 2_000_000, "quito": 1_900_000,
+    "tokyo": 13_900_000, "beijing": 21_500_000, "seoul": 9_700_000, "new_delhi": 30_000_000,
+    "jakarta": 10_600_000, "bangkok": 10_700_000, "kuala_lumpur": 1_800_000,
+    "singapore": 5_900_000, "manila": 13_000_000, "hanoi": 8_000_000, "islamabad": 1_100_000,
+    "dhaka": 10_300_000, "colombo": 750_000, "kathmandu": 1_000_000, "kabul": 4_600_000,
+    "riyadh": 7_600_000, "abu_dhabi": 1_500_000, "tehran": 9_000_000, "baghdad": 7_500_000,
+    "ankara": 5_700_000, "jerusalem": 950_000, "amman": 4_000_000, "beirut": 2_400_000,
+    "damascus": 2_500_000, "cairo": 10_000_000, "nairobi": 4_400_000, "lagos": 15_000_000,
+    "johannesburg": 5_600_000, "accra": 2_500_000, "casablanca": 3_700_000,
+    "tunis": 2_700_000, "algiers": 3_500_000, "addis_ababa": 5_000_000,
+    "kinshasa": 17_000_000, "canberra": 460_000, "wellington": 210_000,
+    "tashkent": 2_900_000, "yerevan": 1_100_000,
+    # Tier-1 глобальные
+    "new_york": 8_400_000, "shanghai": 27_000_000, "hong_kong": 7_500_000,
+    "dubai": 3_600_000, "sydney": 5_300_000, "frankfurt": 770_000, "chicago": 2_700_000,
+    "los_angeles": 4_000_000, "zurich": 435_000, "toronto": 3_000_000, "mumbai": 20_000_000,
+    "sao_paulo": 12_300_000, "istanbul": 15_500_000, "milan": 1_400_000, "taipei": 2_600_000,
+    "tel_aviv": 460_000,
+    # DACH
+    "hamburg": 1_900_000, "munich": 1_500_000, "cologne": 1_100_000, "stuttgart": 630_000,
+    "dusseldorf": 620_000, "leipzig": 600_000, "dortmund": 590_000, "bremen": 570_000,
+    "graz": 290_000, "linz": 205_000, "salzburg": 155_000, "innsbruck": 130_000,
+    "geneva": 200_000, "basel": 175_000, "lausanne": 140_000,
+    # LATAM
+    "rio_de_janeiro": 6_700_000, "salvador": 2_900_000, "fortaleza": 2_700_000,
+    "cordoba": 1_400_000, "rosario": 1_300_000, "guadalajara": 1_500_000,
+    "monterrey": 1_100_000, "medellin": 2_500_000, "cali": 2_200_000,
+    "montevideo": 1_300_000, "asuncion": 520_000, "la_paz": 800_000, "havana": 2_100_000,
+    "santo_domingo": 1_000_000, "san_jose": 340_000, "panama_city": 880_000,
+}
+# Своё население приоритетнее (RU/CIS) — intl только добавляет отсутствующее.
+for _slug, _pop in _INTL_POPULATION.items():
+    CITY_POPULATION.setdefault(_slug, _pop)
+
 
 def city_population(city_slug: str) -> int | None:
     """Население города по city_slug (или None, если неизвестно)."""
