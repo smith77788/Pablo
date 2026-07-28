@@ -1658,15 +1658,27 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             summary = _op_summary
             from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb, StrikeCb, MassPubCb
+            from bot.callbacks import BmCb, StrikeCb, MassPubCb, MassOpCb
+            from services import operation_bus
 
             kb = InlineKeyboardBuilder()
-            # Partial-fail → retry: для массовой публикации с ошибками даём кнопку
-            # повторить ТОЛЬКО неудавшиеся каналы (best-in-class mass-op).
+            # Partial-fail → retry: повторить ТОЛЬКО неудавшиеся цели, а не всю
+            # операцию. Перезапуск целиком тратит лимиты аккаунтов и повторно
+            # обрабатывает успешные цели (дубли постов, повторные вступления).
+            #
+            # mass_publish имеет собственный обработчик (умеет переносить медиа);
+            # для остальных типов кнопка появляется, только если op_type объявил
+            # retry_targets — то есть operation_log.target у него однозначно
+            # обратим в цель. Молча угадывать нельзя: повтор ушёл бы не туда.
             if op_type == "mass_publish" and _failed > 0:
                 kb.button(
                     text=f"🔁 Повторить неудавшиеся ({_failed})",
                     callback_data=MassPubCb(action="retry_failed", target_id=op_id),
+                )
+            elif _failed > 0 and operation_bus.supports_retry_failed(op_type):
+                kb.button(
+                    text=f"🔁 Повторить неудавшиеся ({_failed})",
+                    callback_data=MassOpCb(action="retry_targets", op_id=op_id),
                 )
             kb.button(
                 text="📋 Детали операции",

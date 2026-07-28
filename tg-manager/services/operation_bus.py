@@ -70,6 +70,16 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
 # description: отображается пользователю в очереди
 # min_plan: минимальная подписка для выполнения (или None)
 # max_retries: количество автоматических повторов при временной ошибке
+# retry_targets: описание точечного повтора упавших ЦЕЛЕЙ (необязательное):
+#     {"param": "<поле params со списком целей>",
+#      "prefix": "<префикс в operation_log.target, если есть>",
+#      "kind": "int" | "str"}
+#     Объявляется ТОЛЬКО когда operation_log.target однозначно обратим в
+#     элемент этого списка. У большинства операций в лог пишется исполнитель
+#     («acc#123») или человекочитаемая метка (заголовок канала) — повторять по
+#     ним нельзя: это либо не цель, либо необратимо в идентификатор. Молчаливо
+#     угадывать здесь опаснее, чем не давать кнопку: повтор ушёл бы не по тем
+#     целям, а операция отчиталась бы об успехе.
 OP_REGISTRY: dict[str, dict] = {
     "mass_publish": {
         "description": "Массовая публикация",
@@ -82,18 +92,24 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 1,
         "icon": "🔍",
+        # op_worker пишет target=f"ch#{chan_id}" — префикс + числовой id.
+        "retry_targets": {"param": "channel_ids", "prefix": "ch#", "kind": "int"},
     },
     "bulk_join": {
         "description": "Массовое вступление в каналы",
         "min_plan": "starter",
         "max_retries": 3,
         "icon": "📥",
+        # target = сама ссылка-приглашение, как она пришла в params.
+        "retry_targets": {"param": "links", "kind": "str", "alt_params": ["targets"]},
     },
     "bulk_leave": {
         "description": "Массовый выход из каналов",
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "📤",
+        # target = str(channel) — элемент списка channels как есть.
+        "retry_targets": {"param": "channels", "kind": "str"},
     },
     "bulk_bot_edit": {
         "description": "Массовое редактирование ботов",
@@ -655,3 +671,144 @@ def describe(op_type: str) -> str:
     icon = meta.get("icon", "⚙️")
     desc = meta.get("description", op_type)
     return f"{icon} {desc}"
+
+
+# ── Точечный повтор упавших целей ────────────────────────────────────────────
+#
+# Частичный провал массовой операции без этого механизма означает перезапуск
+# ВСЕЙ операции: лишний расход лимитов аккаунтов и повторная обработка уже
+# успешных целей (дубли постов, повторные вступления). Данные для точечного
+# повтора уже есть — op_worker пишет per-target результат в operation_log.
+#
+# Ограничение честное и намеренное: механизм работает только для op_type,
+# объявивших `retry_targets`. У остальных operation_log.target — это либо
+# исполнитель («acc#123»), либо человекочитаемая метка, из которой цель не
+# восстановить. Угадывать нельзя: повтор ушёл бы не по тем целям и отчитался
+# бы об успехе.
+
+
+def retry_targets_meta(op_type: str) -> dict | None:
+    """Описание точечного повтора для op_type. None — повтор не поддержан."""
+    meta = (OP_REGISTRY.get(op_type) or {}).get("retry_targets")
+    return meta if isinstance(meta, dict) and meta.get("param") else None
+
+
+def supports_retry_failed(op_type: str) -> bool:
+    return retry_targets_meta(op_type) is not None
+
+
+def parse_log_target(raw: str, meta: dict):
+    """`operation_log.target` → элемент списка целей. None — не разобрано.
+
+    Строгий разбор: значение, не соответствующее объявленному формату, ОТБРАСЫВАЕТСЯ.
+    Мусор в списке целей хуже, чем более короткий список: исполнитель либо
+    молча ничего не сделает, либо ударит не по тому объекту.
+    """
+    val = (raw or "").strip()
+    if not val:
+        return None
+    prefix = meta.get("prefix") or ""
+    if prefix:
+        if not val.startswith(prefix):
+            return None
+        val = val[len(prefix):]
+    if meta.get("kind") == "int":
+        neg = val.startswith("-")
+        digits = val[1:] if neg else val
+        if not digits.isdigit():
+            return None
+        return int(val)
+    return val
+
+
+async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -> list:
+    """Упавшие цели операции, в формате элементов params. Порядок сохраняется.
+
+    Берутся ТОЛЬКО status='error'. Цель, у которой есть хотя бы одна успешная
+    запись, исключается: один и тот же канал мог упасть на одном аккаунте и
+    пройти на другом — повторять его значит сделать вторую публикацию.
+    """
+    meta = retry_targets_meta(op_type)
+    if not meta:
+        return []
+    try:
+        rows = await pool.fetch(
+            "SELECT target, status FROM operation_log "
+            " WHERE op_id=$1 AND target IS NOT NULL ORDER BY step_num, id",
+            op_id,
+        )
+    except Exception:
+        log.warning("operation_bus: чтение operation_log op=%s не удалось", op_id, exc_info=True)
+        return []
+
+    succeeded: set = set()
+    failed_ordered: list = []
+    seen: set = set()
+    for r in rows:
+        parsed = parse_log_target(r["target"], meta)
+        if parsed is None:
+            continue
+        key = str(parsed)
+        if r["status"] == "ok":
+            succeeded.add(key)
+        elif r["status"] == "error" and key not in seen:
+            seen.add(key)
+            failed_ordered.append((key, parsed))
+    return [val for key, val in failed_ordered if key not in succeeded]
+
+
+async def submit_retry_failed(
+    pool: asyncpg.Pool, owner_id: int, src_op_id: int
+) -> dict:
+    """Поставить операцию-повтор только по упавшим целям исходной.
+
+    Возвращает {"ok": bool, "op_id": int|None, "count": int, "reason": str}.
+    Причина отказа возвращается текстом, а не скрывается: «повторять нечего» и
+    «повтор не поддержан для этого типа» — разные ответы для пользователя.
+    """
+    row = await pool.fetchrow(
+        "SELECT owner_id, op_type, params FROM operation_queue WHERE id=$1", src_op_id
+    )
+    if not row or row["owner_id"] != owner_id:
+        return {"ok": False, "op_id": None, "count": 0, "reason": "Операция не найдена"}
+
+    op_type = row["op_type"]
+    meta = retry_targets_meta(op_type)
+    if not meta:
+        return {
+            "ok": False, "op_id": None, "count": 0,
+            "reason": "Для этого типа операции точечный повтор не поддержан",
+        }
+
+    try:
+        params = row["params"] if isinstance(row["params"], dict) else json.loads(row["params"] or "{}")
+    except (TypeError, ValueError):
+        params = {}
+
+    failed = await collect_failed_targets(pool, src_op_id, op_type)
+    if not failed:
+        return {"ok": False, "op_id": None, "count": 0, "reason": "Неудавшихся целей не осталось"}
+
+    # Поле целей заменяется, остальные параметры (текст, задержки, аккаунты)
+    # переносятся как есть — повтор обязан повторять ту же операцию.
+    new_params = dict(params)
+    new_params[meta["param"]] = failed
+    for alt in meta.get("alt_params") or ():
+        # Исполнитель может читать альтернативное имя поля первым: если оставить
+        # старое значение, повтор пойдёт по ПОЛНОМУ списку целей.
+        new_params.pop(alt, None)
+    new_params["retry_of_op"] = src_op_id
+
+    try:
+        op_id = await submit(pool, owner_id, op_type, new_params, total_items=len(failed))
+    except PlanRequiredError:
+        raise
+    except Exception as exc:
+        log.error("operation_bus: повтор op=%s не поставлен: %s", src_op_id, exc)
+        return {"ok": False, "op_id": None, "count": len(failed), "reason": "Не удалось поставить операцию"}
+
+    log.info(
+        "operation_bus: retry_failed src=%s → op=%s targets=%d type=%s",
+        src_op_id, op_id, len(failed), op_type,
+    )
+    return {"ok": True, "op_id": op_id, "count": len(failed), "reason": ""}

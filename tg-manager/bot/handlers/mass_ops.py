@@ -849,6 +849,52 @@ async def cb_retry_all_failed(
     await cb_queue(callback, MassOpCb(action="queue", op_type="all", page=0), pool)
 
 
+@router.callback_query(MassOpCb.filter(F.action == "retry_targets"))
+async def cb_retry_failed_targets(
+    callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
+) -> None:
+    """Повторить операцию ТОЛЬКО по упавшим целям.
+
+    Отличается от «retry_op» (перезапуск всей операции) и «retry_failed»
+    (сброс всех проваленных операций): здесь создаётся НОВАЯ операция того же
+    типа, ограниченная целями со status='error'. Перезапуск целиком тратит
+    лимиты аккаунтов и повторно обрабатывает успешные цели — то есть даёт
+    дубли постов и повторные вступления.
+    """
+    from services import operation_bus
+
+    op_id = callback_data.op_id
+    if not op_id:
+        await callback.answer("Операция не указана", show_alert=True)
+        return
+
+    await callback.answer("⏳ Собираю упавшие цели…")
+    try:
+        res = await operation_bus.submit_retry_failed(pool, callback.from_user.id, op_id)
+    except operation_bus.PlanRequiredError as exc:
+        await callback.answer(
+            f"🚫 Требуется тариф {exc.required_plan.upper()}", show_alert=True
+        )
+        return
+    except Exception as exc:
+        log.error("cb_retry_failed_targets op=%s: %s", op_id, exc)
+        await callback.answer("Не удалось поставить повтор", show_alert=True)
+        return
+
+    if not res["ok"]:
+        # Причина показывается как есть: «повторять нечего» и «тип не
+        # поддерживает точечный повтор» — разные ответы, и пользователь должен
+        # понимать, какой из них он получил.
+        await callback.answer(f"ℹ️ {res['reason']}", show_alert=True)
+        return
+
+    await callback.answer(
+        f"✅ Операция #{res['op_id']}: повтор по {res['count']} упавшим целям",
+        show_alert=True,
+    )
+    await cb_queue(callback, MassOpCb(action="queue", op_type="all", page=0), pool)
+
+
 @router.callback_query(MassOpCb.filter(F.action == "op_detail"))
 async def cb_op_detail(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
@@ -932,9 +978,26 @@ async def cb_op_detail(
     kb = InlineKeyboardBuilder()
     if op["status"] == "failed":
         kb.button(
-            text="🔄 Повторить",
+            text="🔄 Повторить всю операцию",
             callback_data=MassOpCb(action="retry_op", op_id=op_id),
         )
+    # Экран деталей — то место, где пользователь ВИДИТ упавшие цели, поэтому
+    # точечный повтор должен быть здесь, а не только в уведомлении (которое
+    # уже могло уехать вверх по переписке).
+    try:
+        from services import operation_bus as _ob
+
+        if _ob.supports_retry_failed(op["op_type"]):
+            _failed_targets = await _ob.collect_failed_targets(pool, op_id, op["op_type"])
+            if _failed_targets:
+                kb.button(
+                    text=f"🔁 Повторить упавшие ({len(_failed_targets)})",
+                    callback_data=MassOpCb(action="retry_targets", op_id=op_id),
+                )
+    except Exception as _rt_err:
+        # Подсчёт целей — вспомогательный: его сбой не должен лишать экран
+        # остальных кнопок и превращать деталь операции в тупик.
+        log.warning("cb_op_detail: подсчёт упавших целей op=%s: %s", op_id, _rt_err)
     kb.button(
         text="◀️ В очередь",
         callback_data=MassOpCb(action="queue", op_type="all", page=0),
