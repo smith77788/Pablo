@@ -104,8 +104,9 @@ async def cb_shield_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📊 Топ-10 рискованных", callback_data=ShieldCb(action="top10"))
     kb.button(text="⚙️ Настройки", callback_data=ShieldCb(action="settings"))
     kb.button(text="📋 История (7 дней)", callback_data=ShieldCb(action="history"))
+    kb.button(text="🩺 Разбор потерь", callback_data=ShieldCb(action="autopsy"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 2, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -284,6 +285,120 @@ async def cb_shield_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     kb = _back_kb()
     kb.adjust(1)
 
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ─── Разбор потерь (Ban Weather) ──────────────────────────────────────────────
+
+
+@router.callback_query(ShieldCb.filter(F.action == "autopsy"))
+async def cb_shield_autopsy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Разбор смертей аккаунтов: почему улетели и что сделать.
+
+    Триггер БД пишет каждую смену статуса в account_status_events, движок
+    иммунитета считает по ним автопсию. До этого экрана данные копились
+    невидимо: пользователь узнавал «аккаунт улетел», но не узнавал причину и
+    не получал правила на будущее — то есть петля «смерть → вывод → защита»
+    не замыкалась на нём.
+    """
+    await safe_answer(callback)
+    owner_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT e.acc_id, e.new_status, e.signature, e.autopsy, e.created_at,
+                      e.processed_at, a.phone, a.username
+                 FROM account_status_events e
+                 LEFT JOIN tg_accounts a ON a.id = e.acc_id
+                WHERE e.owner_id = $1 AND e.is_death
+                ORDER BY e.created_at DESC
+                LIMIT 10""",
+            owner_id,
+        )
+    except Exception as exc:
+        # Схема v146 могла быть ещё не применена — это не ошибка пользователя.
+        log.debug("shield_hub.autopsy: %s", exc)
+        rows = []
+
+    # Повторяющаяся сигнатура = паттерн, выкашивающий флот. Это главное, ради
+    # чего разбор существует, поэтому считается отдельно и показывается сверху.
+    top_sig: list = []
+    try:
+        top_sig = await pool.fetch(
+            """SELECT signature, COUNT(*) AS n
+                 FROM account_status_events
+                WHERE owner_id = $1 AND is_death AND signature IS NOT NULL
+                  AND created_at > NOW() - INTERVAL '30 days'
+                GROUP BY signature HAVING COUNT(*) > 1
+                ORDER BY n DESC LIMIT 3""",
+            owner_id,
+        )
+    except Exception as exc:
+        log.debug("shield_hub.autopsy top_sig: %s", exc)
+
+    lines = ["🩺 <b>Разбор потерь</b>\n"]
+
+    if not rows:
+        lines.append(
+            "<i>Потерь не зафиксировано — разбирать нечего.</i>\n\n"
+            "Здесь появится причина по каждому улетевшему аккаунту: что он делал "
+            "перед этим, чем отличался от выживших и какое правило снизит риск."
+        )
+    else:
+        if top_sig:
+            lines.append("⚠️ <b>Повторяющиеся паттерны за 30 дней:</b>")
+            for sg in top_sig:
+                lines.append(
+                    f"   • <code>{html.escape(str(sg['signature'])[:48])}</code> — "
+                    f"<b>{sg['n']}</b> потери"
+                )
+            lines.append("")
+
+        pending = sum(1 for r in rows if r["processed_at"] is None)
+        if pending:
+            # Честно: часть событий ещё в очереди, а не «причина неизвестна».
+            lines.append(f"<i>В обработке: {pending} из {len(rows)}</i>\n")
+
+        for r in rows:
+            name = f"@{r['username']}" if r["username"] else (r["phone"] or f"#{r['acc_id']}")
+            ts = r["created_at"]
+            ts_str = ts.strftime("%d.%m %H:%M") if hasattr(ts, "strftime") else "—"
+            lines.append(f"☠️ <b>{html.escape(str(name))}</b> · {ts_str} · {r['new_status']}")
+
+            data = r["autopsy"]
+            if isinstance(data, str):
+                try:
+                    import json as _json
+
+                    data = _json.loads(data)
+                except (TypeError, ValueError):
+                    data = None
+            if not isinstance(data, dict):
+                lines.append("   <i>разбор ещё не готов</i>")
+                continue
+
+            cause = data.get("probable_cause")
+            if cause:
+                lines.append(f"   Причина: {html.escape(str(cause)[:140])}")
+            diff = data.get("differed_from_survivors")
+            if diff:
+                lines.append(f"   {html.escape(str(diff)[:160])}")
+            rule = data.get("suggested_rule") or {}
+            rule_text = rule.get("note") or rule.get("description")
+            if rule_text:
+                # Действие показываем словами: «throttle»/«quarantine» в
+                # интерфейсе ничего не значат для пользователя.
+                act = {"quarantine": "увести в карантин", "throttle": "снизить темп"}.get(
+                    rule.get("action"), rule.get("action") or ""
+                )
+                suffix = f" → <b>{html.escape(act)}</b>" if act else ""
+                lines.append(f"   💡 {html.escape(str(rule_text)[:130])}{suffix}")
+            lines.append("")
+
+    kb = _back_kb()
+    kb.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
     )
