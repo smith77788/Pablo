@@ -4164,6 +4164,23 @@ async def get_owner_presence_objects(
     )
 
 
+async def get_owner_presence_regions(
+    pool: asyncpg.Pool, owner_id: int, status: str | None = "done"
+) -> list[str]:
+    """Список непустых регионов среди созданных объектов владельца (для фильтра)."""
+    rows = await pool.fetch(
+        """SELECT DISTINCT gpt.region
+           FROM global_presence_targets gpt
+           JOIN global_presence_plans gpp ON gpp.id = gpt.plan_id
+           WHERE gpp.owner_id=$1 AND ($2::text IS NULL OR gpt.status=$2)
+                 AND gpt.region IS NOT NULL AND gpt.region <> ''
+           ORDER BY gpt.region""",
+        owner_id,
+        status,
+    )
+    return [r["region"] for r in rows]
+
+
 async def get_owner_presence_type_counts(
     pool: asyncpg.Pool, owner_id: int, status: str | None = "done"
 ) -> dict:

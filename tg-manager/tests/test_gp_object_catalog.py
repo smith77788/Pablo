@@ -73,6 +73,9 @@ async def test_type_counts_owner_scoped():
 def test_catalog_handler_wired():
     src = pathlib.Path(__file__).resolve().parents[1].joinpath(
         "bot", "handlers", "global_presence.py").read_text("utf-8")
-    assert 'F.action == "catalog"' in src, "нет обработчика каталога"
-    assert 'action="catalog"' in src, "нет кнопки каталога в меню"
+    # кросс-проектный обзор всех объектов на action="objects" (per-plan каталог
+    # агента — на action="catalog"; действия не пересекаются)
+    assert 'F.action == "objects"' in src, "нет обработчика обзора всех объектов"
+    assert 'action="objects"' in src, "нет кнопки «Все объекты» в меню"
     assert "get_owner_presence_objects" in src and "get_owner_presence_type_counts" in src
+    assert "get_owner_presence_regions" in src, "фильтр по региону не задействован"
