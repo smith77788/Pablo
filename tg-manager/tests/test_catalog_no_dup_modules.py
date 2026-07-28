@@ -67,10 +67,27 @@ def test_all_tile_handlers_defined():
     assert not dead, f"Нерабочие плитки (обработчик не определён): {dead}"
 
 
-def test_two_dashboards_have_distinct_labels():
+def test_dashboard_is_one_destination_with_one_name():
+    """Раньше здесь требовались ДВА дашборда с разными именами — это отражало
+    прежнее устройство, когда «Дашборд» и «Дашборд метрик» были разными экранами.
+
+    После сведения всего в единый хаб (`openUnifiedDashboard`, жалоба владельца
+    «остался лишь один единый полноценный дашборд») требование перестало быть
+    верным и начало ПРОТИВОРЕЧИТЬ `test_no_same_handler_multiple_labels` в этом
+    же файле: три плитки вели на один экран под тремя разными именами, и один
+    гейт требовал ровно то, что запрещал другой. Ветка стояла красной.
+
+    Правило теперь одно: у одного назначения одно имя. Детальные дашборды никуда
+    не делись — их запускает вкладка «Все дашборды» хаба, это стережёт
+    `test_single_dashboard_entry.test_detail_dashboards_still_reachable_from_hub`.
+    """
     tiles = _tiles(_index())
-    dash = [lbl.strip() for oc, lbl in tiles if "ашборд" in lbl]
-    # оба дашборда присутствуют, но с РАЗНЫМИ именами (не два «Дашборд»)
-    assert "Дашборд" in dash, "главный «Дашборд» должен быть в каталоге"
-    assert "Дашборд метрик" in dash, "метрик-дашборд должен называться отлично от главного"
-    assert dash.count("Дашборд") == 1, "не должно быть двух плиток «Дашборд» (несколько дашбордов)"
+    dash_tiles = [(oc.strip(), lbl.strip()) for oc, lbl in tiles if "ашборд" in lbl]
+    assert dash_tiles, "вход в дашборд должен быть в каталоге"
+    assert {oc for oc, _ in dash_tiles} == {"openUnifiedDashboard()"}, (
+        "плитка с именем «Дашборд» обязана вести в единый хаб, а не в старый экран"
+    )
+    assert {lbl for _, lbl in dash_tiles} == {"Дашборд"}, (
+        f"одно назначение — одно имя, иначе пользователь видит дубли модулей: "
+        f"{sorted({lbl for _, lbl in dash_tiles})}"
+    )
