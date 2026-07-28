@@ -6755,7 +6755,8 @@ async function openBotFunnels(botId, botName) {
   try {
     const d = await api('/api/miniapp/bot/'+botId+'/funnels');
     const fns = d.funnels||[];
-    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Нажмите + Создать')); return; }
+    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Воронка ведёт подписчика по шагам автоматически',
+      {label:'➕ Создать воронку', fn:'openFunnelModal()'})); return; }
     txt('bfList', fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
       <div class="ava ava-orange">🔄</div>
       <div class="li-body">
@@ -7157,7 +7158,8 @@ async function loadAccounts() {
 function renderChPreview(list, total) {
   const el = document.getElementById('chPreview');
   if (!el) return;
-  if (!list.length) { el.innerHTML=empty('📡','Нет каналов','Добавьте канал через меню в Telegram'); return; }
+  if (!list.length) { el.innerHTML=empty('📡','Нет каналов','Создайте сеть каналов или импортируйте существующие',
+      {label:'📡 Фабрика каналов', fn:'openChannelFactory()'}); return; }
   const totalN = (total!=null ? total : list.length);
   const preview = list.slice(0,3);
   const more = totalN - 3;
@@ -7690,7 +7692,8 @@ async function openChannels() {
     const d = await api('/api/miniapp/channels');
     CUR_CHANNELS = d.channels||[];
     txt('ch-cnt', (d.total!=null?d.total:CUR_CHANNELS.length)+' каналов');
-    if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Добавьте канал через меню в Telegram')); return; }
+    if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Создайте сеть каналов или импортируйте существующие',
+      {label:'📡 Фабрика каналов', fn:'openChannelFactory()'})); return; }
     renderChannels(CUR_CHANNELS);
   } catch(e) {
     txt('chList', errHtml(e.message,'openChannels()'));
@@ -7933,7 +7936,8 @@ async function loadBroadcasts() {
 function renderBcasts(items) {
   const el = document.getElementById('bcastList');
   if (!items.length) {
-    el.className='lst'; el.innerHTML=empty('📢','Нет рассылок','Создайте через кнопку + или раздел Боты'); return;
+    el.className='lst'; el.innerHTML=empty('📢','Нет рассылок','Рассылка отправляет сообщение всем подписчикам бота',
+      {label:'➕ Создать рассылку', fn:'openBcastPick()'}); return;
   }
   el.className = 'bc-table';
   el.innerHTML = `<div class="bc-head"><span>Текст / Бот</span><span style="text-align:center">✓</span><span style="text-align:center">✕</span><span>Статус</span></div>`
@@ -16411,7 +16415,17 @@ function ago(ts) {
 }
 function empty(ico,txt2,sub,action) {
   // action: {label, fn} — кнопка-призыв к действию (как в топовых приложениях)
-  const btn = action ? `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>` : '';
+  //
+  // Без действия экран становился тупиком: 192 из 207 вызовов не передавали
+  // action, а 73 из них — это «Ошибка» с текстом исключения и НИ ОДНОЙ кнопки.
+  // Пользователь упирался в текст ошибки и мог только закрыть мини-апп.
+  // Поэтому выход есть всегда: явный CTA, если его задали, иначе «Назад» —
+  // и только когда есть куда возвращаться (на корневом экране кнопка не нужна).
+  const btn = action
+    ? `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>`
+    : (typeof STACK !== 'undefined' && STACK.length > 1
+        ? `<button class="btn" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`
+        : '');
   return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}${btn}</div>`;
 }
 function txt(id, html) {
