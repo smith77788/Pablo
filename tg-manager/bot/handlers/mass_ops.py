@@ -763,10 +763,59 @@ async def cb_mp_confirm(
         f"Тип: 📤 Массовая публикация\n"
         f"Цели: <b>{target_label}</b>\n"
         f"Каналов: <b>~{channel_count}</b>\n"
-        f"Задержка: <b>{delay_label}</b>\n\n"
-        f"Воркер запустит операцию автоматически.\n"
+        f"Задержка: <b>{delay_label}</b>"
+        + spintax_diversity_hint(mp_text, channel_count)
+        + f"\n\nВоркер запустит операцию автоматически.\n"
         f"Следить за прогрессом: <b>Очередь операций</b>",
         reply_markup=kb.as_markup(),
+    )
+
+
+def spintax_diversity_hint(text: str, targets: int) -> str:
+    """Строка о разнообразии текста рассылки. Пустая — если сказать нечего.
+
+    Одинаковый текст в сотнях каналов — самый заметный признак рассылки, и
+    пользователь узнавал об этом только по последствиям. Пространство вариантов
+    считается тем же движком, который потом раскрывает шаблон, поэтому число
+    честное, а не приблизительное.
+    """
+    if not text or targets <= 1:
+        return ""
+
+    def _plural(n: int) -> str:
+        """«целей / цели / цель» — иначе строка читается как машинная."""
+        if 11 <= n % 100 <= 14:
+            return "целей"
+        return {1: "цель", 2: "цели", 3: "цели", 4: "цели"}.get(n % 10, "целей")
+
+    unit = _plural(targets)
+    try:
+        from services import spintax_service
+
+        groups = spintax_service.count_group_variants(text)
+    except Exception:
+        return ""
+
+    if not groups:
+        return (
+            f"\n⚠️ <b>Текст одинаковый для всех {targets} {unit}</b> — заметный "
+            f"признак рассылки.\n"
+            f"    Добавьте варианты: <code>{{Привет|Здравствуйте}}</code>"
+        )
+
+    total = 1
+    for g in groups:
+        total *= max(1, int(g))
+    if total >= targets * 2:
+        return f"\n🎲 Вариантов текста: <b>{total}</b> — хватает на {targets} {unit}"
+    repeats = targets / total if total else targets
+    if repeats < 1.5:
+        # Повторов почти нет — пугать нечем, показываем факт как есть.
+        return f"\n🎲 Вариантов текста: <b>{total}</b> на {targets} {unit}"
+    return (
+        f"\n⚠️ Вариантов текста: <b>{total}</b> на {targets} {unit} — "
+        f"каждый повторится ~{repeats:.0f} раз.\n"
+        f"    Больше групп <code>{{а|б|в}}</code> — меньше повторов."
     )
 
 

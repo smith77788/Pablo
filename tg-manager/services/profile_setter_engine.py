@@ -444,20 +444,15 @@ def format_restriction_verdict(res: dict) -> str:
 # ── Спинтакс (рандомизация текста) ───────────────────────────────────────────
 
 def expand_spintax(text: str) -> str:
-    """Раскрыть {вариант1|вариант2|вариант3} → случайный вариант."""
-    import random
+    """Раскрыть {вариант1|вариант2|вариант3} → случайный вариант.
 
-    def _replace(m: re.Match) -> str:
-        options = m.group(1).split("|")
-        return random.choice(options)
+    Тонкая обёртка над общей реализацией: третья копия одного и того же
+    разбора расходилась бы с остальными по вложенности и по поведению на
+    битых шаблонах, а профили ставятся тем же движком массовых операций.
+    """
+    from services.dm_engine import expand_spintax as _expand
 
-    result = text
-    while "{" in result and "|" in result:
-        new = re.sub(r"\{([^{}]+)\}", _replace, result)
-        if new == result:
-            break
-        result = new
-    return result
+    return _expand(text)
 
 
 async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dict:

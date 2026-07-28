@@ -28,16 +28,51 @@ log = logging.getLogger(__name__)
 # ── Spintax ───────────────────────────────────────────────────────────────────
 
 
-def expand_spintax(text: str) -> str:
-    """Разворачивает {A|B|C} рекурсивно — каждый раз случайный вариант."""
+def _expand_spintax_naive(text: str) -> str:
+    """Запасной разворот: одна группа за проход, случайный вариант.
 
+    Оставлен как фолбэк, а не как основной путь: движок строже и на реальных
+    пользовательских текстах падает там, где эта версия просто возвращает
+    текст — незакрытая скобка, `{{CITY}}` из генератора инфраструктуры, `{}`.
+    Уронить рассылку из-за скобки в тексте недопустимо.
+    """
     def _replace(m: re.Match) -> str:
         parts = m.group(1).split("|")
         return random.choice(parts)
 
-    while "{" in text and "}" in text:
-        text = re.sub(r"\{([^{}]+)\}", _replace, text)
+    guard = 0
+    while "{" in text and "}" in text and guard < 20:
+        new_text = re.sub(r"\{([^{}]+)\}", _replace, text)
+        if new_text == text:
+            break
+        text = new_text
+        guard += 1
     return text
+
+
+def expand_spintax(text: str) -> str:
+    """Развернуть spintax `{A|B|C}` — один случайный вариант.
+
+    Единая точка входа для массовых операций. Логика делегирована
+    `services/spintax_engine` (лексер + парсер + валидатор): он корректно
+    разбирает вложенность, тогда как построчная замена регуляркой раскрывает
+    внутреннюю группу раньше внешней и даёт не тот вариант, который написал
+    пользователь.
+
+    Fail-soft по устройству: движок валидирующий и бросает на текстах, которые
+    в рассылках встречаются постоянно (незакрытая скобка, `{{CITY}}`,
+    пустая группа). Исключение здесь означало бы оборванную посреди сети
+    рассылку, поэтому при любой ошибке разбора возвращаемся к прежнему
+    поведению, а не наверх.
+    """
+    if not text or "{" not in text:
+        return text
+    try:
+        from services import spintax_service
+
+        return spintax_service.expand_template(text)
+    except Exception:
+        return _expand_spintax_naive(text)
 
 
 def parse_import_list(raw, limit: int = 5000) -> list[dict]:
