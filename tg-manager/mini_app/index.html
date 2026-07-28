@@ -208,6 +208,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .field label{display:block;font-size:12px;font-weight:600;color:var(--hint);margin-bottom:5px;letter-spacing:.03em}
 .field textarea,.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:14px;color:var(--text);font-family:inherit;resize:none;outline:none;-webkit-appearance:none;appearance:none;transition:border-color .2s,box-shadow .2s}
 .field textarea:focus,.field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.12)}
+/* Поле формы, лежащее ПРЯМО в теле экрана (без обёртки с отступом), упиралось в
+   край: рамка ввода вплотную к границе экрана — визуально «кривое окно». 16px —
+   канонический отступ приложения (тот же, что у .sec). Правило узкое, только для
+   прямых детей тела экрана, чтобы не задвоить отступ там, где обёртка уже есть. */
+.sub-sb > .field{padding-left:16px;padding-right:16px}
+/* Чекбоксы и радио — НЕ текстовые поля. Правило выше писалось под ввод текста
+   (width:100%, padding, appearance:none), но `input` без уточнения типа накрывало
+   и их: галочка получала appearance:none (нативная отрисовка отключена, своей
+   нет → пустой прямоугольник) и width:100% (растягивалась на всю строку). В
+   итоге чекбокс был НЕВИДИМ и нередко схлопывался в 0×0 — пользователь не мог
+   ни увидеть, ни нажать выбор аккаунтов в инвайте и «Что копировать» в
+   клон-адаптации. Часть чекбоксов по приложению спасалась инлайновым
+   width:18px — то есть симптом лечили поштучно, не находя причину.
+   Здесь причина снята один раз для всех. */
+.field input[type=checkbox],.field input[type=radio]{width:auto;min-width:0;padding:0;margin:0;flex:none;-webkit-appearance:auto;appearance:auto;accent-color:var(--btn);cursor:pointer}
 .field-note{font-size:11px;color:var(--hint);margin-top:4px}
 .field-err{font-size:12px;color:var(--red);background:rgba(248,113,113,.08);border-radius:var(--radius);padding:7px 10px;margin-top:6px;display:none}
 
@@ -3143,20 +3158,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       Доступно аккаунтов: <b id="setterAvail">—</b>
     </div>
     <div class="sec">Тип операции</div>
-    <div id="setterTabs" style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0 10px">
+    <div id="setterTabs" style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 16px 10px">
       <button class="btn btn-p" onclick="selectSetterOp('name')" id="setterTab-name">📝 Имя/Bio</button>
       <button class="btn btn-s" onclick="selectSetterOp('avatar')" id="setterTab-avatar">🖼 Аватар</button>
       <button class="btn btn-s" onclick="selectSetterOp('2fa')" id="setterTab-2fa">🔑 2FA</button>
     </div>
-    <div id="setterNameFields">
+    <div id="setterNameFields" style="padding:0 16px">
       <div class="field"><label>Имя (спинтакс: {Алекс|Макс})</label><input type="text" id="setterFirstName" maxlength="64" placeholder="Имя"></div>
       <div class="field"><label>Фамилия</label><input type="text" id="setterLastName" maxlength="64" placeholder="Фамилия"></div>
       <div class="field"><label>Bio (до 70 симв.)</label><input type="text" id="setterAbout" maxlength="70" placeholder="Предприниматель"></div>
     </div>
-    <div id="setterAvatarFields" style="display:none">
+    <div id="setterAvatarFields" style="display:none;padding:0 16px">
       <div class="field"><label>URL изображения</label><input type="url" id="setterAvatarUrl" placeholder="https://example.com/photo.jpg"></div>
     </div>
-    <div id="setter2faFields" style="display:none">
+    <div id="setter2faFields" style="display:none;padding:0 16px">
       <div class="field"><label>Новый пароль (мин 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
       <div class="field"><label>Текущий пароль (если уже стоит)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым если не установлен"></div>
       <div class="field"><label>Подсказка (необязательно)</label><input type="text" id="setter2faHint" maxlength="64" placeholder="Подсказка"></div>
@@ -3227,7 +3242,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Отправить репорт</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field"><label>Цель (username, ссылка или ID)</label><input type="text" id="reporterTarget" placeholder="@username или t.me/channel"></div>
       <div class="field">
         <label>Причина</label>
@@ -3246,7 +3261,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-d" id="reporterBtn" onclick="submitReporter()" style="width:100%">🚨 Отправить репорт</button>
     </div>
     <div class="sec" style="margin-top:8px">🛡️ Проверка на запрещёнку</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div style="font-size:12px;opacity:.7;margin-bottom:6px">Read-only: сканирует ресурсы на запрещённую тематику (CSAM/террор) и собирает доказательное досье. Ничего не постит и не сносит — жалобу подаёте адресно выше.</div>
       <div class="field"><label>Ресурсы (по одному в строке или через запятую)</label><textarea id="cscanResources" rows="4" placeholder="@channel1&#10;t.me/channel2"></textarea></div>
       <div class="field"><label>Сообщений на ресурс (1–200)</label><input type="number" id="cscanLimit" value="50" min="1" max="200" class="inp"></div>
@@ -3274,7 +3289,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" id="boostTab-subscribers" onclick="boostSetType('subscribers')" style="flex:1;padding:9px 4px;font-size:13px">👥 Подписчики</button>
       <button class="btn btn-s" id="boostTab-bot_starts" onclick="boostSetType('bot_starts')" style="flex:1;padding:9px 4px;font-size:13px">🚀 Старты в ботах</button>
     </div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
       <div class="field" id="boostF-msgids"><label>ID сообщений (через запятую или диапазон 120-130)</label><input type="text" id="boostMsgIds" placeholder="123, 124, 125"></div>
       <div class="field" id="boostF-msgid"><label>ID сообщения</label><input type="number" id="boostMsgId" placeholder="123" class="inp"></div>
@@ -3355,7 +3370,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">Продвижение в нише</div>
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Агент найдёт группы по нише, вступит и опубликует ваш текст (до 5 групп за запуск, с паузами для безопасности).</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
       <div class="field"><label>Гео / город (опционально)</label><input type="text" id="growthGeo" placeholder="например: Москва, СПб"></div>
       <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
@@ -3365,7 +3380,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:14px">💬 AI-комментинг</div>
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны AI-ключи). Естественно, по теме, на языке поста.</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field"><label>Тематика (опционально, контекст для ИИ)</label><input type="text" id="aicNiche" placeholder="например: крипта, фитнес"></div>
       <div class="field"><label>Тон</label>
@@ -3394,7 +3409,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Текст публикации</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="preset-row" id="qpPresetRow"></div>
       <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
       <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div></div>
@@ -3437,7 +3452,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Текст сценария</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field"><textarea id="spinText" rows="5" placeholder="Пришлите обычный текст сообщения — соберу из него spintax-варианты…" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     </div>
     <div style="font-size:12px;color:var(--hint);padding:0 2px 4px">Синонимы в <code>{вариант1|вариант2}</code>, каждый вариант проверяется движком. Сверху — пример, снизу — сам шаблон для копирования в софт.</div>
@@ -3482,7 +3497,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" id="bfModeNewBtn" onclick="bfSetMode('new')" style="flex:1;font-size:13px;padding:9px 6px">🏭 Создать новых</button>
       <button class="btn btn-s" id="bfModeTokenBtn" onclick="bfSetMode('token')" style="flex:1;font-size:13px;padding:9px 6px">🔑 По токену</button>
     </div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <!-- РЕЖИМ «создать новых»: аккаунт реально переписывается с @BotFather -->
       <div id="bfNewFields">
         <div class="field">
@@ -3547,7 +3562,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="personaStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Создать персону</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field">
         <label>Имя персоны *</label>
         <input type="text" id="pName" placeholder="Например: Алексей" class="inp">
@@ -3593,7 +3608,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div id="autoregStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
     <div class="sec">Новая регистрация</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field">
         <label>Количество аккаунтов (1–50)</label>
         <input type="number" id="autoregCount" value="1" min="1" max="50" class="inp">
@@ -3632,7 +3647,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Проверка номеров</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field"><label>Номера телефонов (по одному на строке или через запятую)</label><textarea id="phoneCheckInput" rows="5" placeholder="+79001234567&#10;+79001234568&#10;+79001234569" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field-err" id="phoneCheckErr"></div>
       <button class="btn btn-p" id="phoneCheckBtn" onclick="submitPhoneCheck()" style="width:100%">🔍 Проверить</button>
@@ -3726,7 +3741,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Разбор и рекомендации</div>
     <div id="invAdvice" style="padding:6px 14px 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec">Настройка инвайта</div>
-    <div style="padding:8px 0">
+    <div style="padding:8px 16px">
       <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
       <div class="field">
         <label>Источник аудитории</label>
@@ -3737,6 +3752,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <option value="import_list">Свой список (вставить)</option>
         </select>
       </div>
+      <div id="massInviteAudience" style="font-size:12px;color:var(--hint);margin:-6px 0 10px;padding:0 2px"></div>
       <div class="field" id="massInviteImportField" style="display:none">
         <label>Список для инвайта</label>
         <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567"></textarea>
@@ -12838,12 +12854,49 @@ function massInviteSrcToggle() {
   const src = document.getElementById('massInviteSrc').value;
   const f = document.getElementById('massInviteImportField');
   if (f) f.style.display = (src==='import_list') ? 'block' : 'none';
+  loadInviteAudienceSize();
+}
+
+// Сколько целей даст выбранный источник — ДО запуска. Без этого сценарий
+// обрывался молча: пользователь жал «Запустить», операция уходила в очередь и
+// падала с «Аудитория пуста», а увидеть это можно было только в истории. Снаружи
+// это и выглядит как «инвайтинг не работает совсем».
+let INV_AUDIENCE = null;   // null = ещё не знаем / не применимо
+async function loadInviteAudienceSize() {
+  const el = document.getElementById('massInviteAudience');
+  if (!el) return;
+  const src = document.getElementById('massInviteSrc').value;
+  if (src === 'import_list') { INV_AUDIENCE = null; el.textContent=''; return; }
+  el.textContent = 'Считаю аудиторию…';
+  try {
+    let url = '/api/miniapp/invite/audience?source=' + encodeURIComponent(src);
+    if (src === 'parsed' && INV_PARSE_RUN) url += '&parse_run_id=' + INV_PARSE_RUN;
+    const d = await api(url);
+    INV_AUDIENCE = (d.total === null || d.total === undefined) ? null : +d.total;
+    if (INV_AUDIENCE === null) { el.textContent = ''; return; }
+    if (!INV_AUDIENCE) {
+      // Пустой источник — не тупик: говорим, откуда взять аудиторию.
+      el.innerHTML = `<span style="color:#f59e0b">⚠️ Источник пуст — приглашать некого.</span> ${esc(d.hint||'')}`;
+      return;
+    }
+    const capped = d.capped_at && INV_AUDIENCE > d.capped_at
+      ? ` · за прогон возьмём ${num(d.capped_at)}` : '';
+    el.innerHTML = `👥 Доступно целей: <b>${num(INV_AUDIENCE)}</b>${capped}`;
+  } catch(e) {
+    // Не знаем — молчим. Ноль здесь означал бы «пусто» и оттолкнул бы от запуска
+    // рабочей операции.
+    INV_AUDIENCE = null; el.textContent = '';
+  }
 }
 async function submitMassInvite() {
   const group = document.getElementById('massInviteGroup').value.trim();
   const source = document.getElementById('massInviteSrc').value;
   const errEl = document.getElementById('massInviteErr');
   if (!group) { errEl.textContent='Укажите группу'; return; }
+  if (INV_AUDIENCE === 0 && source !== 'import_list') {
+    errEl.textContent = 'Источник пуст — приглашать некого. Смените источник или соберите аудиторию.';
+    return;
+  }
   const body = {group, source};
   // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
@@ -12864,7 +12917,7 @@ async function submitMassInvite() {
   if (_pa) body.per_account_limit = parseInt(_pa);
   // Инвайт — самая баноопасная операция → подтверждение перед запуском.
   // Без лимита на аккаунт риск бана максимальный — предупреждаем явно.
-  const _paceLbl = {slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;
+  const _paceLbl = {auto:'🤖 авто (по состоянию флота)', slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;
   const _warn = _pa ? '' : '\n\n⚠️ Лимит на аккаунт не задан — риск бана выше. Задайте его в «⚙️ Лимиты».';
   if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_warn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
   const btn = document.getElementById('massInviteBtn');

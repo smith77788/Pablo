@@ -5379,6 +5379,79 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "has_data": bool(ranked),
         })
 
+    async def invite_audience_size(request: web.Request) -> web.Response:
+        """Сколько целей даст выбранный источник — ДО запуска операции.
+
+        Без этого сценарий обрывался молча: пользователь выбирал источник (по
+        умолчанию «из парсера»), жал «Запустить», операция уходила в очередь и
+        падала с «Аудитория пуста» — а увидеть это можно было только в истории
+        операций. Снаружи это выглядит как «инвайтинг не работает совсем».
+        DM-кампании считают получателей до старта (`total_targets`) — инвайт нет.
+
+        Запросы намеренно повторяют те, что делает `op_worker._exec_mass_invite`
+        при загрузке аудитории: показанное число обязано совпадать с тем, что
+        реально возьмёт исполнитель. Расхождение здесь хуже отсутствия счётчика —
+        оно врёт с видом точности. Сторожит tests/test_invite_audience_size.py.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        source = (request.query.get("source") or "parsed").strip()
+        if source not in ("parsed", "crm", "bot_users"):
+            return _err("Неизвестный источник аудитории", 400)
+
+        total, hint = 0, ""
+        try:
+            if source == "parsed":
+                _pr = request.query.get("parse_run_id")
+                try:
+                    _pr = int(_pr) if _pr else None
+                except (TypeError, ValueError):
+                    _pr = None
+                if _pr:
+                    total = await _safe_count(
+                        pool,
+                        "SELECT COUNT(*) FROM parsed_audiences "
+                        "WHERE owner_id=$1 AND parse_run_id=$2 "
+                        "AND (username IS NOT NULL OR tg_user_id IS NOT NULL)",
+                        uid, _pr)
+                else:
+                    total = await _safe_count(
+                        pool,
+                        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1 "
+                        "AND (username IS NOT NULL OR tg_user_id IS NOT NULL)",
+                        uid)
+                hint = "Соберите аудиторию в «Парсер аудитории» — оттуда она попадёт сюда."
+            elif source == "crm":
+                total = await _safe_count(
+                    pool,
+                    "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 "
+                    "AND (username IS NOT NULL OR tg_user_id IS NOT NULL OR phone IS NOT NULL)",
+                    uid)
+                hint = "Добавьте контакты в CRM или импортируйте их."
+            else:
+                total = await _safe_count(
+                    pool,
+                    "SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu "
+                    "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
+                    "WHERE mb.added_by=$1 AND bu.is_active=TRUE",
+                    uid)
+                hint = "Подписчики появятся, когда люди начнут писать вашим ботам."
+        except Exception:
+            log.warning("invite_audience_size uid=%s source=%s", uid, source, exc_info=True)
+            # Честно говорим «не знаем», а не показываем 0: ноль здесь означал бы
+            # «источник пуст» и оттолкнул бы от запуска рабочей операции.
+            return _json_resp({"source": source, "total": None, "hint": ""})
+
+        # Исполнитель берёт не больше 2000 целей за прогон — показываем это честно,
+        # иначе счётчик обещал бы больше, чем операция реально возьмёт.
+        return _json_resp({
+            "source": source,
+            "total": int(total or 0),
+            "capped_at": 2000,
+            "hint": hint if not total else "",
+        })
+
     async def invite_advice(request: web.Request) -> web.Response:
         """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
 
@@ -12139,6 +12212,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
+    app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
