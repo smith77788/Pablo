@@ -475,7 +475,7 @@ flood-aware, preflight cooldown/flood, warmup-guard) — второй фильт
   в `_exec_mass_invite`; порог `INVITE_FLOOD_STOP_STREAK` (env, дефолт 5, 0=выкл) →
   стоп операции с честной причиной «флот перегрет»; реальный успех сбрасывает серию.
   Тесты в `test_invite_queue_scheduler.py` (stop/reset/disabled).
-- [ ] **P1 — AI-автоответчик: владелец не видит статус/причину сбоя ИИ.** «Статус AI»
+- [x] **P1 — AI-автоответчик: владелец видит статус/причину сбоя ИИ.** «Статус AI»
   есть только у админа (`admin.py:_adm_ai_status`, `_provider_status_line`); у владельца
   бота — тишина (сбой только в лог). Фикс: owner-scoped `ai_status`/`ai_test` (reuse
   `ai_providers.configured_providers()`), блок в экране автоответов. Тест `test_ai_status_owner`.

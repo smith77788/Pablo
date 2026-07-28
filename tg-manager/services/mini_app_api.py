@@ -4842,6 +4842,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_factory_status uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def ai_status(request: web.Request) -> web.Response:
+        """Статус AI для ВЛАДЕЛЬЦА (раньше был только у админа) — чтобы понимать,
+        почему AI-автоответчик молчит. Быстрый: без live-пинга, только какие
+        провайдеры настроены (ключи в env, глобальные)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.ai_providers import configured_providers
+            provs = configured_providers()
+            return _json_resp({
+                "configured": bool(provs),
+                "providers": [{"name": p.name, "model": (p.models[0] if p.models else None)}
+                              for p in provs],
+            })
+        except Exception as exc:
+            log.exception("ai_status uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def ai_test(request: web.Request) -> web.Response:
+        """Live-проверка AI провайдеров для владельца (реюз ping_providers).
+        Показывает, отвечает ли каждый провайдер и за сколько мс."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.ai_providers import ping_providers
+            results = await ping_providers()
+            return _json_resp({
+                "any_ok": any(r.get("ok") for r in results),
+                "providers": results,
+            })
+        except Exception as exc:
+            log.exception("ai_test uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def bot_add(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -12470,6 +12506,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Quick Post
     app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
+    app.router.add_get("/api/miniapp/ai/status", ai_status)
+    app.router.add_post("/api/miniapp/ai/test", ai_test)
     app.router.add_get("/api/miniapp/seo", seo_overview)
     app.router.add_post("/api/miniapp/seo/apply", seo_apply)
     app.router.add_post("/api/miniapp/seo/apply_all", seo_apply_all)

@@ -732,6 +732,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openArModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
+    <div class="sec">Статус AI <span class="sec-btn" onclick="testAi(this)" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Проверить →</span></div>
+    <div class="lst" id="aiStatusBox" style="margin-bottom:8px"></div>
     <div class="sec">Авто-ответы бота</div>
     <div class="lst" id="arList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -6650,7 +6652,34 @@ async function openArScreen() {
   txt('ar-name', 'Авто-ответы · '+CUR_BOT.name);
   txt('arList', '<div class="spin-wrap"><div class="spin"></div></div>');
   push('s-autoreplies');
+  loadAiStatus();
   await loadArList();
+}
+
+// Статус AI для владельца — почему AI-автоответчик может молчать (раньше видел
+// только админ). Быстрый статус (какие провайдеры настроены) + live-проверка.
+async function loadAiStatus() {
+  const box = document.getElementById('aiStatusBox');
+  if (!box) return;
+  try {
+    const d = await api('/api/miniapp/ai/status');
+    if (!d.configured) {
+      box.innerHTML = `<div class="li" style="cursor:default"><div class="ava ava-orange">⚠️</div><div class="li-body"><div class="li-name">AI не настроен</div><div class="li-sub">Авто-ответы с ИИ работать не будут — не заданы ключи AI-провайдеров.</div></div></div>`;
+      return;
+    }
+    box.innerHTML = (d.providers||[]).map(p=>`<div class="li" style="cursor:default"><div class="ava ava-blue">🧠</div><div class="li-body"><div class="li-name">${esc(p.name)}</div><div class="li-sub">${esc(p.model||'')}</div></div><span class="badge b-gy">настроен</span></div>`).join('');
+  } catch(e) { box.innerHTML = errHtml(e.message,'loadAiStatus()'); }
+}
+async function testAi(btn) {
+  const box = document.getElementById('aiStatusBox');
+  if (btn) btn.textContent = 'Проверяю…';
+  try {
+    const d = await api('/api/miniapp/ai/test', {method:'POST'});
+    const provs = d.providers||[];
+    box.innerHTML = provs.length ? provs.map(p=>`<div class="li" style="cursor:default"><div class="ava ${p.ok?'ava-green':'ava-red'}">${p.ok?'✅':'❌'}</div><div class="li-body"><div class="li-name">${esc(p.name)}</div><div class="li-sub">${p.ms} мс</div></div><span class="badge ${p.ok?'b-gr':'b-rd'}">${p.ok?'работает':'сбой'}</span></div>`).join('') : empty('🧠','AI не настроен','Задайте ключи AI-провайдеров');
+    toast(d.any_ok ? '✅ AI отвечает' : '⚠️ AI не отвечает');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+  finally { if (btn) btn.textContent = 'Проверить →'; }
 }
 
 async function loadArList() {

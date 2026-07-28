@@ -160,3 +160,42 @@ def configured_providers() -> list[AiProvider]:
         provider for name, provider in providers.items() if provider not in ordered
     )
     return ordered
+
+
+async def ping_providers(timeout: int = 8) -> list[dict]:
+    """Live-пинг каждого настроенного провайдера (реюз в admin-статусе и в
+    owner-эндпоинте mini-app). Возвращает [{name, ok, ms}] в порядке failover.
+
+    ok=True при HTTP<500 (провайдер отвечает); сетевые/ключевые сбои → ok=False.
+    Не бросает — ошибки инкапсулированы в ok=False, чтобы UI показал честный статус.
+    """
+    import asyncio
+    import time as _time
+
+    import aiohttp
+
+    providers = configured_providers()
+    if not providers:
+        return []
+
+    async def _one(p: "AiProvider") -> dict:
+        t0 = _time.monotonic()
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(
+                    f"{p.base_url}/chat/completions",
+                    json={"model": p.models[0],
+                          "messages": [{"role": "user", "content": "1+1=?"}],
+                          "max_tokens": 5},
+                    headers={"Authorization": f"Bearer {p.api_key}",
+                             "Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                    ssl=False,
+                ) as resp:
+                    return {"name": p.name, "ok": resp.status < 500,
+                            "ms": int((_time.monotonic() - t0) * 1000)}
+        except Exception:
+            return {"name": p.name, "ok": False,
+                    "ms": int((_time.monotonic() - t0) * 1000)}
+
+    return await asyncio.gather(*[_one(p) for p in providers])
