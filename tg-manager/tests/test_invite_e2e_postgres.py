@@ -147,7 +147,13 @@ def stand():
         await conn.close()
         return await asyncpg.create_pool(DSN, min_size=1, max_size=4)
 
-    pool = _run(_boot())
+    try:
+        pool = _run(_boot())
+    except Exception as exc:
+        # DSN задан, но сервер недоступен (не поднят / упал / не тот порт). Это не
+        # провал инвайта — это отсутствие стенда: честный skip вместо 17 трейсбеков,
+        # которые прячут реальную причину за деталями asyncpg.
+        pytest.skip(f"Postgres по INFRAGRAM_TEST_DSN недоступен: {str(exc)[:120]}")
     s = _Stand(pool)
 
     import services.mass_inviter_engine as inv
