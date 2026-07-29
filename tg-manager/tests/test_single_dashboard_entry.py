@@ -37,11 +37,13 @@ def test_unified_hub_is_the_entry():
 
 
 def test_detail_dashboards_still_reachable_from_hub():
-    """Функции детальных дашбордов НЕ удалены (хаб их запускает из вкладки «Все
-    дашборды») — иначе «ничего не потеряно» нарушено."""
+    """Детальные экраны (НЕ дашборды) запускаются из вкладки «Все разделы».
+
+    Второй «Дашборд метрик» (openAnalyticsDashboard) УДАЛён по правилу «один
+    дашборд» — его метрики уже во вкладке «Аналитика» единого дашборда. Здесь
+    проверяем, что легитимные детальные экраны на месте."""
     html = _html()
     assert "function openAnalytics()" in html
-    assert "async function openAnalyticsDashboard()" in html
     dashjs = open(_DASHJS, encoding="utf-8").read()
-    # лаунчер хаба ссылается на детальные экраны
-    assert "openAnalyticsDashboard" in dashjs and "openAnalytics" in dashjs
+    # лаунчер хаба ссылается на детальные экраны (без второго дашборда)
+    assert "openAnalytics" in dashjs and "openHealth" in dashjs

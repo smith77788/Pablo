@@ -41,8 +41,9 @@ def test_hub_structure():
     assert "/api/miniapp/dashboard_realtime" in js
     # переиспользует рендер командного центра, не дублирует
     assert "_ccRender" in js
-    # запуск детальных экранов из хаба (ничего не потеряно)
-    for fn in ("openHealth", "openBotStats", "openAdminStats", "openAnalyticsDashboard"):
+    # запуск детальных экранов из хаба (ничего не потеряно). Второй «Дашборд
+    # метрик» (openAnalyticsDashboard) удалён по правилу «один дашборд».
+    for fn in ("openHealth", "openBotStats", "openAdminStats"):
         assert fn in js, f"нет запуска {fn}"
     # динамический экран (не трогаем разметку index.html)
     assert "createElement('div')" in js and "'s-uni-dash'" in js

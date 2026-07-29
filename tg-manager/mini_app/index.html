@@ -17657,11 +17657,8 @@ function renderAudSegChart(segments) {
 let _dashRange = '7d';
 let _dashRefreshTimer = null;
 
-async function openAnalyticsDashboard() {
-  push('s-analytics-dashboard');
-  loadDashboard();
-  startDashAutoRefresh();
-}
+// Второй «Дашборд метрик» удалён: единый дашборд (openUnifiedDashboard) уже
+// содержит вкладку «📈 Аналитика» с теми же метриками. Не заводить второй дашборд.
 
 function startDashAutoRefresh() {
   if (_dashRefreshTimer) clearInterval(_dashRefreshTimer);
