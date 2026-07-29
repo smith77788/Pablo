@@ -10005,14 +10005,14 @@ async def _exec_leave_all_chats(
     try:
         acc = await pool.fetchrow(
             "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
             int(account_id), owner_id,
         )
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
 
     if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     left = 0
@@ -10068,14 +10068,14 @@ async def _exec_read_all_dialogs(
     try:
         acc = await pool.fetchrow(
             "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
             int(account_id), owner_id,
         )
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
 
     if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     read = 0
@@ -10129,14 +10129,14 @@ async def _exec_delete_private_dialogs(
     try:
         acc = await pool.fetchrow(
             "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
             int(account_id), owner_id,
         )
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
 
     if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     deleted = 0
@@ -10189,14 +10189,14 @@ async def _exec_delete_contacts(
     try:
         acc = await pool.fetchrow(
             "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
             int(account_id), owner_id,
         )
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
 
     if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     deleted = 0
