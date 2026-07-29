@@ -19,7 +19,7 @@ from bot.keyboards import subscription_locked_markup
 from database import db
 from database.db import fetch_bots
 from services import operation_bus
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ async def cb_net_bc_cluster(
         await callback.message.edit_text(
             f"⚠️ Ошибка загрузки ботов кластера.\n<code>{_html.escape(str(_e)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

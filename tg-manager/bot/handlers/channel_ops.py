@@ -33,7 +33,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb, MassOpCb
 from services import task_registry as _treg
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.states import (
     BulkChanFSM,
     BulkCreateFSM,
@@ -3387,7 +3387,8 @@ async def fsm_botfather_username(
     except Exception as exc:
         mark_handled_error(f"botfather_create accounts: {exc}")
         await message.answer(
-            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>"
+            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=terminal_kb(),
         )
         return
     if not accounts:
@@ -4713,6 +4714,7 @@ async def fsm_bulk_channel_id(
             f"📋 Операция <code>#{op_id}</code> в очереди\n"
             f"💡 Статус: /ops",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
 
     elif op == "post":

@@ -17,7 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import RankCb, VisCb, BmCb
 from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
-from bot.utils.op_helpers import safe_edit
+from bot.utils.op_helpers import safe_edit, terminal_kb
 from bot.utils.subscription import get_plan, locked_text, require_plan
 from bot.utils import tariffs
 from database import db
@@ -239,6 +239,7 @@ async def msg_add_keyword(
         await message.answer(
             "⚠️ Пустое сообщение. Попробуйте ещё раз через меню позиций.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1457,6 +1458,7 @@ async def vis_receive_keyword(
         await message.answer(
             "⚠️ Ключевое слово должно быть от 1 до 50 символов. Попробуйте ещё раз:",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

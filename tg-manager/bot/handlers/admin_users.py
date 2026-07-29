@@ -12,7 +12,7 @@ from aiogram.filters.callback_data import CallbackData
 from bot.utils.subscription import is_platform_admin
 from database import db
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 
 def _is_admin(uid: int) -> bool:
@@ -456,6 +456,7 @@ async def cb_confirm_grant(
     await callback.message.edit_text(
         f"✅ План <b>{plan.upper()}</b> выдан пользователю #{user_id} на {months} месяцев.",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
 
 
@@ -497,6 +498,7 @@ async def cb_revoke_plan(
     await callback.message.edit_text(
         f"✅ Подписка отменена. Пользователь #{user_id} переведён на план <b>FREE</b>.",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
 
 

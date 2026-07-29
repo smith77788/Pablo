@@ -18,7 +18,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BoostCb, BmCb
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -182,7 +182,7 @@ async def msg_views_acc_count(
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты.")
+        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     channel = data["channel"]
@@ -414,7 +414,7 @@ async def msg_subscribers_acc_count(
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты.")
+        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     kb = InlineKeyboardBuilder()

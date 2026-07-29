@@ -18,7 +18,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.states import MultigeoEdit
 from database import db
 from services import bot_api
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 
@@ -251,6 +251,7 @@ async def msg_multigeo_name(
         await message.answer(
             f"⚠️ Имя слишком длинное: {len(value)}/64 символов. Сократите и отправьте снова.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     ok = await bot_api.set_name(http, token, value, language_code=lang)
@@ -322,6 +323,7 @@ async def msg_multigeo_short(
         await message.answer(
             f"⚠️ Краткое описание слишком длинное: {len(value)}/120 символов. Сократите и отправьте снова.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     ok = await bot_api.set_short_description(http, token, value, language_code=lang)
@@ -393,6 +395,7 @@ async def msg_multigeo_desc(
         await message.answer(
             f"⚠️ Описание слишком длинное: {len(value)}/512 символов. Сократите и отправьте снова.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     ok = await bot_api.set_description(http, token, value, language_code=lang)

@@ -18,7 +18,7 @@ from bot.utils import subscription as sub_utils
 from bot.utils import tariffs
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
@@ -602,6 +602,7 @@ async def cb_pay(
         await callback.message.edit_text(
             "❌ <b>Ошибка создания платежа.</b>\n\nПожалуйста, попробуйте позже или обратитесь в поддержку.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

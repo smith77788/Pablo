@@ -17,7 +17,7 @@ from bot.states import ErrorReportFSM
 from services.logger import log_exc_swallow
 from services.error_codes import ErrorCode
 from services.error_reporting import report_error
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +52,8 @@ async def msg_error_description(message: Message, state: FSMContext) -> None:
     description = message.text.strip()
     if len(description) < 10:
         await message.answer(
-            "❌ Описание слишком короткое. Опишите подробнее что произошло."
+            "❌ Описание слишком короткое. Опишите подробнее что произошло.",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -143,7 +144,8 @@ async def msg_error_screenshot(
         log_exc_swallow(log, f"Ошибка сохранения отчёта об ошибке: {e}")
         await message.answer(
             f"❌ Не удалось сохранить отчёт [{ErrorCode.DB_QUERY_TIMEOUT.value}]. "
-            "Попробуйте позже или напишите в поддержку."
+            "Попробуйте позже или напишите в поддержку.",
+            reply_markup=terminal_kb(),
         )
 
 

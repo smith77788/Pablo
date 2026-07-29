@@ -16,7 +16,7 @@ from bot.callbacks import BotCb, BotFactCb, EcoPickCb
 from bot.states import BotCloneSettingsFSM, BotCreateFSM, BotTokenImportFSM, BotValidateFSM
 from database import db
 from services import bot_api
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -383,6 +383,7 @@ async def msg_import_tokens(
             "❌ Токены не найдены. Пожалуйста, отправьте токены в формате:\n"
             "<code>123456789:AABBcc...</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -568,6 +569,7 @@ async def msg_validate_tokens(
             "❌ Токены не найдены. Пожалуйста, отправьте токены в формате:\n"
             "<code>123456789:AABBcc...</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

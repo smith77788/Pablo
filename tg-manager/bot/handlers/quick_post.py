@@ -29,7 +29,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.utils.event_status import mark_handled_error
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -202,6 +202,7 @@ async def cb_qp_cancel(callback: CallbackQuery, state: FSMContext) -> None:
             "❌ <b>Создание поста отменено.</b>\n\n"
             "Используйте /post или кнопку «✍️ Создать пост» в меню операций.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
     except Exception as e:
         log.warning("handler error in cb_qp_cancel: %s", e)
@@ -327,6 +328,7 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
             "Сначала подключите аккаунты и импортируйте каналы:\n"
             "Меню → 🏗 Активы & Сети → 📡 Каналы → 📥 Импорт из Telegram",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -456,6 +458,7 @@ async def cb_qp_use_template(
             "Сначала подключите аккаунты и импортируйте каналы:\n"
             "Меню → 🏗 Активы & Сети → 📡 Каналы → 📥 Импорт из Telegram",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -644,6 +647,7 @@ async def msg_qp_media(message: Message, state: FSMContext) -> None:
     sent = await message.answer(
         f"✅ <b>Медиа прикреплено</b> ({media_type})\n\nНажмите «Далее» чтобы продолжить.",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
     await _show_step3_media(sent, has_media=True, edit=True)
 
@@ -864,6 +868,7 @@ async def cb_qp_publish(
             "⚠️ Не найдены активные аккаунты для выбранных каналов.\n"
             "Убедитесь, что аккаунты активны (/accounts).",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -893,6 +898,7 @@ async def cb_qp_publish(
         await callback.message.edit_text(
             "❌ <b>Ошибка постановки в очередь</b>\n\nПопробуйте ещё раз или обратитесь в поддержку.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -900,6 +906,7 @@ async def cb_qp_publish(
         await callback.message.edit_text(
             "⚠️ <b>Не удалось создать операцию</b>\n\nПовторите попытку через /post",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -910,4 +917,5 @@ async def cb_qp_publish(
         f"Вы получите уведомление по завершении.\n"
         f"<i>Управление очередью: /ops → 📋 Очередь</i>",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )

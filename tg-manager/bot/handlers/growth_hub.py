@@ -22,7 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import BmCb, GrowthCb
 from bot.states import GrowthAgentFSM
 from services import operation_bus
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -244,7 +244,8 @@ async def on_acc_count_input(
     use = min(n, total) if n > 0 else min(3, total)
     if use == 0:
         await message.answer(
-            "⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты."
+            "⚠️ Нет доступных аккаунтов. Добавьте аккаунты в разделе Аккаунты.",
+            reply_markup=terminal_kb(),
         )
         return
 

@@ -17,6 +17,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import PhoneCheckerCb, BmCb
+from bot.utils.op_helpers import terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -110,7 +111,7 @@ async def msg_phone_checker_phones(
     # Ищем лучший аккаунт для проверки
     acc = await _get_best_account(pool, message.from_user.id)
     if not acc:
-        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в раздел Аккаунты.")
+        await message.answer("⚠️ Нет доступных аккаунтов. Добавьте аккаунты в раздел Аккаунты.", reply_markup=terminal_kb())
         return
 
     prog_msg = await message.answer(

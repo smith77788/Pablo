@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ContentClonerCb, BmCb
+from bot.utils.op_helpers import terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -303,5 +304,6 @@ async def _do_queue(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, ms
         f"📨 Режим: {mode_label} последние {msg_count} сообщений → {len(targets)} канал(ов)\n\n"
         "<i>Следите за статусом в разделе «Операции».</i>",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
     await cb.answer("✅ В очереди!")

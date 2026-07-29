@@ -160,3 +160,51 @@ async def safe_answer(callback: "CallbackQuery", text: str = "", show_alert: boo
         await callback.answer(text=text, show_alert=show_alert)
     except Exception:
         pass
+
+
+# ── Выход с терминального экрана ─────────────────────────────────────────────
+
+
+def terminal_kb(*, back: object | None = None, back_text: str = "◀️ Назад"):
+    """Клавиатура для финального экрана — «готово», «ошибка», «отменено».
+
+    Такие экраны показываются и уходят: 96 из них в 37 хендлерах не имели ни
+    одной кнопки, и пользователь мог только вспомнить команду `/menu`. Для
+    экрана-ошибки это особенно плохо — человек уже столкнулся с проблемой и
+    вместо выхода получает текст без действий.
+
+    `back` — callback конкретного раздела, если он известен: возврат «туда,
+    откуда пришёл» полезнее прыжка в корень. Не передан — ведём в главное
+    меню, которое доступно всегда и не зависит от тарифа.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb
+
+    kb = InlineKeyboardBuilder()
+    if back is not None:
+        kb.button(text=back_text, callback_data=back)
+        kb.button(text="🏠 В меню", callback_data=BmCb(action="main"))
+        kb.adjust(2)
+    else:
+        kb.button(text="🏠 В меню", callback_data=BmCb(action="main"))
+        kb.adjust(1)
+    return kb.as_markup()
+
+
+def retry_kb(retry_cb: object, *, retry_text: str = "🔄 Попробовать снова", back: object | None = None):
+    """Клавиатура для экрана ошибки, которую имеет смысл повторить.
+
+    Отличается от `terminal_kb` наличием самого действия: если операция
+    провалилась из-за сети или занятого имени, предложить повтор дешевле,
+    чем заставлять пользователя проходить весь сценарий заново.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=retry_text, callback_data=retry_cb)
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 В меню", callback_data=BmCb(action="main"))
+    kb.adjust(1)
+    return kb.as_markup()

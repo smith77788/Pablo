@@ -14,7 +14,7 @@ from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 
@@ -456,6 +456,7 @@ async def msg_bulk_commands(
         await message.answer(
             "❌ Неверный формат. Каждая строка:\n<code>/команда - Описание</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     await state.clear()
@@ -520,6 +521,7 @@ async def msg_bulk_localized_commands(
         await message.answer(
             "❌ Неверный формат. Каждая строка:\n<code>/команда - Описание</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     await state.clear()

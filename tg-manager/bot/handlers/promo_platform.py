@@ -35,7 +35,7 @@ from bot.states import (
     PromoTopCheckFSM,
     PromoTransferFSM,
 )
-from bot.utils.op_helpers import safe_edit
+from bot.utils.op_helpers import safe_edit, terminal_kb
 from bot.utils.subscription import require_plan
 from database import db
 from services import bot_api
@@ -405,7 +405,8 @@ async def cb_order_boost(callback: CallbackQuery, callback_data: PromoCb, pool: 
             f"Проверьте:\n"
             f"• ID сервиса в настройках панели\n"
             f"• Баланс панели\n"
-            f"• Корректность API ключа"
+            f"• Корректность API ключа",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -454,7 +455,8 @@ async def cb_order_check_smm(callback: CallbackQuery, callback_data: PromoCb, po
 
     if result.get("error"):
         await callback.message.answer(
-            f"⚠️ Ошибка при проверке статуса:\n<code>{html.escape(str(result['error'])[:200])}</code>"
+            f"⚠️ Ошибка при проверке статуса:\n<code>{html.escape(str(result['error'])[:200])}</code>",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1013,13 +1015,15 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     except Exception as exc:
         await callback.message.answer(
-            f"⚠️ Ошибка получения аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>"
+            f"⚠️ Ошибка получения аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=terminal_kb(),
         )
         return
 
     if not accounts:
         await callback.message.answer(
-            "⚠️ Нет подключённых аккаунтов.\nДобавьте аккаунт в /accounts и попробуйте снова."
+            "⚠️ Нет подключённых аккаунтов.\nДобавьте аккаунт в /accounts и попробуйте снова.",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1153,13 +1157,15 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
         acc = await select_account(pool, message.from_user.id, action_type="read")
     except Exception as exc:
         await message.answer(
-            f"⚠️ Нет доступных аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>"
+            f"⚠️ Нет доступных аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=terminal_kb(),
         )
         return
 
     if not acc:
         await message.answer(
-            "⚠️ Нет подходящего аккаунта для BotFather.\nДобавьте аккаунт в /accounts."
+            "⚠️ Нет подходящего аккаунта для BotFather.\nДобавьте аккаунт в /accounts.",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1177,7 +1183,8 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
         )
     except Exception as exc:
         await message.answer(
-            f"⚠️ Ошибка BotFather:\n<code>{html.escape(str(exc)[:300])}</code>"
+            f"⚠️ Ошибка BotFather:\n<code>{html.escape(str(exc)[:300])}</code>",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1191,7 +1198,8 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
             f"Возможные причины:\n"
             f"• @{new_owner} не существует\n"
             f"• Новый владелец не принял условия BotFather\n"
-            f"• FloodWait — попробуйте позже"
+            f"• FloodWait — попробуйте позже",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1297,7 +1305,8 @@ async def cb_panel_check(callback: CallbackQuery, callback_data: PromoCb, pool: 
             f"⚠️ <b>Ошибка подключения к панели</b>\n\n"
             f"Панель: {html.escape(panel['name'])}\n"
             f"Ошибка: <code>{html.escape(str(result['error'])[:300])}</code>\n\n"
-            f"Проверьте URL и API-ключ в настройках панели."
+            f"Проверьте URL и API-ключ в настройках панели.",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1335,7 +1344,8 @@ async def cb_panel_services(callback: CallbackQuery, callback_data: PromoCb, poo
     if not services:
         await callback.message.answer(
             f"⚠️ Список сервисов пуст или ошибка запроса.\n"
-            f"Панель: {html.escape(panel['name'])}"
+            f"Панель: {html.escape(panel['name'])}",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1437,7 +1447,8 @@ async def fsm_panel_name(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"✅ Название: <b>{html.escape(name)}</b>\n\n"
         "Шаг 2/4: введите <b>URL API</b> панели\n"
-        "(например: <code>https://globalssmm.com/api/v2</code>):"
+        "(например: <code>https://globalssmm.com/api/v2</code>):",
+        reply_markup=terminal_kb(),
     )
 
 
@@ -1485,7 +1496,8 @@ async def fsm_panel_key(message: Message, state: FSMContext) -> None:
         f"✅ <b>Соединение успешно!</b>\n💰 Баланс: {balance} {currency}\n\n"
         "Шаг 4/4: введите <b>ID сервиса</b> для накрутки Telegram-подписчиков\n"
         "(найдите нужный сервис через «Список сервисов» после добавления)\n"
-        "или отправьте <code>-</code> чтобы пропустить:"
+        "или отправьте <code>-</code> чтобы пропустить:",
+        reply_markup=terminal_kb(),
     )
     await state.update_data(balance=balance, balance_verified=True)
     await state.set_state(PromoAddPanelFSM.service_id)

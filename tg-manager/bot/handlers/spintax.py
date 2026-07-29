@@ -33,7 +33,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, SpinCb
 from bot.states import SpinFlow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 from services import spintax_ai, spintax_service
 from services.logger import log_exc_swallow
@@ -196,7 +196,8 @@ async def _run_spin(message: Message, state: FSMContext, script: str) -> None:
         return
     if len(script) > _MAX_SCRIPT_LEN:
         await message.answer(
-            f"⚠️ Слишком длинный текст (лимит {_MAX_SCRIPT_LEN} символов). Сократите сценарий."
+            f"⚠️ Слишком длинный текст (лимит {_MAX_SCRIPT_LEN} символов). Сократите сценарий.",
+            reply_markup=terminal_kb(),
         )
         return
 

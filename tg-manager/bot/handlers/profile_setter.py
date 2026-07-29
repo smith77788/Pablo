@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ProfileSetterCb, BmCb
+from bot.utils.op_helpers import terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -106,7 +107,7 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
     if op == "name":
         parsed = _parse_name_bio(text)
         if not any(parsed.values()):
-            await message.answer("⚠️ Не распознано. Формат:\nИмя: Текст\nФамилия: Текст\nBio: Текст")
+            await message.answer("⚠️ Не распознано. Формат:\nИмя: Текст\nФамилия: Текст\nBio: Текст", reply_markup=terminal_kb())
             return
         await state.update_data(name_data=parsed)
     elif op == "avatar":

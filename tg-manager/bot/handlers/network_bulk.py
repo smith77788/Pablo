@@ -16,7 +16,7 @@ from bot.utils.subscription import require_plan, locked_text, is_platform_admin
 from database import db
 from services import bot_api
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ async def msg_bulk_name(
 ) -> None:
     name = message.text.strip()
     if len(name) > 64:
-        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.")
+        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.", reply_markup=terminal_kb())
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
@@ -208,7 +208,7 @@ async def msg_bulk_localized_name(
 ) -> None:
     name = message.text.strip()
     if len(name) > 64:
-        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.")
+        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.", reply_markup=terminal_kb())
         return
     data = await state.get_data()
     lang = data.get("lang", "")
@@ -248,7 +248,7 @@ async def msg_bulk_desc(
 ) -> None:
     desc = message.text.strip()
     if len(desc) > 512:
-        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.")
+        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.", reply_markup=terminal_kb())
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
@@ -282,7 +282,7 @@ async def msg_bulk_localized_desc(
 ) -> None:
     desc = message.text.strip()
     if len(desc) > 512:
-        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.")
+        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.", reply_markup=terminal_kb())
         return
     data = await state.get_data()
     lang = data.get("lang", "")
@@ -322,7 +322,7 @@ async def msg_bulk_short(
 ) -> None:
     short = message.text.strip()
     if len(short) > 120:
-        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.")
+        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.", reply_markup=terminal_kb())
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
@@ -356,7 +356,7 @@ async def msg_bulk_localized_short(
 ) -> None:
     short = message.text.strip()
     if len(short) > 120:
-        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.")
+        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.", reply_markup=terminal_kb())
         return
     data = await state.get_data()
     lang = data.get("lang", "")
@@ -403,6 +403,7 @@ async def msg_bulk_commands(
         await message.answer(
             "❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     await state.clear()
@@ -473,6 +474,7 @@ async def msg_bulk_localized_commands(
         await message.answer(
             "❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     await state.clear()

@@ -31,7 +31,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils import tariffs
 from bot.utils.event_status import mark_handled_error
-from bot.utils.op_helpers import safe_answer, safe_edit
+from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
 from config import TG_API_ID, TG_API_HASH
 from database import db
 from services.account_manager import (
@@ -623,6 +623,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
             await message.answer(
                 f"❌ Ошибка при отправке кода: <code>{escape(err[:200])}</code>",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
         return
 
@@ -693,6 +694,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.answer(
                 f"❌ Не удалось выслать код: <code>{escape(str(exc2)[:200])}</code>",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
             return
 
@@ -739,6 +741,7 @@ async def cb_qr_login(
         await callback.message.answer(
             f"❌ Не удалось запустить QR-вход: <code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -966,6 +969,7 @@ async def handle_qr_2fa(
         await message.answer(
             f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1027,6 +1031,7 @@ async def handle_code(message: Message, pool: asyncpg.Pool, state: FSMContext) -
             await message.answer(
                 f"❌ Ошибка подтверждения кода: <code>{escape(err[:200])}</code>",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
         return
 
@@ -1097,6 +1102,7 @@ async def _finalize_login(
         await message.answer(
             f"❌ Не удалось получить сессию: <code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         await state.clear()
         return
@@ -1132,6 +1138,7 @@ async def _finalize_login(
         await message.answer(
             f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         await state.clear()
         return
@@ -1672,6 +1679,7 @@ async def relog_phone_entered(
         await message.answer(
             "❌ Формат номера: <code>+79161234567</code> (плюс и 7–15 цифр). Попробуйте снова:",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     data = await state.get_data()
@@ -2053,6 +2061,7 @@ async def handle_post_text(
             await message.answer(
                 f"❌ Не удалось отправить сообщение:\n<code>{escape(err[:200])}</code>",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
         await state.clear()
         return
@@ -3312,7 +3321,8 @@ async def handle_import_tdata(
     if not name.endswith(".zip"):
         await state.clear()
         await message.answer(
-            "❌ Ожидается ZIP-архив. Упакуйте папку tdata в .zip и отправьте снова."
+            "❌ Ожидается ZIP-архив. Упакуйте папку tdata в .zip и отправьте снова.",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -3454,7 +3464,8 @@ async def handle_import_tdata(
     else:
         await state.clear()
         await message.answer(
-            "❌ Конвертация завершилась без результата. Попробуйте снова."
+            "❌ Конвертация завершилась без результата. Попробуйте снова.",
+            reply_markup=terminal_kb(),
         )
 
 
@@ -3505,6 +3516,7 @@ async def handle_import_session_file(
             "❌ Ожидается файл с расширением <code>.session</code>.\n"
             "Убедитесь что отправляете правильный файл.",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -3627,6 +3639,7 @@ async def _finalize_import(
             await message.answer(
                 f"❌ Ошибка обновления сессии в БД: <code>{escape(str(exc)[:200])}</code>",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
             return
 
@@ -3693,6 +3706,7 @@ async def _finalize_import(
         await message.answer(
             f"❌ Ошибка сохранения в БД: <code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -4080,7 +4094,8 @@ async def fsm_batch_import_file(
         or filename.endswith(".zip")
     ):
         await message.answer(
-            "⚠️ Поддерживаются .txt, .csv и .zip (архив .session файлов)."
+            "⚠️ Поддерживаются .txt, .csv и .zip (архив .session файлов).",
+            reply_markup=terminal_kb(),
         )
         return
     max_size = 20 * 1024 * 1024 if filename.endswith(".zip") else 500_000
@@ -4118,6 +4133,7 @@ async def fsm_batch_import_file(
                 "⚠️ ZIP не содержит .session файлов.\n\n"
                 "Убедитесь что архив содержит файлы с расширением <code>.session</code>.",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
             return
         if len(session_names) > 50:
@@ -4155,6 +4171,7 @@ async def fsm_batch_import_file(
                 "⚠️ CSV не содержит распознанных сессий.\n\n"
                 "Ожидаемый формат: <code>session,cluster</code> (cluster — опционально)",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
             return
         if len(pairs) > 50:

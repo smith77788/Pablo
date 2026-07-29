@@ -13,7 +13,7 @@ from bot.callbacks import AutoFunnelCb, BmCb
 from bot.states import AutoFunnelFSM
 from database import db
 from services import auto_funnel as af_service
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -375,6 +375,7 @@ async def msg_af_step_delay(message: Message, state: FSMContext) -> None:
         f"✅ Задержка: <b>{delay} ч</b>\n\nТеперь введите текст сообщения для этого шага.\n"
         "Поддерживается HTML разметка: <code>&lt;b&gt;, &lt;i&gt;, &lt;a&gt;</code>",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
 
 

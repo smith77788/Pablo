@@ -25,7 +25,7 @@ from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
 from bot.utils.event_status import mark_handled_error
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1323,6 +1323,7 @@ async def cb_wu_sess_start(
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1941,6 +1942,7 @@ async def cb_ract_start(
         await callback.message.edit_text(
             f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

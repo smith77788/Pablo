@@ -14,7 +14,7 @@ from bot.callbacks import StarsCb
 from bot.states import StarsExperimentFSM
 from database import db
 from services import stars_optimizer
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
@@ -392,7 +392,7 @@ async def cb_create_pick_bot(callback: CallbackQuery, callback_data: StarsCb, st
 async def fsm_waiting_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip() if message.text else ""
     if not name or len(name) > 128:
-        await message.answer("⚠️ Название должно быть от 1 до 128 символов. Попробуйте снова.")
+        await message.answer("⚠️ Название должно быть от 1 до 128 символов. Попробуйте снова.", reply_markup=terminal_kb())
         return
     await state.update_data(name=name)
     await state.set_state(StarsExperimentFSM.waiting_ctype)

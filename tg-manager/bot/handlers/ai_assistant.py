@@ -24,7 +24,7 @@ from bot.callbacks import AiCb, BmCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
-from bot.utils.op_helpers import safe_answer, safe_edit
+from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
 
 from services import ai_memory
 from services.ai_providers import configured_providers
@@ -960,7 +960,8 @@ async def cmd_forget(message: Message, pool: asyncpg.Pool) -> None:
         return
 
     await message.answer(
-        "✅ Удалил." if deleted else "Такой записи в твоей памяти нет."
+        "✅ Удалил." if deleted else "Такой записи в твоей памяти нет.",
+        reply_markup=terminal_kb(),
     )
 
 
@@ -1038,7 +1039,8 @@ async def cb_ai_confirm_action(
     action_data = data.get("pending_action_data")
     if not action_data:
         await callback.message.edit_text(
-            "⚠️ Данные действия устарели. Попросите ассистента повторить."
+            "⚠️ Данные действия устарели. Попросите ассистента повторить.",
+            reply_markup=terminal_kb(),
         )
         return
 

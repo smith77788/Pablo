@@ -20,7 +20,7 @@ from database import db
 from services import presence_setup
 from services import task_registry as _treg
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -854,6 +854,7 @@ async def cb_pack_promote(
         await callback.message.edit_text(
             f"❌ Не удалось поставить операцию в очередь: {escape(str(exc)[:120])}",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

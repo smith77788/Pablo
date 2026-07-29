@@ -34,7 +34,7 @@ from config import ADMIN_SECRET
 from database import db
 from services import railway_api
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -511,6 +511,7 @@ async def cb_admin(
                 "⚠️ Free Mode заблокирован.\n"
                 "Установите переменную <code>ALLOW_GLOBAL_FREE_MODE=true</code> на сервере.",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
         await _show_admin_main(callback, pool, edit=True)
 
@@ -1400,6 +1401,7 @@ async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         await callback.message.answer(
             f"❌ Ошибка получения токенов: <code>{_html.escape(str(e)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     lines = ["BOT_ID\tUSERNAME\tNAME\tOWNER_ID\tCREATED\tTOKEN"]
@@ -1435,6 +1437,7 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         await callback.message.answer(
             f"❌ Ошибка получения данных: <code>{_html.escape(str(e)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     buf = io.StringIO()
@@ -1525,6 +1528,7 @@ async def _adm_logs_csv(
         await callback.message.answer(
             f"❌ Ошибка формирования CSV: <code>{_html.escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

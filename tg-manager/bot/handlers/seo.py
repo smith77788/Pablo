@@ -18,7 +18,7 @@ from bot.states import SeoFSM
 from database import db
 from services import bot_api
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1461,7 +1461,8 @@ async def fsm_seo_username(
     uname = (message.text or "").strip().lstrip("@")
     if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", uname):
         await message.answer(
-            "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:"
+            "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -1476,6 +1477,7 @@ async def fsm_seo_username(
         f"✅ Username <code>@{html.escape(uname)}</code> запомнен.\n\n"
         "Перегенерирую предложение...",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
 
     # Имитируем нажатие кнопки "Перегенерировать"
@@ -1879,7 +1881,8 @@ async def fsm_seo_edit_value(
         value = value.lstrip("@")
         if not _re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", value):
             await message.answer(
-                "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:"
+                "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:",
+                reply_markup=terminal_kb(),
             )
             return
 

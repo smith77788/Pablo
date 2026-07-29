@@ -16,7 +16,7 @@ from bot.states import WorkspaceFSM
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -192,7 +192,8 @@ async def msg_ws_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     name = (message.text or "").strip()
     if not name or len(name) > 64:
         await message.answer(
-            "❌ Название должно быть от 1 до 64 символов. Попробуйте снова:"
+            "❌ Название должно быть от 1 до 64 символов. Попробуйте снова:",
+            reply_markup=terminal_kb(),
         )
         return
     await state.update_data(ws_name=name)

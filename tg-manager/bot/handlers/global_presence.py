@@ -32,7 +32,7 @@ from services import (
     infra_generator,
     avatar_factory,
 )
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1429,6 +1429,7 @@ async def msg_gp_custom_geo_file(
         f"✅ <b>Загружено {len(geo_list)} городов из файла</b>\n"
         f"Первые 5: {', '.join(g['city'] for g in geo_list[:5])}{'…' if len(geo_list) > 5 else ''}",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
 
     _msg = message
@@ -1962,7 +1963,8 @@ async def cb_gp_confirm_preview(
         log.exception("cb_gp_confirm_preview failed: %s", exc)
         try:
             await callback.message.answer(
-                "⚠️ Внутренняя ошибка. Попробуйте ещё раз или нажмите ❌ Отмена."
+                "⚠️ Внутренняя ошибка. Попробуйте ещё раз или нажмите ❌ Отмена.",
+                reply_markup=terminal_kb(),
             )
         except Exception as e:
             log.warning("handler error in cb_gp_confirm_preview: %s", e)

@@ -34,7 +34,7 @@ from bot.callbacks import ParserCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -637,7 +637,7 @@ async def msg_parser_geo_coords(message: Message, state: FSMContext) -> None:
         return
     lat, lon = float(m.group(1)), float(m.group(2))
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-        await message.answer("⚠️ Неверные координаты. Широта: -90..90, долгота: -180..180")
+        await message.answer("⚠️ Неверные координаты. Широта: -90..90, долгота: -180..180", reply_markup=terminal_kb())
         return
     await state.update_data(geo_lat=lat, geo_lon=lon)
     await state.set_state(ParserFSM.geo_radius)

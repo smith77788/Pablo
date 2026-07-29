@@ -23,7 +23,7 @@ from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from bot.utils.event_status import mark_handled_error
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1206,6 +1206,7 @@ async def cb_dm_resume(
         await callback.message.answer(
             f"⚠️ Ошибка постановки в очередь: {_h.escape(str(exc)[:200])}",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
     # cb_dm_detail calls callback.answer() itself

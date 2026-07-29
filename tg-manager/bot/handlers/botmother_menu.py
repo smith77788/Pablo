@@ -119,7 +119,7 @@ from database import db
 from services.logger import log_exc_swallow
 from services import operation_bus
 from services.bg_tasks import spawn  # strong-ссылка для fire-and-forget (класс #14)
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
@@ -425,10 +425,19 @@ async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
 
 @router.callback_query(BmCb.filter(F.action == "main"))
 async def cb_main(
-    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     from bot.utils import menu_cache
     await safe_answer(callback)
+    # Главное меню — корень: возврат сюда завершает любой мастер. Без очистки
+    # пользователь, вышедший из середины ввода, оставался в FSM-состоянии, и
+    # следующее его сообщение уходило в брошенный шаг — бот отвечал про поле,
+    # которое человек уже покинул.
+    try:
+        if await state.get_state() is not None:
+            await state.clear()
+    except Exception:
+        log.debug("cb_main: очистка состояния не удалась", exc_info=True)
     user_id = callback.from_user.id
 
     # Check 30-second cache — serve instantly on repeat visits
@@ -1687,6 +1696,7 @@ async def fsm_plan_waiting_datetime(
             "⚠️ Не удалось распознать дату. Используйте формат:\n"
             "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

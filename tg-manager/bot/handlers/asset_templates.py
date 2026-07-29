@@ -41,7 +41,7 @@ from bot.states import (
     BulkLeaveFSM,
 )
 from bot.keyboards import subscription_locked_markup
-from bot.utils.op_helpers import _get_active_accounts
+from bot.utils.op_helpers import _get_active_accounts, terminal_kb
 from bot.utils.subscription import require_plan, locked_text
 from bot.utils.template_validator import validate_asset_template
 from database import db
@@ -452,7 +452,8 @@ async def msg_waiting_name(message: Message, state: FSMContext) -> None:
         return
     if len(name) > 64:
         await message.answer(
-            "❌ Название слишком длинное (максимум 64 символа). Попробуйте ещё раз:"
+            "❌ Название слишком длинное (максимум 64 символа). Попробуйте ещё раз:",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -521,6 +522,7 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
                 "<code>mass_publish</code>, <code>bulk_join</code>, "
                 "<code>bulk_leave</code>, <code>bulk_bot_edit</code>",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
             return
     else:

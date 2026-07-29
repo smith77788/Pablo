@@ -23,7 +23,7 @@ from bot.states import SendToUser
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 
@@ -427,6 +427,7 @@ async def msg_send_user_id(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"✅ User ID: <code>{user_id}</code>\n\nТеперь введите текст сообщения:",
         parse_mode="HTML",
+        reply_markup=terminal_kb(),
     )
 
 
