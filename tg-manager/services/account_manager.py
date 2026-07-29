@@ -2438,9 +2438,21 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
             
             # Update status if changed
             if new_status != old_status:
+                # set_status обогащает событие причиной; status_reason на самой
+                # записи аккаунта обновляем отдельно — это разные поля и разные
+                # потребители (карточка аккаунта против разбора потерь).
+                from services import account_status as _acc_status
+
+                await _acc_status.set_status(
+                    pool,
+                    acc["id"],
+                    new_status,
+                    reason=str(result.get("reason", ""))[:200] or None,
+                    source="session_health",
+                )
                 await pool.execute(
-                    "UPDATE tg_accounts SET acc_status=$1, status_reason=$2 WHERE id=$3",
-                    new_status, result.get("reason", ""), acc["id"],
+                    "UPDATE tg_accounts SET status_reason=$1 WHERE id=$2",
+                    result.get("reason", ""), acc["id"],
                 )
                 log.info(
                     "session_health: acc=%d phone=%s status %s→%s: %s",

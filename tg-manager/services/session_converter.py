@@ -5,6 +5,11 @@ Session Converter — конвертация форматов сессий.
 - Pyrogram JSON → Telethon StringSession
 - SQLite session → Telethon StringSession (через telethon.sync или asyncio)
 - tdata — определение (конвертация через opentele если установлена)
+
+СТАТУС: НЕ ПОДКЛЮЧЁН (проверено 2026-07-27). Импорт сессий работает через
+`account_manager.import_from_pyrogram_json` / `import_from_session_file` /
+`import_tdata_from_zip_bytes` — они и вызываются из бота. Этот модуль их
+дублирует; подключать имеет смысл только если решено переносить импорт сюда.
 """
 
 from __future__ import annotations

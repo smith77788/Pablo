@@ -341,8 +341,17 @@ def _record_operation_result(action_type: str, success: bool, duration_s: float)
 
 
 def get_adaptive_delay(action_type: str, base_delay: float = 5.0) -> float:
-    """Calculate adaptive delay based on operation history.
-    
+    """Задержка по истории успехов/провалов ДАННОГО процесса.
+
+    НЕ ИСПОЛЬЗУЕТСЯ В ПРОДЕ (проверено 2026-07-27). Рабочий контур обучения на
+    исходах — `pacing_engine`: он пишет `record_result` и читается в
+    `op_worker.get_adaptive_delay` (множитель) и `flood_engine`. Здешние счётчики
+    к тому же заполняются лишь в одном месте воркера, то есть история заведомо
+    неполная.
+
+    Оставлено как исторический артефакт, но при правке ТЕМПА массовых операций
+    правьте `pacing_engine` — иначе изменение не доедет до реальных задержек.
+
     Features:
     - If recent failures: increase delay (cool down)
     - If high success rate: decrease delay slightly (optimize speed)

@@ -7,6 +7,12 @@ Provides:
 - Reconnect handling with DC awareness
 - Account-to-session mapping with in-memory cache
 - Worker-safe session checkout/checkin
+
+СТАТУС: НЕ ПОДКЛЮЧЁН (проверено 2026-07-27). Жизненный цикл сессий сейчас —
+`account_manager._make_client()` на каждый вызов. Пул с checkout/checkin
+меняет модель работы всех массовых операций, поэтому подключение здесь не
+«одна строка», а отдельная задача с канарейкой: ошибка в этом слое стоит
+потери изоляции аккаунтов.
 """
 
 from __future__ import annotations

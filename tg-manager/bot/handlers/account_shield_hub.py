@@ -309,7 +309,7 @@ async def cb_shield_autopsy(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     try:
         rows = await pool.fetch(
             """SELECT e.acc_id, e.new_status, e.signature, e.autopsy, e.created_at,
-                      e.processed_at, a.phone, a.username
+                      e.processed_at, e.reason, e.source, a.phone, a.username
                  FROM account_status_events e
                  LEFT JOIN tg_accounts a ON a.id = e.acc_id
                 WHERE e.owner_id = $1 AND e.is_death
@@ -366,6 +366,12 @@ async def cb_shield_autopsy(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             ts = r["created_at"]
             ts_str = ts.strftime("%d.%m %H:%M") if hasattr(ts, "strftime") else "—"
             lines.append(f"☠️ <b>{html.escape(str(name))}</b> · {ts_str} · {r['new_status']}")
+
+            # reason/source пишет тот код, который сменил статус — это точнее
+            # причины, вычисленной по признакам постфактум. Показываем первой.
+            if r["reason"]:
+                src_note = f" <i>({html.escape(str(r['source']))})</i>" if r["source"] else ""
+                lines.append(f"   Система: {html.escape(str(r['reason'])[:130])}{src_note}")
 
             data = r["autopsy"]
             if isinstance(data, str):

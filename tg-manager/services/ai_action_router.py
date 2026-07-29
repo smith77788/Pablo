@@ -1,3 +1,9 @@
+"""ai_action_router.
+СТАТУС: НЕ ПОДКЛЮЧЁН (проверено 2026-07-27). Маршрутизация фразы в действие по
+regex-словарю. AI-ассистент использует свой путь (`bot/utils/ai_tools.py` +
+`services/intent_planner`), который умеет больше.
+"""
+
 from __future__ import annotations
 import json
 import logging

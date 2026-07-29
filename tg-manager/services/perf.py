@@ -1,4 +1,7 @@
-"""Performance measurement utilities for before/after comparison."""
+"""Performance measurement utilities for before/after comparison.
+СТАТУС: НЕ ПОДКЛЮЧЁН (проверено 2026-07-27). Утилита замеров «до/после» для
+разовых сравнений. Держится как инструмент разработки, в проде не участвует.
+"""
 
 from __future__ import annotations
 

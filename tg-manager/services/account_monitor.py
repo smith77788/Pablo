@@ -321,9 +321,21 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
         # Session is confirmed dead
         if status in ("session_expired", "banned", "deactivated") and auth_error:
             try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status=$1, is_active=FALSE WHERE id=$2",
+                # Через account_status.set_status, а не прямым UPDATE: триггер БД
+                # поймает смену в любом случае, но человекочитаемую ПРИЧИНУ в
+                # событие пишет только этот путь. Без неё разбор потерь
+                # показывает смерть без объяснения, откуда она взялась.
+                from services import account_status as _acc_status
+
+                await _acc_status.set_status(
+                    pool,
+                    acc["id"],
                     status,
+                    reason=str(auth_error)[:200],
+                    source="account_monitor",
+                )
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
                     acc["id"],
                 )
             except Exception:

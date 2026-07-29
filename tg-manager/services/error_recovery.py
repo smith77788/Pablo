@@ -1,6 +1,12 @@
 """Error recovery mechanisms for automatic error handling.
 
 Provides retry logic, circuit breakers, and fallback strategies.
+
+СТАТУС: НЕ ПОДКЛЮЧЁН (проверено 2026-07-27). Дублирует уже работающее:
+circuit breaker живёт в `op_worker._circuit_breaker_state`, повторы операций —
+в `operation_bus` (`max_retries` в OP_REGISTRY). Прежде чем подключать, решите,
+какой из двух механизмов остаётся единственным: два контура повторов над одной
+очередью дадут двойной retry.
 """
 
 from __future__ import annotations
