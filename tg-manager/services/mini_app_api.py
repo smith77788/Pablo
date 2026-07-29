@@ -820,7 +820,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "plan_row": pool.fetchrow(
                 "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid),
             "exp_row": pool.fetchrow(
-                "SELECT expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
+                "SELECT plan, expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
                 "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid),
             "activity": pool.fetch(
                 """SELECT COALESCE(label, op_type) AS action, status, created_at,
@@ -846,6 +846,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stats["plan"] = r["plan"]
             if not stats.get("plan"):
                 stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
+            # exp_row = активная неистёкшая подписка из subscriptions (ПРЯМОЙ запрос,
+            # мимо per-process кеша get_plan). Её наличие ДОКАЗЫВАЕТ платный тариф.
+            # Раньше exp_row использовался только для даты истечения, а не для плана →
+            # дашборд показывал «free» при живой подписке, если кеш get_plan этого
+            # процесса устарел (оплату обработал ДРУГОЙ процесс — бот). Тот же
+            # источник истины, что и /subscription.
+            if r["exp_row"] and (not stats.get("plan") or stats["plan"] == "free"):
+                stats["plan"] = r["exp_row"]["plan"] if "plan" in r["exp_row"] else "paid"
             try:
                 from bot.utils.subscription import coerce_plan as _cp
                 stats["plan"] = _cp(stats["plan"])
