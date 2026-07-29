@@ -1545,8 +1545,33 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 op_id, op_type, _final_status, elapsed, _ok, _failed,
                 result.get("summary", ""),
             )
-            # Circuit breaker: record result
-            await _circuit_breaker_record(owner_id, _final_status == "done")
+            # Circuit breaker: считаем ТОЛЬКО реальные сбои исполнения.
+            #
+            # Предохранитель существует, чтобы остановить владельца, у которого
+            # операции ломаются на ходу (аккаунты умирают, сеть, Telegram). Но
+            # исполнители возвращают status='failed' и на чисто КОНФИГУРАЦИОННЫХ
+            # отказах — «аудитория пуста», «не указана группа», «нет активных
+            # аккаунтов». Таких возвратов в op_worker десятки.
+            #
+            # Из-за этого три подряд неверно заполненные формы (например запуск
+            # инвайта, когда парсер ещё не собирал аудиторию) открывали цепь — и
+            # ВСЕ операции владельца на 30 минут начинали молча откладываться.
+            # Снаружи это выглядит как «ничего не работает»: операция уходит в
+            # «ожидает» и не стартует, причём без единого объяснения.
+            #
+            # Признак конфигурационного отказа: исполнитель не тронул НИ ОДНОЙ
+            # цели (ok=0 и failed=0) и не бросил исключение — то есть он отказал
+            # ДО работы, а не сломался в ней. Исключения учитываются отдельно,
+            # ниже по коду, и предохранителя не теряют.
+            _config_refusal = _final_status == "failed" and _ok == 0 and _failed == 0
+            if _config_refusal:
+                log.info(
+                    "op_worker: op_id=%d — отказ до начала работы (%s), "
+                    "предохранитель не трогаем",
+                    op_id, (result.get("summary") or "")[:80],
+                )
+            else:
+                await _circuit_breaker_record(owner_id, _final_status == "done")
             # Adaptive pacing: record result for learning
             session_simulator.record_success(op_type, 0, elapsed) if _final_status == "done" else session_simulator.record_failure(op_type, 0, elapsed)
             # ML pacing engine: feed success/failure so get_multiplier() learns

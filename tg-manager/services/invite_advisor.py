@@ -54,7 +54,33 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     advice: list[dict] = []
     checked: list[str] = []
 
-    week = await _fetch(
+    # ── 0. Операции вообще запускаются? ──────────────────────────────────────
+    # Предохранитель op_worker останавливает ВСЕ операции владельца на 30 минут
+    # после серии сбоев. Состояние отдавалось эндпойнтом `/circuit_breaker`, но фронт
+    # его никогда не спрашивал: операция уходила в «ожидает» и не стартовала без
+    # единого объяснения — снаружи это и есть «ничего не работает». Здесь пауза
+    # становится видимой первым же пунктом разбора.
+    checked.append("пауза после сбоев")
+    try:
+        from services.op_worker import _circuit_breaker_status
+        cb = _circuit_breaker_status(int(owner_id))
+        if cb.get("status") == "open":
+            mins = max(1, int(cb.get("cooldown_remaining_s") or 0) // 60)
+            advice.append({
+                "severity": "danger",
+                "title": f"Операции на паузе ещё ~{mins} мин — новые запуски ждут",
+                "detail": (
+                    f"После {cb.get('failures')} сбоев подряд система приостановила "
+                    f"запуск операций, чтобы не жечь аккаунты вслепую. Запущенное "
+                    f"сейчас не пропадёт — оно стартует само, когда пауза кончится. "
+                    f"Если сбои были из-за настроек (пустая аудитория, не указана "
+                    f"группа), просто дождитесь окончания паузы."
+                ),
+            })
+    except Exception:
+        log.debug("invite_advisor: circuit breaker state unavailable", exc_info=True)
+
+    week_rows = await _fetch(
         pool,
         """SELECT s.account_id,
                   COALESCE(a.phone, a.first_name, '#' || a.id::text) AS label,
@@ -67,6 +93,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
            GROUP BY s.account_id, a.phone, a.first_name, a.id""",
         owner_id,
     )
+    week = week_rows or []
     out["has_data"] = bool(week)
 
     # ── 1. Кто ловит флуды ───────────────────────────────────────────────────
@@ -119,7 +146,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
 
     # ── 3. Профиль аккаунтов сам режет лимит ─────────────────────────────────
     checked.append("оформление профилей")
-    weak = await _fetch(
+    weak_rows = await _fetch(
         pool,
         """SELECT id, COALESCE(phone, first_name, '#' || id::text) AS label,
                   first_name, username, has_photo, warmup_level
@@ -127,6 +154,57 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
            WHERE owner_id = $1 AND is_active = TRUE AND session_str IS NOT NULL""",
         owner_id,
     )
+    weak = weak_rows or []
+    # Ни одного пригодного аккаунта — самая частая причина «инвайт не работает»:
+    # операция честно падает с «Нет активных аккаунтов-инвайтеров с сессией», но
+    # до этого момента ничто на экране об этом не предупреждало.
+    if weak_rows is not None and not weak:
+        advice.append({
+            "severity": "danger",
+            "title": "Нет аккаунтов, которыми можно приглашать",
+            "detail": (
+                "Инвайту нужен активный аккаунт с рабочей сессией. Сейчас таких "
+                "нет: либо аккаунты не добавлены, либо их сессии не сохранились "
+                "или истекли. Операция запустится и сразу завершится отказом — "
+                "добавьте аккаунт и проверьте его в разделе «Аккаунты»."
+            ),
+        })
+
+    # Карантин: аккаунты есть, но исполнитель их пропустит (риск-пульс). Если
+    # пропустит ВСЕХ — инвайт снова завершится отказом, и снова без предупреждения.
+    checked.append("карантин аккаунтов")
+    if weak:
+        try:
+            from services import infra_memory as _im
+            quarantined = []
+            for r in weak:
+                if await _im.is_account_quarantined(pool, r["id"]):
+                    quarantined.append(r)
+            if quarantined and len(quarantined) == len(weak):
+                advice.append({
+                    "severity": "danger",
+                    "title": "Все аккаунты на паузе риск-пульса — приглашать нечем",
+                    "detail": (
+                        "Каждый аккаунт помечен как рискованный (флуды, ограничения "
+                        "или низкий trust) и будет пропущен для защиты от бана. "
+                        "Инвайт завершится отказом, пока не появится хотя бы один "
+                        "здоровый аккаунт — дайте текущим отдохнуть или добавьте новые."
+                    ),
+                })
+            elif quarantined:
+                advice.append({
+                    "severity": "warn",
+                    "title": f"{len(quarantined)} из {len(weak)} аккаунтов на паузе риск-пульса",
+                    "detail": (
+                        "Их пропустят для защиты от бана — реальная ёмкость инвайта "
+                        "ниже, чем кажется по числу аккаунтов."
+                    ),
+                    "accounts": [{"id": r["id"], "label": _label({**dict(r), "account_id": r["id"]})}
+                                 for r in quarantined[:5]],
+                })
+        except Exception:
+            log.debug("invite_advisor: quarantine check unavailable", exc_info=True)
+
     empty = [r for r in weak
              if not (r["first_name"] or "").strip() or not (r["username"] or "").strip()
              or r["has_photo"] is False]
@@ -237,11 +315,19 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     return out
 
 
-async def _fetch(pool, q: str, *args) -> list[dict]:
-    """Запрос, который не имеет права уронить аналитика."""
+async def _fetch(pool, q: str, *args) -> list[dict] | None:
+    """Запрос, который не имеет права уронить аналитика.
+
+    Возвращает None, если запрос НЕ УДАЛСЯ. Это принципиально не то же самое,
+    что пустой список: «аккаунтов нет» и «мы не смогли их спросить» — разные
+    факты, и путать их нельзя. Ранняя версия возвращала [] в обоих случаях, и
+    при сбое БД разбор уверенно сообщал «нет аккаунтов, которыми можно
+    приглашать» — врал с видом точности ровно там, где пользователь принимает
+    решение.
+    """
     try:
         rows = await pool.fetch(q, *args)
         return [dict(r) for r in (rows or [])]
     except Exception:
         log.debug("invite_advisor: query failed", exc_info=True)
-        return []
+        return None

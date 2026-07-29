@@ -251,3 +251,93 @@ def test_ui_renders_advice_and_card():
     assert re.search(r"openInviteAccount\(\$\{a\.id\}\)", html), (
         "экран без входа — тупик"
     )
+
+
+# ── почему инвайт не стартует: невидимые блокеры ─────────────────────────────
+# Жалоба «всё ещё не инвайтит» упиралась в три причины, о которых экран молчал:
+# предохранитель op_worker (все операции владельца на паузе), отсутствие
+# аккаунтов с сессией и поголовный карантин. Каждая честно роняла операцию —
+# но узнать об этом можно было только из истории операций.
+
+def test_open_circuit_breaker_is_surfaced(monkeypatch):
+    from services import op_worker
+    monkeypatch.setattr(op_worker, "_circuit_breaker_status",
+                        lambda uid: {"status": "open", "failures": 3,
+                                     "cooldown_remaining_s": 900})
+    res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
+    pause = [a for a in _sev(res, "danger") if "пауз" in a["title"].lower()]
+    assert pause, (
+        "операции стоят на паузе, а экран об этом молчит — снаружи это "
+        "неотличимо от «продукт не работает»"
+    )
+    assert "15" in pause[0]["title"], "остаток паузы должен быть назван в минутах"
+    assert "не пропадёт" in pause[0]["detail"], (
+        "надо сказать, что запущенное стартует само — иначе пользователь начнёт "
+        "перезапускать и продлит паузу"
+    )
+
+
+def test_closed_breaker_is_silent(monkeypatch):
+    from services import op_worker
+    monkeypatch.setattr(op_worker, "_circuit_breaker_status",
+                        lambda uid: {"status": "closed", "failures": 0})
+    res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
+    assert not [a for a in res["advice"] if "пауз" in a["title"].lower()]
+
+
+def test_no_usable_accounts_is_the_first_thing_said():
+    """Самая частая причина «инвайт не работает»: приглашать физически нечем."""
+    res = _advise(_Pool(week=[], accounts=[]))
+    none_acc = [a for a in _sev(res, "danger") if "нет аккаунтов" in a["title"].lower()]
+    assert none_acc, "отсутствие пригодных аккаунтов обязано называться прямо"
+    assert "сесси" in none_acc[0]["detail"], "нужно объяснить, чего именно не хватает"
+
+
+def test_all_accounts_quarantined_is_a_blocker(monkeypatch):
+    from services import infra_memory
+    async def _quar(pool, acc_id):
+        return True
+    monkeypatch.setattr(infra_memory, "is_account_quarantined", _quar)
+    res = _advise(_Pool(week=[_stat()], accounts=[_acc(), _acc(id=2)]))
+    q = [a for a in _sev(res, "danger") if "риск-пульс" in a["title"]]
+    assert q, "если пропустят всех — инвайт не сделает ничего, это надо сказать заранее"
+
+
+def test_partial_quarantine_is_a_warning_not_a_blocker(monkeypatch):
+    from services import infra_memory
+    async def _quar(pool, acc_id):
+        return int(acc_id) == 1
+    monkeypatch.setattr(infra_memory, "is_account_quarantined", _quar)
+    res = _advise(_Pool(week=[_stat()], accounts=[_acc(), _acc(id=2)]))
+    q = [a for a in _sev(res, "warn") if "риск-пульс" in a["title"]]
+    assert q, "частичный карантин снижает ёмкость — предупредить стоит"
+    assert "1 из 2" in q[0]["title"], "числа должны быть настоящими"
+
+
+def test_quarantine_failure_does_not_break_the_advisor(monkeypatch):
+    from services import infra_memory
+    async def _boom(pool, acc_id):
+        raise RuntimeError("нет пульса")
+    monkeypatch.setattr(infra_memory, "is_account_quarantined", _boom)
+    res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
+    assert isinstance(res["advice"], list), "сбой проверки не имеет права ронять разбор"
+
+
+def test_db_failure_never_claims_there_are_no_accounts():
+    """«Аккаунтов нет» и «мы не смогли их спросить» — разные факты.
+
+    Ранняя версия `_fetch` возвращала [] в обоих случаях, и при сбое БД разбор
+    уверенно сообщал «нет аккаунтов, которыми можно приглашать» — врал с видом
+    точности ровно там, где пользователь принимает решение.
+    """
+    res = _advise(_Pool(boom=True))
+    assert not [a for a in res["advice"] if "нет аккаунтов" in a["title"].lower()], (
+        "при сбое запроса нельзя утверждать, что аккаунтов нет"
+    )
+
+
+def test_empty_result_and_failed_query_are_distinguishable():
+    import inspect
+    from services import invite_advisor
+    src = inspect.getsource(invite_advisor._fetch)
+    assert "return None" in src, "сбой запроса обязан отличаться от пустого ответа"
