@@ -479,7 +479,7 @@ flood-aware, preflight cooldown/flood, warmup-guard) — второй фильт
   есть только у админа (`admin.py:_adm_ai_status`, `_provider_status_line`); у владельца
   бота — тишина (сбой только в лог). Фикс: owner-scoped `ai_status`/`ai_test` (reuse
   `ai_providers.configured_providers()`), блок в экране автоответов. Тест `test_ai_status_owner`.
-- [ ] **P1 — Фильтры аудитории в инвайте/DM** (только с username / не бот / premium).
+- [x] **P1 — Фильтры аудитории в ИНВАЙТЕ** (DM — хвост, нужна campaign-storage плумбинг) (только с username / не бот / premium).
   `parsed_audiences` хранит поля, композер их не фильтрует. Reuse фильтров парсер-вью +
   `parse_run_id`. Тест `test_invite_audience_filter`.
 - [ ] **P2 — Префилл текущего описания бота при правке** (`bot_api.get_my_description`

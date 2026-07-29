@@ -3755,6 +3755,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         </select>
       </div>
       <div id="massInviteAudience" style="font-size:12px;color:var(--hint);margin:-6px 0 10px;padding:0 2px"></div>
+      <div class="field" id="massInviteFilters">
+        <label>Фильтры аудитории</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px">
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltUsername"> только с @username</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltNotBot"> не боты</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltPremium"> premium</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltActive"> активные</label>
+        </div>
+        <div class="hint" style="padding:4px 2px 0">Отсеять ботов/удалённых/приватные аккаунты до запуска — меньше «пустых» приглашений и риска.</div>
+      </div>
       <div class="field" id="massInviteImportField" style="display:none">
         <label>Список для инвайта</label>
         <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567"></textarea>
@@ -12944,6 +12954,14 @@ async function submitMassInvite() {
   if (_b) body.batch_size = parseInt(_b);
   if (_m) body.max_invites = parseInt(_m);
   if (_pa) body.per_account_limit = parseInt(_pa);
+  // Фильтры аудитории (только с username / не бот / premium / активные) —
+  // применяются в исполнителе теми же условиями, что парсер-вью.
+  const _af = {};
+  if (document.getElementById('invFltUsername')?.checked) _af.with_username = true;
+  if (document.getElementById('invFltNotBot')?.checked) _af.not_bot = true;
+  if (document.getElementById('invFltPremium')?.checked) _af.premium = true;
+  if (document.getElementById('invFltActive')?.checked) _af.active = true;
+  if (Object.keys(_af).length) body.aud_filters = _af;
   // Инвайт — самая баноопасная операция → подтверждение перед запуском.
   // Без лимита на аккаунт риск бана максимальный — предупреждаем явно.
   const _paceLbl = {auto:'🤖 авто (по состоянию флота)', slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;

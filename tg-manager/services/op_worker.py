@@ -8300,21 +8300,28 @@ async def _exec_mass_invite(
                 _pr = int(_pr) if _pr else None
             except (TypeError, ValueError):
                 _pr = None
+            # Фильтры аудитории (только с username / не бот / premium / активные) —
+            # те же, что в парсер-вью. Богатые колонки хранились, но инвайт их не
+            # применял → в приглашение шли боты/удалённые/приватные без username.
+            from services.audience_filters import parsed_audience_filters
+            _af = params.get("aud_filters") or {}
             if _pr:
+                _fsql, _fp = parsed_audience_filters(_af, base_params_count=2)
                 rows = await _safe_fetch(
                     pool,
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    "WHERE owner_id=$1 AND parse_run_id=$2 ORDER BY parsed_at DESC LIMIT 2000",
-                    owner_id, _pr,
+                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} ORDER BY parsed_at DESC LIMIT 2000",
+                    owner_id, _pr, *_fp,
                 )
             else:
+                _fsql, _fp = parsed_audience_filters(_af, base_params_count=1)
                 rows = await _safe_fetch(
                     pool,
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    "WHERE owner_id=$1 ORDER BY parsed_at DESC LIMIT 2000",
-                    owner_id,
+                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC LIMIT 2000",
+                    owner_id, *_fp,
                 )
             # Источник каждой цели известен (из какого канала её спарсили) —
             # раскладываем вперемешку, чтобы аккаунт не приглашал подряд сорок

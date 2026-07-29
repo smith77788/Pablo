@@ -208,36 +208,9 @@ def parse_proxy_type(proxy_url: str) -> str | None:
     return None
 
 
-def parsed_audience_filters(q, base_params_count: int = 1):
-    """Строит доп. условия WHERE + параметры для выборки parsed_audiences.
-
-    q: mapping с ключами source, premium, with_username, not_bot, active, with_phone.
-    Плейсхолдеры продолжаются с base_params_count (после owner_id=$1). Богатые
-    колонки (is_premium/is_bot/is_active/phone) раньше хранились, но не фильтровались.
-    Чистая функция — тестируема.
-    """
-    def _truthy(v) -> bool:
-        return str(v).lower() in ("1", "true", "yes", "on")
-    conds: list[str] = []
-    params: list = []
-    idx = base_params_count
-    src = (q.get("source") or "").strip()
-    if src:
-        idx += 1
-        conds.append(f"source_username ILIKE ${idx}")
-        params.append(f"%{src}%")
-    if _truthy(q.get("premium")):
-        conds.append("is_premium=TRUE")
-    if _truthy(q.get("with_username")):
-        conds.append("username IS NOT NULL AND username<>''")
-    if _truthy(q.get("not_bot")):
-        conds.append("COALESCE(is_bot,FALSE)=FALSE")
-    if _truthy(q.get("active")):
-        conds.append("is_active=TRUE")
-    if _truthy(q.get("with_phone")):
-        conds.append("phone IS NOT NULL AND phone<>''")
-    sql = (" AND " + " AND ".join(conds)) if conds else ""
-    return sql, params
+# Единый источник фильтров parsed_audiences (парсер-вью + инвайт + DM) —
+# вынесен в services/audience_filters.py, чтобы все три места применяли одно и то же.
+from services.audience_filters import parsed_audience_filters  # noqa: E402,F401
 
 
 def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dict[str, Any]]:
@@ -6397,6 +6370,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     params["parse_run_id"] = int(_pr)
                 except (TypeError, ValueError):
                     pass
+            # Фильтры аудитории (только с username / не бот / premium / активные) —
+            # применяются в _exec_mass_invite теми же условиями, что парсер-вью.
+            _af_in = body.get("aud_filters") or {}
+            if isinstance(_af_in, dict):
+                _af = {k: True for k in ("with_username", "not_bot", "premium", "active", "with_phone")
+                       if str(_af_in.get(k)).lower() in ("1", "true", "yes", "on")}
+                if _af:
+                    params["aud_filters"] = _af
             if user_refs:
                 params["user_refs"] = user_refs
             if phones:
