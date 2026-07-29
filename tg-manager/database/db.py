@@ -3668,6 +3668,43 @@ async def get_referral_leaderboard_platform(
     return [dict(r) for r in rows]
 
 
+async def _sync_platform_user_plan(pool, user_id: int, sub_row) -> None:
+    """Отразить активную строку subscriptions в денормализованном platform_users
+    и сбросить кеш плана.
+
+    Источник правды — таблица subscriptions (её читают get_plan и бот). Но
+    platform_users.current_plan/plan_expires_at — второе хранилище, которое
+    читают админ-списки и часть мини-аппа. Любой писатель subscriptions ОБЯЗАН
+    синхронно обновить platform_users, иначе подписку видно в боте, но не в
+    мини-аппе (классический рассинхрон). sub_row — результат RETURNING
+    (plan, expires_at) апсерта subscriptions.
+    """
+    if not sub_row:
+        return
+    try:
+        await pool.execute(
+            "UPDATE platform_users SET current_plan=$2, plan_expires_at=$3 WHERE user_id=$1",
+            user_id,
+            sub_row["plan"],
+            sub_row["expires_at"],
+        )
+    except Exception:
+        log_exc_swallow(log, "_sync_platform_user_plan: platform_users sync failed", user_id=user_id)
+    _invalidate_plan_cache(user_id)
+
+
+def _invalidate_plan_cache(user_id: int) -> None:
+    """Сброс in-process кеша плана (единый на весь рантайм — один процесс).
+
+    Ленивый импорт, чтобы избежать циклической зависимости db ↔ bot.utils.
+    """
+    try:
+        from bot.utils.subscription import invalidate_plan_cache
+        invalidate_plan_cache(user_id)
+    except Exception:
+        log_exc_swallow(log, "_invalidate_plan_cache failed", user_id=user_id)
+
+
 # Reward tier definitions
 _REWARD_TIERS = [
     ("basic", "active", 5, "starter", 14),
@@ -3701,8 +3738,11 @@ async def check_and_grant_rewards(
             )
         except Exception:
             continue
-        # Extend subscription
-        await pool.execute(
+        # Extend subscription. RETURNING даёт итоговый plan/expires_at, чтобы
+        # синхронно обновить platform_users (второе хранилище) — иначе бот видит
+        # подписку (get_plan читает subscriptions), а мини-апп/админка,
+        # читающие platform_users.current_plan, показывают free.
+        sub_row = await pool.fetchrow(
             """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
                VALUES ($1, $2, now() + ($3 || ' days')::INTERVAL, true)
                ON CONFLICT (user_id) DO UPDATE SET
@@ -3712,11 +3752,13 @@ async def check_and_grant_rewards(
                        THEN EXCLUDED.plan ELSE subscriptions.plan END,
                    is_active  = true,
                    expires_at = GREATEST(subscriptions.expires_at, now())
-                              + ($3 || ' days')::INTERVAL""",
+                              + ($3 || ' days')::INTERVAL
+               RETURNING plan, expires_at""",
             referrer_id,
             plan,
             str(days),
         )
+        await _sync_platform_user_plan(pool, referrer_id, sub_row)
         granted.append(level)
         # Notify referrer
         level_names = {
@@ -3758,15 +3800,19 @@ async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
     )
     if not updated:
         return False
-    await pool.execute(
+    sub_row = await pool.fetchrow(
         """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
            VALUES ($1, 'starter', now() + INTERVAL '7 days', true)
            ON CONFLICT (user_id) DO UPDATE SET
                plan       = CASE WHEN subscriptions.is_active THEN subscriptions.plan ELSE 'starter' END,
                is_active  = true,
-               expires_at = GREATEST(subscriptions.expires_at, now()) + INTERVAL '7 days'""",
+               expires_at = GREATEST(subscriptions.expires_at, now()) + INTERVAL '7 days'
+           RETURNING plan, expires_at""",
         referred_id,
     )
+    # Синхронизируем platform_users, иначе welcome-бонус виден боту, но не
+    # мини-аппу/админке (см. _sync_platform_user_plan).
+    await _sync_platform_user_plan(pool, referred_id, sub_row)
     try:
         await bot.send_message(
             referred_id,
@@ -4601,30 +4647,21 @@ async def grant_plan_to_user(
     """
     from datetime import datetime, timedelta, timezone
 
-    # Обновить platform_users — expires_at продлевается от текущей даты истечения
-    # если подписка ещё активна, иначе — от now()
-    await pool.execute(
-        """UPDATE platform_users
-           SET current_plan=$1,
-               plan_expires_at = CASE
-                   WHEN plan_expires_at > now()
-                       THEN plan_expires_at + ($2 || ' months')::INTERVAL
-                   ELSE now() + ($2 || ' months')::INTERVAL
-               END
-           WHERE user_id=$3""",
-        plan,
-        str(months),
-        user_id,
-    )
     expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
-    # Обновить subscriptions (именно здесь get_plan() проверяет доступ)
+    # subscriptions — источник правды (тут get_plan() проверяет доступ). Пишем
+    # ЕЁ первой, а platform_users синхронизируем ровно от возвращённого
+    # expires_at, а не вторым независимым CASE — иначе две даты могут разойтись.
     if plan == "free":
         await pool.execute(
             "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
         )
-    else:
         await pool.execute(
+            "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
+            user_id,
+        )
+    else:
+        sub_row = await pool.fetchrow(
             """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
                VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
                ON CONFLICT(user_id) DO UPDATE
@@ -4634,17 +4671,20 @@ async def grant_plan_to_user(
                        WHEN subscriptions.expires_at > now()
                            THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
                        ELSE now() + ($3 || ' months')::INTERVAL
-                   END""",
+                   END
+               RETURNING plan, expires_at""",
             user_id,
             plan,
             str(months),
         )
-        # Refresh expires for audit log
-        row = await pool.fetchrow(
-            "SELECT expires_at FROM subscriptions WHERE user_id=$1", user_id
-        )
-        if row:
-            expires = row["expires_at"]
+        if sub_row:
+            expires = sub_row["expires_at"]
+            await pool.execute(
+                "UPDATE platform_users SET current_plan=$2, plan_expires_at=$3 WHERE user_id=$1",
+                user_id,
+                sub_row["plan"],
+                sub_row["expires_at"],
+            )
 
         # Зафиксировать подтверждённую оплату, чтобы выручка/счётчики были точными.
         if record_payment:
@@ -4690,6 +4730,10 @@ async def grant_plan_to_user(
             log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id
         )
 
+    # Обе таблицы записаны выше — сбрасываем кеш плана, иначе get_plan отдаёт
+    # старое значение до 60с (в т.ч. в мини-аппе — тот же процесс, тот же кеш).
+    _invalidate_plan_cache(user_id)
+
 
 async def grant_subscription(
     pool: asyncpg.Pool,
@@ -4727,6 +4771,8 @@ async def revoke_plan_from_user(
         admin_id,
         user_id,
     )
+    # Сброс кеша — иначе отозванный юзер до 60с считается платным.
+    _invalidate_plan_cache(user_id)
 
 
 async def revoke_strike_access(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
