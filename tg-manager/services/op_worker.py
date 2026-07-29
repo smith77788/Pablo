@@ -672,6 +672,34 @@ async def _maybe_requeue(
     return True
 
 
+# ── Аккаунты для массовых операций: ОДИН источник правды ─────────────────────
+# Этот SELECT был скопирован по файлу девять раз, и во всех копиях не хватало трёх
+# полей, которые читает `account_manager._make_client` при выборе транспорта:
+#
+#   • `proxy_id` — «привязан ли аккаунт к прокси». Ключевой момент: если прокси
+#     назначен, но сейчас НЕАКТИВЕН,JOIN отдаёт proxy_url=NULL. Без proxy_id
+#     аккаунт выглядит «свободным», и политика разрешает подключить его НАПРЯМУЮ
+#     — а он привязан к IP того прокси. Telegram отвечает AUTH_KEY_DUPLICATED и
+#     УБИВАЕТ сессию. Аккаунт после этого не работает вообще; снаружи это ровно
+#     «операция ничего не делает». Об этой ловушке прямо предупреждает комментарий
+#     в `account_manager._pick_proxy`, но массовые исполнители поле не выбирали.
+#   • `cf_relay_url` — транспорт через Cloudflare-релей. Без него аккаунт на релее
+#     терял свой транспорт и уходил напрямую с адреса сервера.
+#   • `owner_id` — по нему `_make_client` находит ПОЛИТИКУ прокси владельца
+#     (`_OWNER_PROXY_POLICY`). Без него строгая политика, включённая пользователем,
+#     в массовых операциях молча не применялась.
+#
+# Дальше — один текст на всех: разойтись копиям больше негде.
+_ACC_COLS = (
+    "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
+    "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
+    "COALESCE(p.proxy_url, NULL) AS proxy_url "
+    "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+    "WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+    "AND a.is_active=TRUE AND a.session_str IS NOT NULL"
+)
+
+
 def interleave_by_source(pairs: list) -> list:
     """Разложить цели так, чтобы соседние шли из РАЗНЫХ источников.
 
@@ -7702,10 +7730,7 @@ async def _exec_boost_views(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -7774,10 +7799,7 @@ async def _exec_boost_reactions(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -7845,10 +7867,7 @@ async def _exec_boost_stories(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -7924,6 +7943,60 @@ async def _filter_quarantined_accounts(
     return accounts, 0
 
 
+# Сколько раз инвайт вправе продолжить сам себя. Аудитория в 2000 целей при
+# консервативном суточном лимите растягивается на дни — но бесконечно хвост
+# продлеваться не должен, иначе забытая операция будет жить месяцами.
+_MAX_INVITE_CHAIN = 14
+
+
+async def _schedule_invite_continuation(
+    pool, owner_id: int, params: dict, users: list, phones: list, chain: int
+) -> "int | None":
+    """Поставить продолжение инвайта на завтра. Возвращает op_id или None.
+
+    Цели передаются ЯВНЫМ списком, а не источником: повторное чтение источника
+    захватило бы и тех, кого уже пригласили. Через шину (`operation_bus.submit`),
+    а не прямым INSERT — продолжение обязано проходить те же проверки, что и
+    обычный запуск.
+
+    Никогда не бросает: продолжение — улучшение, а не обязательство, и его сбой
+    не должен превращать успешный прогон в проваленный.
+    """
+    import datetime as _dt
+    try:
+        nxt = dict(params)
+        nxt.pop("parse_run_id", None)
+        nxt["source"] = "import_list"          # аудитория уже зафиксирована
+        nxt["user_refs"] = users
+        nxt["phones"] = phones
+        nxt["invite_chain"] = chain
+        # Завтра сразу после полуночи UTC: суточные счётчики считаются по
+        # CURRENT_DATE, значит именно тогда лимиты и обновятся.
+        when = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=1)).replace(
+            hour=0, minute=10, second=0, microsecond=0)
+        from services import operation_bus as _obus
+        return await _obus.submit(
+            pool, owner_id, "mass_invite", nxt,
+            total_items=len(users) + len(phones),
+            scheduled_for=when.isoformat(),
+            label=f"Инвайт → {params.get('group', '')} (продолжение {chain})",
+            # Тарифный гейт продолжение НЕ проходит, и это принципиально: цели
+            # здесь — остаток УЖЕ принятой операции, а разбиение по дням наша
+            # внутренняя механика (суточный лимит на аккаунт), а не новая покупка.
+            # С включённым гейтом хвост аудитории молча переставал приглашаться
+            # после первого дня — проверено на живой базе: submit падал с
+            # PlanRequiredError, ошибка глоталась, продолжение не создавалось.
+            # Новую работу так не начать: сюда попадают только те цели, что
+            # операция уже взяла в работу.
+            bypass_plan_check=True,
+        )
+    except Exception as exc:
+        # Не тихо: остаток аудитории остаётся неприглашённым, и это должно быть
+        # видно в логах, а не только по косвенным признакам.
+        log.warning("mass_invite: продолжение не поставлено (owner=%s): %s", owner_id, exc)
+        return None
+
+
 async def _premium_filter_accounts(
     pool: asyncpg.Pool, op_id: int, accounts: list, premium_only: bool
 ) -> tuple[list, int]:
@@ -7972,10 +8045,7 @@ async def _exec_boost_subscribers(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -8053,10 +8123,7 @@ async def _exec_boost_bot_starts(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -8331,10 +8398,7 @@ async def _exec_mass_invite(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -8645,6 +8709,25 @@ async def _exec_mass_invite(
 
     total = total_ok + total_fail
     _left = len(q_users) + len(q_phones)
+
+    # ── Остаток не бросаем: продолжим, когда лимиты обновятся ────────────────
+    # Суточный лимит на аккаунт консервативен по умолчанию (холодный старт — 15).
+    # У пользователя с одним-двумя аккаунтами и большой аудиторией первый прогон
+    # закрывает лишь её часть. Раньше остаток исчезал вместе с операцией: в итоге
+    # писалось «осталось N», и дальше пользователь должен был вспомнить и
+    # запустить заново. Снаружи это выглядит как «инвайт не доработал» или вовсе
+    # «не работает».
+    #
+    # Теперь остаток уезжает в ОТДЕЛЬНУЮ операцию на завтра. Не продолжаем, если
+    # флот перегрет (flood_storm) или группа закрыта — там проблема не в лимитах,
+    # и повтор только навредит.
+    _next_op = None
+    _chain = int(params.get("invite_chain") or 0)
+    if _left and not group_broken and not flood_storm and _chain < _MAX_INVITE_CHAIN:
+        if not await _is_cancelled(pool, op_id):
+            _next_op = await _schedule_invite_continuation(
+                pool, owner_id, params, list(q_users), list(q_phones), _chain + 1)
+
     summary = (
         f"👥 Инвайтер: {group}\n"
         f"✅ Добавлено: {total_ok}/{total}"
@@ -8655,11 +8738,14 @@ async def _exec_mass_invite(
         + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
            "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
            if flood_storm else "")
+        + (f"\n🔁 Осталось {_left} — продолжим завтра автоматически (операция #{_next_op})"
+           if _next_op else "")
         + (f"\n⏸ Осталось в очереди: {_left} (аккаунты исчерпали лимит на сегодня)"
-           if _left and not group_broken and not flood_storm else "")
+           if _left and not _next_op and not group_broken and not flood_storm else "")
     )
     return {"status": "done", "ok": total_ok, "failed": total_fail,
-            "left": _left, "flood_storm": flood_storm, "summary": summary}
+            "left": _left, "next_op_id": _next_op,
+            "flood_storm": flood_storm, "summary": summary}
 
 
 # ── Сеттер профилей ───────────────────────────────────────────────────────────
@@ -8675,10 +8761,7 @@ async def _exec_bulk_set_profile(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -8762,10 +8845,7 @@ async def _exec_mass_report(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:
@@ -8847,10 +8927,7 @@ async def _exec_content_clone(
 
     accounts = await _safe_fetch(
             pool,
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        _ACC_COLS,
         owner_id, account_ids,
     )
     if not accounts:

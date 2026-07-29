@@ -13,6 +13,7 @@ Operation Bus — универсальный механизм постановк
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import logging
 from typing import Any, Optional
 
@@ -479,6 +480,38 @@ OP_REGISTRY: dict[str, dict] = {
 }
 
 
+def _coerce_scheduled_for(value):
+    """ISO-строка или datetime → tz-aware datetime. None остаётся None.
+
+    ПОЧЕМУ ЭТО НУЖНО. Параметр объявлен как строка, а в запросе стоит
+    `$5::timestamptz`. Каст выглядит достаточной защитой, но asyncpg выводит тип
+    параметра ИЗ ЗАПРОСА: увидев timestamptz, он требует объект datetime и на
+    строке падает `invalid input for query argument $5` ещё до похода в
+    Postgres. То есть парсить строку было НЕКОМУ.
+
+    Из-за этого молча не создавалась КАЖДАЯ отложенная операция: запланированные
+    посты (`mini_app_api.schedule_post`), отложенные рассылки (`broadcaster`),
+    массовая публикация по расписанию (`bot/handlers/mass_publish`) и
+    автопродолжение инвайта. Все они передают `.isoformat()`. Обнаружено прогоном
+    по настоящей базе — на заглушках пула этого не видно вообще.
+
+    Наивный datetime считаем UTC: `scheduled_for` сравнивается с `now()` в
+    timestamptz-колонке, и молчаливый сдвиг на часовой пояс сервера — отдельный
+    класс ошибок (см. свод, класс 10).
+    """
+    if value is None or isinstance(value, datetime):
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"operation_bus: scheduled_for={value!r} — ожидается ISO-8601 или datetime"
+        ) from exc
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
 async def submit(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -486,7 +519,7 @@ async def submit(
     params: dict[str, Any],
     *,
     total_items: int = 0,
-    scheduled_for: Optional[str] = None,
+    scheduled_for: Optional[object] = None,   # ISO-строка или datetime
     template_id: Optional[int] = None,
     max_retries: Optional[int] = None,
     label: Optional[str] = None,
@@ -541,7 +574,7 @@ async def submit(
         op_type,
         params_json,
         total_items,
-        scheduled_for,
+        _coerce_scheduled_for(scheduled_for),
         template_id,
         retries,
         op_label,
