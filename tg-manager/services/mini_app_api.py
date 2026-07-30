@@ -270,6 +270,34 @@ def _is_admin(uid: int | None) -> bool:
     return False
 
 
+def _wants_platform_scope(request, uid: int | None) -> bool:
+    """Нужен ли МЕЖТЕНАНТНЫЙ (платформенный) срез аккаунтов вместо своих.
+
+    Раньше любой админ ВСЕГДА видел/оперировал по всем аккаунтам платформы —
+    из-за этого два админ-профиля показывали один и тот же список (все 25), а
+    масс-операции/«проверить все» шли по чужим аккаунтам. Теперь платформенный
+    срез — это ЯВНЫЙ опт-ин (`?scope=platform` в query или `{"scope":"platform"}`
+    в теле), и только для админа. По умолчанию — свои аккаунты (owner-scoped),
+    даже у админа. Каждый профиль видит СВОИ подключённые аккаунты."""
+    if not _is_admin(uid):
+        return False
+    scope = ""
+    try:
+        scope = (request.rel_url.query.get("scope") or "").strip().lower()
+    except Exception:
+        scope = ""
+    return scope in ("all", "platform")
+
+
+def _body_wants_platform_scope(uid: int | None, body: dict) -> bool:
+    """То же, что _wants_platform_scope, но для POST-тела (масс-операции/проверка).
+    Платформенный срез только у админа и только по явному флагу в теле."""
+    if not _is_admin(uid):
+        return False
+    scope = str((body or {}).get("scope") or "").strip().lower()
+    return scope in ("all", "platform")
+
+
 def _jlist(val) -> list:
     """Safe JSONB→list: asyncpg may return already-parsed list or a JSON string."""
     if isinstance(val, list):
@@ -796,10 +824,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return await _gp(pool, uid)
             except Exception:
                 return None
-        _adm = _is_admin(uid)
-        # Здоровье аккаунтов на дашборде должно совпадать по скоупу со счётчиком
-        # аккаунтов и экраном «Аккаунты»: админ — по всей платформе, иначе показывал
-        # бы «100%» при 0 своих аккаунтов (25 чужих разного здоровья не учитывались).
+        # Скоуп дашборда обязан совпадать с экраном «Аккаунты» (класс #1). Экран
+        # теперь owner-scoped по умолчанию (даже у админа) — значит и счётчик/
+        # здоровье считаем по СВОИМ. Платформенный срез — только явным
+        # ?scope=platform у админа. Иначе два админ-профиля видели одинаковые 25.
+        _adm = _wants_platform_scope(request, uid)
         _health_sql = (
             """SELECT ROUND(AVG(
                     CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
@@ -1654,7 +1683,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        admin = _is_admin(uid)
+        # По умолчанию — СВОИ аккаунты (даже для админа). Платформенный срез —
+        # только явным ?scope=platform. Иначе два админ-профиля видели одинаковые
+        # 25 аккаунтов всей платформы вместо своих.
+        admin = _wants_platform_scope(request, uid)
         # Параметры серверной пагинации/фильтрации
         qs = request.rel_url.query
         flt = qs.get("filter", "all")
@@ -1766,7 +1798,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        admin = _is_admin(uid)
+        # Платформенный срез только по явному ?scope=platform (по умолчанию — свой).
+        admin = _wants_platform_scope(request, uid)
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
@@ -1872,7 +1905,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        admin = _is_admin(uid)
+        # Экспорт — свои аккаунты; вся платформа только по явному ?scope=platform.
+        admin = _wants_platform_scope(request, uid)
         if admin:
             rows = await _safe_fetch(pool,
                 """SELECT id, phone, first_name, username, tg_user_id,
@@ -3229,12 +3263,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        admin = _is_admin(uid)
         # «Проверить все» = ВСЕ аккаунты в области видимости, включая неактивные:
         # смысл проверки — в т.ч. вернуть в строй ошибочно отключённые (об этом и
         # предупреждение в UI). Фильтр is_active здесь выбирал только активные
-        # (6 из 25) и противоречил обещанию кнопки. Скоуп: админ — вся платформа,
-        # обычный пользователь — свои.
+        # (6 из 25) и противоречил обещанию кнопки. Скоуп: по умолчанию СВОИ;
+        # вся платформа — только явным ?scope=platform у админа (не по умолчанию,
+        # иначе админ проверял бы чужие аккаунты).
+        admin = _wants_platform_scope(request, uid)
         if admin:
             rows = await _safe_fetch(pool, "SELECT id FROM tg_accounts")
         else:
@@ -3324,7 +3359,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid request", 400)
         op = body.get("op")
-        admin = _is_admin(uid)
+        # По умолчанию масс-операция идёт по СВОИМ аккаунтам (даже у админа) —
+        # чтобы админ случайно не оперировал над чужими. Платформенный срез —
+        # только явным {"scope":"platform"} в теле.
+        admin = _body_wants_platform_scope(uid, body)
         # Режим «применить ко всему срезу»: id берём не из загруженной страницы,
         # а резолвим весь набор под текущим фильтром на сервере (тот же WHERE, что
         # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
@@ -12182,7 +12220,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return []
 
-        _adm = _is_admin(uid)
+        # Живой поток статистики совпадает по скоупу с дашбордом/экраном
+        # «Аккаунты»: owner-scoped по умолчанию, платформа — только ?scope=platform.
+        _adm = _wants_platform_scope(request, uid)
         try:
             data = await _stats(pool, uid, _adm)
             await push("stats", data)
