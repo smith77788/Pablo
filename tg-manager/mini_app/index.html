@@ -1276,44 +1276,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Авторег Pro</div>
         <div class="mgmt-tile-val" id="m-autoreg-pro-val"></div>
       </div>
+      <!-- Единый хаб контактов: ОДНА плитка «Контакты». Синхронизация, граф,
+           дубликаты, конфликты, теги, напоминания и экспорт — не отдельные
+           плитки, а инструменты ВНУТРИ хаба (панель инструментов на s-contacts).
+           Раньше это были 8 плиток на один и тот же модуль — «центр
+           синхронизации» дублировал кнопку синхронизации в самих контактах. -->
       <div class="mgmt-tile" onclick="openContacts()">
         <div class="mgmt-tile-ico">📇</div>
         <div class="mgmt-tile-lbl">Контакты</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUchSyncCenter()">
-        <div class="mgmt-tile-ico">🔄</div>
-        <div class="mgmt-tile-lbl">Синхронизация</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUchGraph()">
-        <div class="mgmt-tile-ico">🕸</div>
-        <div class="mgmt-tile-lbl">Граф связей</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="detectDuplicates()">
-        <div class="mgmt-tile-ico">🔍</div>
-        <div class="mgmt-tile-lbl">Дубликаты</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUchConflicts()">
-        <div class="mgmt-tile-ico">⚠️</div>
-        <div class="mgmt-tile-lbl">Конфликты</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUchSmartTags()">
-        <div class="mgmt-tile-ico">🏷</div>
-        <div class="mgmt-tile-lbl">Умные теги</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUchReminders()">
-        <div class="mgmt-tile-ico">⏰</div>
-        <div class="mgmt-tile-lbl">Напоминания</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openUchExport()">
-        <div class="mgmt-tile-ico">📤</div>
-        <div class="mgmt-tile-lbl">Экспорт</div>
         <div class="mgmt-tile-val"></div>
       </div>
     </div>
@@ -2721,11 +2691,23 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openUchAI()" title="AI Ассистент">🤖</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="toggleContactSelect()" title="Выбор" id="contactSelectBtn">☑️</span>
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="syncContacts()" title="Синхронизация">🔄</span>
       <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openContactStats()" title="Статистика">📊</span>
     </div>
   </div>
   <div class="sub-sb">
+    <!-- Инструменты хаба. Единственный вход к синхронизации/графу/дубликатам/
+         конфликтам/тегам/напоминаниям/экспорту — отсюда, а не отдельными
+         плитками. «🔄 Синхронизация» ведёт в центр синхронизации (где виден
+         статус и кнопка запуска), чтобы синхронизация была ОДНОЙ поверхностью. -->
+    <div style="display:flex;gap:6px;padding:8px 0 4px;overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <span class="chip" style="flex:0 0 auto" onclick="openUchSyncCenter()">🔄 Синхронизация</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openUchGraph()">🕸 Граф связей</span>
+      <span class="chip" style="flex:0 0 auto" onclick="detectDuplicates()">🔍 Дубликаты</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openUchConflicts()">⚠️ Конфликты</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openUchSmartTags()">🏷 Умные теги</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openUchReminders()">⏰ Напоминания</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
+    </div>
     <div style="padding:6px 0">
       <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов..." oninput="searchContacts()" class="inp">
     </div>
