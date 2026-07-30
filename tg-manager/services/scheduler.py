@@ -192,8 +192,41 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
         if _ab_sweep_cycle >= 60:
             _ab_sweep_cycle = 0
             await declare_ab_winners(pool)
+            # Тем же часовым тактом — самолечение денормализованного плана:
+            # get_plan уже дата-aware, но platform_users.current_plan и
+            # subscriptions.is_active после истечения остаются «paid»/true и
+            # подтекают в админ-списки/фолбэки. Свип возвращает их в согласие.
+            await expire_stale_subscriptions(pool)
 
         await asyncio.sleep(60)
+
+
+async def expire_stale_subscriptions(pool: asyncpg.Pool) -> None:
+    """Привести оба хранилища подписки в согласие для истёкших строк.
+
+    Источник правды — subscriptions (get_plan фильтрует `expires_at > now()`),
+    поэтому доступ и так снимается вовремя. Но денормализованная копия
+    platform_users.current_plan и флаг subscriptions.is_active после истечения
+    остаются «paid»/true навсегда — и подтекают в админ-CSV, сегментацию и
+    фолбэки чтения. Идемпотентно: трогает только реально истёкшие строки, на
+    свежих подписках — 0 изменений. Кеш плана здесь чистить не нужно: get_plan
+    и так вернёт free по дате (кеш живёт 60с).
+    """
+    try:
+        subs = await pool.execute(
+            "UPDATE subscriptions SET is_active=false "
+            "WHERE is_active=true AND expires_at <= now()"
+        )
+        users = await pool.execute(
+            "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL "
+            "WHERE current_plan IS NOT NULL AND current_plan <> 'free' "
+            "AND plan_expires_at IS NOT NULL AND plan_expires_at <= now()"
+        )
+        # Логируем только когда реально что-то истекло (иначе шум каждый час).
+        if subs != "UPDATE 0" or users != "UPDATE 0":
+            log.info("expire_stale_subscriptions: subs=%s users=%s", subs, users)
+    except Exception:
+        log.exception("expire_stale_subscriptions: sweep failed")
 
 
 async def declare_ab_winners(pool: asyncpg.Pool) -> None:
