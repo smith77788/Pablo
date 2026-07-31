@@ -10022,6 +10022,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _ns = await _db.get_notification_settings(pool, uid)
             settings["notif_ops"] = bool(_ns.get("op_complete", True))
             settings["notif_error"] = bool(_ns.get("restriction", True))
+            # new_user и position_change — реальные, читаемые notify_if_enabled
+            # преференции, которые мини-апп раньше не показывал: отключить спам
+            # «новый подписчик» / «позиция изменилась» было неоткуда.
+            settings["notif_new_user"] = bool(_ns.get("new_user", True))
+            settings["notif_position"] = bool(_ns.get("position_change", True))
         except Exception as _e:
             log.debug("user_settings_get notif overlay uid=%d: %s", uid, _e)
         return _json_resp(settings)
@@ -10050,13 +10055,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 _op = bool(data.get("notif_ops", True))
                 _err = bool(data.get("notif_error", True))
-                await pool.execute(
-                    "INSERT INTO notification_settings(user_id, op_complete, restriction, flood_warning) "
-                    "VALUES($1,$2,$3,$3) "
-                    "ON CONFLICT(user_id) DO UPDATE SET op_complete=$2, restriction=$3, "
-                    "flood_warning=$3, updated_at=now()",
-                    uid, _op, _err,
-                )
+                # new_user/position_change сохраняем, только если фронт их прислал:
+                # иначе старый клиент, не знающий про эти поля, молча сбрасывал бы
+                # их в дефолт при каждом сохранении настроек.
+                _nu = bool(data.get("notif_new_user", True))
+                _pos = bool(data.get("notif_position", True))
+                _has_extra = "notif_new_user" in data or "notif_position" in data
+                if _has_extra:
+                    await pool.execute(
+                        "INSERT INTO notification_settings(user_id, op_complete, restriction, "
+                        "flood_warning, new_user, position_change) "
+                        "VALUES($1,$2,$3,$3,$4,$5) "
+                        "ON CONFLICT(user_id) DO UPDATE SET op_complete=$2, restriction=$3, "
+                        "flood_warning=$3, new_user=$4, position_change=$5, updated_at=now()",
+                        uid, _op, _err, _nu, _pos,
+                    )
+                else:
+                    await pool.execute(
+                        "INSERT INTO notification_settings(user_id, op_complete, restriction, flood_warning) "
+                        "VALUES($1,$2,$3,$3) "
+                        "ON CONFLICT(user_id) DO UPDATE SET op_complete=$2, restriction=$3, "
+                        "flood_warning=$3, updated_at=now()",
+                        uid, _op, _err,
+                    )
             except Exception as _ne:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
             return _json_resp({"ok": True})

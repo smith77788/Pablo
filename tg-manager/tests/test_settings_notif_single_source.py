@@ -34,10 +34,23 @@ def test_save_syncs_to_notification_settings():
 
 
 def test_save_preserves_other_bot_toggles():
+    """Раньше здесь требовалось, чтобы save ВООБЩЕ не трогал new_user/
+    position_change — тогда мини-апп ими не управлял, и цель была «не затереть
+    чужие тумблеры». Теперь мини-апп ими управляет (см.
+    test_settings_notification_prefs), но инвариант «не затирать» остался: если
+    клиент их НЕ прислал (старая версия фронта), они обновляться не должны.
+
+    То есть проверяем не отсутствие полей, а НАЛИЧИЕ защиты от затирания."""
     body = _fn_src("user_settings_save")
-    # ON CONFLICT обновляет ТОЛЬКО три поля — не трогает new_user/position_change/deploy
     assert "ON CONFLICT(user_id) DO UPDATE SET op_complete" in body
-    assert "new_user" not in body and "position_change" not in body
+    assert '"notif_new_user" in data or "notif_position" in data' in body, (
+        "нужна проверка присутствия полей: без неё старый клиент затрёт настройку"
+    )
+    # Совместимая ветка (когда полей нет) обязана существовать и НЕ упоминать их.
+    compat = body.split("else:")[-1]
+    assert "new_user" not in compat and "position_change" not in compat, (
+        "в ветке без новых полей их трогать нельзя — иначе смысл защиты теряется"
+    )
 
 
 def test_get_reflects_real_notification_state():

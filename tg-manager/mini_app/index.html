@@ -4283,9 +4283,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <span style="font-size:14px">🔔 Уведомления об операциях</span>
         <input type="checkbox" id="set-notif-ops" style="width:18px;height:18px;accent-color:var(--accent)">
       </label>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">⚠️ Критические ошибки (флуд/ограничения)</span>
         <input type="checkbox" id="set-notif-error" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <span style="font-size:14px">👤 Новые подписчики ботов</span>
+        <input type="checkbox" id="set-notif-newuser" style="width:18px;height:18px;accent-color:var(--accent)" checked>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0">
+        <span style="font-size:14px">📈 Изменение позиций в поиске</span>
+        <input type="checkbox" id="set-notif-position" style="width:18px;height:18px;accent-color:var(--accent)" checked>
       </label>
     </div>
 
@@ -16646,22 +16654,34 @@ async function openSettings() {
   };
   setChk('set-notif-ops', s.notif_ops, true);
   setChk('set-notif-error', s.notif_error, true);
+  setChk('set-notif-newuser', s.notif_new_user, true);
+  setChk('set-notif-position', s.notif_position, true);
   const ppEl = document.getElementById('set-proxy-policy');
   if (ppEl) ppEl.value = s.proxy_policy || 'allow_direct';
   txt('set-save-msg','');
   txt('set-err','');
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
-    // Политика прокси действует на бэке (get_proxy_policy) — берём её значение
-    // из серверных настроек, чтобы тумблер отражал реально применяемый режим.
+    // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
+    // тумблеры уведомлений показывали ЛОКАЛЬНЫЙ кэш, поэтому изменение через бота
+    // не отражалось в мини-аппе — тумблер «врал». Теперь все тумблеры и политика
+    // прокси берутся из ответа сервера.
     const backend = await api('/api/miniapp/settings');
-    if (backend && ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
+    if (backend) {
+      setChk('set-notif-ops', backend.notif_ops, true);
+      setChk('set-notif-error', backend.notif_error, true);
+      setChk('set-notif-newuser', backend.notif_new_user, true);
+      setChk('set-notif-position', backend.notif_position, true);
+      if (ppEl && backend.proxy_policy) ppEl.value = backend.proxy_policy;
+    }
   } catch(e) {/* ok, settings from local */}
 }
 async function saveSettings() {
   const s = {
     notif_ops: document.getElementById('set-notif-ops')?.checked ?? true,
     notif_error: document.getElementById('set-notif-error')?.checked ?? true,
+    notif_new_user: document.getElementById('set-notif-newuser')?.checked ?? true,
+    notif_position: document.getElementById('set-notif-position')?.checked ?? true,
     proxy_policy: document.getElementById('set-proxy-policy')?.value || 'allow_direct',
   };
   _saveLocalSettings(s);
