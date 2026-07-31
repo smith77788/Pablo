@@ -634,23 +634,17 @@ async def execute_action(
                 results.append("❌ Не удалось обновить имя")
         if description:
             ok = await bot_api.set_description(http, _dec_tok, description)
+            # Источник правды описания бота — Telegram (set_description). В
+            # managed_bots такой колонки нет и её никто не читает, поэтому
+            # локальная запись-зеркало раньше падала ПОСЛЕ успешного вызова API
+            # и обрывала инструмент — эту бесполезную запись убрали.
             if ok:
-                await pool.execute(
-                    "UPDATE managed_bots SET description=$1 WHERE bot_id=$2",
-                    description,
-                    bot_id,
-                )
                 results.append(f"✅ Описание обновлено ({len(description)} симв.)")
             else:
                 results.append("❌ Не удалось обновить описание")
         if short_desc:
             ok = await bot_api.set_short_description(http, _dec_tok, short_desc)
             if ok:
-                await pool.execute(
-                    "UPDATE managed_bots SET short_description=$1 WHERE bot_id=$2",
-                    short_desc,
-                    bot_id,
-                )
                 results.append("✅ Краткое описание обновлено")
             else:
                 results.append("❌ Не удалось обновить краткое описание")
@@ -845,12 +839,16 @@ async def execute_action(
         if not row:
             return "❌ Бот не найден"
         sched_id = await pool.fetchval(
-            """INSERT INTO scheduled_broadcasts(bot_id, owner_id, text, scheduled_at)
+            # Колонки строго по схеме scheduled_broadcasts (schema_v2): message_text/
+            # execute_at/created_by. Раньше стояли owner_id/text/scheduled_at —
+            # таких колонок нет, INSERT падал ВСЕГДА (AI-планирование рассылки было
+            # мертво). execute_at получает datetime (не строку) — класс-15 безопасен.
+            """INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by)
                VALUES($1,$2,$3,$4) RETURNING id""",
             bot_id,
-            user_id,
             text,
             scheduled_at,
+            user_id,
         )
         return f"✅ Рассылка запланирована на {scheduled_at.strftime('%d.%m %H:%M')} UTC (через {when_minutes} мин). ID: {sched_id}"
 
