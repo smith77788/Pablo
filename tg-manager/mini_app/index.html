@@ -1492,6 +1492,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Дополнительно</div>
     <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Прочие инструменты и интеграции.</div>
     <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openGlobalSearch()">
+        <div class="mgmt-tile-ico">🌐</div>
+        <div class="mgmt-tile-lbl">Глобальный поиск</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openApiKeys()">
         <div class="mgmt-tile-ico">🔑</div>
         <div class="mgmt-tile-lbl">API Ключи</div>
@@ -5835,6 +5840,7 @@ const MODULE_KEYWORDS = {
   'Комплаенс':'проверка запрещёнка спам скам модерация compliance антиспам',
   'SEO':'оптимизация поиск позиции топ выдача ключевые слова',
   'CRM':'контакты база сегменты клиенты воронка сделки',
+  'Глобальный поиск':'найти канал группу бота человека поиск telegram discover',
   'Дашборд':'аналитика метрики статистика сводка отчёт',
   'Аудитория+':'аналитика метрики статистика сегменты',
   'Звёзды':'stars монетизация оплата донат',
@@ -5931,6 +5937,7 @@ const MODULE_DESCS = {
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Spintax':'Генерация вариаций текста (spintax)',
   'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
+  'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
 };
 function buildDrawer() {
   const body = document.getElementById('navBody');
