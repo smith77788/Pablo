@@ -4257,6 +4257,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <input type="number" id="strikeMaxAcc" min="1" max="50" placeholder="все доступные (до 50)">
         <div class="field-note">Меньше аккаунтов = щадящий режим, дольше живут</div>
       </div>
+      <div class="field">
+        <label>Интервал повтора по одной цели, ч</label>
+        <input type="number" id="strikeRestrikeH" min="0" max="168" value="4">
+        <div class="field-note">Анти-детект: не бить одну цель чаще этого интервала. 0 — без ограничения</div>
+      </div>
+      <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="strikeForce">
+        <span>Форсировать повтор (игнорировать интервал)</span>
+      </label>
       <div style="font-size:12px;color:var(--hint);margin:10px 0;line-height:1.5">
         ⚠️ Strike отправляет официальные репорты через Telegram Trust &amp; Safety.
         Результат зависит от решения модераторов Telegram.
@@ -14406,6 +14415,9 @@ async function strikeLaunch() {
     const _maxAccRaw = document.getElementById('strikeMaxAcc')?.value.trim();
     const _payload = {target: _STRIKE_TARGET, category: _STRIKE_CAT.key, num_waves: _waves};
     if (_maxAccRaw) _payload.max_accounts = parseInt(_maxAccRaw);
+    const _restrikeRaw = document.getElementById('strikeRestrikeH')?.value.trim();
+    if (_restrikeRaw !== '' && _restrikeRaw != null) _payload.min_restrike_hours = parseInt(_restrikeRaw);
+    if (document.getElementById('strikeForce')?.checked) _payload.force = true;
     const d = await api('/api/miniapp/strike/launch', {
       method: 'POST',
       body: JSON.stringify(_payload),

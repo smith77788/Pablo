@@ -8254,6 +8254,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except (TypeError, ValueError):
                 max_accounts = 0
             acc_limit = max_accounts if 0 < max_accounts <= 50 else 50
+            # Анти-детект повтор-интервал (движок читает min_restrike_hours из params;
+            # 0 = без ограничения) и сознательный обход интервала (force). Раньше UI
+            # их не слал — пользователь упирался в «цель атакована в последние 4ч,
+            # повтор пропущен» без единой ручки, чтобы это изменить.
+            try:
+                min_restrike_hours = int(body.get("min_restrike_hours", 4))
+            except (TypeError, ValueError):
+                min_restrike_hours = 4
+            min_restrike_hours = max(0, min(168, min_restrike_hours))
+            force = bool(body.get("force"))
 
             # Подсчёт доступных аккаунтов
             accs = await pool.fetch(
@@ -8277,6 +8287,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "target": normalized,
                     "reason": cat["tg_reason"],
                     "num_waves": num_waves,
+                    "min_restrike_hours": min_restrike_hours,
+                    "force": force,
                     "account_ids": [r["id"] for r in accs],
                 }),
                 len(accs),
