@@ -4271,6 +4271,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "ORDER BY members_count DESC NULLS LAST LIMIT 500", uid, acc_id)
         return _json_resp({"channels": rows, "total": len(rows or [])})
 
+    async def account_bots(request: web.Request) -> web.Response:
+        """Боты, СОЗДАННЫЕ через этот аккаунт (managed_bots.acc_id).
+
+        Боты не привязаны к аккаунту в общем случае (добавляются по токену
+        владельцем), но созданные в Bot Factory через конкретный аккаунт несут
+        acc_id — их и показываем. Скоуп по added_by (владелец) И acc_id.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        rows = await _safe_fetch(pool,
+            "SELECT bot_id, username, first_name, is_active FROM managed_bots "
+            "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC LIMIT 500", uid, acc_id)
+        return _json_resp({"bots": rows, "total": len(rows or [])})
+
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
         Инлайн, немедленный результат (реабилитация своего аккаунта)."""
@@ -12773,6 +12792,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/dialog/{peer}/send_file", account_dialog_send_file)
     app.router.add_get("/api/miniapp/account/{acc_id}/contacts", account_contacts)
     app.router.add_get("/api/miniapp/account/{acc_id}/channels", account_channels)
+    app.router.add_get("/api/miniapp/account/{acc_id}/bots", account_bots)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)

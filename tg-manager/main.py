@@ -518,6 +518,11 @@ async def main() -> None:
         # fail_streak: дебаунс «мёртвого» воркера — помечаем down только после N
         # подряд неудачных health-пингов (разовый сетевой блип не двигает аккаунты).
         "ALTER TABLE cf_worker_pool ADD COLUMN IF NOT EXISTS fail_streak INTEGER DEFAULT 0",
+        # Привязка бота к аккаунту-создателю (schema_v162). Читается сразу на
+        # экране «Боты аккаунта» и пишется Bot Factory — при лаге миграции запрос
+        # /account/{id}/bots падал бы с «column acc_id does not exist».
+        "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS acc_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS idx_managed_bots_acc_id ON managed_bots(acc_id)",
     ):
         try:
             await pool.execute(_ddl)

@@ -183,7 +183,8 @@ def _build_acc_detail_src() -> str:
 def test_account_detail_wires_account_scoped_resources():
     """Карточка ведёт в РЕСУРСЫ АККАУНТА (диалоги/контакты/каналы аккаунта)."""
     chunk = _build_acc_detail_src()
-    for call in ("openAccountDialogs(", "openAccountContacts(", "openAccountChannels("):
+    for call in ("openAccountDialogs(", "openAccountContacts(", "openAccountChannels(",
+                 "openAccountBots("):
         assert call in chunk, f"в карточке аккаунта нет входа: {call}"
 
 
@@ -213,6 +214,41 @@ def test_account_channels_scoped_by_account():
     m2 = re.search(r"function openAccountChannels\(", HTML)
     assert m2 and "openChannel(" in HTML[m2.start(): m2.start() + 1400], \
         "из списка нельзя открыть карточку канала"
+
+
+def test_account_bots_scoped_by_account():
+    """Боты аккаунта = созданные через него (managed_bots.acc_id), не портфель."""
+    assert '"/api/miniapp/account/{acc_id}/bots"' in API, "нет маршрута ботов аккаунта"
+    m = re.search(r"async def account_bots\(", API)
+    assert m
+    body = API[m.start(): m.start() + 1200]
+    assert "WHERE added_by=$1 AND acc_id=$2" in body, "боты не скоупятся по аккаунту"
+    assert re.search(r"push\('s-accbots'\)", HTML), "к экрану ботов аккаунта нет входа"
+    m2 = re.search(r"function openAccountBots\(", HTML)
+    assert m2 and "openBot(" in HTML[m2.start(): m2.start() + 1400], \
+        "из списка нельзя открыть карточку бота"
+
+
+def test_bot_factory_records_creating_account():
+    """Bot Factory обязана записывать acc_id — иначе «боты аккаунта» всегда пусты.
+
+    Все три вставки в managed_bots (multi + single + retry) должны нести acc_id,
+    иначе созданный через аккаунт бот не привяжется к нему.
+    """
+    src = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
+    inserts = re.findall(r"INSERT INTO managed_bots\([^)]*\)", src)
+    assert inserts, "вставки в managed_bots не найдены"
+    without = [ins for ins in inserts if "acc_id" not in ins]
+    assert not without, f"вставки в managed_bots без acc_id: {len(without)} — боты не привяжутся к аккаунту"
+
+
+def test_schema_migration_adds_acc_id():
+    """Колонка должна заводиться миграцией И ранним self-heal (лаг применения)."""
+    mig = (ROOT / "schema_v162.sql").read_text(encoding="utf-8")
+    assert "managed_bots" in mig and "acc_id" in mig
+    main = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS acc_id" in main, \
+        "нет раннего self-heal — при лаге миграции /account/{id}/bots упадёт"
 
 
 def test_chat_can_send():

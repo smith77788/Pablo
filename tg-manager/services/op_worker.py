@@ -5072,10 +5072,11 @@ async def _exec_bot_factory_multi(
                 try:
                     from services.token_vault import encrypt_token as _enc_tok_mf
                     await pool.execute(
-                        """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
-                           VALUES($1,$2,$3,$4,$5,TRUE)
-                           ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
+                        """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
+                           VALUES($1,$2,$3,$4,$5,TRUE,$6)
+                           ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
                         owner_id, _enc_tok_mf(token), bot_id, actual_uname, display_name,
+                        candidate.get("id"),
                     )
                 except Exception as e:
                     log.warning("_exec_bot_factory_multi: managed_bots upsert failed bot_id=%s: %s", bot_id, e)
@@ -5198,14 +5199,15 @@ async def _exec_bot_factory(
             try:
                 from services.token_vault import encrypt_token as _enc_tok_f
                 await pool.execute(
-                    """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
-                       VALUES($1,$2,$3,$4,$5,TRUE)
-                       ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
+                    """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
+                       VALUES($1,$2,$3,$4,$5,TRUE,$6)
+                       ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
                     owner_id,
                     _enc_tok_f(token),
                     bot_id or 0,
                     actual_uname,
                     display_name,
+                    acc.get("id"),
                 )
             except Exception:
                 log_exc_swallow(log, "_exec_bot_factory: managed_bots upsert failed")
@@ -5250,10 +5252,11 @@ async def _exec_bot_factory(
                             _retry_bot_id = int(token.split(":")[0]) if ":" in token else 0
                             _enc_retry_tok = _enc_tok_fr(token)
                             await pool.execute(
-                                """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
-                                   VALUES($1,$2,$3,$4,$5,TRUE)
-                                   ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
+                                """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
+                                   VALUES($1,$2,$3,$4,$5,TRUE,$6)
+                                   ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
                                 owner_id, _enc_retry_tok, _retry_bot_id, actual_uname, display_name,
+                                acc.get("id"),
                             )
                         except Exception as e:
                             log_exc_swallow(log, f"bot_factory retry managed_bots upsert failed: {e}")

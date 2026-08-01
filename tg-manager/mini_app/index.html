@@ -880,6 +880,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════ РЕСУРСЫ АККАУНТА: БОТЫ ══════════ -->
+<div class="screen" id="s-accbots">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🤖 Боты аккаунта</div>
+  </div>
+  <div class="sub-sb">
+    <div style="padding:4px 0 8px">
+      <button class="btn btn-p" onclick="openBotFactory()" style="width:100%;font-size:13px;padding:10px 6px">🏭 Создать бота через этот аккаунт</button>
+    </div>
+    <div class="lst" id="accbotList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════ КОНСОЛЬ АККАУНТА: КОНТАКТЫ ══════════ -->
 <div class="screen" id="s-acccontacts">
   <div class="hdr">
@@ -7784,6 +7798,32 @@ async function openAccountChannels(accId) {
   } catch(e) { txt('acchanList', errHtml(e.message,'openAccountChannels('+accId+')')); }
 }
 
+// Боты, СОЗДАННЫЕ через этот аккаунт (managed_bots.acc_id). Боты, добавленные по
+// токену вручную, к аккаунту не привязаны и сюда не попадают — только в общий
+// раздел. Выбор → карточка бота (openBot) с управлением.
+async function openAccountBots(accId) {
+  ACC_CONSOLE_ID = accId;
+  push('s-accbots');
+  txt('accbotList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/account/'+accId+'/bots');
+    const list = d.bots || [];
+    if (!list.length) {
+      txt('accbotList', empty('🤖','У аккаунта нет ботов',
+        'Боты, созданные через этот аккаунт в фабрике, появятся здесь. Добавленные по токену вручную — в общем разделе «Боты».'));
+      return;
+    }
+    txt('accbotList', list.map(b => {
+      const name = esc(b.first_name || (b.username ? '@'+b.username : 'Бот #'+b.bot_id));
+      const sub = [b.username?'@'+esc(b.username):'', b.is_active?'🟢 активен':'⚪ выключен'].filter(Boolean).join(' · ');
+      return `<div class="li tap" onclick="openBot(${b.bot_id})">
+        <div class="row-ico" style="background:var(--bg-green-16)">🤖</div>
+        <div class="li-body"><div class="li-name">${name}</div><div class="li-sub">${sub}</div></div>
+        <div class="li-right"><span class="chev">›</span></div></div>`;
+    }).join(''));
+  } catch(e) { txt('accbotList', errHtml(e.message,'openAccountBots('+accId+')')); }
+}
+
 async function openAccountContacts(accId) {
   ACC_CONSOLE_ID = accId;
   ACC_CONT_SEL = null;  // выходим из режима выбора при каждом открытии
@@ -8057,8 +8097,9 @@ function buildAccDetail(d) {
       <button class="btn btn-s" onclick="openAccountDialogs(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">💬 Диалоги</button>
       <button class="btn btn-s" onclick="openAccountContacts(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">📇 Контакты</button>
     </div>
-    <div style="padding:2px 0 4px">
-      <button class="btn btn-s" onclick="openAccountChannels(${a.id})" style="width:100%;font-size:14px;padding:13px 6px">📡 Каналы и чаты аккаунта</button>
+    <div style="display:flex;gap:8px;padding:2px 0 4px">
+      <button class="btn btn-s" onclick="openAccountChannels(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">📡 Каналы и чаты</button>
+      <button class="btn btn-s" onclick="openAccountBots(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">🤖 Боты</button>
     </div>
 
     <details class="acc-actions" style="margin:6px 0;background:var(--bg2);border-radius:12px">

@@ -1960,3 +1960,14 @@ s-accchannels (выбор → openChannel: управление/история/�
 отфильтрован по этому объекту. Прежде чем вешать «раздел» на карточку — проверь,
 есть ли в данных привязка к этому объекту; нет привязки → не вешай (иначе тихо
 показываешь чужой/общий срез). Гейт: test_account_card_has_no_global_section_shortcuts.
+## managed_bots.acc_id — 2026-08-01 — боты, созданные через аккаунт, привязаны к нему
+Продолжение скоупинга ресурсов аккаунта: у ботов не было привязки к аккаунту-
+создателю (managed_bots.added_by = только владелец). Добавил колонку acc_id
+(schema_v162 + ранний self-heal ALTER в main.py — читается сразу на экране «Боты
+аккаунта»). Bot Factory теперь пишет acc_id во ВСЕХ трёх вставках managed_bots
+(multi: candidate.id; single + retry: acc.id). Эндпойнт /account/{id}/bots
+(WHERE added_by AND acc_id) + экран s-accbots (выбор → openBot). На карточке
+аккаунта секция «Ресурсы аккаунта»: Каналы и Боты рядом. Боты, добавленные по
+токену вручную, acc_id=NULL — в аккаунт не попадают, только в общий раздел.
+Гейты: test_account_bots_scoped_by_account, test_bot_factory_records_creating_account
+(проверяет, что НИ ОДНА из вставок managed_bots не осталась без acc_id).
