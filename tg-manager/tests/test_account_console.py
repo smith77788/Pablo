@@ -74,9 +74,13 @@ def test_engine_has_session_functions():
 def test_to_ui_contact_shape():
     from services import account_console as ac
     ui = ac._to_ui_contact({"user_id": 5, "first_name": "Ян", "last_name": "П",
-                            "username": "yan", "phone": "+7", "is_premium": True})
+                            "username": "yan", "phone": "+7", "is_premium": True,
+                            "access_hash": 42})
     assert ui == {"id": 5, "name": "Ян П", "username": "yan", "phone": "+7",
-                  "is_bot": False, "premium": True, "mutual": False}
+                  "access_hash": "42", "is_bot": False, "premium": True, "mutual": False}
+    # 64-битный hash не должен терять точность: отдаём строкой.
+    big = ac._to_ui_contact({"user_id": 5, "access_hash": 7477083978437332073})
+    assert big["access_hash"] == "7477083978437332073"
     # Без имени — падать на @username, потом на id.
     assert ac._to_ui_contact({"user_id": 9, "username": "u"})["name"] == "@u"
     assert ac._to_ui_contact({"user_id": 9})["name"] == "9"
@@ -198,3 +202,53 @@ def test_send_targets_are_escaped():
     assert m
     body = HTML[m.start(): m.start() + 1600]
     assert "esc(m.text)" in body, "текст сообщения не экранируется"
+
+
+# ── Слой 2: файлы / любой контакт / множественный выбор ──────────────────────
+
+def test_send_file_engine_and_route():
+    from services import account_console as ac
+    import inspect
+    assert callable(getattr(ac, "send_file", None)), "нет движка отправки файла"
+    assert "access_hash" in inspect.signature(ac.send_file).parameters
+    assert '"/api/miniapp/account/{acc_id}/dialog/{peer}/send_file"' in API, \
+        "маршрут отправки файла не зарегистрирован"
+
+
+def test_access_hash_threaded_everywhere():
+    """access_hash проходит через историю/текст/файл — иначе диалог с контактом
+    без общего чата не открыть и не написать."""
+    from services import account_console as ac
+    import inspect
+    for fn in ("get_history", "send_text", "send_file"):
+        assert "access_hash" in inspect.signature(getattr(ac, fn)).parameters, fn
+    # Короткий путь: есть access_hash → InputPeerUser без запросов.
+    src = (ROOT / "services" / "account_console.py").read_text(encoding="utf-8")
+    assert "InputPeerUser" in src, "нет прямого резолва по access_hash"
+
+
+def test_file_composer_present():
+    chat = _screen_body("s-accchat")
+    assert 'id="achatFile"' in chat and "sendAccountFile(" in chat, "нет прикрепления файла"
+    m = re.search(r"function sendAccountFile\(", HTML)
+    assert m and "/send_file" in HTML[m.start(): m.start() + 900]
+    assert "20*1024*1024" in HTML[m.start(): m.start() + 900], "нет лимита размера на фронте"
+
+
+def test_write_any_contact_uses_access_hash():
+    """writeContact открывает чат и по @username, и по id+access_hash."""
+    m = re.search(r"function writeContact\(", HTML)
+    assert m
+    body = HTML[m.start(): m.start() + 500]
+    assert "c.access_hash" in body, "контакт без @username не резолвится по access_hash"
+
+
+def test_multiselect_group_send_reuses_safe_dm():
+    """«Написать всем» идёт через безопасный DM-движок (operation_bus), не циклом."""
+    for fn in ("toggleAccContSelect", "toggleAccContPick", "writeSelectedContacts", "submitAccContMsg"):
+        assert re.search(rf"function {fn}\(", HTML), f"нет функции {fn}"
+    m = re.search(r"function submitAccContMsg\(", HTML)
+    body = HTML[m.start(): m.start() + 700]
+    assert "/api/miniapp/dm/adhoc_send" in body, "групповая отправка не через безопасный adhoc-путь"
+    cont = _screen_body("s-acccontacts")
+    assert "writeSelectedContacts()" in cont and 'id="accContBulk"' in cont

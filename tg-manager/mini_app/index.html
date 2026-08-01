@@ -856,9 +856,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
     <div id="achatBody" style="flex:1;overflow-y:auto;padding:8px 12px"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div style="display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--sep);background:var(--bg)">
+    <div style="display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--sep);background:var(--bg);align-items:center">
+      <input id="achatFile" type="file" style="display:none" onchange="sendAccountFile(this)">
+      <button class="btn btn-s" style="padding:10px 12px;flex:0 0 auto" onclick="document.getElementById('achatFile').click()" title="Прикрепить файл (фото/документ)">📎</button>
       <input id="achatInput" type="text" placeholder="Сообщение..." class="input-flex" onkeydown="if(event.key==='Enter')sendAccountChat()">
-      <button class="btn btn-p" style="padding:10px 16px" onclick="sendAccountChat()">➤</button>
+      <button class="btn btn-p" style="padding:10px 16px;flex:0 0 auto" onclick="sendAccountChat()">➤</button>
     </div>
   </div>
 </div>
@@ -868,10 +870,27 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📇 Контакты аккаунта</div>
+    <div class="hdr-meta"><span style="font-size:17px;cursor:pointer;opacity:.7" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько">☑️</span></div>
   </div>
   <div class="sub-sb">
     <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск..." oninput="filterAccountContacts()" class="inp"></div>
+    <div id="accContBulk" style="display:none;padding:8px 12px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 0 8px">
+      <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="accContSelCount">0</span> <span style="color:var(--hint)">· массовая отправка идёт по @username</span></div>
+      <button class="btn btn-p" style="width:100%;font-size:13px" onclick="writeSelectedContacts()">✍️ Написать всем выбранным</button>
+    </div>
     <div class="lst" id="accContList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Компоуз для массовой отправки выбранным контактам (через безопасный DM-движок) -->
+<div class="mbg" id="mo-acccont-msg" onclick="if(event.target===this)closeModal('mo-acccont-msg')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-acccont-msg')">✕</div>
+    <div class="modal-title">✍️ Написать выбранным</div>
+    <div id="accContMsgHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
+    <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <div id="accContMsgErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitAccContMsg()">🚀 Отправить</button>
   </div>
 </div>
 
@@ -7611,8 +7630,11 @@ async function openAccount(accId) {
 let ACC_CONSOLE_ID = null;   // аккаунт, чью консоль сейчас смотрим
 let ACC_CHAT_PEER = null;    // id/@username открытого собеседника
 let ACC_CHAT_NAME = '';
+let ACC_CHAT_HASH = null;    // access_hash открытого собеседника (для резолва без общего чата)
 let ACC_DIALOGS = {};        // peer id → имя (чтобы не тащить имя через onclick)
+let ACC_DIALOG_HASH = {};    // peer id → access_hash
 let ACC_CONTACTS = [];
+let ACC_CONT_SEL = null;     // Set выбранных user_id (режим множественного выбора) или null
 
 async function openAccountDialogs(accId) {
   ACC_CONSOLE_ID = accId;
@@ -7621,8 +7643,8 @@ async function openAccountDialogs(accId) {
   try {
     const d = await api('/api/miniapp/account/'+accId+'/dialogs');
     const list = d.dialogs || [];
-    ACC_DIALOGS = {};
-    list.forEach(dg => { ACC_DIALOGS[dg.id] = dg.name; });
+    ACC_DIALOGS = {}; ACC_DIALOG_HASH = {};
+    list.forEach(dg => { ACC_DIALOGS[dg.id] = dg.name; ACC_DIALOG_HASH[dg.id] = dg.access_hash; });
     if (!list.length) { txt('adlgList', empty('💬','Нет диалогов','У аккаунта пока нет переписок')); return; }
     txt('adlgList', list.map(dg => {
       const ico = {user:'👤',bot:'🤖',group:'👥',channel:'📡'}[dg.kind] || '💬';
@@ -7639,21 +7661,27 @@ async function openAccountDialogs(accId) {
   } catch(e) { txt('adlgList', errHtml(e.message,'openAccountDialogs('+accId+')')); }
 }
 
-async function openAccountChat(accId, peer, name) {
+async function openAccountChat(accId, peer, name, accessHash) {
   ACC_CONSOLE_ID = accId;
   ACC_CHAT_PEER = String(peer);
   ACC_CHAT_NAME = name || ACC_DIALOGS[peer] || 'Чат';
+  // access_hash: явный (из контакта) → из карты диалогов → нет. Позволяет открыть
+  // и написать собеседнику даже без общей переписки (резолв по InputPeerUser).
+  ACC_CHAT_HASH = (accessHash != null && accessHash !== '') ? accessHash
+                  : (ACC_DIALOG_HASH[peer] != null ? ACC_DIALOG_HASH[peer] : null);
   txt('achat-title', esc(ACC_CHAT_NAME));
   push('s-accchat');
   await reloadAccountChat();
 }
+
+function _chatQ() { return (ACC_CHAT_HASH != null && ACC_CHAT_HASH !== '') ? ('?access_hash=' + encodeURIComponent(ACC_CHAT_HASH)) : ''; }
 
 async function reloadAccountChat() {
   const body = document.getElementById('achatBody');
   if (!body || ACC_CHAT_PEER == null) return;
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/history');
+    const d = await api('/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/history'+_chatQ());
     if (d.peer_name) { ACC_CHAT_NAME = d.peer_name; txt('achat-title', esc(d.peer_name)); }
     const msgs = d.messages || [];
     if (!msgs.length) { body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px 12px">Нет сообщений — напишите первым</div>'; return; }
@@ -7678,19 +7706,48 @@ async function sendAccountChat() {
   if (!text) return;
   inp.disabled = true;
   try {
+    const b = {text};
+    if (ACC_CHAT_HASH != null && ACC_CHAT_HASH !== '') b.access_hash = String(ACC_CHAT_HASH);
     await api('/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/send',
-      {method:'POST', body: JSON.stringify({text})});
+      {method:'POST', body: JSON.stringify(b)});
     inp.value = '';
     await reloadAccountChat();
   } catch(e) { toast('⚠️ '+(e.message || 'Не отправлено')); }
   finally { inp.disabled = false; inp.focus(); }
 }
 
+// Отправка файла: multipart (api() форсит JSON, поэтому свой fetch с Bearer, как
+// у импорта сессий). Текст из поля ввода уходит подписью к файлу.
+async function sendAccountFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  input.value = '';  // позволить повторно выбрать тот же файл
+  if (f.size > 20*1024*1024) { toast('⚠️ Файл больше 20 МБ'); return; }
+  toast('📎 Отправляю файл…');
+  const fd = new FormData();
+  fd.append('file', f, f.name);
+  const capEl = document.getElementById('achatInput');
+  const cap = (capEl.value || '').trim();
+  if (cap) fd.append('caption', cap);
+  if (ACC_CHAT_HASH != null && ACC_CHAT_HASH !== '') fd.append('access_hash', String(ACC_CHAT_HASH));
+  const path = '/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/send_file';
+  try {
+    let r = await fetch(path, {method:'POST', headers:{'Authorization':'Bearer '+TK}, body:fd});
+    if (r.status === 401) { await _reAuth(); r = await fetch(path, {method:'POST', headers:{'Authorization':'Bearer '+TK}, body:fd}); }
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok || j.ok === false) throw new Error(j.message || j.error || 'Файл не отправлен');
+    capEl.value = '';
+    await reloadAccountChat();
+  } catch(e) { toast('⚠️ '+(e.message || 'Файл не отправлен')); }
+}
+
 async function openAccountContacts(accId) {
   ACC_CONSOLE_ID = accId;
+  ACC_CONT_SEL = null;  // выходим из режима выбора при каждом открытии
   push('s-acccontacts');
   txt('accContList', '<div class="spin-wrap"><div class="spin"></div></div>');
   const s = document.getElementById('accContSearch'); if (s) s.value = '';
+  const bulk = document.getElementById('accContBulk'); if (bulk) bulk.style.display = 'none';
   try {
     const d = await api('/api/miniapp/account/'+accId+'/contacts');
     ACC_CONTACTS = d.contacts || [];
@@ -7700,16 +7757,22 @@ async function openAccountContacts(accId) {
 
 function renderAccountContacts(list) {
   if (!list.length) { txt('accContList', empty('📇','Нет контактов','В адресной книге аккаунта пусто')); return; }
+  const sel = ACC_CONT_SEL;
   txt('accContList', list.map(c => {
     const ico = c.is_bot ? '🤖' : '👤';
     const sub = [c.username?'@'+esc(c.username):'', c.phone?esc(c.phone):''].filter(Boolean).join(' · ');
-    // Написать можно тем, у кого есть @username — он резолвится без общего чата.
-    const write = c.username
-      ? `<button class="btn btn-s" style="padding:5px 12px;font-size:12px" onclick="event.stopPropagation();writeContact('${esc(c.username)}')">✍️</button>`
-      : '';
+    if (sel) {
+      // Режим выбора: массовая отправка работает по @username, остальных не выбрать.
+      const on = sel.has(c.id);
+      const canPick = !!c.username;
+      return `<div class="li ${canPick?'tap':''}" ${canPick?`onclick="toggleAccContPick(${c.id})"`:''} style="${canPick?'':'opacity:.45'}">
+        <div class="acc-check ${on?'on':''}">${on?'✓':''}</div>
+        <div class="li-body"><div class="li-name">${esc(c.name)}${c.premium?' ⭐':''}</div><div class="li-sub">${sub||'без @username'}</div></div></div>`;
+    }
+    // Обычный режим: написать можно ЛЮБОМУ контакту (по @username или по id+hash).
     return `<div class="li"><div class="row-ico" style="background:var(--bg-green-16)">${ico}</div>
       <div class="li-body"><div class="li-name">${esc(c.name)}${c.premium?' ⭐':''}</div><div class="li-sub">${sub}</div></div>
-      <div class="li-right">${write}</div></div>`;
+      <div class="li-right"><button class="btn btn-s" style="padding:5px 12px;font-size:12px" onclick="event.stopPropagation();writeContact(${c.id})">✍️</button></div></div>`;
   }).join(''));
 }
 
@@ -7719,11 +7782,60 @@ function filterAccountContacts() {
     (c.name||'').toLowerCase().includes(q) || (c.username||'').toLowerCase().includes(q)));
 }
 
-function writeContact(username) {
-  const c = ACC_CONTACTS.find(x => x.username === username);
-  const name = c ? c.name : ('@'+username);
-  ACC_DIALOGS['@'+username] = name;
-  openAccountChat(ACC_CONSOLE_ID, '@'+username, name);
+// Открыть чат с контактом. Есть @username → резолв по нему; иначе по id+access_hash
+// (InputPeerUser) — так пишем и тем, с кем ещё не было общей переписки.
+function writeContact(id) {
+  const c = ACC_CONTACTS.find(x => String(x.id) === String(id));
+  if (!c) return;
+  const peer = c.username ? ('@'+c.username) : String(c.id);
+  ACC_DIALOGS[peer] = c.name;
+  openAccountChat(ACC_CONSOLE_ID, peer, c.name, c.username ? null : c.access_hash);
+}
+
+function toggleAccContSelect() {
+  ACC_CONT_SEL = ACC_CONT_SEL ? null : new Set();
+  const bulk = document.getElementById('accContBulk');
+  if (bulk) bulk.style.display = ACC_CONT_SEL ? 'block' : 'none';
+  if (ACC_CONT_SEL) document.getElementById('accContSelCount').textContent = '0';
+  filterAccountContacts();
+}
+
+function toggleAccContPick(id) {
+  if (!ACC_CONT_SEL) return;
+  if (ACC_CONT_SEL.has(id)) ACC_CONT_SEL.delete(id); else ACC_CONT_SEL.add(id);
+  document.getElementById('accContSelCount').textContent = ACC_CONT_SEL.size;
+  filterAccountContacts();
+}
+
+// Массовая отправка выбранным — через безопасный DM-движок (operation_bus:
+// bulk_dm_adhoc с темпом/флуд-контролем), НЕ наивным циклом. Работает по
+// @username; без него получатель в adhoc-путь не попадает.
+function writeSelectedContacts() {
+  if (!ACC_CONT_SEL || !ACC_CONT_SEL.size) { toast('Выберите контакты'); return; }
+  const chosen = ACC_CONTACTS.filter(c => ACC_CONT_SEL.has(c.id) && c.username);
+  const skipped = ACC_CONT_SEL.size - chosen.length;
+  if (!chosen.length) { toast('⚠️ У выбранных нет @username — массовая отправка идёт по @username'); return; }
+  document.getElementById('accContMsgHint').innerHTML =
+    `Получателей: <b>${chosen.length}</b>` + (skipped ? ` · пропущено без @username: ${skipped}` : '') +
+    `<br>Отправка через этот аккаунт со своим темпом (защита от бана).`;
+  document.getElementById('accContMsgText').value = '';
+  document.getElementById('accContMsgErr').textContent = '';
+  showModal('mo-acccont-msg');
+}
+
+async function submitAccContMsg() {
+  const text = document.getElementById('accContMsgText').value.trim();
+  const err = document.getElementById('accContMsgErr');
+  if (!text) { err.textContent = 'Введите текст'; return; }
+  const usernames = ACC_CONTACTS.filter(c => ACC_CONT_SEL && ACC_CONT_SEL.has(c.id) && c.username).map(c => c.username);
+  if (!usernames.length) { err.textContent = 'Нет получателей с @username'; return; }
+  try {
+    const r = await api('/api/miniapp/dm/adhoc_send', {method:'POST',
+      body: JSON.stringify({usernames, text, account_ids: [ACC_CONSOLE_ID]})});
+    closeModal('mo-acccont-msg');
+    toast(`📨 Рассылка запущена (#${r.op_id}) — ${r.recipients||usernames.length} получателей`);
+    toggleAccContSelect();
+  } catch(e) { err.textContent = e.message || 'Ошибка'; }
 }
 
 // Машинная причина проблемы (status_reason от op_worker) → человекочитаемо + путь

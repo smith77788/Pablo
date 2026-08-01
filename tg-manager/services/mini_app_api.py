@@ -4049,6 +4049,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _err(res.get("error") or "Не удалось опубликовать историю", 400)
 
     # ── Живая консоль аккаунта (диалоги / история / отправка / контакты) ──────
+    def _parse_access_hash(raw) -> int | None:
+        """access_hash из query/body/form → int|None. Позволяет резолвить
+        собеседника (контакт) без общего чата; пустое/мусор → None (безопасно)."""
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if s and s.lstrip("-").isdigit():
+            return int(s)
+        return None
+
     async def _console_account(uid: int, acc_id: int):
         """Загрузить сессию+транспорт аккаунта для консоли, скоуп по владельцу.
 
@@ -4100,12 +4110,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         peer = account_console.parse_peer(request.match_info.get("peer", ""))
         if peer == "" or peer is None:
             return _err("Не указан собеседник", 400)
+        access_hash = _parse_access_hash(request.query.get("access_hash"))
         acc = await _console_account(uid, acc_id)
         if not acc or not acc.get("session_str"):
             return _err("Аккаунт недоступен", 400)
         try:
             res = await asyncio.wait_for(
-                account_console.get_history(acc["session_str"], dict(acc), peer, limit=50),
+                account_console.get_history(acc["session_str"], dict(acc), peer,
+                                            limit=50, access_hash=access_hash),
                 timeout=60)
         except asyncio.TimeoutError:
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
@@ -4134,12 +4146,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         text = (body.get("text") or "").strip()
         if not text:
             return _err("Введите текст сообщения", 400)
+        access_hash = _parse_access_hash(body.get("access_hash"))
         acc = await _console_account(uid, acc_id)
         if not acc or not acc.get("session_str"):
             return _err("Аккаунт недоступен", 400)
         try:
             res = await asyncio.wait_for(
-                account_console.send_text(acc["session_str"], dict(acc), peer, text),
+                account_console.send_text(acc["session_str"], dict(acc), peer, text,
+                                          access_hash=access_hash),
                 timeout=60)
         except asyncio.TimeoutError:
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
@@ -4148,6 +4162,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(f"Ошибка: {str(exc)[:140]}", 400)
         if not res.get("ok"):
             return _err(res.get("error") or "Не удалось отправить", 400)
+        return _json_resp({"ok": True, "message_id": res.get("message_id")})
+
+    async def account_dialog_send_file(request: web.Request) -> web.Response:
+        """Отправить файл (фото/документ) в диалог (ручное действие 1:1).
+
+        multipart: file (обязательно), caption?, access_hash?. Лимит 20 МБ —
+        защита от OOM; читаем чанками.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        from services import account_console
+        peer = account_console.parse_peer(request.match_info.get("peer", ""))
+        if peer == "" or peer is None:
+            return _err("Не указан собеседник", 400)
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return _err("bad request", 400)
+        file_bytes = b""
+        filename = "file"
+        caption = ""
+        access_hash = None
+        _MAX = 20 * 1024 * 1024
+        async for part in reader:
+            if part.name == "file":
+                filename = part.filename or "file"
+                buf = bytearray()
+                while True:
+                    chunk = await part.read_chunk(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    if len(buf) > _MAX:
+                        return _err("Файл слишком большой (макс 20 МБ)", 400)
+                file_bytes = bytes(buf)
+            elif part.name == "caption":
+                caption = (await part.text())[:1024]
+            elif part.name == "access_hash":
+                access_hash = _parse_access_hash((await part.text()).strip())
+        if not file_bytes:
+            return _err("Файл не получен", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            res = await asyncio.wait_for(
+                account_console.send_file(acc["session_str"], dict(acc), peer,
+                                          file_bytes, filename, caption, access_hash),
+                timeout=180)
+        except asyncio.TimeoutError:
+            return _err("Отправка файла не завершилась за 180с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_dialog_send_file uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось отправить файл", 400)
         return _json_resp({"ok": True, "message_id": res.get("message_id")})
 
     async def account_contacts(request: web.Request) -> web.Response:
@@ -12675,6 +12750,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/account/{acc_id}/dialogs", account_dialogs)
     app.router.add_get("/api/miniapp/account/{acc_id}/dialog/{peer}/history", account_dialog_history)
     app.router.add_post("/api/miniapp/account/{acc_id}/dialog/{peer}/send", account_dialog_send)
+    app.router.add_post("/api/miniapp/account/{acc_id}/dialog/{peer}/send_file", account_dialog_send_file)
     app.router.add_get("/api/miniapp/account/{acc_id}/contacts", account_contacts)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)

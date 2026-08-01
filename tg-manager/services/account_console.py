@@ -108,19 +108,35 @@ def parse_peer(raw: str) -> int | str:
 
 # ── Работа с сессией ─────────────────────────────────────────────────────────
 
-async def _warm_entity(client: Any, peer: int | str) -> Any:
+async def _warm_entity(client: Any, peer: int | str,
+                       access_hash: int | None = None) -> Any:
     """Разрешить собеседника в InputPeer.
 
     `StringSession` НЕ хранит кэш сущностей между подключениями, поэтому
     `get_input_entity(id)` на свежем клиенте часто падает с «Could not find the
-    input entity». Лечение — один раз прогреть кэш через `get_dialogs`, тогда id
-    из нашего же списка диалогов разрешается. Для @username прогрев не нужен.
+    input entity». Три пути разрешения, от дешёвого к дорогому:
+
+    1. Есть `access_hash` (мы знаем его для контакта) — строим `InputPeerUser`
+       напрямую, без единого запроса. Это и даёт «начать диалог с ЛЮБЫМ
+       контактом», даже без @username и без общей переписки.
+    2. Прогрев `get_dialogs` — id из нашего списка диалогов разрешается.
+    3. Прогрев адресной книги (`GetContactsRequest`) — контакт вне последних
+       диалогов. Для @username всё это не нужно — резолвится сразу.
     """
+    if access_hash is not None and isinstance(peer, int) and peer > 0:
+        from telethon.tl.types import InputPeerUser
+        return InputPeerUser(peer, int(access_hash))
     try:
         return await client.get_input_entity(peer)
     except (ValueError, TypeError):
         await asyncio.wait_for(client.get_dialogs(limit=200), timeout=_ACTION_TIMEOUT)
-        return await client.get_input_entity(peer)
+        try:
+            return await client.get_input_entity(peer)
+        except (ValueError, TypeError):
+            from telethon.tl.functions.contacts import GetContactsRequest
+            await asyncio.wait_for(client(GetContactsRequest(hash=0)),
+                                   timeout=_ACTION_TIMEOUT)
+            return await client.get_input_entity(peer)
 
 
 async def list_dialogs(session_string: str, acc: dict | None,
@@ -148,6 +164,10 @@ async def list_dialogs(session_string: str, acc: dict | None,
                                     bool(getattr(dg, "is_group", False)),
                                     bool(getattr(dg, "is_channel", False))),
                 "username": getattr(ent, "username", None),
+                # access_hash — 64-битное число: отдаём СТРОКОЙ, иначе JS потеряет
+                # точность (>2^53) и резолв по InputPeerUser сломается.
+                "access_hash": (lambda h: str(h) if h is not None else None)(
+                    getattr(ent, "access_hash", None)),
                 "unread": int(getattr(dg, "unread_count", 0) or 0),
                 "pinned": bool(getattr(dg, "pinned", False)),
                 "last_text": preview(getattr(last, "message", None)),
@@ -168,7 +188,7 @@ async def list_dialogs(session_string: str, acc: dict | None,
 
 
 async def get_history(session_string: str, acc: dict | None, peer: int | str,
-                      limit: int = 40) -> dict[str, Any]:
+                      limit: int = 40, access_hash: int | None = None) -> dict[str, Any]:
     """История одного диалога (последние `limit` сообщений, новые внизу)."""
     from services.account_manager import _make_client
 
@@ -176,7 +196,8 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
     msgs: list[dict] = []
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await asyncio.wait_for(_warm_entity(client, peer), timeout=_ACTION_TIMEOUT)
+        entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
+                                        timeout=_ACTION_TIMEOUT)
         peer_name = None
         try:
             ent_obj = await client.get_entity(entity)
@@ -211,7 +232,7 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
 
 
 async def send_text(session_string: str, acc: dict | None, peer: int | str,
-                    text: str) -> dict[str, Any]:
+                    text: str, access_hash: int | None = None) -> dict[str, Any]:
     """Отправить текстовое сообщение в диалог. Ручное действие 1:1.
 
     FloodWait/приватность/нет прав возвращаются классифицированной ошибкой, а не
@@ -226,13 +247,50 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
     client = _make_client(session_string, acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await asyncio.wait_for(_warm_entity(client, peer), timeout=_ACTION_TIMEOUT)
+        entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
+                                        timeout=_ACTION_TIMEOUT)
         sent = await asyncio.wait_for(client.send_message(entity, text),
                                       timeout=_ACTION_TIMEOUT)
         return {"ok": True, "message_id": getattr(sent, "id", None)}
     except Exception as exc:
         code, human = classify_error(str(exc))
         log.warning("account_console.send_text acc=%s: %s", (acc or {}).get("id"), exc)
+        return {"ok": False, "code": code, "error": human}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def send_file(session_string: str, acc: dict | None, peer: int | str,
+                    file_bytes: bytes, filename: str, caption: str = "",
+                    access_hash: int | None = None) -> dict[str, Any]:
+    """Отправить файл (фото/документ) в диалог. Ручное действие 1:1.
+
+    Telethon сам определит изображение и отправит как фото, остальное — как
+    документ. Загрузка дольше текста → отдельный, больший таймаут.
+    """
+    import io
+    from services.account_manager import _make_client
+
+    if not file_bytes:
+        return {"ok": False, "code": "empty", "error": "Пустой файл"}
+
+    client = _make_client(session_string, acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
+                                        timeout=_ACTION_TIMEOUT)
+        bio = io.BytesIO(file_bytes)
+        bio.name = filename or "file"
+        sent = await asyncio.wait_for(
+            client.send_file(entity, bio, caption=(caption or "")[:1024] or None),
+            timeout=120)
+        return {"ok": True, "message_id": getattr(sent, "id", None)}
+    except Exception as exc:
+        code, human = classify_error(str(exc))
+        log.warning("account_console.send_file acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
         try:
@@ -250,6 +308,9 @@ def _to_ui_contact(c: dict) -> dict:
         "name": name or (("@" + uname) if uname else str(c.get("user_id"))),
         "username": uname,
         "phone": c.get("phone") or None,
+        # access_hash строкой (64-бит > 2^53 → JS теряет точность). Позволяет
+        # написать контакту без общего чата.
+        "access_hash": (str(c["access_hash"]) if c.get("access_hash") is not None else None),
         "is_bot": False,  # оба источника исключают ботов и удалённых
         "premium": bool(c.get("is_premium")),
         "mutual": bool(c.get("is_mutual")),
