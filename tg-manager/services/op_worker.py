@@ -859,6 +859,12 @@ async def _get_owner_semaphore(owner_id: int) -> asyncio.Semaphore:
 # Track last progress milestone notified per op (25/50/75%)
 _progress_milestones: dict[int, int] = {}
 
+# Обслуживающие операции: пользователю НЕ нужен поминутный прогресс, только итог.
+# Иначе длинная синхронизация контактов флота (28 акк.) спамила «0%» каждую минуту
+# (жалоба: «уведомления об одной и той же операции каждую минуту»). Для них монитор
+# прогресса не запускаем — придёт одно финальное уведомление.
+_QUIET_PROGRESS_OPS = {"contacts_sync"}
+
 # Cache for _is_cancelled: op_id -> (result: bool, checked_at: float)
 _cancel_cache: dict[int, tuple[bool, float]] = {}
 _CANCEL_CACHE_TTL = 5.0  # seconds between DB checks in tight loops
@@ -875,6 +881,7 @@ async def _progress_monitor(
     _heartbeat_sent = False
     _ticks_without_total = 0
     _last_update_sent = 0.0
+    _last_sent_pct = -1  # чтобы не слать одинаковый прогресс повторно (застрявшая op)
     _eta_data[op_id] = {"start": time.time(), "last_done": 0, "last_time": time.time()}
     
     try:
@@ -910,10 +917,13 @@ async def _progress_monitor(
                 eta = _calculate_eta(op_id, done, total)
                 eta_text = f"⏰ ETA: {eta}" if eta else ""
                 
-                # Send update every 30 seconds (not just milestones)
+                # Send update every 30 seconds (not just milestones), но ТОЛЬКО если
+                # прогресс реально сдвинулся — иначе застрявшая на 0% операция
+                # слала бы одинаковое уведомление каждые 30с.
                 now = time.time()
-                if now - _last_update_sent >= 30:
+                if now - _last_update_sent >= 30 and pct != _last_sent_pct:
                     _last_update_sent = now
+                    _last_sent_pct = pct
                     bar_filled = pct // 10
                     bar = "█" * bar_filled + "░" * (10 - bar_filled)
                     speed = _calculate_speed(op_id, done)
@@ -1342,10 +1352,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             except Exception:
                 log_exc_swallow(log, f"prime proxy_policy op#{op_id}")
 
-            # Запустить фоновый монитор прогресса для длинных операций
-            progress_task = asyncio.create_task(
-                _progress_monitor(pool, bot, op_id, owner_id, op_type)
-            )
+            # Запустить фоновый монитор прогресса для длинных операций.
+            # Обслуживающие op-типы (contacts_sync) НЕ мониторим — иначе поминутный
+            # спам «0%» по одной и той же операции.
+            if op_type not in _QUIET_PROGRESS_OPS:
+                progress_task = asyncio.create_task(
+                    _progress_monitor(pool, bot, op_id, owner_id, op_type)
+                )
 
             if op_type == "mass_publish":
                 result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
@@ -8270,7 +8283,17 @@ async def _exec_contacts_sync(
     """
     from services.contacts_hub.sync_service import sync_all_accounts
 
-    res = await sync_all_accounts(pool, owner_id)
+    # Ограничение по времени: зависший на сети аккаунт не должен держать
+    # единственный слот воркера бесконечно (уже записанные контакты сохранятся —
+    # sync_account коммитит по контакту). 12 минут с запасом на большой флот.
+    try:
+        res = await asyncio.wait_for(sync_all_accounts(pool, owner_id), timeout=720)
+    except asyncio.TimeoutError:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id)
+        return {"status": "done", "ok": 0, "failed": 0,
+                "summary": "⏳ Синхронизация прервана по таймауту (12 мин) — часть "
+                           "контактов сохранена. Проверьте сессии/прокси и повторите."}
     synced = int(res.get("total_synced", 0) or 0)
     created = int(res.get("total_created", 0) or 0)
     found = int(res.get("accounts_found", 0) or 0)
