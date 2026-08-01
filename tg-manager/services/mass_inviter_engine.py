@@ -109,6 +109,9 @@ async def invite_batch(
     errors: list[str] = []
     peer_flood = False
     flood_wait = 0
+    # Цели, которые отклонены приватностью/не-взаимностью — их прямой инвайт не
+    # берёт, но может взять «добавление через выдачу админки» (промоут-трюк).
+    privacy_failed: list = []
 
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -127,9 +130,11 @@ async def invite_batch(
                 ok += 1  # уже в группе = успех
             except UserPrivacyRestrictedError:
                 failed += 1
+                privacy_failed.append(ref)
                 errors.append(f"{ref}: privacy restricted")
             except UserNotMutualContactError:
                 failed += 1
+                privacy_failed.append(ref)
                 errors.append(f"{ref}: not mutual contact")
             except PeerFloodError:
                 peer_flood = True
@@ -176,6 +181,139 @@ async def invite_batch(
             await client.disconnect()
         except Exception as e:
             log_exc_swallow(log, "invite_batch: disconnect")
+
+    return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
+            "flood_wait": flood_wait, "errors": errors,
+            "privacy_failed": privacy_failed}
+
+
+# ── Автовыдача прав админа инвайтерам + «промоут-трюк» ───────────────────────
+
+async def channel_admin_status(session_string: str, _acc: dict | None,
+                               group_ref: str) -> dict[str, Any]:
+    """Права ЭТОГО аккаунта в целевом чате: создатель / админ с add_admins / инвайт.
+
+    Нужно, чтобы выбрать «промоутера» — аккаунт, который вправе выдавать админку
+    остальным инвайтерам (и добавлять через промоут-трюк). Только чтение.
+    """
+    from services.account_manager import _make_client
+    from telethon.tl.functions.channels import GetParticipantRequest
+    from telethon.tl.types import ChannelParticipantCreator, ChannelParticipantAdmin
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        group = await _resolve_group_entity(client, group_ref)
+        me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
+        part = await asyncio.wait_for(
+            client(GetParticipantRequest(channel=group, participant="me")),
+            timeout=_ACTION_TIMEOUT)
+        p = part.participant
+        if isinstance(p, ChannelParticipantCreator):
+            return {"ok": True, "user_id": me.id, "creator": True,
+                    "can_promote": True, "can_invite": True}
+        if isinstance(p, ChannelParticipantAdmin):
+            r = getattr(p, "admin_rights", None)
+            return {"ok": True, "user_id": me.id, "creator": False,
+                    "can_promote": bool(getattr(r, "add_admins", False)),
+                    "can_invite": bool(getattr(r, "invite_users", False))}
+        return {"ok": True, "user_id": me.id, "creator": False,
+                "can_promote": False, "can_invite": False}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:120]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "channel_admin_status: disconnect")
+
+
+async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str,
+                          user_refs: list[str | int]) -> dict[str, Any]:
+    """«Промоут-трюк»: добавить пользователя, выдав ему админку и тут же сняв.
+
+    Когда прямой InviteToChannel блокируется приватностью, аккаунт-АДМИН с правом
+    add_admins может добавить человека через EditAdmin (он становится участником),
+    после чего снять права → остаётся обычным участником. Требует прав add_admins
+    у вызывающего аккаунта (создатель/админ). Медленнее и заметнее обычного
+    инвайта — только как запасной путь для заблокированных целей.
+    """
+    from services.account_manager import _make_client
+    from telethon.tl.functions.channels import EditAdminRequest
+    from telethon.tl.types import ChatAdminRights
+    from telethon.errors import (
+        UserAlreadyParticipantError, PeerFloodError, FloodWaitError,
+        UserPrivacyRestrictedError, ChatAdminRequiredError,
+    )
+
+    _grant = ChatAdminRights(
+        post_messages=False, edit_messages=False, delete_messages=False,
+        ban_users=False, invite_users=True, pin_messages=False, add_admins=False,
+        manage_call=False, other=False, change_info=False, anonymous=False,
+        manage_topics=False)
+    _revoke = ChatAdminRights(
+        post_messages=False, edit_messages=False, delete_messages=False,
+        ban_users=False, invite_users=False, pin_messages=False, add_admins=False,
+        manage_call=False, other=False, change_info=False, anonymous=False,
+        manage_topics=False)
+
+    client = _make_client(session_string, _acc)
+    ok, failed = 0, 0
+    errors: list[str] = []
+    peer_flood = False
+    flood_wait = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        group = await _resolve_group_entity(client, group_ref)
+        for ref in user_refs:
+            try:
+                user = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
+                # Выдать минимальную админку → человек добавлен в чат…
+                await asyncio.wait_for(
+                    client(EditAdminRequest(channel=group, user_id=user,
+                                            admin_rights=_grant, rank="")),
+                    timeout=_ACTION_TIMEOUT)
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+                # …и сразу снять права → остаётся обычным участником.
+                await asyncio.wait_for(
+                    client(EditAdminRequest(channel=group, user_id=user,
+                                            admin_rights=_revoke, rank="")),
+                    timeout=_ACTION_TIMEOUT)
+                ok += 1
+                await asyncio.sleep(random.uniform(2.5, 5.0))
+            except UserAlreadyParticipantError:
+                ok += 1
+            except ChatAdminRequiredError:
+                errors.append("group error: нет прав add_admins для промоут-трюка")
+                break
+            except PeerFloodError:
+                peer_flood = True
+                failed += 1
+                errors.append(f"{ref}: peer flood")
+                break
+            except FloodWaitError as e:
+                _fw = int(getattr(e, "seconds", 60) or 60)
+                failed += 1
+                if _fw > _MAX_FLOOD_INLINE:
+                    flood_wait = _fw
+                    break
+                await asyncio.sleep(min(_fw, 60))
+            except UserPrivacyRestrictedError:
+                # Даже трюк не всегда обходит приватность — честно считаем провалом.
+                failed += 1
+                errors.append(f"{ref}: privacy (промоут-трюк не помог)")
+            except Exception as e:
+                log.warning("add_via_promote failed: %s", e)
+                failed += 1
+                errors.append(f"{ref}: {str(e)[:80]}")
+    except Exception as exc:
+        log.warning("add_via_promote connect/group error: %s", exc)
+        errors.append(f"connect: {str(exc)[:100]}")
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "add_via_promote: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors}

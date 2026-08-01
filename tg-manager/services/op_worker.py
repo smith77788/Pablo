@@ -8684,6 +8684,65 @@ async def _exec_mass_invite(
     all_users = list(user_refs)
     all_phones = list(phones)
 
+    # ── Продвинутый режим: автовыдача админки инвайтерам + промоут-трюк ────────
+    # Инвайт в КАНАЛ вообще невозможен без прав админа у инвайтера, а часть целей
+    # блокирует прямой инвайт приватностью. Поэтому: (1) находим аккаунт-создателя/
+    # админа чата и выдаём остальным инвайтерам право invite_users; (2) цели,
+    # отклонённые приватностью, добавляем «промоут-трюком» (выдать/снять админку)
+    # аккаунтом с правом add_admins. Оба шага опциональны и fail-open.
+    _promoter = None            # (acc_dict) — аккаунт с правами выдавать админку
+    _privacy_blocked: list = []  # цели, отклонённые приватностью (для промоут-трюка)
+    _promoted_n = 0
+    _auto_promote = params.get("auto_promote", True)
+    _promote_trick = params.get("promote_trick", True)
+    if (_auto_promote or _promote_trick) and accounts:
+        from services import mass_inviter_engine as _inv
+        from services import account_manager
+        # tg_user_id инвайтеров — кого промоутить (в _ACC_COLS их нет).
+        _uid_rows = await _safe_fetch(
+            pool, "SELECT id, tg_user_id FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+            owner_id, [int(a["id"]) for a in accounts])
+        _acc_uid = {int(r["id"]): r["tg_user_id"] for r in (_uid_rows or []) if r.get("tg_user_id")}
+        # Ищем промоутера: первый аккаунт-создатель или админ с add_admins.
+        for a in accounts:
+            try:
+                st = await asyncio.wait_for(
+                    _inv.channel_admin_status(a["session_str"], dict(a), group),
+                    timeout=45)
+            except Exception:
+                continue
+            if st.get("ok") and st.get("can_promote"):
+                _promoter = a
+                break
+        if _promoter is None:
+            await _safe_execute(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'promote','skip',$2)", op_id,
+                "автовыдача админки пропущена: ни один инвайтер не создатель/админ чата "
+                "с правом «Назначать админов». Сделайте один аккаунт админом чата.")
+        elif _auto_promote:
+            for a in accounts:
+                if int(a["id"]) == int(_promoter["id"]):
+                    continue
+                _u = _acc_uid.get(int(a["id"]))
+                if not _u:
+                    continue
+                try:
+                    okp = await asyncio.wait_for(
+                        account_manager.promote_to_admin(
+                            _promoter["session_str"], group, int(_u),
+                            _acc=dict(_promoter), invite_users=True, post_messages=False),
+                        timeout=45)
+                    if okp:
+                        _promoted_n += 1
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                except Exception as _pe:
+                    log.debug("mass_invite op=%d: promote acc=%s failed: %s", op_id, a.get("id"), _pe)
+            await _safe_execute(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'promote','ok',$2)", op_id,
+                f"выдана админка (invite_users) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}")
+
     # ── Очередь-планировщик ──────────────────────────────────────────────────
     # Раньше аудитория НАРЕЗАЛАСЬ по аккаунтам заранее (_chunks). Цену платил
     # пользователь, причём дважды:
@@ -8834,6 +8893,9 @@ async def _exec_mass_invite(
             if leftover:
                 _give_back(queue, leftover)
 
+            # Цели, отклонённые приватностью — кандидаты на промоут-трюк.
+            if _promoter is not None and _promote_trick:
+                _privacy_blocked.extend(res.get("privacy_failed") or [])
             # Классифицируем причины отказов для честного итога («почему 0 из тысяч»).
             for _e in (res.get("errors") or []):
                 _es = str(_e).lower()
@@ -8906,6 +8968,41 @@ async def _exec_mass_invite(
         if not progressed:
             break
 
+    # ── Промоут-трюк для заблокированных приватностью целей ───────────────────
+    # Прямой инвайт их не взял; аккаунт-админ с add_admins пробует добавить через
+    # выдачу/снятие админки. Ограничиваем объём, уважаем флуд/отмену/лимит прогона.
+    _trick_ok = 0
+    if _promoter is not None and _promote_trick and _privacy_blocked and not group_broken \
+            and not flood_storm and not await _is_cancelled(pool, op_id):
+        from services import mass_inviter_engine as _inv
+        _seen_pt: set = set()
+        _uniq_blocked = [x for x in _privacy_blocked
+                         if not (str(x) in _seen_pt or _seen_pt.add(str(x)))]
+        _cap = 200 if not _max_invites else max(0, _max_invites - (total_ok + total_fail))
+        _uniq_blocked = _uniq_blocked[:max(0, _cap)] if _cap else _uniq_blocked[:200]
+        if _uniq_blocked:
+            log.info("mass_invite op=%d: промоут-трюк для %d заблокированных целей",
+                     op_id, len(_uniq_blocked))
+            try:
+                _tr = await _inv.add_via_promote(
+                    _promoter["session_str"], dict(_promoter), group, _uniq_blocked)
+                _trick_ok = int(_tr.get("ok") or 0)
+                total_ok += _trick_ok
+                if _trick_ok:
+                    await bump_daily_stats(pool, int(_promoter["id"]),
+                                           ok=_trick_ok, invites=_trick_ok)
+                    invited_this_run.update(str(x) for x in _uniq_blocked)
+                    await _safe_execute(
+                        pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                        op_id, _trick_ok)
+                await _safe_execute(
+                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,0,'promote_trick',$2,$3)", op_id,
+                    "ok" if _trick_ok else "fail",
+                    f"добавлено промоут-трюком: {_trick_ok}/{len(_uniq_blocked)}")
+            except Exception as _te:
+                log.warning("mass_invite op=%d: промоут-трюк сбой: %s", op_id, _te)
+
     # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
     await _record_invited_targets(pool, owner_id, _group_key, op_id, invited_this_run)
 
@@ -8933,6 +9030,8 @@ async def _exec_mass_invite(
     summary = (
         f"👥 Инвайтер: {group}\n"
         f"✅ Добавлено: {total_ok}/{total}"
+        + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
+        + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
