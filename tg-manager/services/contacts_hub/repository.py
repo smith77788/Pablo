@@ -8,6 +8,32 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+# jsonb-колонки asyncpg отдаёт СТРОКОЙ (кодек jsonb не зарегистрирован), а фронт
+# ждёт массив/объект: c.phones.join(...) на строке падает «join is not a
+# function». Разбираем на границе чтения — единый контракт для всех читателей.
+_JSON_LIST_FIELDS = ('phones', 'emails', 'websites', 'addresses')
+_JSON_OBJ_FIELDS = ('custom_fields', 'digital_footprint')
+
+
+def _parse_json_fields(d: dict) -> dict:
+    for f in _JSON_LIST_FIELDS:
+        v = d.get(f)
+        if isinstance(v, str):
+            try:
+                d[f] = json.loads(v)
+            except (ValueError, TypeError):
+                d[f] = []
+        elif v is None:
+            d[f] = []
+    for f in _JSON_OBJ_FIELDS:
+        v = d.get(f)
+        if isinstance(v, str):
+            try:
+                d[f] = json.loads(v)
+            except (ValueError, TypeError):
+                d[f] = {}
+    return d
+
 
 async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
                        favorite_only=False, premium_only=False, multi_only=False,
@@ -60,7 +86,7 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
     params.extend([limit, offset])
     rows = await pool.fetch(f'SELECT * FROM unified_contacts WHERE {where} ORDER BY {order} LIMIT ${idx} OFFSET ${idx+1}', *params)
     total = await pool.fetchval(f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params[:-2])
-    return {'contacts': [dict(r) for r in rows], 'total': total}
+    return {'contacts': [_parse_json_fields(dict(r)) for r in rows], 'total': total}
 
 
 async def get_contact(pool, contact_id, owner_id):
@@ -71,7 +97,7 @@ async def get_contact(pool, contact_id, owner_id):
     history = await pool.fetch('SELECT * FROM contact_history WHERE contact_id=$1 ORDER BY created_at DESC LIMIT 50', contact_id)
     groups = await pool.fetch('SELECT g.* FROM contact_groups g JOIN contact_group_members gm ON g.id = gm.group_id WHERE gm.contact_id = $1', contact_id)
     return {
-        'contact': dict(row),
+        'contact': _parse_json_fields(dict(row)),
         'sources': [dict(s) for s in sources],
         'history': [dict(h) for h in history],
         'groups': [dict(g) for g in groups],

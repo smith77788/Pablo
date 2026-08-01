@@ -2088,3 +2088,16 @@ format_strike_summary; strike_status.email_vector.configured; UI-баннер с
 **много «✅» ≠ результат. Если у операции есть сильный и слабый вектор — отчёт обязан
 разделять «сделали много действий» и «сделали то, что влияет на цель», и вести к
 сильному.** Гейт: test_strike_effectiveness_verdict.
+## Контакты: карточка падала «c.phones.join is not a function» — jsonb как строка — 2026-08-01
+После фикса записи контакты синхронизировались, но открытие карточки/списка
+падало: фронт зовёт c.phones.join(', '), а asyncpg без кодека отдаёт jsonb
+СТРОКОЙ ('["+7"]'), не массивом. Доказано на живом Postgres: dict(row)['phones']
+== str. Фикс: repository._parse_json_fields разбирает jsonb-поля (phones/emails/
+websites/addresses → [], custom_fields/digital_footprint → {}) на границе чтения;
+подключён в get_contacts, get_contact и обоих возвратах search_contacts. Плюс
+двойная защита на фронте (Array.isArray перед .join). Гейт: test_contacts_json_fields.
+УРОК В СВОД (jsonb из asyncpg — строка): без зарегистрированного кодека asyncpg
+возвращает jsonb как str. Любой SELECT jsonb-колонки → dict(row) отдаёт строку;
+если потребитель ждёт list/dict (.join/.map/индексация) — разбирай json на границе
+чтения (или заведи кодек). Тот же класс, что str-даты в bind: тип-несоответствие
+БД↔приложение, невидимое на заглушке пула.

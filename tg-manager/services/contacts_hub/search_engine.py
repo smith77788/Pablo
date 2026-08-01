@@ -271,7 +271,8 @@ async def search_contacts(
         rows = await pool.fetch(
             'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name LIMIT $2 OFFSET $3',
             owner_id, limit, offset)
-        return [dict(r) for r in rows]
+        from services.contacts_hub.repository import _parse_json_fields
+        return [_parse_json_fields(dict(r)) for r in rows]
 
     cache_key = f'search:{owner_id}:{query}:{limit}:{offset}'
     cached = _cache.get(cache_key)
@@ -344,7 +345,8 @@ async def search_contacts(
                 LIMIT ${idx - 1} OFFSET ${idx}''',
             *params)
 
-    result = [dict(r) for r in rows]
+    from services.contacts_hub.repository import _parse_json_fields
+    result = [_parse_json_fields(dict(r)) for r in rows]
     _cache.set(cache_key, result)
     return result
 
