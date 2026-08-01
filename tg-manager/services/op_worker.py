@@ -5356,6 +5356,13 @@ async def _exec_strike(
     label = params.get("label") or f"queued_strike_{op_id}"
     # mode: сначала из params (явно), потом из strike_access (настройки пользователя)
     mode_from_params = params.get("mode", "")
+    # Настойчивая эскалация: давить по расписанию, пока цель не снята или пока не
+    # исчерпан лимит заходов. strike_chain — текущий номер захода (0 = первый).
+    persist = bool(params.get("persist"))
+    try:
+        strike_chain = max(0, int(params.get("strike_chain") or 0))
+    except (TypeError, ValueError):
+        strike_chain = 0
 
     try:
         num_waves = max(1, int(params.get("num_waves", 3)))
@@ -5600,6 +5607,36 @@ async def _exec_strike(
 
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
+
+    # ── Настойчивая эскалация: переповтор, пока цель не снята ──────────────────
+    # Реальные тейкдауны идут во времени: площадка/модерация реагирует не мгновенно.
+    # Если пользователь включил persist и цель ПОДТВЕРЖДЁННО ещё жива (verified_down
+    # is False) — ставим следующий заход через ~12ч. Останавливаемся, когда цель
+    # снята (verified_down True) или исчерпан лимit заходов. verified_down None
+    # («не удалось проверить») тоже НЕ продолжаем автоматически — не жжём флот
+    # вслепую, честно сообщаем, что исход неизвестен.
+    if persist:
+        _still_up = any(getattr(r, "verified_down", None) is False for r in results)
+        _confirmed_down = results and all(
+            getattr(r, "verified_down", None) is True for r in results)
+        if _confirmed_down:
+            summary_text += "\n\n🎯 <b>Цель снята — эскалация остановлена.</b>"
+        elif _still_up and strike_chain + 1 < _MAX_STRIKE_CHAIN:
+            _cont_id = await _schedule_strike_continuation(
+                pool, owner_id, params, strike_chain + 1)
+            if _cont_id:
+                summary_text += (
+                    f"\n\n🔁 <b>Настойчивая эскалация:</b> цель ещё жива — "
+                    f"следующий заход через ~{_STRIKE_CONTINUATION_HOURS}ч "
+                    f"(попытка {strike_chain + 2}/{_MAX_STRIKE_CHAIN}). "
+                    f"Давление продолжится, пока цель не снята."
+                )
+        elif _still_up:
+            summary_text += (
+                f"\n\n🔁 <b>Настойчивая эскалация исчерпана</b> "
+                f"({_MAX_STRIKE_CHAIN} заходов) — цель всё ещё активна. "
+                f"Усильте пакетом жалобы (App Store/Google Play) вручную."
+            )
 
     return {
         "status": "done",
@@ -8032,6 +8069,48 @@ async def _schedule_invite_continuation(
         # Не тихо: остаток аудитории остаётся неприглашённым, и это должно быть
         # видно в логах, а не только по косвенным признакам.
         log.warning("mass_invite: продолжение не поставлено (owner=%s): %s", owner_id, exc)
+        return None
+
+
+# Сколько раз Strike вправе сам себя переповторить в режиме настойчивой эскалации.
+# Реальные тейкдауны идут ВО ВРЕМЕНИ (площадка/модерация реагирует не мгновенно):
+# давим повторно, пока цель не снята или пока не исчерпан лимит попыток. Каждый
+# круг разнесён на часы — и чтобы дать площадке отреагировать, и чтобы аккаунты
+# успевали остыть между заходами.
+_MAX_STRIKE_CHAIN = 4
+_STRIKE_CONTINUATION_HOURS = 12
+
+
+async def _schedule_strike_continuation(
+    pool, owner_id: int, params: dict, chain: int
+) -> "int | None":
+    """Поставить следующий заход Strike через ~12ч (настойчивая эскалация).
+
+    Через шину (operation_bus.submit), а не прямым INSERT — заход обязан проходить
+    те же проверки, что обычный запуск. Никогда не бросает: эскалация — улучшение,
+    её сбой не должен ронять успешный прогон. Аккаунты НЕ фиксируем (account_ids
+    сбрасываем) — каждый заход берёт свежий здоровый флот; force=True, т.к. это
+    сознательный повтор по уже принятой цели, а не новая покупка.
+    """
+    import datetime as _dt
+    try:
+        nxt = dict(params)
+        nxt.pop("account_ids", None)     # свежий выбор флота на каждый заход
+        nxt["persist"] = True
+        nxt["strike_chain"] = chain
+        nxt["force"] = True              # обойти restrike-guard: это и есть повтор
+        when = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(
+            hours=_STRIKE_CONTINUATION_HOURS)
+        from services import operation_bus as _obus
+        return await _obus.submit(
+            pool, owner_id, "strike", nxt,
+            total_items=1,
+            scheduled_for=when.isoformat(),
+            label=f"Strike → {params.get('target', '')} (эскалация {chain})",
+            bypass_plan_check=True,
+        )
+    except Exception as exc:
+        log.warning("strike: эскалация не поставлена (owner=%s): %s", owner_id, exc)
         return None
 
 

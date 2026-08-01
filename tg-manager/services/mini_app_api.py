@@ -8304,6 +8304,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 min_restrike_hours = 4
             min_restrike_hours = max(0, min(168, min_restrike_hours))
             force = bool(body.get("force"))
+            # Настойчивая эскалация: движок переповторяет заход по расписанию, пока
+            # цель не снята или пока не исчерпан лимит попыток (реальные тейкдауны
+            # идут во времени, а не одним залпом).
+            persist = bool(body.get("persist"))
 
             # Подсчёт доступных аккаунтов
             accs = await pool.fetch(
@@ -8329,6 +8333,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "num_waves": num_waves,
                     "min_restrike_hours": min_restrike_hours,
                     "force": force,
+                    "persist": persist,
                     "account_ids": [r["id"] for r in accs],
                 }),
                 len(accs),
