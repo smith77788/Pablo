@@ -8123,7 +8123,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # но ещё нет итоговых метрик.
             active = await _safe_fetch(pool,
                 """SELECT id, COALESCE(label, op_type) AS label, status,
-                          total_items, done_items, created_at
+                          total_items, done_items, created_at, scheduled_for, params
                    FROM operation_queue
                    WHERE owner_id=$1 AND op_type LIKE 'strike%'
                      AND status IN ('pending','running')
@@ -8145,8 +8145,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("strike_history uid=%d", uid)
             return _err(str(exc), 500)
 
+        import datetime as _dt
+        _now = _dt.datetime.now(_dt.timezone.utc)
         operations = []
         for r in (active or []):
+            # Отложенный заход настойчивой эскалации: pending + scheduled_for в будущем
+            # + persist в params. Показываем как «под эскалацией», а не просто «в очереди».
+            _params = r["params"]
+            if isinstance(_params, str):
+                try:
+                    _params = _json.loads(_params or "{}")
+                except Exception:
+                    _params = {}
+            _params = _params or {}
+            _sched = r["scheduled_for"]
+            _is_escalation = bool(
+                _params.get("persist") and _sched and _sched > _now
+            )
             operations.append({
                 "id": r["id"],
                 "label": r["label"] or "Strike",
@@ -8155,6 +8170,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "processed": r["done_items"] or 0,
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "in_progress": True,
+                "escalation": _is_escalation,
+                "escalation_round": int(_params.get("strike_chain") or 0) if _is_escalation else 0,
+                "scheduled_for": _sched.isoformat() if _sched else None,
+                "target": _params.get("target"),
             })
         for r in (done or []):
             # Суммарное число доставленных жалоб по всем векторам.
@@ -8176,7 +8195,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "admins_reported": int(r["admins_reported"] or 0),
                     "network_reports": int(r["network_reports"] or 0),
                     "blocked": bool(r["blocked"]),
+                    # Трёхзначный статус цели: снята / активна / не проверено —
+                    # bool() терял разницу между «подтверждённо жива» и «не проверяли».
                     "verified_down": bool(r["verified_down"]),
+                    "verified_status": (
+                        "down" if r["verified_down"] is True
+                        else "up" if r["verified_down"] is False
+                        else "unknown"
+                    ),
                     "spambot_escalation": bool(r["spambot_escalation"]),
                     "duration_s": int(r["duration_s"] or 0),
                 },

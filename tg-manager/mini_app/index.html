@@ -14361,6 +14361,17 @@ async function openStrike() {
       if (op.in_progress) {
         const pct = op.total ? Math.round(op.processed/op.total*100) : 0;
         const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
+        // Отложенный заход настойчивой эскалации — отдельная подача, не «в очереди».
+        if (op.escalation) {
+          const when = op.scheduled_for ? new Date(op.scheduled_for).toLocaleString('ru') : '';
+          return `<div class="row">
+            <div class="row-ico" style="background:var(--bg-red-16)">🔁</div>
+            <div class="row-body">
+              <div class="row-name">${esc(op.label)} <span class="badge b-gy">⏳ под эскалацией</span></div>
+              <div class="row-val">Заход ${num(op.escalation_round||0)+1} · следующий: ${esc(when)}</div>
+            </div>
+          </div>`;
+        }
         return `<div class="row">
           <div class="row-ico" style="background:var(--bg-red-16)">⚔️</div>
           <div class="row-body">
@@ -14370,10 +14381,12 @@ async function openStrike() {
           </div>
         </div>`;
       }
-      // Завершённый страйк — показываем РЕАЛЬНУЮ эффективность
+      // Завершённый страйк — показываем РЕАЛЬНУЮ эффективность + честный статус цели.
       const m = op.metrics||{};
-      const downBadge = m.verified_down ? '<span class="badge b-gr">🎯 цель снята</span>'
-        : (m.blocked ? '<span class="badge b-gy">заблокирован</span>' : '');
+      const vs = m.verified_status || (m.verified_down ? 'down' : 'unknown');
+      const downBadge = vs==='down' ? '<span class="badge b-gr">🎯 цель снята</span>'
+        : vs==='up' ? '<span class="badge b-rd">⚠️ ещё активна</span>'
+        : (m.blocked ? '<span class="badge b-gy">заблокирован</span>' : '<span class="badge b-gy">— не проверено</span>');
       const escBadge = m.spambot_escalation ? ' · 🤖 SpamBot-эскалация' : '';
       return `<div class="row" style="cursor:default">
         <div class="row-ico" style="background:var(--bg-red-16)">⚔️</div>
