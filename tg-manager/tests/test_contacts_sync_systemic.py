@@ -77,6 +77,26 @@ def test_isolated_failure_still_marked():
     assert len(pool.execs) == 1, "изолированный протухший аккаунт должен быть помечен"
 
 
+def test_iso_date_params_bound_as_text():
+    """registered_estimate/last_seen_at приходят ISO-СТРОКАМИ.
+
+    Голый ::date/::timestamptz заставлял asyncpg кодировать str как date/timestamp
+    и звать .toordinal()/.timestamp() → падало на КАЖДОМ контакте, весь синк давал
+    0. Приводим текст→тип в Postgres (::text::date / ::text::timestamptz). Тип-
+    ошибки связывания заглушка пула не ловит, поэтому это структурный гейт.
+    """
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "services" / "contacts_hub" / "sync_service.py").read_text(encoding="utf-8")
+    body = src[src.index("async def sync_account("): src.index("async def sync_all_accounts(")]
+    # Правильная форма присутствует…
+    assert "$12::text::date" in body and "$14::text::timestamptz" in body, "INSERT: нет text-приведения"
+    assert "$9::text::date" in body and "$11::text::timestamptz" in body, "UPDATE: нет text-приведения"
+    # …и НЕТ старой формы, которая падала на str.
+    import re
+    for bad in (r"\$12::date\b", r"\$14::timestamptz\b", r"\$9::date\b", r"\$11::timestamptz\b"):
+        assert not re.search(bad, body), f"осталась падающая привязка {bad}"
+
+
 def test_sync_account_does_not_mark_itself():
     """Пометку acc_status теперь принимает агрегатор — sync_account не пишет БД
     в except (иначе системный сбой снова массово метил бы аккаунты)."""

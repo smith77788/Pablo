@@ -2052,3 +2052,23 @@ whitelist; UI формы кампании — опция «🤖 Авто». Ур
 нет — это разрыв паритета; переноси через ОБЩИЙ существующий движок
 (flood_engine.auto_strategy), не пиши второй.** Гейт: test_dm_auto_pace (падает без
 проброса auto в движок/валидатор/UI; проверяет fail-safe в normal).
+
+## Контакт-синк: НАСТОЯЩАЯ причина — ошибка привязки типа даты в asyncpg — 2026-08-01
+Сырой пример (после честной диагностики) показал правду: «invalid input for query
+argument $12: '2013-11-01' ('str' object has no attribute 'toordinal')». Это НЕ
+сессии и НЕ транспорт — сессии/подключение/сбор контактов работали. Падала ЗАПИСЬ
+в unified_contacts: registered_estimate (date) и last_seen_at (timestamptz)
+приходят ISO-СТРОКАМИ, а голый `$N::date`/`$N::timestamptz` заставлял asyncpg
+кодировать str как date/timestamp и звать .toordinal()/.timestamp() → падало на
+ПЕРВОМ контакте каждого аккаунта → 0 сохранено → 28/28 «ошибка». Фикс:
+`$N::text::date` / `$N::text::timestamptz` (INSERT и UPDATE) — asyncpg биндит текст,
+Postgres приводит тип. ДОКАЗАНО на живом Postgres 16: старая форма воспроизводит
+ту же ошибку, новая — сохраняет. upsert_contact в repository имеет тот же риск, но
+мёртв (0 вызовов). Гейт: test_iso_date_params_bound_as_text (структурный, т.к.
+заглушка пула тип-ошибки не ловит — это и есть причина, почему баг дожил до прода).
+УРОК В СВОД (тип-ошибки БД невидимы без живой БД): asyncpg требует datetime.date/
+datetime для колонок date/timestamptz — СТРОКА с голым ::date/::timestamptz падает
+«no attribute toordinal/timestamp». Для ISO-строк используй `::text::date` /
+`::text::timestamptz` (или конвертируй в объекты). Юнит-заглушка пула тип НЕ
+проверяет → такие баги ловятся ТОЛЬКО на живом Postgres (или структурным гейтом на
+форму каста). При «пишет, но в БД пусто» — первым делом подними реальный PG.
