@@ -5134,11 +5134,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field">
       <label>Темп отправки</label>
       <select id="cmpPace">
+        <option value="auto">🤖 Авто — темп по состоянию флота</option>
         <option value="slow">🐢 Медленно — безопаснее от банов</option>
         <option value="normal" selected>⚖️ Обычный</option>
         <option value="fast">⚡ Быстро — выше риск</option>
       </select>
-      <div class="field-note">Влияет на паузы между сообщениями с аккаунтов</div>
+      <div class="field-note">Авто подстраивает паузы под флуды флота за сегодня; ручные — фиксированные паузы между сообщениями</div>
     </div>
     <div class="field">
       <label>Лимит на аккаунт в день</label>

@@ -483,10 +483,27 @@ async def run_campaign(
     _media_url = (_cp or {}).get("media_url") or None
     try:
         _pace = (_cp or {}).get("pace")
-        _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
-        if _pace_mult:
+        if _pace == "auto":
+            # «Авто»: темп из состояния ВСЕГО флота за сегодня (flood_engine),
+            # а не три числа, выбранные вслепую. Паритет с масс-инвайтом: Telegram
+            # смотрит на аккаунты как на группу, флуд у одного тормозит всех.
+            # «Авто» не имеет права быть опаснее обычного — при сбое расчёта normal.
+            try:
+                from services.flood_engine import auto_strategy
+                _st = await auto_strategy(pool, owner_id)
+                _pace_mult = float(_st.get("pace_mult") or 1.0)
+                log.info("dm_engine campaign=%s: авто-темп ×%.2f (%s)",
+                         campaign_id, _pace_mult, _st.get("reason") or "")
+            except Exception:
+                log.debug("dm_engine: auto strategy unavailable campaign=%s", campaign_id)
+                _pace_mult = 1.0
             _delay_min *= _pace_mult
             _delay_max *= _pace_mult
+        else:
+            _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
+            if _pace_mult:
+                _delay_min *= _pace_mult
+                _delay_max *= _pace_mult
     except Exception as e:
         log.warning('dm_engine: pace_multiplier load failed: %s', e)
 

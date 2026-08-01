@@ -7124,9 +7124,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 total_targets = len(import_list)
         except Exception:
             total_targets = 0
-        # Темп рассылки (params.pace): slow безопаснее, fast быстрее (риск бана).
+        # Темп рассылки (params.pace): slow безопаснее, fast быстрее (риск бана),
+        # auto — движок считает темп по состоянию флота за сегодня (flood_engine),
+        # паритет с масс-инвайтом.
         pace = (body.get("pace") or "normal").strip()
-        if pace not in ("slow", "normal", "fast"):
+        if pace not in ("slow", "normal", "fast", "auto"):
             pace = "normal"
         _params = {"pace": pace}
         if cohort_type:
