@@ -12339,23 +12339,25 @@ async function saveCrmReminder(id) {
 function copyText(t) { navigator.clipboard?.writeText(t); toast('📋 Скопировано'); }
 
 async function syncContacts() {
-  toast('🔄 Синхронизация...');
+  toast('🔄 Запускаю синхронизацию...');
   try {
     const d = await api('/api/miniapp/uch/sync', {method:'POST'});
+    if (d.queued) {
+      // Фоновая операция: 20+ аккаунтов инлайн не укладывались в таймаут запроса
+      // и обрывались. Теперь контакты подтягиваются по мере обработки — обновляем
+      // список несколько раз, пока op_worker проходит флот.
+      toast(`🔄 Синхронизация ${d.accounts||''} аккаунтов запущена — контакты появятся по мере обработки`);
+      [6000, 15000, 30000, 60000, 90000].forEach(ms => setTimeout(() => {
+        loadContacts(); loadContactStats();
+        if (document.getElementById('s-uchsynccenter')?.classList.contains('active')) loadSyncCenter();
+      }, ms));
+      return;
+    }
+    // Обратная совместимость со старым инлайн-ответом (если вернулся).
     if ((d.total_synced||0) > 0) {
       toast(`✅ Синхронизировано: ${d.total_synced} контактов, создано: ${d.total_created||0}`);
     } else if (d.message) {
-      // Явная причина нулевого результата + детализация по аккаунтам (если есть)
       toast('⚠️ '+d.message);
-      const det = (d.details||[]).filter(x=>!x.ok);
-      if (det.length) {
-        // showInfo — plain text (Telegram showAlert), без HTML-экранирования
-        const lines = det.slice(0,6).map(x=>`• ${x.account}: ${x.reason||'ошибка'}`).join('\n');
-        showInfo('Синхронизация контактов — детали по аккаунтам:\n\n'+lines
-          + (det.length>6?`\n… ещё ${det.length-6}`:''));
-      }
-    } else {
-      toast('✅ Синхронизация завершена: новых контактов нет');
     }
     loadContacts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }

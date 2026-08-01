@@ -1439,6 +1439,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_boost_bot_starts(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_invite":
                 result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
+            elif op_type == "contacts_sync":
+                result = await _exec_contacts_sync(pool, op_id, owner_id, params)
             elif op_type == "ai_comment":
                 result = await _exec_ai_comment(pool, bot, op_id, owner_id, params)
             elif op_type == "compliance_scan":
@@ -8233,6 +8235,36 @@ async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: in
             )
     except Exception:
         log_exc_swallow(log, "invite dedup: record failed")
+
+
+async def _exec_contacts_sync(
+    pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Фоновая синхронизация контактов флота в единый хаб.
+
+    Инлайн в HTTP-запросе 20+ аккаунтов не укладывались в таймаут шлюза и
+    обрывались (клиент отключался → gather отменялся → в БД попадала лишь часть
+    или НИЧЕГО). В фоне op_worker таймаута нет: sync_all_accounts проходит весь
+    флот с внутренней конкуренцией и пишет контакты по мере обработки. Именно так
+    «28 аккаунтов с контактами» перестают показывать пустой хаб.
+    """
+    from services.contacts_hub.sync_service import sync_all_accounts
+
+    res = await sync_all_accounts(pool, owner_id)
+    synced = int(res.get("total_synced", 0) or 0)
+    created = int(res.get("total_created", 0) or 0)
+    found = int(res.get("accounts_found", 0) or 0)
+    errs = res.get("errors") or []
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1, done_items=$1 WHERE id=$2",
+        max(found, 1), op_id)
+    if synced or not errs:
+        summary = (f"✅ Синхронизировано контактов: {synced} (новых {created}) "
+                   f"с {found} аккаунтов")
+    else:
+        summary = (f"⚠️ Контакты не получены с {found} аккаунтов — {len(errs)} ошибок "
+                   "(устаревшие сессии/недоступные прокси). Проверьте раздел «Аккаунты».")
+    return {"status": "done", "ok": synced, "failed": len(errs), "summary": summary}
 
 
 async def _exec_mass_invite(

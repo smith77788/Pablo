@@ -14050,13 +14050,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 500)
 
     async def uch_sync(request: web.Request) -> web.Response:
+        """Запустить синхронизацию контактов флота в ФОНЕ (operation_bus).
+
+        Раньше выполнялось инлайн в этом запросе: для 20+ аккаунтов Telethon-
+        подключения не укладывались в таймаут шлюза, клиент отключался, aiohttp
+        отменял обработчик на середине — в хаб попадали лишь часть контактов или
+        ноль. Теперь ставим операцию и сразу отвечаем; op_worker обрабатывает без
+        таймаута, а хаб подтягивает контакты по мере готовности.
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            from services.contacts_hub.sync_service import sync_all_accounts
-            result = await sync_all_accounts(pool, uid)
-            return _json_resp(result)
+            n = await _safe_count(pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 "
+                "AND session_str IS NOT NULL AND session_str <> ''", uid)
+            if not n:
+                return _err("Нет аккаунтов с сохранённой сессией. Подключите аккаунт "
+                            "в разделе «Аккаунты», затем синхронизируйте контакты.", 400)
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "contacts_sync", {},
+                total_items=int(n), label=f"Синхронизация контактов: {int(n)} акк.")
+            return _json_resp({"ok": True, "queued": True, "op_id": op_id, "accounts": int(n)})
         except Exception as e:
+            log.exception("uch_sync submit uid=%s", uid)
             return _err(str(e), 500)
 
     async def uch_groups(request: web.Request) -> web.Response:
