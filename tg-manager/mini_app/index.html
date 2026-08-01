@@ -831,6 +831,44 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb" id="acd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
+<!-- ══════════ КОНСОЛЬ АККАУНТА: ДИАЛОГИ ══════════ -->
+<div class="screen" id="s-accdialogs">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">💬 Диалоги</div>
+    <div class="hdr-meta"><span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openAccountContacts(ACC_CONSOLE_ID)" title="Контакты аккаунта">📇</span></div>
+  </div>
+  <div class="sub-sb"><div class="lst" id="adlgList"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+</div>
+
+<!-- ══════════ КОНСОЛЬ АККАУНТА: ЧАТ ══════════ -->
+<div class="screen" id="s-accchat">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="achat-title">Чат</div>
+    <div class="hdr-meta"><span style="font-size:16px;cursor:pointer;opacity:.7" onclick="reloadAccountChat()" title="Обновить">🔄</span></div>
+  </div>
+  <div class="sub-sb" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
+    <div id="achatBody" style="flex:1;overflow-y:auto;padding:8px 12px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div style="display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--sep);background:var(--bg)">
+      <input id="achatInput" type="text" placeholder="Сообщение..." class="input-flex" onkeydown="if(event.key==='Enter')sendAccountChat()">
+      <button class="btn btn-p" style="padding:10px 16px" onclick="sendAccountChat()">➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ КОНСОЛЬ АККАУНТА: КОНТАКТЫ ══════════ -->
+<div class="screen" id="s-acccontacts">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📇 Контакты аккаунта</div>
+  </div>
+  <div class="sub-sb">
+    <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск..." oninput="filterAccountContacts()" class="inp"></div>
+    <div class="lst" id="accContList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ CHANNELS LIST ══════════════════════ -->
 <div class="screen" id="s-channels">
   <div class="hdr">
@@ -7561,6 +7599,127 @@ async function openAccount(accId) {
   }
 }
 
+// ── Живая консоль аккаунта: диалоги / чат / контакты ───────────────────────
+// Живой просмотр диалогов ВЫБРАННОГО аккаунта через его сессию: открыть чат,
+// увидеть историю, ответить. Тексты/имена — внешние данные, всегда через esc().
+let ACC_CONSOLE_ID = null;   // аккаунт, чью консоль сейчас смотрим
+let ACC_CHAT_PEER = null;    // id/@username открытого собеседника
+let ACC_CHAT_NAME = '';
+let ACC_DIALOGS = {};        // peer id → имя (чтобы не тащить имя через onclick)
+let ACC_CONTACTS = [];
+
+async function openAccountDialogs(accId) {
+  ACC_CONSOLE_ID = accId;
+  push('s-accdialogs');
+  txt('adlgList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/account/'+accId+'/dialogs');
+    const list = d.dialogs || [];
+    ACC_DIALOGS = {};
+    list.forEach(dg => { ACC_DIALOGS[dg.id] = dg.name; });
+    if (!list.length) { txt('adlgList', empty('💬','Нет диалогов','У аккаунта пока нет переписок')); return; }
+    txt('adlgList', list.map(dg => {
+      const ico = {user:'👤',bot:'🤖',group:'👥',channel:'📡'}[dg.kind] || '💬';
+      const last = dg.last_media ? esc(dg.last_media) : esc(dg.last_text || '');
+      const pref = dg.last_out ? '<span style="opacity:.55">Вы: </span>' : '';
+      const unread = dg.unread > 0 ? `<span class="badge b-bl">${dg.unread}</span>` : '';
+      return `<div class="li tap" onclick="openAccountChat(${accId},'${dg.id}')">
+        <div class="row-ico" style="background:var(--bg-blue-16)">${ico}</div>
+        <div class="li-body"><div class="li-name">${esc(dg.name)}${dg.pinned?' 📌':''}</div>
+          <div class="li-sub">${pref}${last}</div></div>
+        <div class="li-right">${unread}<span class="chev">›</span></div>
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('adlgList', errHtml(e.message,'openAccountDialogs('+accId+')')); }
+}
+
+async function openAccountChat(accId, peer, name) {
+  ACC_CONSOLE_ID = accId;
+  ACC_CHAT_PEER = String(peer);
+  ACC_CHAT_NAME = name || ACC_DIALOGS[peer] || 'Чат';
+  txt('achat-title', esc(ACC_CHAT_NAME));
+  push('s-accchat');
+  await reloadAccountChat();
+}
+
+async function reloadAccountChat() {
+  const body = document.getElementById('achatBody');
+  if (!body || ACC_CHAT_PEER == null) return;
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/history');
+    if (d.peer_name) { ACC_CHAT_NAME = d.peer_name; txt('achat-title', esc(d.peer_name)); }
+    const msgs = d.messages || [];
+    if (!msgs.length) { body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px 12px">Нет сообщений — напишите первым</div>'; return; }
+    body.innerHTML = msgs.map(m => {
+      const out = m.out;
+      const media = m.media ? `<div style="opacity:.85;font-size:12px;margin-bottom:2px">${esc(m.media)}</div>` : '';
+      const text = m.text ? `<div style="white-space:pre-wrap;word-break:break-word">${esc(m.text)}</div>` : '';
+      const time = m.date ? new Date(m.date).toLocaleString('ru') : '';
+      return `<div style="display:flex;${out?'justify-content:flex-end':''};margin-bottom:8px">
+        <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--accent);color:var(--text);border-bottom-right-radius:4px':'background:var(--sep);color:var(--text);border-bottom-left-radius:4px'}">
+          ${media}${text}<div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${time}</div>
+        </div></div>`;
+    }).join('');
+    body.scrollTop = body.scrollHeight;
+  } catch(e) { body.innerHTML = errHtml(e.message,'reloadAccountChat()'); }
+}
+
+async function sendAccountChat() {
+  const inp = document.getElementById('achatInput');
+  if (!inp) return;
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.disabled = true;
+  try {
+    await api('/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/send',
+      {method:'POST', body: JSON.stringify({text})});
+    inp.value = '';
+    await reloadAccountChat();
+  } catch(e) { toast('⚠️ '+(e.message || 'Не отправлено')); }
+  finally { inp.disabled = false; inp.focus(); }
+}
+
+async function openAccountContacts(accId) {
+  ACC_CONSOLE_ID = accId;
+  push('s-acccontacts');
+  txt('accContList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  const s = document.getElementById('accContSearch'); if (s) s.value = '';
+  try {
+    const d = await api('/api/miniapp/account/'+accId+'/contacts');
+    ACC_CONTACTS = d.contacts || [];
+    renderAccountContacts(ACC_CONTACTS);
+  } catch(e) { txt('accContList', errHtml(e.message,'openAccountContacts('+accId+')')); }
+}
+
+function renderAccountContacts(list) {
+  if (!list.length) { txt('accContList', empty('📇','Нет контактов','В адресной книге аккаунта пусто')); return; }
+  txt('accContList', list.map(c => {
+    const ico = c.is_bot ? '🤖' : '👤';
+    const sub = [c.username?'@'+esc(c.username):'', c.phone?esc(c.phone):''].filter(Boolean).join(' · ');
+    // Написать можно тем, у кого есть @username — он резолвится без общего чата.
+    const write = c.username
+      ? `<button class="btn btn-s" style="padding:5px 12px;font-size:12px" onclick="event.stopPropagation();writeContact('${esc(c.username)}')">✍️</button>`
+      : '';
+    return `<div class="li"><div class="row-ico" style="background:var(--bg-green-16)">${ico}</div>
+      <div class="li-body"><div class="li-name">${esc(c.name)}${c.premium?' ⭐':''}</div><div class="li-sub">${sub}</div></div>
+      <div class="li-right">${write}</div></div>`;
+  }).join(''));
+}
+
+function filterAccountContacts() {
+  const q = (document.getElementById('accContSearch').value || '').toLowerCase();
+  renderAccountContacts(ACC_CONTACTS.filter(c =>
+    (c.name||'').toLowerCase().includes(q) || (c.username||'').toLowerCase().includes(q)));
+}
+
+function writeContact(username) {
+  const c = ACC_CONTACTS.find(x => x.username === username);
+  const name = c ? c.name : ('@'+username);
+  ACC_DIALOGS['@'+username] = name;
+  openAccountChat(ACC_CONSOLE_ID, '@'+username, name);
+}
+
 // Машинная причина проблемы (status_reason от op_worker) → человекочитаемо + путь
 // к фиксу. Отвечает на «почему аккаунт не работает», когда он вроде подключён.
 function accReasonHuman(raw) {
@@ -7725,27 +7884,45 @@ function buildAccDetail(d) {
     ${healthBanner}
     ${transportRow}
 
-    <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
+    <div style="display:flex;gap:8px;padding:0 0 6px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
       <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
       <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
+      ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1;min-width:130px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
     </div>
-    <div style="display:flex;gap:8px;padding:0 0 4px;flex-wrap:wrap">
-      ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
-      <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
-      <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
-      <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
-      <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
-      <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
-      <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
-      <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
-      <button class="btn btn-s" onclick="openAccProxy(${a.id}, ${a.proxy_id||'null'})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
-      <button class="btn btn-s" onclick="unbindAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔌 Снять прокси</button>
-      <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
-      <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
-      <button class="btn btn-s" onclick="exportAccSession(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">💾 Экспорт сессии</button>
-      <button class="btn btn-s" onclick="resetAccCooldown(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">⚡ Сброс кулдауна</button>
+
+    <div class="sec">Консоль аккаунта</div>
+    <div style="display:flex;gap:8px;padding:2px 0 4px">
+      <button class="btn btn-s" onclick="openAccountDialogs(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">💬 Диалоги</button>
+      <button class="btn btn-s" onclick="openAccountContacts(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">📇 Контакты</button>
     </div>
+
+    <div class="sec">Разделы</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:2px 0 4px">
+      <button class="btn btn-s" onclick="openChannels()" style="font-size:13px;padding:13px 6px">📡 Каналы и чаты</button>
+      <button class="btn btn-s" onclick="goTab('bots')" style="font-size:13px;padding:13px 6px">🤖 Боты</button>
+      <button class="btn btn-s" onclick="openInfra()" style="font-size:13px;padding:13px 6px">🏗 Инфраструктура</button>
+      <button class="btn btn-s" onclick="openGlobalPresence()" style="font-size:13px;padding:13px 6px">🌐 Гео-Сети</button>
+    </div>
+
+    <details style="margin:4px 0">
+      <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 2px;list-style:none">⚙️ Действия с аккаунтом</summary>
+      <div style="display:flex;gap:8px;padding:6px 0 2px;flex-wrap:wrap">
+        <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
+        <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
+        <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
+        <button class="btn btn-s" onclick="openAccProxy(${a.id}, ${a.proxy_id||'null'})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
+        <button class="btn btn-s" onclick="unbindAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔌 Снять прокси</button>
+        <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
+        <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
+        <button class="btn btn-s" onclick="exportAccSession(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">💾 Экспорт сессии</button>
+        <button class="btn btn-s" onclick="resetAccCooldown(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">⚡ Сброс кулдауна</button>
+      </div>
+    </details>
 
     <div class="sec">Профиль</div>
     <div class="lst">

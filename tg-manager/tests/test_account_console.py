@@ -1,0 +1,133 @@
+"""Живая консоль аккаунта: диалоги / история / отправка / контакты.
+
+Экран карточки аккаунта раньше был стеной из 14 обрезанных кнопок и не давал
+попасть в переписку самого аккаунта. Добавлены: консоль (диалоги→чат→история→
+ответ) и контакты аккаунта, плюс входы в разделы Каналы/Боты/Инфраструктура/
+Гео-Сети. Гейт держит цепочку целой: движок → маршруты API → экраны → входы.
+
+Пустые хелперы движка тестируются здесь же (без сети и без telethon — в тестовой
+среде его нет; движок импортирует telethon лениво внутри функций).
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+
+_DIV = re.compile(r"<(/?)div\b", re.I)
+
+
+def _screen_body(sid: str) -> str:
+    m = re.search(rf'<div class="screen" id="{re.escape(sid)}"', HTML)
+    assert m, f"экран {sid} не найден"
+    start, depth = m.start(), 0
+    for t in _DIV.finditer(HTML, start):
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            return HTML[start:t.end()]
+    raise AssertionError(f"незакрытый экран {sid}")
+
+
+# ── Чистые хелперы движка ────────────────────────────────────────────────────
+
+def test_dialog_kind():
+    from services import account_console as ac
+    assert ac.dialog_kind(True, True, False, False) == "bot"   # бот раньше user
+    assert ac.dialog_kind(True, False, False, False) == "user"
+    assert ac.dialog_kind(False, False, True, False) == "group"
+    assert ac.dialog_kind(False, False, False, True) == "channel"
+
+
+def test_preview_collapses_and_truncates():
+    from services import account_console as ac
+    assert ac.preview("  многострочный\nтекст ") == "многострочный текст"
+    assert ac.preview("x" * 200, 80).endswith("…")
+    assert ac.preview(None) == ""
+
+
+def test_classify_error_maps_known():
+    from services import account_console as ac
+    assert ac.classify_error("AuthKeyUnregisteredError")[0] == "session_expired"
+    assert ac.classify_error("A wait of 30s (FloodWait)")[0] == "flood"
+    assert ac.classify_error("proxy connect timeout")[0] == "network"
+    assert ac.classify_error("UserPrivacyRestrictedError")[0] == "privacy"
+    # Русский текст причины не пустой — его увидит пользователь.
+    assert ac.classify_error("whatever")[1]
+
+
+def test_parse_peer():
+    from services import account_console as ac
+    assert ac.parse_peer("-100500") == -100500   # marked id канала/чата
+    assert ac.parse_peer("777") == 777
+    assert ac.parse_peer("@durov") == "@durov"
+
+
+def test_engine_has_session_functions():
+    from services import account_console as ac
+    for fn in ("list_dialogs", "get_history", "send_text", "list_contacts"):
+        assert callable(getattr(ac, fn, None)), f"нет функции движка {fn}"
+
+
+# ── Маршруты API ─────────────────────────────────────────────────────────────
+
+def test_api_routes_registered():
+    for route in (
+        '"/api/miniapp/account/{acc_id}/dialogs"',
+        '"/api/miniapp/account/{acc_id}/dialog/{peer}/history"',
+        '"/api/miniapp/account/{acc_id}/dialog/{peer}/send"',
+        '"/api/miniapp/account/{acc_id}/contacts"',
+    ):
+        assert route in API, f"маршрут не зарегистрирован: {route}"
+
+
+def test_api_scopes_by_owner():
+    """Сессия аккаунта достаётся строго по владельцу — иначе кросс-тенантный
+    доступ к чужим перепискам."""
+    assert "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE" in API
+
+
+# ── Экраны и входы ───────────────────────────────────────────────────────────
+
+def test_console_screens_exist():
+    for sid in ("s-accdialogs", "s-accchat", "s-acccontacts"):
+        assert f'id="{sid}"' in HTML, f"экран {sid} отсутствует"
+
+
+def test_console_screens_reachable():
+    """К каждому экрану консоли есть хотя бы один переход push()."""
+    for sid in ("s-accdialogs", "s-accchat", "s-acccontacts"):
+        assert re.search(rf"push\('{sid}'\)", HTML), f"к {sid} нет входа push()"
+
+
+def test_account_detail_wires_console_and_sections():
+    """Карточка аккаунта ведёт в консоль и в разделы — иначе входы недостижимы."""
+    body = _screen_body("s-accdetail")  # экран есть
+    assert body
+    # Кнопки строятся в JS buildAccDetail — проверяем по исходнику функции.
+    m = re.search(r"function buildAccDetail\(", HTML)
+    assert m
+    nxt = re.search(r"\n(?:async )?function ", HTML[m.end():])
+    chunk = HTML[m.start(): m.end() + (nxt.start() if nxt else 16000)]
+    for call in ("openAccountDialogs(", "openAccountContacts(",
+                 "openChannels()", "goTab('bots')", "openInfra()", "openGlobalPresence()"):
+        assert call in chunk, f"в карточке аккаунта нет входа: {call}"
+
+
+def test_chat_can_send():
+    """Чат обязан уметь отправлять: инпут + функция отправки на нужный маршрут."""
+    chat = _screen_body("s-accchat")
+    assert "sendAccountChat()" in chat and 'id="achatInput"' in chat
+    m = re.search(r"function sendAccountChat\(", HTML)
+    assert m, "нет функции отправки"
+    assert "/send" in HTML[m.start(): m.start() + 800]
+
+
+def test_send_targets_are_escaped():
+    """Внешний контент (тексты/имена) рендерится через esc() — защита от инъекций."""
+    m = re.search(r"function reloadAccountChat\(", HTML)
+    assert m
+    body = HTML[m.start(): m.start() + 1600]
+    assert "esc(m.text)" in body, "текст сообщения не экранируется"

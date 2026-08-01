@@ -4048,6 +4048,134 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "label": f"✅ История опубликована ({res.get('period_hours', 24)}ч)"})
         return _err(res.get("error") or "Не удалось опубликовать историю", 400)
 
+    # ── Живая консоль аккаунта (диалоги / история / отправка / контакты) ──────
+    async def _console_account(uid: int, acc_id: int):
+        """Загрузить сессию+транспорт аккаунта для консоли, скоуп по владельцу.
+
+        Внешние данные (тексты, имена) — это ДАННЫЕ: экранирует их фронт, бэкенд
+        отдаёт сырьё. session_str наружу не отдаём и не логируем.
+        """
+        return await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+
+    async def account_dialogs(request: web.Request) -> web.Response:
+        """Список диалогов аккаунта (только чтение)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import account_console
+            res = await asyncio.wait_for(
+                account_console.list_dialogs(acc["session_str"], dict(acc), limit=50),
+                timeout=60)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_dialogs uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось получить диалоги", 400)
+        return _json_resp({"ok": True, "dialogs": res.get("dialogs", [])})
+
+    async def account_dialog_history(request: web.Request) -> web.Response:
+        """История одного диалога аккаунта (только чтение)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        from services import account_console
+        peer = account_console.parse_peer(request.match_info.get("peer", ""))
+        if peer == "" or peer is None:
+            return _err("Не указан собеседник", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            res = await asyncio.wait_for(
+                account_console.get_history(acc["session_str"], dict(acc), peer, limit=50),
+                timeout=60)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_dialog_history uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось получить историю", 400)
+        return _json_resp({"ok": True, "peer_name": res.get("peer_name"),
+                           "messages": res.get("messages", [])})
+
+    async def account_dialog_send(request: web.Request) -> web.Response:
+        """Отправить текстовое сообщение в диалог (ручное действие 1:1)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        from services import account_console
+        peer = account_console.parse_peer(request.match_info.get("peer", ""))
+        if peer == "" or peer is None:
+            return _err("Не указан собеседник", 400)
+        text = (body.get("text") or "").strip()
+        if not text:
+            return _err("Введите текст сообщения", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            res = await asyncio.wait_for(
+                account_console.send_text(acc["session_str"], dict(acc), peer, text),
+                timeout=60)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_dialog_send uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось отправить", 400)
+        return _json_resp({"ok": True, "message_id": res.get("message_id")})
+
+    async def account_contacts(request: web.Request) -> web.Response:
+        """Контакты аккаунта — адресная книга Telegram (только чтение)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        acc = await _console_account(uid, acc_id)
+        if not acc or not acc.get("session_str"):
+            return _err("Аккаунт недоступен", 400)
+        try:
+            from services import account_console
+            res = await asyncio.wait_for(
+                account_console.list_contacts(acc["session_str"], dict(acc)),
+                timeout=60)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
+        except Exception as exc:
+            log.exception("account_contacts uid=%d acc=%d", uid, acc_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 400)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось получить контакты", 400)
+        return _json_resp({"ok": True, "contacts": res.get("contacts", [])})
+
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
         Инлайн, немедленный результат (реабилитация своего аккаунта)."""
@@ -12543,6 +12671,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
     app.router.add_post("/api/miniapp/account/{acc_id}/spamblock_appeal", account_spamblock_appeal)
+    # Живая консоль аккаунта: диалоги / история / отправка / контакты.
+    app.router.add_get("/api/miniapp/account/{acc_id}/dialogs", account_dialogs)
+    app.router.add_get("/api/miniapp/account/{acc_id}/dialog/{peer}/history", account_dialog_history)
+    app.router.add_post("/api/miniapp/account/{acc_id}/dialog/{peer}/send", account_dialog_send)
+    app.router.add_get("/api/miniapp/account/{acc_id}/contacts", account_contacts)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
