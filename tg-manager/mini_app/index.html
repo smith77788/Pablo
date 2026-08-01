@@ -2816,6 +2816,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterContacts('mutual',this)">↔ Взаимные</div>
     </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
+    <div id="contactFilterHint" style="display:none;font-size:12px;color:var(--hint);padding:2px 2px 6px;line-height:1.35"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
       <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -12026,10 +12027,21 @@ async function loadContacts(append=false) {
 
 async function searchContacts() { loadContacts(); }
 
+// Пояснения к неочевидным фильтрам — чтобы «взаимных всего 2» не читалось как баг.
+const CONTACT_FILTER_HINTS = {
+  mutual: '↔ Взаимные — собеседник тоже добавил этот аккаунт в свои контакты (двусторонняя связь по флагу Telegram). Обычно их мало: люди редко сохраняют аккаунт в ответ.',
+  multi: '👥 Мульти-акк — контакт есть сразу у нескольких ваших аккаунтов.',
+};
 function filterContacts(filter, btn) {
   CONTACT_FILTER = filter;
   document.querySelectorAll('#contactFilterSeg .seg-opt').forEach(el=>el.classList.remove('on'));
   if (btn) btn.classList.add('on');
+  const hint = document.getElementById('contactFilterHint');
+  if (hint) {
+    const txtHint = CONTACT_FILTER_HINTS[filter];
+    hint.textContent = txtHint || '';
+    hint.style.display = txtHint ? 'block' : 'none';
+  }
   loadContacts();
 }
 
@@ -12091,7 +12103,9 @@ async function loadContactStats() {
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Всего</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(d.favorites||0)}</div><div class="kpi-lbl">⭐ Избр.</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--purple)">${num(d.premium||0)}</div><div class="kpi-lbl">💎 Premium</div></div>
+      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_phone||0)}</div><div class="kpi-lbl">📱 Телефон</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_username||0)}</div><div class="kpi-lbl">Username</div></div>
+      <div class="kpi-card" style="min-width:60px;text-align:center" title="Двусторонняя связь: аккаунт и собеседник добавили друг друга в контакты"><div class="kpi-val">${num(d.mutual||0)}</div><div class="kpi-lbl">↔ Взаимные</div></div>
     `);
   } catch(_) {}
 }

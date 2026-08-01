@@ -179,6 +179,7 @@ async def get_contact_stats(pool, owner_id) -> dict:
     with_username = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND username IS NOT NULL', owner_id)
     with_phone = await pool.fetchval("SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND phones != '[]'", owner_id)
     favorites = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_favorite=TRUE', owner_id)
+    mutual = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_mutual=TRUE', owner_id)
     notes_count = await pool.fetchval("SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND notes != '' AND notes IS NOT NULL", owner_id)
     tag_count = await pool.fetchval("SELECT COUNT(DISTINCT tag) FROM unified_contacts, unnest(tags) AS tag WHERE owner_id=$1", owner_id)
     group_count = await pool.fetchval('SELECT COUNT(*) FROM contact_groups WHERE owner_id=$1', owner_id)
@@ -186,7 +187,7 @@ async def get_contact_stats(pool, owner_id) -> dict:
     accounts = await pool.fetch('SELECT cs.account_id, COUNT(*) as cnt FROM contact_sources cs JOIN unified_contacts uc ON cs.contact_id = uc.id WHERE uc.owner_id = $1 GROUP BY cs.account_id', owner_id)
     return {
         'total': total, 'premium': premium, 'with_username': with_username,
-        'with_phone': with_phone, 'favorites': favorites, 'notes': notes_count,
+        'with_phone': with_phone, 'favorites': favorites, 'mutual': mutual, 'notes': notes_count,
         'tags': tag_count, 'groups': group_count, 'last_sync': last_sync,
         'by_account': [{'account_id': a['account_id'], 'count': a['cnt']} for a in accounts],
     }
