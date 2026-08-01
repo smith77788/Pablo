@@ -8201,11 +8201,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {"key": k, "label": v["label"], "severity": v.get("severity", "MEDIUM")}
                 for k, v in MINI_CATEGORIES.items()
             ]
+            # Юридический вектор (письма abuse@/dmca@ Telegram, CSAM→NCMEC) — это
+            # то, что РЕАЛЬНО приводит к удалению канала, в отличие от массовых
+            # in-app репортов. Он работает только при подключённых SMTP-ящиках;
+            # без них Strike бьёт вхолостую слабым вектором. Отдаём флаг, чтобы
+            # предупредить ДО запуска.
+            try:
+                _email_cnt = await pool.fetchval(
+                    "SELECT COUNT(*) FROM strike_email_accounts WHERE owner_id=$1 AND is_active=TRUE",
+                    uid,
+                )
+            except Exception:
+                _email_cnt = None  # таблицы может не быть — не блокируем статус
             return _json_resp({
                 "has_access": row is not None,
                 "mode": row["mode"] if row else None,
                 "purchased_at": row["purchased_at"].isoformat() if row and row["purchased_at"] else None,
                 "categories": categories,
+                "email_vector": {
+                    "configured": bool(_email_cnt) if _email_cnt is not None else None,
+                    "accounts": int(_email_cnt or 0) if _email_cnt is not None else 0,
+                },
             })
         except Exception as exc:
             log.exception("strike_status uid=%d", uid)

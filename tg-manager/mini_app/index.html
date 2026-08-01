@@ -4243,6 +4243,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Step 3: Confirm -->
     <div id="strikeStep3" style="display:none">
       <div class="strike-preview" id="strikePreviewBox"></div>
+      <div id="strikeVectorWarn" style="display:none;font-size:12px;line-height:1.5;background:var(--card-2,rgba(255,180,0,.08));border:1px solid var(--orange,#e6a100);border-radius:10px;padding:10px 12px;margin-top:10px"></div>
       <div class="field" style="margin-top:10px">
         <label>Эшелонирование (волн)</label>
         <select id="strikeWaves">
@@ -14397,6 +14398,29 @@ function strikeSelectCat(key, label) {
     <div class="strike-preview-row"><div class="strike-preview-lbl">📱 Аккаунты:</div><div class="strike-preview-val">все доступные активные</div></div>
     <div class="strike-preview-row"><div class="strike-preview-lbl">📡 Метод:</div><div class="strike-preview-val">Telegram Trust & Safety</div></div>
   `);
+  // Честное предупреждение о векторе. Массовые in-app жалобы сами по себе почти
+  // никогда не удаляют канал (Telegram взвешивает репутацию жалующегося, а не число
+  // репортов). Реально к удалению приводит юридический вектор — письма в abuse@/
+  // dmca@ Telegram + жалоба в App Store/Google Play — а он работает лишь при
+  // подключённых SMTP-ящиках. Если их нет — говорим прямо ДО запуска.
+  const _ev = _STRIKE_STATUS && _STRIKE_STATUS.email_vector;
+  const _warnEl = document.getElementById('strikeVectorWarn');
+  if (_warnEl) {
+    if (_ev && _ev.configured === false) {
+      _warnEl.style.display = '';
+      _warnEl.innerHTML = '⚠️ <b>Юридический вектор выключен.</b> Подключены только '
+        + 'массовые in-app жалобы — они <b>почти никогда не удаляют канал</b>. '
+        + 'Удаление даёт письмо в abuse@/dmca@ Telegram (нужны SMTP-ящики в '
+        + 'настройках Strike) + жалоба в App Store/Google Play на приложение Telegram.';
+    } else if (_ev && _ev.configured === true) {
+      _warnEl.style.display = '';
+      _warnEl.innerHTML = '✅ Юридический вектор включён (' + (_ev.accounts||0)
+        + ' SMTP). Он и решает; массовые жалобы — вспомогательные. '
+        + 'Гарантировать удаление не может ни один инструмент — решение за Telegram.';
+    } else {
+      _warnEl.style.display = 'none';
+    }
+  }
   document.getElementById('strikeStep2').style.display = 'none';
   document.getElementById('strikeStep3').style.display = '';
 }

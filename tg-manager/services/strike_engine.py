@@ -2316,7 +2316,53 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             lines.append(
                 f"  🔍 Проверка: {'✅ УДАЛЁН' if r.verified_down else '⚠️ Всё ещё активен'}"
             )
+        for _vline in _strike_effectiveness_verdict(r):
+            lines.append(_vline)
     return "\n".join(lines)
+
+
+def _strike_effectiveness_verdict(r: "StrikeResult") -> list[str]:
+    """Честный вердикт: что из сделанного РЕАЛЬНО влияет на удаление цели.
+
+    Почему это важно. Массовые in-app репорты (account.reportPeer / messages.report)
+    с десятков аккаунтов — самый СЛАБЫЙ вектор: Telegram не считает голоса, он взвешивает
+    репутацию жалующегося, а поток репортов с фарм-аккаунтов сам выглядит как
+    координированное поведение и обесценивается (а иногда бьёт по НАШИМ аккаунтам).
+    Реально к удалению публичного канала приводят вектора юридической/платформенной
+    ответственности: письмо в abuse@/dmca@ Telegram, CSAM → NCMEC, и жалоба в
+    App Store/Google Play (Telegram обязан чистить контент, угрожающий присутствию
+    приложения в сторах). Раньше сводка показывала стену «✅» по слабым векторам и
+    создавала ложное ощущение результата. Тут говорим прямо.
+    """
+    out: list[str] = []
+    if r.verified_down:
+        return out  # цель ушла — вердикт не нужен, выше уже «✅ УДАЛЁН»
+    legal_ran = (r.emails_sent or 0) > 0
+    if not legal_ran:
+        skip = ""
+        try:
+            skip = str((r.email_escalation or {}).get("skip_reason") or "")
+        except Exception:
+            skip = ""
+        _hint = "не настроен" if "no email" in skip.lower() or not skip else skip
+        out.append(
+            "  🎯 <b>Итог по цели:</b> сработал только слабый вектор — массовые "
+            "in-app жалобы. Сами по себе они <b>почти никогда не удаляют канал</b> "
+            "(Telegram взвешивает репутацию жалующегося, а не число репортов)."
+        )
+        out.append(
+            f"  📧 <b>Юридический вектор НЕ отправлен</b> (<i>{html.escape(_hint)}</i>) — "
+            "именно письма в abuse@/dmca@ Telegram и жалоба в App Store/Google Play "
+            "приводят к удалению. Подключите SMTP-ящики в настройках Strike и повторите."
+        )
+    else:
+        out.append(
+            f"  🎯 <b>Итог по цели:</b> юридические письма отправлены ({r.emails_sent}). "
+            "Удаление публичного канала — всегда решение Telegram; ни один инструмент "
+            "не гарантирует его. Проверьте статус позже; при живой цели усильте "
+            "жалобой в App Store/Google Play на приложение Telegram."
+        )
+    return out
 
 
 # ── Backward-compatible API (для channel_ops.py) ────────────────────────────────
