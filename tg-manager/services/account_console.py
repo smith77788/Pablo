@@ -241,37 +241,55 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
             pass
 
 
-async def list_contacts(session_string: str, acc: dict | None) -> dict[str, Any]:
-    """Контакты аккаунта (адресная книга Telegram). Только чтение."""
-    from services.account_manager import _make_client
+def _to_ui_contact(c: dict) -> dict:
+    """Богатый dict из account_manager → компактный формат для консоли."""
+    name = " ".join(x for x in (c.get("first_name"), c.get("last_name")) if x)
+    uname = c.get("username") or None
+    return {
+        "id": c.get("user_id"),
+        "name": name or (("@" + uname) if uname else str(c.get("user_id"))),
+        "username": uname,
+        "phone": c.get("phone") or None,
+        "is_bot": False,  # оба источника исключают ботов и удалённых
+        "premium": bool(c.get("is_premium")),
+        "mutual": bool(c.get("is_mutual")),
+    }
 
-    client = _make_client(session_string, acc)
-    out: list[dict] = []
+
+async def list_contacts(session_string: str, acc: dict | None) -> dict[str, Any]:
+    """Контакты аккаунта. Только чтение.
+
+    Два источника, как в синхронизации контакт-хаба: адресная книга
+    (`get_contacts`) И собеседники личных диалогов (`get_dialog_contacts`). У
+    «рабочего» аккаунта книга часто пуста, а в ЛС — десятки людей; без второго
+    источника карточка показывала бы «нет контактов» при живой переписке (эту же
+    ошибку уже ловили в контакт-хабе). Переиспользуем движок account_manager,
+    а не дублируем GetContactsRequest здесь.
+    """
+    from services import account_manager as am
+
     try:
-        from telethon.tl.functions.contacts import GetContactsRequest
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        res = await asyncio.wait_for(client(GetContactsRequest(hash=0)),
-                                     timeout=_ACTION_TIMEOUT)
-        users = getattr(res, "users", []) or []
-        for u in users:
-            name = " ".join(x for x in (getattr(u, "first_name", None),
-                                        getattr(u, "last_name", None)) if x)
-            out.append({
-                "id": u.id,
-                "name": name or (("@" + u.username) if getattr(u, "username", None) else str(u.id)),
-                "username": getattr(u, "username", None),
-                "phone": getattr(u, "phone", None),
-                "is_bot": bool(getattr(u, "bot", False)),
-                "premium": bool(getattr(u, "premium", False)),
-            })
-        out.sort(key=lambda c: c["name"].lower())
-        return {"ok": True, "contacts": out}
+        book = await am.get_contacts(session_string, acc)
     except Exception as exc:
         code, human = classify_error(str(exc))
         log.warning("account_console.list_contacts acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+
+    # Диалоговые собеседники — дополнение. Их сбой НЕ роняет уже полученную книгу.
+    dialog_people: list[dict] = []
+    try:
+        dialog_people = await am.get_dialog_contacts(session_string, limit=300, _acc=acc)
+    except Exception:
+        log.debug("list_contacts: dialog harvest failed acc=%s", (acc or {}).get("id"))
+
+    # Слияние по user_id: адресная книга приоритетнее (там телефон/mutual), диалоги
+    # лишь ДОБАВЛЯЮТ недостающих — поэтому книга идёт первой и не перезатирается.
+    by_id: dict[Any, dict] = {}
+    for c in list(book) + dialog_people:
+        uid = c.get("user_id")
+        if uid is None or uid in by_id:
+            continue
+        by_id[uid] = c
+    out = [_to_ui_contact(c) for c in by_id.values()]
+    out.sort(key=lambda c: c["name"].lower())
+    return {"ok": True, "contacts": out}

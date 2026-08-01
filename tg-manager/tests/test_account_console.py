@@ -71,6 +71,73 @@ def test_engine_has_session_functions():
         assert callable(getattr(ac, fn, None)), f"нет функции движка {fn}"
 
 
+def test_to_ui_contact_shape():
+    from services import account_console as ac
+    ui = ac._to_ui_contact({"user_id": 5, "first_name": "Ян", "last_name": "П",
+                            "username": "yan", "phone": "+7", "is_premium": True})
+    assert ui == {"id": 5, "name": "Ян П", "username": "yan", "phone": "+7",
+                  "is_bot": False, "premium": True, "mutual": False}
+    # Без имени — падать на @username, потом на id.
+    assert ac._to_ui_contact({"user_id": 9, "username": "u"})["name"] == "@u"
+    assert ac._to_ui_contact({"user_id": 9})["name"] == "9"
+
+
+def test_list_contacts_merges_book_and_dialogs(monkeypatch):
+    """Контакты аккаунта = адресная книга + собеседники ЛС (книга приоритетна).
+
+    Без второго источника «рабочий» аккаунт с пустой книгой, но живой перепиской
+    показывал бы «нет контактов» — ту же ошибку уже ловил контакт-хаб.
+    """
+    import asyncio
+    import sys
+    import types
+    from services import account_console as ac
+
+    stub = types.ModuleType("services.account_manager")
+
+    async def get_contacts(s, a=None):
+        return [{"user_id": 1, "first_name": "Ann", "username": "ann",
+                 "phone": "+7", "is_premium": True, "is_mutual": True}]
+
+    async def get_dialog_contacts(s, limit=500, _acc=None):
+        return [{"user_id": 1, "first_name": "AnnFromDialog"},   # дубль — книга победит
+                {"user_id": 2, "first_name": "Bob"}]              # новый — добавится
+
+    stub.get_contacts = get_contacts
+    stub.get_dialog_contacts = get_dialog_contacts
+    monkeypatch.setitem(sys.modules, "services.account_manager", stub)
+
+    res = asyncio.run(ac.list_contacts("sess", {"id": 9}))
+    assert res["ok"]
+    by_id = {c["id"]: c for c in res["contacts"]}
+    assert set(by_id) == {1, 2}
+    assert by_id[1]["name"] == "Ann" and by_id[1]["phone"] == "+7"  # книга, не диалог
+    assert by_id[2]["name"] == "Bob" and by_id[2]["phone"] is None
+
+
+def test_list_contacts_survives_dialog_failure(monkeypatch):
+    """Сбой сбора диалогов не должен ронять уже полученную адресную книгу."""
+    import asyncio
+    import sys
+    import types
+    from services import account_console as ac
+
+    stub = types.ModuleType("services.account_manager")
+
+    async def get_contacts(s, a=None):
+        return [{"user_id": 1, "first_name": "Ann"}]
+
+    async def get_dialog_contacts(s, limit=500, _acc=None):
+        raise RuntimeError("dialogs boom")
+
+    stub.get_contacts = get_contacts
+    stub.get_dialog_contacts = get_dialog_contacts
+    monkeypatch.setitem(sys.modules, "services.account_manager", stub)
+
+    res = asyncio.run(ac.list_contacts("sess", {"id": 9}))
+    assert res["ok"] and len(res["contacts"]) == 1
+
+
 # ── Маршруты API ─────────────────────────────────────────────────────────────
 
 def test_api_routes_registered():
