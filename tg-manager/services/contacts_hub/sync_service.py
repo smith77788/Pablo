@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 
 log = logging.getLogger(__name__)
@@ -148,24 +149,14 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
         # Telethon (напр. AuthKeyUnregistered «server doesn't know about the
         # authorization key») пользователю показывать нельзя.
         friendly, status = classify_session_error(emsg)
-        try:
-            if status == 'dead':
-                # необратимо (AUTH_KEY_DUPLICATED / deactivated) → деактивируем
-                await pool.execute(
-                    "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired', "
-                    "status_reason=$2 WHERE id=$1", account_id, friendly[:200])
-            elif status == 'expired':
-                # ключ не признан: помечаем как требующий релога (СИГНАЛ, попадёт в
-                # пульс здоровья и раздел «Аккаунты»), но НЕ глушим is_active — при
-                # системном сбое (релей не на тот DC) падают все аккаунты одинаково,
-                # деактивировать их все нельзя.
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status='session_expired', "
-                    "status_reason=$2 WHERE id=$1", account_id, friendly[:200])
-        except Exception:
-            pass
+        # ВАЖНО: пометку acc_status здесь НЕ делаем. Решение о пометке принимает
+        # sync_all_accounts, который видит КАРТИНУ по флоту: когда все аккаунты
+        # падают одинаково — это системный сбой транспорта (сеть/прокси/релей/
+        # IPv6), а не 28 одновременно протухших сессий, и метить их session_expired
+        # (тем более только что залогиненные) — ложная тревога.
+        raw = re.sub(r'\s+', ' ', emsg).strip()[:160]
         await log_sync(pool, owner_id, account_id, 'auto', 0, 0, 0, 0, duration_ms, friendly[:200])
-        return {'error': friendly, 'synced': 0}
+        return {'error': friendly, 'status': status, 'raw': raw, 'synced': 0}
 
 
 async def sync_all_accounts(pool, owner_id: int) -> dict:
@@ -226,13 +217,49 @@ async def sync_all_accounts(pool, owner_id: int) -> dict:
     total_created = sum(r.get('created', 0) for r in results)
     total_updated = sum(r.get('updated', 0) for r in results)
     errors = [r.get('error') for r in results if r.get('error')]
+    failed = [(a, r) for a, r in zip(accounts, results) if r.get('error')]
+
+    # Системный сбой vs изолированные проблемы. Когда почти ВЕСЬ флот падает
+    # одинаково — это транспорт (сеть/прокси/релей/IPv6), а не 28 одновременно
+    # протухших сессий. В этом случае НЕ метим аккаунты session_expired (ложная
+    # тревога, особенно для только что залогиненных) и говорим об этом честно.
+    systemic = accounts_found >= 3 and len(failed) >= max(3, int(accounts_found * 0.8))
+
+    if not systemic:
+        # Изолированные сбои — метим конкретные аккаунты (сигнал в «Аккаунты»).
+        for acc, res in failed:
+            st = res.get('status')
+            fr = (res.get('error') or '')[:200]
+            try:
+                if st == 'dead':
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired', "
+                        "status_reason=$2 WHERE id=$1", acc['id'], fr)
+                elif st == 'expired':
+                    await pool.execute(
+                        "UPDATE tg_accounts SET acc_status='session_expired', "
+                        "status_reason=$2 WHERE id=$1", acc['id'], fr)
+            except Exception:
+                pass
+
+    # Честное сообщение: доминирующая РЕАЛЬНАЯ причина + сырой пример для диагностики,
+    # а не гадание «сессии устарели».
     message = None
     if total_synced == 0:
-        if errors:
-            message = ('Аккаунты найдены, но контакты не получены. Вероятно, '
-                       'сессии устарели или прокси недоступны — проверьте детали ниже.')
-        else:
+        if not errors:
             message = 'Синхронизация прошла: у аккаунтов нет контактов для импорта.'
+        else:
+            raw_sample = next((r.get('raw') for _, r in failed if r.get('raw')), '')
+            raw_tail = f' Пример ошибки: {raw_sample}' if raw_sample else ''
+            if systemic:
+                message = (
+                    f'Похоже на системный сбой ПОДКЛЮЧЕНИЯ, а не сессий: {len(failed)} из '
+                    f'{accounts_found} аккаунтов упали одинаково. Сессии, скорее всего, '
+                    'в порядке (аккаунты только что вошли) — проблема в транспорте '
+                    '(сеть/прокси/CF-релей/IPv6). Аккаунты НЕ помечены на релог.' + raw_tail)
+            else:
+                message = ('Аккаунты найдены, но контакты не получены — см. детали по '
+                           'аккаунтам ниже.' + raw_tail)
     return {
         'accounts_found': accounts_found,
         'accounts_synced': len(results),
@@ -240,6 +267,7 @@ async def sync_all_accounts(pool, owner_id: int) -> dict:
         'total_created': total_created,
         'total_updated': total_updated,
         'errors': errors,
+        'systemic': systemic,
         'details': details,
         'message': message,
     }

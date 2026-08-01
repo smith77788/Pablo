@@ -8258,12 +8258,13 @@ async def _exec_contacts_sync(
     await _safe_execute(
         pool, "UPDATE operation_queue SET total_items=$1, done_items=$1 WHERE id=$2",
         max(found, 1), op_id)
-    if synced or not errs:
+    if synced:
         summary = (f"✅ Синхронизировано контактов: {synced} (новых {created}) "
                    f"с {found} аккаунтов")
     else:
-        summary = (f"⚠️ Контакты не получены с {found} аккаунтов — {len(errs)} ошибок "
-                   "(устаревшие сессии/недоступные прокси). Проверьте раздел «Аккаунты».")
+        # Честная причина из sync_all_accounts (различает системный сбой транспорта
+        # и изолированные проблемы), а не гадание «устаревшие сессии».
+        summary = "⚠️ " + (res.get("message") or f"Контакты не получены с {found} аккаунтов")
     return {"status": "done", "ok": synced, "failed": len(errs), "summary": summary}
 
 
