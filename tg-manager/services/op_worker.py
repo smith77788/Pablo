@@ -5398,18 +5398,17 @@ async def _exec_strike(
         action_type="strike",
     )
 
-    if not raw_accounts:
-        return {"status": "failed", "summary": "⚠️ Strike: нет аккаунтов"}
-
-    accounts_dicts = [dict(a) for a in raw_accounts]
+    # ВАЖНО (подход): отсутствие/недоступность TG-аккаунтов НЕ должно убивать
+    # операцию. Массовые in-app жалобы — самый слабый вектор; реально удаляет канал
+    # юридический вектор (письма abuse@/dmca@ Telegram, CSAM→NCMEC), а ему TG-
+    # аккаунты не нужны — только SMTP. Раньше три ранних `return failed` (нет
+    # аккаунтов / все в cooldown / все на прогреве) глушили операцию ДО юр-вектора,
+    # т.е. единственный работающий вектор не запускался. Теперь пустой viable
+    # допустим — ниже уйдём в legal-only, если настроен SMTP.
+    accounts_dicts = [dict(a) for a in (raw_accounts or [])]
 
     # ── Pre-flight: фильтр cooldown + flood-state + сортировка ────────────────
     viable = preflight_accounts(accounts_dicts)
-    if not viable:
-        return {
-            "status": "failed",
-            "summary": "⚠️ Strike: все аккаунты в cooldown или неактивны",
-        }
 
     # ── Warmup overlap guard: exclude accounts with active warmup plans ───────
     try:
@@ -5432,12 +5431,6 @@ async def _exec_strike(
     except Exception:
         log_exc_swallow(log, f"_exec_strike op={op_id}: warmup overlap check failed")
 
-    if not viable:
-        return {
-            "status": "failed",
-            "summary": "⚠️ Strike: все аккаунты на прогреве или в cooldown",
-        }
-
     # ── Anti-detection (класс 7): риск-пульс ──────────────────────────────────
     # Strike — самая баноопасная операция (жалоба через реальный аккаунт). Бить с
     # аккаунта под недавним СЕРЬЁЗНЫМ ограничением (restriction_events) = быстрый
@@ -5449,6 +5442,33 @@ async def _exec_strike(
         log.info(
             "_exec_strike op=%d: пропущено %d аккаунтов под риск-пульсом",
             op_id, _quar_skipped,
+        )
+
+    # ── Нет пригодных TG-аккаунтов → legal-only (не глушим операцию) ───────────
+    # Юридический вектор (письма abuse@/dmca@ Telegram, CSAM→NCMEC) аккаунтов не
+    # требует — и это ЕДИНСТВЕННЫЙ вектор, реально удаляющий канал. Запускаем его,
+    # если настроен хотя бы один SMTP-ящик; иначе честно сообщаем, что запускать
+    # нечего (ни аккаунтов, ни SMTP), а не тихо «готово, 0».
+    if not viable:
+        try:
+            _smtp_cnt = int(await pool.fetchval(
+                "SELECT COUNT(*) FROM strike_email_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE", owner_id) or 0)
+        except Exception:
+            _smtp_cnt = 0
+        if not _smtp_cnt:
+            return {
+                "status": "failed",
+                "summary": (
+                    "⚠️ Strike: нет ни пригодных аккаунтов, ни SMTP-ящиков. "
+                    "Подключите SMTP в настройках Strike — юридические письма "
+                    "(abuse@/dmca@ Telegram) не требуют аккаунтов и это единственный "
+                    "вектор, который реально удаляет канал."
+                ),
+            }
+        log.info(
+            "_exec_strike op=%d: нет TG-аккаунтов для in-app вектора — legal-only (SMTP=%d)",
+            op_id, _smtp_cnt,
         )
 
     # ── Волны ─────────────────────────────────────────────────────────────────
