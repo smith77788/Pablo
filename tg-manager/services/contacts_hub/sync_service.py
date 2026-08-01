@@ -69,6 +69,22 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
         # uses the real GetContactsRequest TL call — client.get_contacts() is not
         # a real Telethon method (this used to raise AttributeError on every sync).
         contacts = await account_manager.get_contacts(acc['session_str'], _acc=dict(acc))
+        # Второй источник — собеседники из личных диалогов. Адресная книга у
+        # «рабочих» аккаунтов часто пуста, а переписок много: без этого система
+        # «не обнаруживала» контакты, которых у аккаунта фактически десятки.
+        # Сбой сбора диалогов НЕ должен ронять уже полученную адресную книгу.
+        try:
+            dialog_contacts = await account_manager.get_dialog_contacts(
+                acc['session_str'], _acc=dict(acc))
+        except Exception as _de:
+            log.warning('sync_account: сбор диалогов не удался acc=%s: %s', account_id, _de)
+            dialog_contacts = []
+        # Слияние по user_id: адресная книга приоритетнее (там есть is_mutual и,
+        # как правило, телефон), диалоги лишь ДОБАВЛЯЮТ тех, кого в книге нет.
+        _by_uid = {c['user_id']: c for c in dialog_contacts}
+        for c in contacts:
+            _by_uid[c['user_id']] = c  # книга перекрывает диалог для того же uid
+        contacts = list(_by_uid.values())
         created = 0
         updated = 0
         for c in contacts:

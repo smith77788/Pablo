@@ -3513,6 +3513,81 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
             log_exc_swallow(log, "Сбой в get_contacts")
 
 
+async def get_dialog_contacts(
+    session_string: str, limit: int = 500, _acc: dict | None = None
+) -> list[dict]:
+    """Собеседники из ЛИЧНЫХ диалогов аккаунта — второй источник контактов.
+
+    ЗАЧЕМ. `get_contacts` читает только адресную книгу (GetContactsRequest). Но у
+    «рабочего» аккаунта людей, с которыми он реально переписывался, обычно в разы
+    больше, чем сохранённых контактов: собеседник в ЛС не попадает в адресную
+    книгу, пока его вручную не «добавить в контакты». Конкуренты (TeleRaptor и
+    др.) собирают именно этих людей — поэтому у них «контактов» много, а у нас по
+    той же учётке было пусто. Это и есть «у аккаунта есть контакты, система их не
+    обнаруживает».
+
+    Возвращает тот же формат dict, что и `get_contacts` (те же ключи), чтобы
+    sync_account мог слить оба источника без спецобработки. Боты и удалённые
+    исключаются. Пустой список = нет личных диалогов; сбой = исключение (как в
+    get_contacts, чтобы не маскировать мёртвую сессию под «нет контактов»).
+    """
+    from telethon.tl.types import User
+    from services.tg_userid_date import estimate_registration_date
+
+    client = _make_client(session_string, _acc, low_risk=True)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        out: list[dict] = []
+        seen: set[int] = set()
+        async for dialog in client.iter_dialogs(limit=limit):
+            try:
+                if not getattr(dialog, "is_user", False):
+                    continue
+                user = dialog.entity
+            except Exception:
+                continue
+            if not isinstance(user, User):
+                continue
+            if getattr(user, "deleted", False) or getattr(user, "bot", False):
+                continue
+            if getattr(user, "is_self", False) or user.id in seen:
+                continue
+            seen.add(user.id)
+            last_seen_type, last_seen_at = _classify_last_seen(getattr(user, "status", None))
+            out.append({
+                "user_id": user.id,
+                "access_hash": getattr(user, "access_hash", None),
+                "username": getattr(user, "username", "") or "",
+                "phone": getattr(user, "phone", "") or "",
+                "first_name": getattr(user, "first_name", "") or "",
+                "last_name": getattr(user, "last_name", "") or "",
+                # Собеседник взаимен только если он в адресной книге; здесь
+                # источник — диалог, поэтому mutual не утверждаем.
+                "is_mutual": False,
+                "is_premium": bool(getattr(user, "premium", False)),
+                "is_verified": bool(getattr(user, "verified", False)),
+                "is_scam": bool(getattr(user, "scam", False)),
+                "is_fake": bool(getattr(user, "fake", False)),
+                "is_restricted": bool(getattr(user, "restricted", False)),
+                "last_seen_type": last_seen_type,
+                "last_seen_at": last_seen_at,
+                "registered_estimate": estimate_registration_date(user.id),
+                "source": "dialog",
+            })
+        return out
+    except asyncio.TimeoutError:
+        log.warning("get_dialog_contacts timeout (connect)")
+        raise RuntimeError("аккаунт не ответил (таймаут коннекта — проверьте прокси/сессию)")
+    except Exception as e:
+        log.warning("get_dialog_contacts error: %s", e)
+        raise
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в get_dialog_contacts")
+
+
 async def kick_from_channel(
     session_string: str,
     channel_id: int,
