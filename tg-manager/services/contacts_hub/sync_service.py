@@ -130,6 +130,7 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
                     username, first_name, last_name, display_name,
                     json.dumps(phones), is_premium, is_verified, is_mutual,
                     reg_est, last_seen_type, last_seen_at, footprint, existing['id'])
+                contact_id = existing['id']
                 updated += 1
             else:
                 contact_id = str(__import__('uuid').uuid4())
@@ -143,11 +144,17 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
                     contact_id, owner_id, user_id, username, first_name,
                     last_name, display_name, json.dumps(phones), is_premium,
                     is_verified, is_mutual, reg_est, last_seen_type, last_seen_at, footprint)
-                await pool.execute(
-                    'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) '
-                    'VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING',
-                    contact_id, account_id, display_name)
                 created += 1
+            # Привязать ЭТОТ аккаунт как источник — и для НОВОГО, и для уже
+            # существующего контакта. Раньше связь писалась только в ветке нового:
+            # контакт, впервые добавленный ДРУГИМ аккаунтом, не числился за этим →
+            # «по аккаунтам» показывало доли реального (Bella 792 вместо тысяч),
+            # хотя контакты собраны. UNIQUE(contact_id, account_id) → идемпотентно.
+            await pool.execute(
+                'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) '
+                'VALUES ($1,$2,$3,NOW()) '
+                'ON CONFLICT (contact_id, account_id) DO UPDATE SET last_synced_at=NOW()',
+                contact_id, account_id, display_name)
 
         duration_ms = int((time.monotonic() - started) * 1000)
         await log_sync(pool, owner_id, account_id, 'auto', len(contacts), created, updated, 0, duration_ms)
