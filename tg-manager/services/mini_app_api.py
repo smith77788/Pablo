@@ -8227,6 +8227,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("strike_status uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def strike_takedown_kit(request: web.Request) -> web.Response:
+        """Готовый «пакет жалобы» по цели: App Store/Google Play/DMCA/NCMEC + текст.
+
+        Это честная версия «жалобы в стор»: авто-сабмит в Apple/Google невозможен
+        (вход+captcha), поэтому отдаём готовый текст + куда подать. Именно этот
+        вектор реально удаляет/блокирует канал, в отличие от массовых in-app жалоб.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            target = (request.query.get("target") or "").strip()
+            reason = (request.query.get("reason") or "other").strip()
+            if not target or len(target) < 2:
+                return _err("Укажите цель", 400)
+            from services.strike_engine import build_takedown_kit
+            kit = build_takedown_kit(target, reason)
+            return _json_resp(kit)
+        except Exception as exc:
+            log.exception("strike_takedown_kit uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def strike_launch(request: web.Request) -> web.Response:
         """Создаёт Strike операцию и ставит её в очередь."""
         uid = _get_uid(request)
@@ -12731,6 +12753,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Strike history
     app.router.add_get("/api/miniapp/strike/history", strike_history)
     app.router.add_get("/api/miniapp/strike/status", strike_status)
+    app.router.add_get("/api/miniapp/strike/takedown_kit", strike_takedown_kit)
     app.router.add_post("/api/miniapp/strike/launch", strike_launch)
     # Host-Server module
     app.router.add_get("/api/miniapp/host_server/status", host_server_status)

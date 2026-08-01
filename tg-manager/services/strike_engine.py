@@ -2441,6 +2441,105 @@ import ssl as _ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+def build_takedown_kit(
+    target: str,
+    reason: str,
+    title: str = "",
+    subscribers: int = 0,
+) -> dict:
+    """Готовый «пакет жалобы» для вектора, который РЕАЛЬНО удаляет/блокирует канал.
+
+    Честно о механике. Массовые in-app репорты почти не работают. Реально к
+    удалению/iOS-блокировке публичного канала приводит ДАВЛЕНИЕ ЧЕРЕЗ СТОРЫ и
+    правовые каналы: Apple и Google требуют от Telegram убирать нелегальный
+    контент из приложений, иначе приложение под угрозой в App Store/Google Play —
+    и Telegram скрывает такой канал (часто именно на iOS: «этот канал нельзя
+    показать на вашем устройстве»). Плюс DMCA и — для CSAM — NCMEC/IWF, где
+    удаление обязательно по закону.
+
+    Эти каналы НЕЛЬЗЯ честно автоматизировать: формы Apple/Google требуют входа в
+    аккаунт и captcha, ботов отклоняют. Поэтому даём ГОТОВЫЙ текст (тема+тело со
+    ссылкой, составом, правовым основанием) и точную инструкцию, куда его подать —
+    подача занимает ~30 секунд, а текст решает. Никаких обещаний «100% удаления»:
+    финальное решение всегда за площадкой.
+
+    Возвращает {target, channels: [{key, title, priority, url, how, subject, body}]},
+    отсортированные по приоритету (сначала самые действенные для этой категории).
+    """
+    clean = str(target or "").lstrip("@").strip()
+    link = f"https://t.me/{clean}"
+    cat = _reason_to_email_cat(reason, None)
+    en = cat.get("label", reason)
+    subs = f"{subscribers:,}" if subscribers else "unknown"
+    is_csam = reason in ("csam", "childabuse")
+
+    def _legal_body(authority: str, guideline: str) -> str:
+        return (
+            f"To: {authority}\n\n"
+            f"Subject of complaint: illegal content distributed via the Telegram app\n"
+            f"Telegram channel: {link}  (@{clean})\n"
+            f"Title: {title or 'n/a'} · Subscribers: {subs}\n"
+            f"Category: {en}\n\n"
+            f"The Telegram iOS/Android application distributes, through the public "
+            f"channel above, content that violates {guideline} and applicable law. "
+            f"The content is public, ongoing and accessible to all users including "
+            f"minors. As the platform distributing this application, you are "
+            f"requested to require its removal or to restrict the application until "
+            f"the violating content is removed.\n\n"
+            f"Direct link to the violating resource: {link}\n"
+        )
+
+    channels: list[dict] = []
+
+    if is_csam:
+        channels.append({
+            "key": "ncmec", "title": "NCMEC CyberTipline (CSAM)", "priority": 0,
+            "url": "https://report.cybertip.org/",
+            "how": "Подайте репорт на CyberTipline — по закону США контент обязаны "
+                   "удалить и передать в правоохранительные органы. Самый быстрый путь.",
+            "subject": f"CyberTip: CSAM on Telegram — {link}",
+            "body": _legal_body("NCMEC CyberTipline", "US federal law (18 U.S.C. §2252) and Apple/Google store policy on child sexual abuse material"),
+        })
+        channels.append({
+            "key": "iwf", "title": "IWF (Internet Watch Foundation)", "priority": 1,
+            "url": "https://report.iwf.org.uk/",
+            "how": "Международный репорт CSAM — IWF работает с хостерами и платформами напрямую.",
+            "subject": f"IWF report: CSAM on Telegram — {link}",
+            "body": _legal_body("Internet Watch Foundation", "international law on child sexual abuse material"),
+        })
+
+    channels.append({
+        "key": "apple", "title": "Apple App Store (iOS-блокировка)", "priority": 2,
+        "url": "",
+        "how": "На iPhone: App Store → найдите приложение Telegram → пролистайте вниз "
+               "до «Report a Problem» / «Сообщить о проблеме» → пожалуйтесь на "
+               "нелегальный контент и вставьте текст ниже. Именно жалоба в Apple чаще "
+               "всего вызывает у Telegram блокировку канала на iOS.",
+        "subject": f"App Store Guideline 1.1 violation — illegal content in Telegram ({link})",
+        "body": _legal_body("Apple App Store Review", "App Store Review Guideline 1.1 (Objectionable Content)"),
+    })
+    channels.append({
+        "key": "google", "title": "Google Play", "priority": 3,
+        "url": "https://support.google.com/googleplay/answer/1075738",
+        "how": "Play Store → Telegram → ⋮ → «Пометить как неприемлемое», либо форма по "
+               "ссылке. Пожалуйтесь на распространение нелегального контента.",
+        "subject": f"Google Play policy violation — illegal content in Telegram ({link})",
+        "body": _legal_body("Google Play Policy Team", "Google Play Developer Policy on illegal activities"),
+    })
+    channels.append({
+        "key": "telegram_abuse", "title": "Telegram Abuse (email)", "priority": 4,
+        "url": "mailto:abuse@telegram.org",
+        "how": "Письмо на abuse@telegram.org и dmca@telegram.org с текстом ниже. Если "
+               "у вас подключён SMTP в настройках Strike — движок шлёт это автоматически "
+               "при каждом ударе.",
+        "subject": cat.get("email_subject", f"Report: illegal content on Telegram — @{clean}"),
+        "body": _legal_body("Telegram Trust & Safety (abuse@telegram.org)", "Telegram Terms of Service and Apple/Google store policies"),
+    })
+
+    channels.sort(key=lambda c: c["priority"])
+    return {"target": clean, "link": link, "category": en, "channels": channels}
+
+
 # Категории для мини-страйка (один аккаунт, ручное обнаружение)
 MINI_CATEGORIES: dict[str, dict] = {
     "csam": {
