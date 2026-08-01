@@ -11943,25 +11943,31 @@ function lastSeenLabel(t) {
   return ({online:'🟢 в сети', recently:'недавно', last_week:'на этой неделе',
     last_month:'в этом месяце', offline:'был давно'})[t] || '';
 }
-async function loadContacts() {
+const CONTACT_PAGE = 200;
+let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
+async function loadContacts(append=false) {
   const q = (document.getElementById('contactSearch')?.value||'').trim();
-  let url;
+  if (!append) CONTACT_OFFSET = 0;
+  let url, paged=false;
   if (q) {
-    url = '/api/miniapp/uch/search?q='+encodeURIComponent(q);
+    url = '/api/miniapp/uch/search?q='+encodeURIComponent(q);   // поиск — свой набор, без пагинации
   } else {
     const params = new URLSearchParams();
     if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
     if (CONTACT_FILTER === 'premium') params.set('premium', '1');
     if (CONTACT_FILTER === 'multi') params.set('multi', '1');
     if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
-    const qs = params.toString();
-    url = '/api/miniapp/uch/contacts' + (qs ? '?'+qs : '');
+    params.set('limit', CONTACT_PAGE);
+    params.set('offset', CONTACT_OFFSET);
+    url = '/api/miniapp/uch/contacts?' + params.toString();
+    paged = true;
   }
   try {
     const d = await api(url);
     const contacts = d.results||d.contacts||[];
-    if (!contacts.length) { txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки')); return; }
-    txt('contactsList', contacts.map(c=>{
+    const total = (d.total!=null) ? d.total : contacts.length;
+    if (!append && !contacts.length) { txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки')); return; }
+    const rowsHtml = contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
       const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
       const meta = [
@@ -11980,8 +11986,21 @@ async function loadContacts() {
         </div>
         ${CONTACT_SELECT_MODE?'':`<div class="li-right"><span class="chev">›</span></div>`}
       </div>`;
-    }).join(''));
-  } catch(e) { txt('contactsList', errHtml(e.message)); }
+    }).join('');
+    const listEl = document.getElementById('contactsList');
+    document.getElementById('contactsMore')?.remove();
+    if (append) { listEl.insertAdjacentHTML('beforeend', rowsHtml); }
+    else { listEl.innerHTML = rowsHtml; }
+    if (paged) {
+      CONTACT_OFFSET += contacts.length;
+      // «Показать ещё» — иначе список молча обрывался на первой странице (видно
+      // «лишь десятки» при тысячах контактов).
+      if (CONTACT_OFFSET < total) {
+        listEl.insertAdjacentHTML('beforeend',
+          `<button id="contactsMore" class="btn btn-s" style="width:100%;margin:8px 0" onclick="loadContacts(true)">Показать ещё · ${num(CONTACT_OFFSET)} из ${num(total)}</button>`);
+      }
+    }
+  } catch(e) { if(!append) txt('contactsList', errHtml(e.message)); else toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function searchContacts() { loadContacts(); }

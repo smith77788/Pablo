@@ -8285,15 +8285,16 @@ async def _exec_contacts_sync(
 
     # Ограничение по времени: зависший на сети аккаунт не должен держать
     # единственный слот воркера бесконечно (уже записанные контакты сохранятся —
-    # sync_account коммитит по контакту). 12 минут с запасом на большой флот.
+    # sync_account коммитит по контакту). 20 минут — с запасом на первичный полный
+    # сбор большого флота (тысячи диалогов на аккаунт).
     try:
-        res = await asyncio.wait_for(sync_all_accounts(pool, owner_id), timeout=720)
+        res = await asyncio.wait_for(sync_all_accounts(pool, owner_id), timeout=1200)
     except asyncio.TimeoutError:
         await _safe_execute(
             pool, "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id)
         return {"status": "done", "ok": 0, "failed": 0,
-                "summary": "⏳ Синхронизация прервана по таймауту (12 мин) — часть "
-                           "контактов сохранена. Проверьте сессии/прокси и повторите."}
+                "summary": "⏳ Синхронизация прервана по таймауту (20 мин) — часть "
+                           "контактов сохранена. Запустите ещё раз, чтобы дособрать."}
     synced = int(res.get("total_synced", 0) or 0)
     created = int(res.get("total_created", 0) or 0)
     found = int(res.get("accounts_found", 0) or 0)

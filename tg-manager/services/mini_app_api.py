@@ -14009,11 +14009,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         premium = request.query.get('premium') == '1'
         multi = request.query.get('multi') == '1'
         mutual = request.query.get('mutual') == '1'
+        # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
+        # контактов пользователь видел «лишь десятки» и не мог долистать до
+        # остальных. limit зажат, offset — для «Показать ещё».
+        try:
+            limit = min(max(int(request.query.get('limit', 200)), 1), 500)
+        except (TypeError, ValueError):
+            limit = 200
+        try:
+            offset = max(int(request.query.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
         try:
             from services.contacts_hub.repository import get_contacts
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
                                         tag=tag, premium_only=premium, multi_only=multi,
-                                        mutual_only=mutual)
+                                        mutual_only=mutual, limit=limit, offset=offset)
+            result['offset'] = offset
+            result['limit'] = limit
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)

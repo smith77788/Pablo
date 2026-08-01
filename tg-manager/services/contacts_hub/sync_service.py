@@ -75,8 +75,12 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
         # «не обнаруживала» контакты, которых у аккаунта фактически десятки.
         # Сбой сбора диалогов НЕ должен ронять уже полученную адресную книгу.
         try:
+            # limit=3000: у «рабочего» аккаунта личных переписок бывают тысячи —
+            # дефолт 500 обрезал сбор, и флот отдавал лишь малую часть контактов
+            # (жалоба «2.9к вместо 10к+»). Адресная книга собирается отдельно и
+            # полностью (GetContactsRequest).
             dialog_contacts = await account_manager.get_dialog_contacts(
-                acc['session_str'], _acc=dict(acc))
+                acc['session_str'], limit=3000, _acc=dict(acc))
         except Exception as _de:
             log.warning('sync_account: сбор диалогов не удался acc=%s: %s', account_id, _de)
             dialog_contacts = []
