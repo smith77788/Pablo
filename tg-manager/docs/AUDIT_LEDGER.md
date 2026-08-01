@@ -2270,3 +2270,23 @@ account_console-тесты патчат реальный модуль setattr'о
 `from pkg import sub as x`, если pkg.sub уже импортирован (атрибут пакета связан) —
 патчь атрибуты реального модуля. Коммит 3e855254; 2711 passed (4 pre-existing
 aiogram-env падения — telethon/aiogram не доустановлены в тест-контейнере).
+
+## Контакт-синк: live-PG регресс на date-bind + утечка стабов в invite e2e — 2026-08-01
+«Большой проход» на ЖИВОМ Postgres 16 (INFRAGRAM_TEST_DSN). (1) Фикс date-bind
+контакт-синка (`$N::text::date`/`::text::timestamptz`, чинил ранее «toordinal»-краш)
+НЕ имел live-PG регресса — заглушка пула типы не проверяет. Добавлен
+test_contacts_sync_e2e_postgres.py: доказано на живом драйвере, что голый `$1::date`
+с ISO-строкой падает `'str' has no attribute 'toordinal'`, а `::text::date` — нет;
+sync_account кладёт контакт (INSERT/UPDATE/None-даты) без краша, phones/footprint как
+jsonb. Регресс падает-без-фикса (проверено временным откатом `::text::date`→`::date`).
+(2) Найдена УТЕЧКА ИЗОЛЯЦИИ: test_invite_e2e_postgres подменял глобалы
+mass_inviter_engine.invite_batch/invite_by_phones/humanize/asyncio.sleep и НЕ
+восстанавливал (module-scoped фикстура, monkeypatch недоступен) → real invite_batch
+оставался стендовым стабом без ключа flood_wait, и test_invite_flood_safety падал
+KeyError'ом — но ТОЛЬКО когда e2e реально выполнялся (задан DSN), иначе skip маскировал.
+Фикс: save/restore оригиналов в teardown. (3) Устаревший assert `"недоступна" in
+summary` был в ДВУХ местах — во втором (e2e) поправил тоже под «Причина: …».
+УРОК В СВОД: (а) type-bind баги (date/jsonb) проверяй на ЖИВОМ PG — заглушка их не
+видит В ПРИНЦИПЕ (класс 23); (б) module-scoped фикстура, патчащая глобалы модуля,
+ОБЯЗАНА save/restore в teardown — иначе тихая межмодульная утечка, видимая лишь при
+определённом порядке/окружении. 2732 passed с DSN (4 pre-existing aiogram-env).

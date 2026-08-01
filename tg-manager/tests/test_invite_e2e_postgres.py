@@ -158,6 +158,18 @@ def stand():
 
     import services.mass_inviter_engine as inv
     from services import invite_behavior, op_worker as w
+    # ВАЖНО: сохраняем оригиналы и восстанавливаем в teardown. Фикстура
+    # module-scoped, поэтому pytest-monkeypatch (function-scoped) тут нельзя, а
+    # без ручного восстановления заглушки движка ПРОТЕКАЛИ в другие модули: после
+    # этого файла real invite_batch подменён на стенд-стаб (без ключа flood_wait),
+    # и test_invite_flood_safety падал KeyError'ом — но только когда e2e реально
+    # выполнялся (задан INFRAGRAM_TEST_DSN). Классический тихий провал изоляции.
+    _orig = {
+        "invite_batch": inv.invite_batch,
+        "invite_by_phones": inv.invite_by_phones,
+        "humanize": invite_behavior.humanize,
+        "sleep": w.asyncio.sleep,
+    }
     inv.invite_batch = s._engine
     inv.invite_by_phones = s._engine
 
@@ -171,6 +183,10 @@ def stand():
     w.asyncio.sleep = _fast
 
     yield s
+    inv.invite_batch = _orig["invite_batch"]
+    inv.invite_by_phones = _orig["invite_by_phones"]
+    invite_behavior.humanize = _orig["humanize"]
+    w.asyncio.sleep = _orig["sleep"]
     _run(pool.close())
     if _LOOP is not None and not _LOOP.is_closed():
         _LOOP.close()
@@ -273,7 +289,10 @@ def test_closed_group_stops_the_fleet(stand):
         refs = [f"@c{i}" for i in range(20)]
         r = _run(stand.run({"group": "@g", "source": "import_list", "user_refs": refs},
                            total=20))
-        assert "недоступна" in (r["summary"] or "")
+        # Итог называет причину остановки: «Причина: <текст движка>» либо общий
+        # «Группа недоступна» — молчаливой остановки быть не должно.
+        assert ("Причина" in (r["summary"] or "") or "недоступ" in (r["summary"] or "")), \
+            "причина остановки должна быть названа в итоге"
         assert len(stand.sent) <= 5, "флот не должен разбиваться об закрытую группу кругами"
     finally:
         stand.mode = "ok"
