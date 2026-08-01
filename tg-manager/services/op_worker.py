@@ -5610,32 +5610,48 @@ async def _exec_strike(
 
     # ── Настойчивая эскалация: переповтор, пока цель не снята ──────────────────
     # Реальные тейкдауны идут во времени: площадка/модерация реагирует не мгновенно.
-    # Если пользователь включил persist и цель ПОДТВЕРЖДЁННО ещё жива (verified_down
-    # is False) — ставим следующий заход через ~12ч. Останавливаемся, когда цель
-    # снята (verified_down True) или исчерпан лимit заходов. verified_down None
-    # («не удалось проверить») тоже НЕ продолжаем автоматически — не жжём флот
-    # вслепую, честно сообщаем, что исход неизвестен.
+    # Логика зависит от того, был ли флот в этом заходе:
+    #   • с аккаунтами (можем верифицировать): продолжаем, только пока цель
+    #     ПОДТВЕРЖДЁННО жива (verified_down False); None не гоним — не жжём флот вслепую;
+    #   • legal-only (без аккаунтов): верификация невозможна, но это чистые письма —
+    #     давление продолжается до лимита заходов даже без подтверждения.
+    # Стоп всегда при подтверждённом снятии (verified_down True) или исчерпании лимита.
     if persist:
         _still_up = any(getattr(r, "verified_down", None) is False for r in results)
         _confirmed_down = results and all(
             getattr(r, "verified_down", None) is True for r in results)
+        # Legal-only заход (без аккаунтов) НЕ может верифицировать цель — там некому
+        # спросить у Telegram, жив ли канал (verified_down всегда None). Но это ЧИСТЫЕ
+        # письма: флот не жжётся, риска нет. Поэтому в legal-only режиме продолжаем
+        # давление до лимита заходов даже без подтверждения — юр-письма уходят каждый
+        # заход. С флотом же (можем верифицировать) сохраняем строгую логику: гоним
+        # только пока цель ПОДТВЕРЖДЁННО жива, не вслепую.
+        _legal_only = not viable
+        _keep_pressing = _still_up or (
+            _legal_only and not _confirmed_down)
         if _confirmed_down:
             summary_text += "\n\n🎯 <b>Цель снята — эскалация остановлена.</b>"
-        elif _still_up and strike_chain + 1 < _MAX_STRIKE_CHAIN:
+        elif _keep_pressing and strike_chain + 1 < _MAX_STRIKE_CHAIN:
             _cont_id = await _schedule_strike_continuation(
                 pool, owner_id, params, strike_chain + 1)
             if _cont_id:
+                _how = ("юр-письма" if _legal_only else "давление")
                 summary_text += (
-                    f"\n\n🔁 <b>Настойчивая эскалация:</b> цель ещё жива — "
-                    f"следующий заход через ~{_STRIKE_CONTINUATION_HOURS}ч "
-                    f"(попытка {strike_chain + 2}/{_MAX_STRIKE_CHAIN}). "
-                    f"Давление продолжится, пока цель не снята."
+                    f"\n\n🔁 <b>Настойчивая эскалация:</b> "
+                    f"{'цель не подтверждена снятой' if _legal_only else 'цель ещё жива'} — "
+                    f"следующий заход ({_how}) через ~{_STRIKE_CONTINUATION_HOURS}ч "
+                    f"(попытка {strike_chain + 2}/{_MAX_STRIKE_CHAIN})."
+                    + (" Проверить снятие без аккаунтов нельзя — письма идут до лимита."
+                       if _legal_only else "")
                 )
-        elif _still_up:
+        elif _keep_pressing:
             summary_text += (
                 f"\n\n🔁 <b>Настойчивая эскалация исчерпана</b> "
-                f"({_MAX_STRIKE_CHAIN} заходов) — цель всё ещё активна. "
-                f"Усильте пакетом жалобы (App Store/Google Play) вручную."
+                f"({_MAX_STRIKE_CHAIN} заходов). "
+                + ("Юр-письма отправлены во всех заходах; проверьте цель и усильте "
+                   "пакетом жалобы (App Store/Google Play) вручную."
+                   if _legal_only else
+                   "Цель всё ещё активна — усильте пакетом жалобы вручную.")
             )
 
     return {
