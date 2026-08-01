@@ -12418,12 +12418,7 @@ async function syncContacts() {
       }, ms));
       return;
     }
-    // Обратная совместимость со старым инлайн-ответом (если вернулся).
-    if ((d.total_synced||0) > 0) {
-      toast(`✅ Синхронизировано: ${d.total_synced} контактов, создано: ${d.total_created||0}`);
-    } else if (d.message) {
-      toast('⚠️ '+d.message);
-    }
+    if (d.message) toast('⚠️ '+d.message);
     loadContacts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }

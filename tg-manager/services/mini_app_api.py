@@ -14169,6 +14169,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "contacts_sync", {},
                 total_items=int(n), label=f"Синхронизация контактов: {int(n)} акк.")
             return _json_resp({"ok": True, "queued": True, "op_id": op_id, "accounts": int(n)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as e:
             log.exception("uch_sync submit uid=%s", uid)
             return _err(str(e), 500)

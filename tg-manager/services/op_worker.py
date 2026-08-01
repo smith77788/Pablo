@@ -8896,7 +8896,9 @@ async def _exec_mass_invite(
             # Цели, отклонённые приватностью — кандидаты на промоут-трюк.
             if _promoter is not None and _promote_trick:
                 _privacy_blocked.extend(res.get("privacy_failed") or [])
-            # Классифицируем причины отказов для честного итога («почему 0 из тысяч»).
+            # Классифицируем причины отказов + ПИШЕМ по каждой цели в лог операции,
+            # чтобы CSV показывал, КТО и ПОЧЕМУ не добавлен (раньше per-target лога
+            # инвайта не было — «Ошибок: 7» без деталей).
             for _e in (res.get("errors") or []):
                 _es = str(_e).lower()
                 if "privacy" in _es:
@@ -8910,6 +8912,17 @@ async def _exec_mass_invite(
                 else:
                     _k = "other"
                 _fail_reasons[_k] = _fail_reasons.get(_k, 0) + 1
+                # "{ref}: reason" → target=ref, message=reason; иначе цель — группа.
+                _raw = str(_e)
+                if _raw.startswith("group error"):
+                    _tgt, _msg = "группа", _raw.split(":", 1)[-1].strip()
+                elif ": " in _raw:
+                    _tgt, _msg = _raw.split(": ", 1)
+                else:
+                    _tgt, _msg = "—", _raw
+                await _safe_execute(
+                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'fail',$4)", op_id, step, _tgt[:120], _msg[:200])
 
             # Группа закрыта/нет прав — это не про аккаунт, это про цель. Раньше
             # об неё по очереди разбивался весь флот; теперь останавливаемся сразу.
@@ -9009,6 +9022,18 @@ async def _exec_mass_invite(
     total = total_ok + total_fail
     _left = len(q_users) + len(q_phones)
 
+    # Человекочитаемый разбор ошибок — чтобы «Ошибок: 7» не читалось как поломка.
+    _reason_labels = {
+        "privacy": "🔒 приватность (нельзя добавить)",
+        "not_mutual": "🔒 не в контактах",
+        "perm": "🚫 нет прав в чате",
+        "flood": "⏳ флуд-лимит",
+        "other": "❓ прочее",
+    }
+    _fail_breakdown = " · ".join(
+        f"{_reason_labels.get(k, k)}: {v}"
+        for k, v in sorted(_fail_reasons.items(), key=lambda kv: -kv[1]) if v)
+
     # ── Остаток не бросаем: продолжим, когда лимиты обновятся ────────────────
     # Суточный лимит на аккаунт консервативен по умолчанию (холодный старт — 15).
     # У пользователя с одним-двумя аккаунтами и большой аудиторией первый прогон
@@ -9033,7 +9058,8 @@ async def _exec_mass_invite(
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
-        + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
+        + (f"\n⚠️ Ошибок: {total_fail}" + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")
+           if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
         + (f"\n🚫 Не удалось добавлять в чат — операция остановлена.\n   Причина: {_group_reason}"
            if group_broken and _group_reason else

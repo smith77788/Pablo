@@ -93,11 +93,8 @@ def test_list_contacts_merges_book_and_dialogs(monkeypatch):
     показывал бы «нет контактов» — ту же ошибку уже ловил контакт-хаб.
     """
     import asyncio
-    import sys
-    import types
+    import services.account_manager as am
     from services import account_console as ac
-
-    stub = types.ModuleType("services.account_manager")
 
     async def get_contacts(s, a=None):
         return [{"user_id": 1, "first_name": "Ann", "username": "ann",
@@ -107,9 +104,11 @@ def test_list_contacts_merges_book_and_dialogs(monkeypatch):
         return [{"user_id": 1, "first_name": "AnnFromDialog"},   # дубль — книга победит
                 {"user_id": 2, "first_name": "Bob"}]              # новый — добавится
 
-    stub.get_contacts = get_contacts
-    stub.get_dialog_contacts = get_dialog_contacts
-    monkeypatch.setitem(sys.modules, "services.account_manager", stub)
+    # list_contacts делает `from services import account_manager as am` в момент
+    # вызова — патчим атрибуты РЕАЛЬНОГО модуля (setitem по sys.modules не
+    # перехватывает уже связанный атрибут пакета services в полном прогоне).
+    monkeypatch.setattr(am, "get_contacts", get_contacts)
+    monkeypatch.setattr(am, "get_dialog_contacts", get_dialog_contacts)
 
     res = asyncio.run(ac.list_contacts("sess", {"id": 9}))
     assert res["ok"]
@@ -122,11 +121,8 @@ def test_list_contacts_merges_book_and_dialogs(monkeypatch):
 def test_list_contacts_survives_dialog_failure(monkeypatch):
     """Сбой сбора диалогов не должен ронять уже полученную адресную книгу."""
     import asyncio
-    import sys
-    import types
+    import services.account_manager as am
     from services import account_console as ac
-
-    stub = types.ModuleType("services.account_manager")
 
     async def get_contacts(s, a=None):
         return [{"user_id": 1, "first_name": "Ann"}]
@@ -134,9 +130,8 @@ def test_list_contacts_survives_dialog_failure(monkeypatch):
     async def get_dialog_contacts(s, limit=500, _acc=None):
         raise RuntimeError("dialogs boom")
 
-    stub.get_contacts = get_contacts
-    stub.get_dialog_contacts = get_dialog_contacts
-    monkeypatch.setitem(sys.modules, "services.account_manager", stub)
+    monkeypatch.setattr(am, "get_contacts", get_contacts)
+    monkeypatch.setattr(am, "get_dialog_contacts", get_dialog_contacts)
 
     res = asyncio.run(ac.list_contacts("sess", {"id": 9}))
     assert res["ok"] and len(res["contacts"]) == 1

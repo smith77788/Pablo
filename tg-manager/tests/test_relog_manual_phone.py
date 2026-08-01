@@ -30,7 +30,9 @@ def test_relog_manual_phone_flow_wired():
     h = h[:2000]
     assert "UPDATE tg_accounts SET phone=" in h
     assert "_send_relog_code" in h
-    assert r"^\+\d{7,15}$" in h
+    # Номер принимается в любом формате (пробелы, без плюса) и нормализуется
+    # общим normalize_phone — жёсткий regex ^\+\d{7,15}$ отсекал валидные вводы.
+    assert "normalize_phone" in h
     # общий помощник отправки кода существует и переводит в waiting_code
     assert "async def _send_relog_code" in src
     helper = src[src.index("async def _send_relog_code"):src.index("async def relog_phone_entered")]

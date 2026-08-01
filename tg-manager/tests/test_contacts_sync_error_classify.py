@@ -48,16 +48,28 @@ def test_transient_errors_not_dead():
 
 
 def test_expired_marks_status_but_not_deactivate_in_sync():
-    """sync_account на 'expired' ставит acc_status='session_expired', но НЕ
-    трогает is_active (в отличие от 'dead')."""
+    """На 'expired' ставится acc_status='session_expired', но is_active НЕ гасится
+    (в отличие от 'dead').
+
+    Пометка перенесена из sync_account в sync_all_accounts: решение метить аккаунт
+    принимается по КАРТИНЕ флота (см. `systemic`) — при системном сбое транспорта
+    все аккаунты падают одинаково, и глушить их все нельзя. Поэтому пометка живёт
+    в ветке `if not systemic:` общего прогона, а не в одиночном sync_account.
+    """
     src_path = os.path.join(ROOT, "services/contacts_hub/sync_service.py")
     with open(src_path, encoding="utf-8") as f:
         src = f.read()
-    seg = src[src.index("friendly, status = classify_session_error"):]
-    seg = seg[:seg.index("return {'error': friendly")]
-    # dead-ветка гасит is_active, expired-ветка — нет
-    assert "if status == 'dead':" in seg and "is_active=FALSE" in seg
-    exp = seg[seg.index("elif status == 'expired':"):]
+    # sync_account на ошибке НЕ метит аккаунт сам — только классифицирует и отдаёт статус.
+    acc = src[src.index("async def sync_account"):src.index("async def sync_all_accounts")]
+    assert "friendly, status = classify_session_error" in acc
+    assert "is_active=FALSE" not in acc, "sync_account не должен деактивировать в одиночку"
+
+    # Пометка — в sync_all_accounts, только когда сбой НЕ системный.
+    allsrc = src[src.index("async def sync_all_accounts"):]
+    guard = allsrc[allsrc.index("if not systemic:"):]
+    assert "if st == 'dead':" in guard and "is_active=FALSE" in guard, \
+        "dead-ветка должна гасить is_active в общем прогоне"
+    exp = guard[guard.index("elif st == 'expired':"):]
     # expired-ветка не содержит деактивации (is_active=FALSE — только в dead)
     assert "is_active=FALSE" not in exp
     assert "acc_status='session_expired'" in exp
