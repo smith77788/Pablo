@@ -8701,6 +8701,8 @@ async def _exec_mass_invite(
     retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
+    _group_reason = ""            # ЧЕМ именно недоступна (нет прав/закрыта/лимит)
+    _fail_reasons: dict[str, int] = {}  # причина отказа → счётчик (для честного итога)
     # Стоп-кран по флудам на ВЕСЬ флот: Telegram смотрит на аккаунты как на группу,
     # поэтому N подряд PeerFlood/FloodWait без единого успеха = флот перегрет,
     # продолжать значит жечь оставшиеся аккаунты в бан. Порог из env (0 = выкл).
@@ -8832,13 +8834,31 @@ async def _exec_mass_invite(
             if leftover:
                 _give_back(queue, leftover)
 
+            # Классифицируем причины отказов для честного итога («почему 0 из тысяч»).
+            for _e in (res.get("errors") or []):
+                _es = str(_e).lower()
+                if "privacy" in _es:
+                    _k = "privacy"
+                elif "not mutual" in _es:
+                    _k = "not_mutual"
+                elif _es.startswith("group error"):
+                    _k = "perm"
+                elif "flood" in _es:
+                    _k = "flood"
+                else:
+                    _k = "other"
+                _fail_reasons[_k] = _fail_reasons.get(_k, 0) + 1
+
             # Группа закрыта/нет прав — это не про аккаунт, это про цель. Раньше
             # об неё по очереди разбивался весь флот; теперь останавливаемся сразу.
-            if any(str(e).startswith("group error") for e in (res.get("errors") or [])):
+            _gerr = next((str(e) for e in (res.get("errors") or [])
+                          if str(e).startswith("group error")), "")
+            if _gerr:
                 group_broken = True
+                _group_reason = _gerr.split("group error:", 1)[-1].strip()
                 log.warning(
-                    "mass_invite op=%d: группа %s недоступна — остановка, чтобы не жечь флот",
-                    op_id, group,
+                    "mass_invite op=%d: группа %s недоступна (%s) — остановка, чтобы не жечь флот",
+                    op_id, group, _group_reason[:120],
                 )
                 await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
                 break
@@ -8916,7 +8936,16 @@ async def _exec_mass_invite(
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
-        + ("\n🚫 Группа недоступна — операция остановлена" if group_broken else "")
+        + (f"\n🚫 Не удалось добавлять в чат — операция остановлена.\n   Причина: {_group_reason}"
+           if group_broken and _group_reason else
+           ("\n🚫 Группа недоступна — операция остановлена" if group_broken else ""))
+        # Честное объяснение «почему 0 добавлено», когда дело не в группе/флуде:
+        # приватность собеседников добавить нельзя (это ограничение Telegram, не бага).
+        + (("\n🔒 Большинство отклонены приватностью получателей — таких Telegram "
+            "запрещает добавлять в группы; помогает только их согласие/старый общий чат."
+           ) if (total_ok == 0 and not group_broken and not flood_storm
+                 and _fail_reasons.get("privacy", 0) + _fail_reasons.get("not_mutual", 0)
+                     >= max(1, int(total_fail * 0.5))) else "")
         + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
            "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
            if flood_storm else "")

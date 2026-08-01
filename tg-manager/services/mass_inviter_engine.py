@@ -97,7 +97,12 @@ async def invite_batch(
         FloodWaitError,
         ChatWriteForbiddenError,
         ChannelPrivateError,
+        ChatAdminRequiredError,
     )
+    try:
+        from telethon.errors import UsersTooMuchError
+    except Exception:  # имя может отличаться между версиями telethon
+        UsersTooMuchError = ()
 
     client = _make_client(session_string, _acc)
     ok, failed = 0, 0
@@ -140,9 +145,23 @@ async def invite_batch(
                     flood_wait = _fw
                     break
                 await asyncio.sleep(min(_fw, 60))
+            except ChatAdminRequiredError:
+                # Не про пользователя, а про ПРАВА аккаунта в этом чате. Для канала
+                # добавлять участников может только админ с правом «Добавлять
+                # подписчиков»; без него так падает КАЖДАЯ попытка → 0 из тысяч.
+                # Останавливаем сразу (group error), чтобы не молотить вхолостую.
+                failed += 1
+                errors.append("group error: у аккаунта нет прав добавлять участников "
+                              "— для канала нужен админ с правом «Добавлять подписчиков», "
+                              "в группе — снять ограничение «Добавление участников: только админы»")
+                break
+            except UsersTooMuchError:
+                failed += 1
+                errors.append("group error: в чате достигнут лимит участников Telegram")
+                break
             except (ChatWriteForbiddenError, ChannelPrivateError) as e:
                 failed += 1
-                errors.append(f"group error: {e}")
+                errors.append(f"group error: нет доступа к чату ({type(e).__name__})")
                 break  # нет прав/группа закрыта
             except Exception as e:
                 log.warning('invite failed: %s', e)
@@ -183,6 +202,7 @@ async def invite_by_phones(
         UserAlreadyParticipantError,
         PeerFloodError,
         FloodWaitError,
+        ChatAdminRequiredError,
     )
 
     client = _make_client(session_string, _acc)
@@ -190,6 +210,7 @@ async def invite_by_phones(
     errors: list[str] = []
     peer_flood = False
     flood_wait = 0
+    group_broken = False
     imported_users: list = []
 
     try:
@@ -209,7 +230,7 @@ async def invite_by_phones(
         log.info("invite_by_phones: imported %d/%d users", len(imported_users), len(phones))
 
         for user in imported_users:
-            if peer_flood or flood_wait:
+            if peer_flood or flood_wait or group_broken:
                 break
             try:
                 await asyncio.wait_for(
@@ -220,6 +241,14 @@ async def invite_by_phones(
                 await asyncio.sleep(random.uniform(2.5, 5.0))
             except UserAlreadyParticipantError:
                 ok += 1
+            except ChatAdminRequiredError:
+                # Права на добавление в чат отсутствуют — падает каждая попытка,
+                # стоп сразу (group error), как и в invite_batch.
+                group_broken = True
+                failed += 1
+                errors.append("group error: у аккаунта нет прав добавлять участников "
+                              "— для канала нужен админ с правом «Добавлять подписчиков»")
+                break
             except UserPrivacyRestrictedError:
                 failed += 1
             except PeerFloodError:
