@@ -127,6 +127,10 @@ def _err(msg: str, status: int = 400) -> web.Response:
     return _json_resp({"error": msg}, status)
 
 
+# Единый нормализатор номера (мини-апп + бот) — принять «+7 932 726 5344» и т.п.
+from services.phone_utils import normalize_phone  # noqa: E402
+
+
 # Единый маппинг UI-операции редактирования канала → op воркера bulk_chan_exec.
 # Используется и в channel_edit (одиночный), и в channels_mass (массовый) —
 # один источник истины, чтобы наборы не разъехались.
@@ -13720,9 +13724,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            phone = (body.get("phone") or "").strip()
-            if not phone.startswith("+") or len(phone) < 8:
-                return _err("Укажите номер в формате +71234567890", 400)
+            phone = normalize_phone(body.get("phone") or "")
+            if not phone:
+                return _err("Укажите номер телефона (7–15 цифр), например +71234567890", 400)
             _pid, proxy_url = await _resolve_proxy_url(uid, body.get("proxy_id"))
             from services import account_manager as am
             phone_code_hash, hint = await asyncio.wait_for(
@@ -13741,7 +13745,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             body = await request.json()
-            phone = (body.get("phone") or "").strip()
+            # Тот же нормализатор, что и в start — Telethon сверяет вход по номеру,
+            # он должен совпадать байт-в-байт с использованным при отправке кода.
+            phone = normalize_phone(body.get("phone") or "") or (body.get("phone") or "").strip()
             code = (body.get("code") or "").strip()
             pch = (body.get("phone_code_hash") or "").strip()
             if not phone or not code or not pch:

@@ -585,12 +585,14 @@ async def cb_add_account(
 
 @router.message(AccountLogin.waiting_phone)
 async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
-    phone = (message.text or "").strip()
+    # Принимаем номер в любом виде (пробелы/дефисы/скобки/без «+») и нормализуем.
+    from services.phone_utils import normalize_phone
+    phone = normalize_phone(message.text or "")
 
-    if not re.match(r"^\+\d{7,15}$", phone):
+    if not phone:
         await message.answer(
-            "❌ Неверный формат номера.\n"
-            "Введите номер в формате: <code>+79001234567</code>",
+            "❌ Не разобрал номер.\n"
+            "Введите номер телефона (7–15 цифр), например: <code>+79001234567</code>",
             parse_mode="HTML",
             reply_markup=_cancel_markup(),
         )
@@ -1674,10 +1676,11 @@ async def relog_phone_entered(
     """Пользователь ввёл номер для релога аккаунта без сохранённого phone.
     Сохраняем номер в ЭТУ строку аккаунта (чтобы _finalize_login обновил её же по
     ON CONFLICT phone) и запускаем обычную отправку кода."""
-    phone = (message.text or "").strip().replace(" ", "")
-    if not re.match(r"^\+\d{7,15}$", phone):
+    from services.phone_utils import normalize_phone
+    phone = normalize_phone(message.text or "")
+    if not phone:
         await message.answer(
-            "❌ Формат номера: <code>+79161234567</code> (плюс и 7–15 цифр). Попробуйте снова:",
+            "❌ Не разобрал номер: нужно 7–15 цифр, например <code>+79161234567</code>. Попробуйте снова:",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )

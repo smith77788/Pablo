@@ -10041,9 +10041,17 @@ function _accDone(r){
 }
 
 // Вход по номеру ───────────────────────────────────────
+// Номер принимаем в ЛЮБОМ виде: с пробелами/дефисами/скобками, с «+» или без.
+// Оставляем только цифры и вешаем один «+» — так же нормализует бэкенд.
+function normalizePhone(raw){
+  const digits=(raw||'').replace(/\D/g,'');
+  return (digits.length>=7 && digits.length<=15) ? ('+'+digits) : null;
+}
 async function accPhoneStart(){
-  _accErr(''); const phone=(document.getElementById('accPhoneNum').value||'').trim();
-  if(!/^\+\d{7,15}$/.test(phone)){ _accErr('Введите номер в формате +71234567890'); return; }
+  _accErr('');
+  const phone=normalizePhone(document.getElementById('accPhoneNum').value);
+  if(!phone){ _accErr('Введите номер телефона (7–15 цифр), например +71234567890'); return; }
+  document.getElementById('accPhoneNum').value=phone;  // показать приведённый вид
   const b=document.getElementById('accPhoneStartBtn'); b.disabled=true; b.textContent='⏳ Отправляю…';
   try{
     const r=await api('/api/miniapp/account/add/phone/start',{method:'POST',body:JSON.stringify({phone,proxy_id:_accProxy().id})});
