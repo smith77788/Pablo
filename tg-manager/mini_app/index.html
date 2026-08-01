@@ -865,6 +865,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════ РЕСУРСЫ АККАУНТА: КАНАЛЫ И ЧАТЫ ══════════ -->
+<div class="screen" id="s-accchannels">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📡 Каналы и чаты аккаунта</div>
+  </div>
+  <div class="sub-sb">
+    <div style="display:flex;gap:8px;padding:4px 0 8px">
+      <button class="btn btn-p" onclick="openChannelFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
+      <button class="btn btn-s" onclick="accAction(ACC_CONSOLE_ID,'scan','Сканировать каналы/группы этого аккаунта и завести их сюда?')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы/группы, где состоит аккаунт">🔎 Скан ресурсов</button>
+    </div>
+    <div class="lst" id="acchanList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════ КОНСОЛЬ АККАУНТА: КОНТАКТЫ ══════════ -->
 <div class="screen" id="s-acccontacts">
   <div class="hdr">
@@ -7741,6 +7756,34 @@ async function sendAccountFile(input) {
   } catch(e) { toast('⚠️ '+(e.message || 'Файл не отправлен')); }
 }
 
+// Каналы/чаты, привязанные к ЭТОМУ аккаунту (managed_channels.acc_id), а не весь
+// портфель владельца — так «Разделы» больше не роняют в общий список. Выбор в
+// списке ведёт в карточку канала (openChannel) с управлением/историей/постингом.
+async function openAccountChannels(accId) {
+  ACC_CONSOLE_ID = accId;
+  push('s-accchannels');
+  txt('acchanList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/account/'+accId+'/channels');
+    const list = d.channels || [];
+    if (!list.length) {
+      txt('acchanList', empty('📡','У аккаунта нет каналов/чатов',
+        'Создайте новый или запустите «Скан ресурсов» — найдём, где состоит этот аккаунт'));
+      return;
+    }
+    txt('acchanList', list.map(c => {
+      const name = esc(c.title || (c.username ? '@'+c.username : 'Канал #'+c.channel_id));
+      const isChan = c.type === 'channel';
+      const type = isChan ? '📡 Канал' : '💬 Чат/группа';
+      return `<div class="li tap" onclick="openChannel(${c.channel_id})">
+        <div class="row-ico" style="background:var(--bg-blue-16)">${isChan?'📡':'💬'}</div>
+        <div class="li-body"><div class="li-name">${name}</div>
+          <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div></div>
+        <div class="li-right"><span class="chev">›</span></div></div>`;
+    }).join(''));
+  } catch(e) { txt('acchanList', errHtml(e.message,'openAccountChannels('+accId+')')); }
+}
+
 async function openAccountContacts(accId) {
   ACC_CONSOLE_ID = accId;
   ACC_CONT_SEL = null;  // выходим из режима выбора при каждом открытии
@@ -8009,18 +8052,13 @@ function buildAccDetail(d) {
       ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1;min-width:130px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
     </div>
 
-    <div class="sec">Консоль аккаунта</div>
+    <div class="sec">Ресурсы аккаунта</div>
     <div style="display:flex;gap:8px;padding:2px 0 4px">
       <button class="btn btn-s" onclick="openAccountDialogs(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">💬 Диалоги</button>
       <button class="btn btn-s" onclick="openAccountContacts(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">📇 Контакты</button>
     </div>
-
-    <div class="sec">Разделы</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:2px 0 4px">
-      <button class="btn btn-s" onclick="openChannels()" style="font-size:13px;padding:13px 6px">📡 Каналы и чаты</button>
-      <button class="btn btn-s" onclick="goTab('bots')" style="font-size:13px;padding:13px 6px">🤖 Боты</button>
-      <button class="btn btn-s" onclick="openInfra()" style="font-size:13px;padding:13px 6px">🏗 Инфраструктура</button>
-      <button class="btn btn-s" onclick="openGlobalPresence()" style="font-size:13px;padding:13px 6px">🌐 Гео-Сети</button>
+    <div style="padding:2px 0 4px">
+      <button class="btn btn-s" onclick="openAccountChannels(${a.id})" style="width:100%;font-size:14px;padding:13px 6px">📡 Каналы и чаты аккаунта</button>
     </div>
 
     <details class="acc-actions" style="margin:6px 0;background:var(--bg2);border-radius:12px">

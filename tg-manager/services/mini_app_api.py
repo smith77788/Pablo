@@ -4251,6 +4251,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(res.get("error") or "Не удалось получить контакты", 400)
         return _json_resp({"ok": True, "contacts": res.get("contacts", [])})
 
+    async def account_channels(request: web.Request) -> web.Response:
+        """Каналы/чаты, ПРИВЯЗАННЫЕ К ЭТОМУ аккаунту (managed_channels.acc_id).
+
+        Именно это «ресурсы аккаунта»: только каналы, где acc_id = выбранный
+        аккаунт, а не весь портфель владельца. Скоуп по owner_id И acc_id.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        rows = await _safe_fetch(pool,
+            "SELECT channel_id AS id, channel_id, username, title, type, "
+            "COALESCE(members_count, 0) AS member_count "
+            "FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 "
+            "ORDER BY members_count DESC NULLS LAST LIMIT 500", uid, acc_id)
+        return _json_resp({"channels": rows, "total": len(rows or [])})
+
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
         Инлайн, немедленный результат (реабилитация своего аккаунта)."""
@@ -12752,6 +12772,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/dialog/{peer}/send", account_dialog_send)
     app.router.add_post("/api/miniapp/account/{acc_id}/dialog/{peer}/send_file", account_dialog_send_file)
     app.router.add_get("/api/miniapp/account/{acc_id}/contacts", account_contacts)
+    app.router.add_get("/api/miniapp/account/{acc_id}/channels", account_channels)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)

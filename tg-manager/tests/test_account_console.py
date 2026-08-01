@@ -173,18 +173,46 @@ def test_console_screens_reachable():
         assert re.search(rf"push\('{sid}'\)", HTML), f"к {sid} нет входа push()"
 
 
-def test_account_detail_wires_console_and_sections():
-    """Карточка аккаунта ведёт в консоль и в разделы — иначе входы недостижимы."""
-    body = _screen_body("s-accdetail")  # экран есть
-    assert body
-    # Кнопки строятся в JS buildAccDetail — проверяем по исходнику функции.
+def _build_acc_detail_src() -> str:
     m = re.search(r"function buildAccDetail\(", HTML)
     assert m
     nxt = re.search(r"\n(?:async )?function ", HTML[m.end():])
-    chunk = HTML[m.start(): m.end() + (nxt.start() if nxt else 16000)]
-    for call in ("openAccountDialogs(", "openAccountContacts(",
-                 "openChannels()", "goTab('bots')", "openInfra()", "openGlobalPresence()"):
+    return HTML[m.start(): m.end() + (nxt.start() if nxt else 16000)]
+
+
+def test_account_detail_wires_account_scoped_resources():
+    """Карточка ведёт в РЕСУРСЫ АККАУНТА (диалоги/контакты/каналы аккаунта)."""
+    chunk = _build_acc_detail_src()
+    for call in ("openAccountDialogs(", "openAccountContacts(", "openAccountChannels("):
         assert call in chunk, f"в карточке аккаунта нет входа: {call}"
+
+
+def test_account_card_has_no_global_section_shortcuts():
+    """Регресс: кнопки «Разделы» роняли в ОБЩИЙ список, а не в ресурсы аккаунта.
+
+    С карточки аккаунта не должно быть прыжков в глобальные разделы —
+    только account-scoped входы (иначе снова «общий список вместо аккаунта»).
+    """
+    chunk = _build_acc_detail_src()
+    for leak in ("openChannels()", "goTab('bots')", "openInfra()", "openGlobalPresence()"):
+        assert leak not in chunk, (
+            f"карточка аккаунта снова прыгает в общий раздел: {leak} — "
+            "нужен account-scoped вход, а не глобальный список"
+        )
+
+
+def test_account_channels_scoped_by_account():
+    """Список каналов аккаунта фильтруется по acc_id, а не только owner_id."""
+    assert '"/api/miniapp/account/{acc_id}/channels"' in API, "нет маршрута каналов аккаунта"
+    m = re.search(r"async def account_channels\(", API)
+    assert m
+    body = API[m.start(): m.start() + 1200]
+    assert "WHERE owner_id=$1 AND acc_id=$2" in body, "каналы не скоупятся по аккаунту"
+    # Экран достижим и ведёт в карточку канала для управления.
+    assert re.search(r"push\('s-accchannels'\)", HTML), "к экрану каналов аккаунта нет входа"
+    m2 = re.search(r"function openAccountChannels\(", HTML)
+    assert m2 and "openChannel(" in HTML[m2.start(): m2.start() + 1400], \
+        "из списка нельзя открыть карточку канала"
 
 
 def test_chat_can_send():
