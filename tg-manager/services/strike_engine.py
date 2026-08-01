@@ -1588,10 +1588,42 @@ async def staggered_strike(
                         log, f"staggered_strike: email_escalation failed target={target}"
                     )
 
+            # ═══ Фаза 7: Верификация — реально ли цель ушла в даун ═══
+            # Раньше verify_target_takedown была написана, но НИГДЕ не вызывалась:
+            # движок отрабатывал все векторы, а «убил цель или нет» оставалось
+            # неизвестным (verified_down всегда None → строка «✅ УДАЛЁН / ⚠️ Всё
+            # ещё активен» в сводке никогда не показывалась). Для пользователя это
+            # выглядело ровно как «Strike не уничтожает цели»: нет ни подтверждения
+            # результата, ни сигнала «цель ещё жива — нужен повтор». Проверяем
+            # доступность цели после атаки лучшим аккаунтом. verified_down остаётся
+            # None ТОЛЬКО если проверить не удалось — не выдаём это за успех.
+            if not await _op_cancelled():
+                _verify_acc = plan.accounts[0] if plan.accounts else None
+                if _verify_acc:
+                    if progress_cb:
+                        await progress_cb(
+                            "strike_verify",
+                            f"🔍 {_telegram_target_display(target)}: проверка результата...",
+                        )
+                    try:
+                        result.verified_down = await verify_target_takedown(
+                            _verify_acc, target, max_attempts=3, delay_range=(25, 50)
+                        )
+                        log.info(
+                            "strike_engine: verify target=%s verified_down=%s",
+                            target,
+                            result.verified_down,
+                        )
+                    except Exception:
+                        log_exc_swallow(
+                            log, f"staggered_strike: verify failed target={target}"
+                        )
+
             result.duration_s = time.time() - t_start
             log.info(
                 "strike_engine: staggered_strike done target=%s duration=%.1fs "
-                "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d",
+                "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d "
+                "verified_down=%s",
                 target,
                 result.duration_s,
                 result.peer_reported,
@@ -1600,6 +1632,7 @@ async def staggered_strike(
                 result.abuse_form_ok,
                 result.spambot_escalation,
                 result.emails_sent,
+                result.verified_down,
             )
             all_results.append(result)
     finally:
