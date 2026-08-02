@@ -188,6 +188,7 @@ _STUB_MODULES = {
         "KeyboardButton": _Any, "ReplyKeyboardMarkup": _Any, "BufferedInputFile": _Any, "ErrorEvent": _Any,
         "WebAppInfo": _Any, "PhotoSize": _Any, "TelegramObject": _Any,
         "MessageOriginChannel": _Any, "MessageOriginChat": _Any, "MessageOriginHiddenUser": _Any, "MessageOriginUser": _Any,
+        "BusinessConnection": _Any, "BusinessMessagesDeleted": _Any,
     },
     "aiogram.utils.keyboard": {"InlineKeyboardBuilder": _Any, "ReplyKeyboardBuilder": _Any},
 }

@@ -4320,6 +4320,102 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC LIMIT 500", uid, acc_id)
         return _json_resp({"bots": rows, "total": len(rows or [])})
 
+    # ── «Хранилище» (Echo Vault): архив бизнес-переписки, строго owner-scoped ──
+    async def vault_status(request: web.Request) -> web.Response:
+        """Подключено ли бизнес-соединение + инструкция, если нет."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import vault_service as _v
+        conn = await _v.active_connection_for_owner(pool, uid)
+        botname = await _resolve_bot_username()
+        return _json_resp({
+            "connected": bool(conn),
+            "can_reply": bool(conn.get("can_reply")) if conn else False,
+            "bot_username": botname,
+        })
+
+    async def vault_chats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import vault_service as _v
+        try:
+            chats = await _v.list_chats(pool, uid, limit=200)
+        except Exception as exc:
+            log.exception("vault_chats uid=%s", uid)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        return _json_resp({"chats": chats, "total": len(chats)})
+
+    async def vault_messages(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            chat_id = int(request.match_info["chat_id"])
+        except (KeyError, ValueError):
+            return _err("bad chat_id", 400)
+        try:
+            limit = min(int(request.query.get("limit", 200)), 1000)
+            offset = max(int(request.query.get("offset", 0)), 0)
+        except (TypeError, ValueError):
+            limit, offset = 200, 0
+        from services import vault_service as _v
+        try:
+            msgs = await _v.list_messages(pool, uid, chat_id, limit=limit, offset=offset)
+        except Exception as exc:
+            log.exception("vault_messages uid=%s chat=%s", uid, chat_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        return _json_resp({"messages": msgs, "limit": limit, "offset": offset})
+
+    async def vault_search(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        q = (request.query.get("q") or "").strip()
+        if len(q) < 2:
+            return _err("Запрос слишком короткий (минимум 2 символа)", 400)
+        from services import vault_service as _v
+        try:
+            res = await _v.search_messages(pool, uid, q, limit=100)
+        except Exception as exc:
+            log.exception("vault_search uid=%s", uid)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        return _json_resp({"results": res, "total": len(res)})
+
+    async def vault_reply(request: web.Request) -> web.Response:
+        """Ответ собеседнику ОТ ИМЕНИ пользователя через бизнес-соединение."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            chat_id = int(request.match_info["chat_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        text = (body.get("text") or "").strip()
+        if not text:
+            return _err("Введите текст сообщения", 400)
+        from services import vault_service as _v
+        token = _bot_token()
+        if not token:
+            return _err("Бот не настроен", 500)
+        from aiogram import Bot as _Bot
+        _b = _Bot(token=token)
+        try:
+            res = await _v.send_reply(pool, _b, uid, chat_id, text)
+        except Exception as exc:
+            log.exception("vault_reply uid=%s chat=%s", uid, chat_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        finally:
+            try:
+                await _b.session.close()
+            except Exception:
+                pass
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не отправлено", 400)
+        return _json_resp({"ok": True, "message_id": res.get("message_id")})
+
     async def account_spamblock_appeal(request: web.Request) -> web.Response:
         """Снятие спамблока: запрос в @SpamBot с проходом по кнопкам аппеляции.
         Инлайн, немедленный результат (реабилитация своего аккаунта)."""
@@ -12907,6 +13003,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/account/{acc_id}/contacts", account_contacts)
     app.router.add_get("/api/miniapp/account/{acc_id}/channels", account_channels)
     app.router.add_get("/api/miniapp/account/{acc_id}/bots", account_bots)
+    # «Хранилище» (Echo Vault)
+    app.router.add_get("/api/miniapp/vault/status", vault_status)
+    app.router.add_get("/api/miniapp/vault/chats", vault_chats)
+    app.router.add_get("/api/miniapp/vault/chat/{chat_id}/messages", vault_messages)
+    app.router.add_get("/api/miniapp/vault/search", vault_search)
+    app.router.add_post("/api/miniapp/vault/chat/{chat_id}/reply", vault_reply)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)

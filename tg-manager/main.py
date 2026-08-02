@@ -106,6 +106,7 @@ from bot.handlers import global_search as global_search_handler
 from bot.handlers import ai_commenting as ai_commenting_handler
 from bot.handlers import compliance_scan as compliance_scan_handler
 from bot.handlers import contacts_hub as contacts_hub_handler
+from bot.handlers import business_vault as business_vault_handler
 from bot.handlers import ghost_hub as ghost_hub_handler
 from bot.handlers import content_mesh_hub as content_mesh_handler
 from bot.handlers import clone_adapt_hub as clone_adapt_handler
@@ -391,6 +392,7 @@ async def main() -> None:
     dp.include_router(ai_commenting_handler.router)
     dp.include_router(compliance_scan_handler.router)
     dp.include_router(contacts_hub_handler.router)
+    dp.include_router(business_vault_handler.router)  # «Хранилище» — business-апдейты
     dp.include_router(ghost_hub_handler.router)
     dp.include_router(content_mesh_handler.router)
     dp.include_router(clone_adapt_handler.router)
@@ -612,6 +614,10 @@ async def main() -> None:
     _allowed_updates = [
         "message", "callback_query", "inline_query",
         "chosen_inline_result", "pre_checkout_query",
+        # «Хранилище» (Echo Vault): без этих типов Telegram НЕ доставит
+        # business-апдейты и архив останется пустым.
+        "business_connection", "business_message",
+        "edited_business_message", "deleted_business_messages",
     ]
 
     try:
