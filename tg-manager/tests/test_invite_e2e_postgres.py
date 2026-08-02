@@ -64,6 +64,7 @@ class _Stand:
         self.per_acc: dict = {}
         self.mode = "ok"
         self.flooder = None
+        self.last_op_id = None
 
     async def _engine(self, session, acc, group, refs):
         self.sent.extend(refs)
@@ -115,6 +116,7 @@ class _Stand:
         rows = await self.pool.fetch(
             "UPDATE operation_queue SET status='running', started_at=now() WHERE id=$1 "
             "RETURNING id, owner_id, op_type, params", op_id)
+        self.last_op_id = op_id  # чтобы тесты могли заглянуть в operation_log
         await w._run_op_task(self.pool, None, dict(rows[0]))
         return await self.pool.fetchrow(
             "SELECT status, done_items, result->>'summary' AS summary, error_msg "
@@ -294,6 +296,14 @@ def test_closed_group_stops_the_fleet(stand):
         assert ("Причина" in (r["summary"] or "") or "недоступ" in (r["summary"] or "")), \
             "причина остановки должна быть названа в итоге"
         assert len(stand.sent) <= 5, "флот не должен разбиваться об закрытую группу кругами"
+        # Per-target лог инвайта реально пишется (моё новое: «кто и почему не добавлен»).
+        # На живом драйвере это ещё и проверка связывания INSERT в operation_log.
+        fails = _run(stand.pool.fetch(
+            "SELECT target, message FROM operation_log WHERE op_id=$1 AND status='fail'",
+            stand.last_op_id))
+        assert fails, "нет per-target записей об отказе — «Ошибок: N» снова без деталей"
+        assert any("ChannelPrivate" in (f["message"] or "") for f in fails), \
+            "причина отказа не сохранена в operation_log"
     finally:
         stand.mode = "ok"
 
