@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "main.py").read_text(encoding="utf-8")
 API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
 HANDLER = (ROOT / "bot" / "handlers" / "business_vault.py").read_text(encoding="utf-8")
+HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 
 # ── проводка ──────────────────────────────────────────────────────────────────
@@ -50,6 +51,33 @@ def test_api_owner_scoped():
     """Все vault-эндпоинты берут uid из токена и скоупят по нему (не по query)."""
     m = re.search(r"async def vault_chats\(.*?async def vault_messages\(", API, re.S)
     assert m and "_get_uid(request)" in m.group(0), "vault_chats не скоупится по владельцу"
+
+
+def test_vault_command_present():
+    assert '@router.message(Command("vault"))' in HANDLER, "нет команды /vault"
+
+
+# ── мини-апп: экраны, вход, deep-link ────────────────────────────────────────
+
+def test_miniapp_screens_and_entry():
+    assert 'id="s-vault"' in HTML and 'id="s-vaultchat"' in HTML, "нет экранов хранилища"
+    assert "onclick=\"openVault()\"" in HTML, "нет плитки входа в Хранилище"
+    assert re.search(r"function openVault\(", HTML), "нет функции openVault"
+    assert re.search(r"push\('s-vault'\)", HTML) and re.search(r"push\('s-vaultchat'\)", HTML)
+
+
+def test_miniapp_reply_and_deeplink():
+    # ответ из хранилища идёт на /reply
+    m = re.search(r"function sendVaultReply\(", HTML)
+    assert m and "/reply" in HTML[m.start(): m.start() + 500]
+    # deep-link #vault открывает архив сразу
+    assert "openVault" in HTML and "'vault'" in HTML
+
+
+def test_miniapp_escapes_external_content():
+    """Текст/имена собеседников — внешние ДАННЫЕ: рендерятся через esc()."""
+    m = re.search(r"function vaultBubble\(", HTML)
+    assert m and "esc(m.text)" in HTML[m.start(): m.start() + 900], "текст сообщения не экранируется"
 
 
 # ── чистые хелперы ────────────────────────────────────────────────────────────

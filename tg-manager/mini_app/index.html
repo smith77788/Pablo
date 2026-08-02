@@ -595,6 +595,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="qa-tile" onclick="goTab('broadcasts')"><div class="qa-tile-ico">📨</div><div class="qa-tile-lbl">Рассылки</div></div>
       <div class="qa-tile" onclick="openOps()"><div class="qa-tile-ico">⚙️</div><div class="qa-tile-lbl">Операции</div></div>
       <div class="qa-tile" onclick="openContacts()"><div class="qa-tile-ico">📇</div><div class="qa-tile-lbl">Контакты</div></div>
+      <div class="qa-tile" onclick="openVault()"><div class="qa-tile-ico">🗄</div><div class="qa-tile-lbl">Хранилище</div></div>
       <div class="qa-tile" onclick="goTab('more')"><div class="qa-tile-ico">⚡</div><div class="qa-tile-lbl">Ещё</div></div>
     </div>
     <!-- Часто используемые (персонально, по реальным кликам) -->
@@ -920,6 +921,33 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
     <div id="accContMsgErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitAccContMsg()">🚀 Отправить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════ -->
+<div class="screen" id="s-vault">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🗄 Хранилище</div>
+    <div class="hdr-meta"><div class="hdr-user" id="vaultCnt"></div></div>
+  </div>
+  <div class="sub-sb">
+    <div id="vaultConnect" style="display:none"></div>
+    <div style="padding:6px 0"><input type="text" id="vaultSearch" placeholder="🔍 Поиск по сообщениям..." oninput="vaultSearchDebounced()" class="inp"></div>
+    <div class="lst" id="vaultList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-vaultchat">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="vchat-title">Диалог</div>
+    <div class="hdr-meta"></div>
+  </div>
+  <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
+  <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
+    <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени..." style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:none;max-height:120px"></textarea>
+    <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()">➤</button>
   </div>
 </div>
 
@@ -5661,6 +5689,11 @@ function forceRefresh() {
     loadRef();
     loadBots();
     loadAdminSection();
+    // Deep-link: кнопка «Открыть Хранилище» из бота ведёт прямо на архив.
+    // web_app-кнопка не передаёт start_param → поддерживаем и #vault в URL.
+    const _sp = tg.initDataUnsafe?.start_param || '';
+    const _hashScreen = (location.hash || '').replace('#','');
+    if (_sp === 'vault' || _hashScreen === 'vault') setTimeout(openVault, 100);
   } catch(e) {
     document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
@@ -11960,6 +11993,132 @@ async function applySeoAll() {
 // ── Unified Contacts Hub ──────────────────────────────────
 let CONTACT_FILTER = null;
 function openContacts() { push('s-contacts'); txt('contactsList','<div class="spin-wrap"><div class="spin"></div></div>'); loadContacts(); loadContactStats(); }
+
+// ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════
+// Архив бизнес-переписки: список чатов → сообщения (с пометками «изменено»/
+// «удалено») → ответ от имени пользователя. Данные строго свои (owner-scoped на API).
+let VAULT_CHAT = null, VAULT_CAN_REPLY = false, _vaultSearchTimer = null, VAULT_NAMES = {};
+
+async function openVault() {
+  push('s-vault');
+  document.getElementById('vaultConnect').style.display = 'none';
+  const s = document.getElementById('vaultSearch'); if (s) s.value = '';
+  txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const st = await api('/api/miniapp/vault/status');
+    VAULT_CAN_REPLY = !!st.can_reply;
+    if (!st.connected) { renderVaultConnect(st.bot_username); }
+    const d = await api('/api/miniapp/vault/chats');
+    renderVaultChats(d.chats || []);
+  } catch(e) { txt('vaultList', errHtml(e.message,'openVault()')); }
+}
+
+function renderVaultConnect(botUsername) {
+  const bu = botUsername ? ('@'+esc(botUsername)) : 'этого бота';
+  document.getElementById('vaultConnect').style.display = 'block';
+  document.getElementById('vaultConnect').innerHTML =
+    `<div style="padding:12px;background:rgba(59,130,246,.1);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+      <b>🔌 Подключите хранилище</b><br>
+      Бот сохранит все сообщения в ваших личных чатах — даже если диалог удалён.
+      <div style="margin-top:8px;color:var(--hint)">
+      1. Настройки Telegram → <b>Telegram для бизнеса</b><br>
+      2. <b>Чат-боты</b> → введите <b>${bu}</b><br>
+      3. Разрешите доступ к чатам (и ответы, если нужно)</div>
+    </div>`;
+}
+
+function renderVaultChats(list) {
+  document.getElementById('vaultCnt').textContent = list.length ? (list.length+' чат.') : '';
+  if (!list.length) {
+    txt('vaultList', empty('🗄','Архив пуст','Подключите бота к бизнес-аккаунту — и переписка начнёт сохраняться'));
+    return;
+  }
+  VAULT_NAMES = {};
+  list.forEach(c => { VAULT_NAMES[c.chat_id] = c.peer_name; });
+  txt('vaultList', list.map(c => {
+    const del = c.deleted > 0 ? `<span class="badge b-rd" style="margin-left:6px">🗑 ${c.deleted}</span>` : '';
+    const date = c.last_date ? new Date(c.last_date).toLocaleDateString('ru-RU') : '';
+    return `<div class="li tap" onclick="openVaultChat(${c.chat_id})">
+      <div class="row-ico" style="background:var(--bg-blue-16)">👤</div>
+      <div class="li-body"><div class="li-name">${esc(c.peer_name)}${del}</div>
+        <div class="li-sub">${esc(c.last_preview||'')||'—'}</div></div>
+      <div class="li-right"><div style="font-size:11px;color:var(--hint)">${date}</div><span class="chev">›</span></div>
+    </div>`;
+  }).join(''));
+}
+
+async function openVaultChat(chatId) {
+  VAULT_CHAT = chatId;
+  txt('vchat-title', esc(VAULT_NAMES[chatId] || 'Диалог'));
+  push('s-vaultchat');
+  const comp = document.getElementById('vchatComposer');
+  comp.style.display = VAULT_CAN_REPLY ? 'flex' : 'none';
+  await reloadVaultChat();
+}
+
+async function reloadVaultChat() {
+  const body = document.getElementById('vchatBody');
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages');
+    const msgs = d.messages || [];
+    if (!msgs.length) { body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px 12px">Нет сохранённых сообщений</div>'; return; }
+    body.innerHTML = msgs.map(m => vaultBubble(m)).join('');
+    body.scrollTop = body.scrollHeight;
+  } catch(e) { body.innerHTML = errHtml(e.message,'reloadVaultChat()'); }
+}
+
+function vaultBubble(m) {
+  const out = m.direction === 'out';
+  const media = m.media_label ? `<div style="opacity:.85;font-size:12px;margin-bottom:2px">${esc(m.media_label)}${m.media_name?' · '+esc(m.media_name):''}</div>` : '';
+  const text = m.text ? `<div style="white-space:pre-wrap;word-break:break-word${m.deleted?';text-decoration:line-through;opacity:.6':''}">${esc(m.text)}</div>` : '';
+  const time = m.date ? new Date(m.date).toLocaleString('ru-RU') : '';
+  const marks = [m.edited?'✏️ изменено':'', m.deleted?'🗑 удалено':''].filter(Boolean).join(' · ');
+  const markHtml = marks ? `<div style="font-size:10px;color:${m.deleted?'var(--red)':'var(--hint)'};margin-top:2px">${marks}</div>` : '';
+  return `<div style="display:flex;${out?'justify-content:flex-end':''}">
+    <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--accent);color:var(--text);border-bottom-right-radius:4px':'background:var(--sep);color:var(--text);border-bottom-left-radius:4px'}">
+      ${media}${text||(m.media_label?'':'<i style="opacity:.5">пустое</i>')}${markHtml}
+      <div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${time}</div>
+    </div></div>`;
+}
+
+async function sendVaultReply() {
+  const inp = document.getElementById('vchatInput');
+  const text = (inp.value||'').trim();
+  if (!text) return;
+  inp.disabled = true;
+  try {
+    await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/reply', {method:'POST', body: JSON.stringify({text})});
+    inp.value = '';
+    await reloadVaultChat();
+  } catch(e) { toast('⚠️ '+(e.message||'Не отправлено')); }
+  finally { inp.disabled = false; inp.focus(); }
+}
+
+function vaultSearchDebounced() {
+  clearTimeout(_vaultSearchTimer);
+  _vaultSearchTimer = setTimeout(vaultDoSearch, 350);
+}
+
+async function vaultDoSearch() {
+  const q = (document.getElementById('vaultSearch').value||'').trim();
+  if (q.length < 2) { const d = await api('/api/miniapp/vault/chats'); renderVaultChats(d.chats||[]); return; }
+  txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/vault/search?q='+encodeURIComponent(q));
+    const res = d.results || [];
+    if (!res.length) { txt('vaultList', empty('🔍','Ничего не найдено','Попробуйте другой запрос')); return; }
+    res.forEach(m => { VAULT_NAMES[m.chat_id] = m.peer_name; });
+    txt('vaultList', res.map(m => {
+      const del = m.deleted ? '<span class="badge b-rd" style="margin-left:6px">🗑</span>' : '';
+      return `<div class="li tap" onclick="openVaultChat(${m.chat_id})">
+        <div class="row-ico" style="background:var(--bg-blue-16)">💬</div>
+        <div class="li-body"><div class="li-name">${esc(m.peer_name)}${del}</div>
+          <div class="li-sub">${esc(m.text||m.media_label||'')}</div></div>
+        <div class="li-right"><span class="chev">›</span></div></div>`;
+    }).join(''));
+  } catch(e) { txt('vaultList', errHtml(e.message,'vaultDoSearch()')); }
+}
 
 function lastSeenLabel(t) {
   return ({online:'🟢 в сети', recently:'недавно', last_week:'на этой неделе',
