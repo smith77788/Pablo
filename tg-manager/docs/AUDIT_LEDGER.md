@@ -2314,3 +2314,24 @@ mass_invite pending 71 мин (owner …)»: _watchdog_alerts считал ЗА�
 проверить — только ручная канарейка. УРОК В СВОД: гипотезу о причине проверяй на живой
 схеме ПРЕЖДЕ фикса (NOT NULL опроверг «бессрочную подписку»); вотчдоги/алерты обязаны
 скоупить по владельцу и уважать scheduled_for так же, как поллер. 2742 passed с DSN.
+
+## Новая фича: «Хранилище» (Echo Vault) — архив business-переписки — 2026-08-02
+Запрос: реализовать функционал бота-архиватора (как Echo Vault) — Telegram Business
+подключение, зеркалирование переписки в архив, переживающий удаление чата. Решения
+пользователя: медиа — file_id+метаданные (без скачивания байтов); ответ из хранилища
+(can_reply) — включить. Интегрировано В СУЩЕСТВУЮЩИЙ бот+мини-апп (не отдельный бот).
+Сделано: schema_v163 (business_connections + vault_messages, текст шифруется token_vault
+at-rest, UNIQUE(owner,chat,msg) идемпотентность); services/vault_service.py (разбор
+апдейта, archive/record_edit/mark_deleted — удаление НЕ стирает контент, list/search,
+send_reply через business_connection_id); bot/handlers/business_vault.py (4 хендлера +
+/vault); main.py allowed_updates += 4 business-типа (КРИТИЧНО: без них Telegram не шлёт
+апдейты — главный молчаливый провал такой фичи) + роутер; mini_app vault-экраны +
+deep-link #vault; API /vault/{status,chats,messages,search,reply} owner-scoped.
+Проверка: live-PG (архив/правки/удаления/поиск/шифрование at-rest/owner-изоляция, 8
+тестов), проводка (allowed_updates/роутер/хендлеры/маршруты/экраны/эскейп), node --check,
+Playwright js-errors:0. 2796 passed с DSN. НЕ ПРОВЕРЕНО вживую (нет aiogram/telegram в
+среде): реальная доставка business-апдейтов и send с business_connection_id — нужна
+канарейка на живом боте + бизнес-аккаунте. УРОК В СВОД: для business-бота allowed_updates
+ОБЯЗАН включать business_connection/business_message/edited_business_message/
+deleted_business_messages, иначе архив молча пуст; conftest стабит aiogram.types —
+новые типы (BusinessConnection и т.п.) добавлять туда, иначе импорт хендлера падает.
