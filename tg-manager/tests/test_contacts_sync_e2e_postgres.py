@@ -200,3 +200,73 @@ def test_sync_account_update_path_rebinds_dates(pool, monkeypatch):
         "SELECT registered_estimate, is_mutual FROM unified_contacts "
         "WHERE owner_id=$1 AND telegram_user_id=$2", OWNER, 55503))
     assert str(row["registered_estimate"]) == "2020-12-31" and row["is_mutual"] is True
+
+
+# ── полный пользовательский путь: очередь-операция «синхронизация» ────────────
+
+def _seed_accounts(p, n) -> list[int]:
+    async def _s():
+        await p.execute(
+            "DELETE FROM contact_sources WHERE contact_id IN "
+            "(SELECT id FROM unified_contacts WHERE owner_id=$1)", OWNER)
+        await p.execute("DELETE FROM unified_contacts WHERE owner_id=$1", OWNER)
+        await p.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER)
+        ids = []
+        for i in range(n):
+            ids.append(await p.fetchval(
+                "INSERT INTO tg_accounts(owner_id,phone,session_str,is_active,acc_status,first_name) "
+                "VALUES($1,$2,$3,TRUE,'active',$4) RETURNING id",
+                OWNER, f"+7991{i:07d}", f"cs{i}", f"CS{i}"))
+        return ids
+    return _run(_s())
+
+
+def test_contacts_sync_operation_end_to_end(pool, monkeypatch):
+    """Путь как у пользователя: operation_bus.submit('contacts_sync') → воркер →
+    контакты флота в хабе + честный итог операции. Ловит и связывание в submit
+    (историю с scheduled_for), и диспетчеризацию исполнителя, и запись контактов.
+
+    Per-account данные разные — проверяем, что sync проходит ВЕСЬ флот, а не один.
+    """
+    import services.account_manager as am
+
+    async def _gc(session, _acc=None):
+        base = int(_acc["id"]) * 1000 if _acc else 0
+        return [{"user_id": base + j, "first_name": f"K{j}",
+                 "phone": f"+7{j:09d}" if j % 2 else None, "is_mutual": j == 0,
+                 "registered_estimate": "2020-05-05", "last_seen_type": "recently",
+                 "last_seen_at": "2026-07-01T00:00:00+00:00",
+                 "access_hash": 123456789012345 + j} for j in range(3)]
+
+    async def _gdc(session, limit=500, _acc=None):
+        return []
+
+    monkeypatch.setattr(am, "get_contacts", _gc)
+    monkeypatch.setattr(am, "get_dialog_contacts", _gdc)
+
+    ids = _seed_accounts(pool, 2)
+
+    from services import operation_bus, op_worker as w
+
+    async def _flow():
+        op_id = await operation_bus.submit(pool, OWNER, "contacts_sync", {},
+                                           total_items=len(ids), label="e2e sync")
+        # Поллер помечает running и передаёт задачу воркеру — воспроизводим 1:1.
+        await pool.execute("UPDATE operation_queue SET status='running', started_at=now() "
+                           "WHERE id=$1", op_id)
+        row = await pool.fetchrow(
+            "SELECT id, owner_id, op_type, params FROM operation_queue WHERE id=$1", op_id)
+        await w._run_op_task(pool, None, dict(row))
+        return await pool.fetchrow(
+            "SELECT status, result->>'summary' AS summary FROM operation_queue WHERE id=$1", op_id)
+
+    final = _run(_flow())
+    assert final["status"] == "done", f"операция не завершилась: {final['status']}"
+    # 2 аккаунта × 3 контакта = 6, все разные user_id → флот пройден целиком.
+    assert "Синхронизировано" in (final["summary"] or ""), final["summary"]
+    cnt = _run(pool.fetchval("SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1", OWNER))
+    assert cnt == 6, f"ожидалось 6 контактов флота, в хабе {cnt}"
+    # Каждый контакт привязан к своему аккаунту-источнику (счёт «по аккаунтам»).
+    src = _run(pool.fetchval(
+        "SELECT COUNT(*) FROM contact_sources WHERE account_id=ANY($1::bigint[])", ids))
+    assert src == 6, f"источники по аккаунтам не записаны: {src}"
