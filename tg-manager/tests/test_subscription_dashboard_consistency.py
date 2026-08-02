@@ -28,14 +28,22 @@ def test_exp_row_query_selects_plan():
 
 
 def test_dashboard_corrects_plan_from_active_subscription():
-    # при наличии активной подписки (exp_row) и «free»/пустом плане — правим на платный.
+    # План резолвится по НАИВЫСШЕМУ тарифу среди источников: get_plan, активная
+    # подписка (exp_row.plan) и ручная выдача (platform_users.current_plan). Так
+    # платный тариф не теряется ни при устаревшем кеше get_plan, ни когда подписка
+    # выдана только в platform_users («Enterprise → Free»). Поведение — в
+    # test_dashboard_plan_resolve.py; здесь проверяем ПРОВОДКУ всех трёх источников.
     m = re.search(
-        r'if r\["exp_row"\] and \(not stats\.get\("plan"\) or stats\["plan"\] == "free"\):\s*\n\s*stats\["plan"\]',
-        _SRC,
+        r'stats\["plan"\]\s*=\s*_resolve_best_plan\(\s*\n\s*'
+        r'r\["plan"\],.*?'
+        r'r\["exp_row"\]\["plan"\].*?'
+        r'plan_row\["current_plan"\]',
+        _SRC, re.DOTALL,
     )
     assert m, (
-        "dashboard должен выставлять платный план, если есть активная подписка в "
-        "subscriptions (иначе устаревший кеш get_plan → «free» при живой подписке)"
+        "dashboard должен резолвить план через _resolve_best_plan по всем трём "
+        "источникам (get_plan + активная подписка + platform_users), иначе теряется "
+        "платный тариф при устаревшем кеше или ручной выдаче в platform_users"
     )
 
 

@@ -176,6 +176,19 @@ def test_account_out_of_daily_limit_does_not_swallow_its_targets(stand):
     assert set(TARGETS) - s.attempted == set(), "аудитория не должна пропадать вместе с аккаунтом"
 
 
+def test_summary_reports_account_engagement_honestly(stand):
+    """Итог честно объясняет «выбрал N, работали M» (жалоба: 28 выбрано, ~20 работали).
+
+    Аккаунт 1 исчерпал суточный лимит и ни разу не сработал — итог обязан это
+    назвать, а не молча показать меньше задействованных аккаунтов.
+    """
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)), limits={1: 0})
+    res = _run(_Pool(), TARGETS)
+    summary = res["summary"]
+    assert "работали 1 из 2" in summary, f"нет честного учёта аккаунтов: {summary!r}"
+    assert "суточный лимит" in summary, "не назван мотив, почему аккаунт не задействован"
+
+
 def test_free_account_picks_up_the_rest(stand):
     """Свободный аккаунт не простаивает: разбирает общую очередь дальше."""
     s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)), limits={1: 5})

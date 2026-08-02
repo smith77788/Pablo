@@ -314,6 +314,33 @@ def _jlist(val) -> list:
         return []
 
 
+def _resolve_best_plan(get_plan_result, exp_plan, pu_plan) -> str:
+    """Наивысший тариф среди источников подписки.
+
+    Подписка может жить в РАЗНЫХ таблицах: `subscriptions` (оплата/бот) и
+    `platform_users.current_plan` (ручная выдача админом), а per-process кеш
+    get_plan мог устареть. Прежняя логика была `plan = get_plan; if not plan:
+    fallback` — но "free" ИСТИННО, поэтому фолбэк на platform_users НЕ срабатывал:
+    Enterprise, выданный только в platform_users, показывался как Free.
+
+    Каждый аргумент уже отфильтрован по сроку в своём запросе (exp_plan — из
+    активной неистёкшей подписки; pu_plan — из platform_users, не истёкший).
+    Пустые/None игнорируются. Возвращает канонический тариф (free/paid).
+    """
+    from bot.utils.subscription import coerce_plan as _cp, PLAN_LEVELS as _PL
+    best = "free"
+    for cand in (get_plan_result, exp_plan, pu_plan):
+        if not cand:
+            continue
+        try:
+            cc = _cp(cand)
+        except Exception:
+            continue
+        if _PL.get(cc, 0) > _PL.get(best, 0):
+            best = cc
+    return best
+
+
 def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
     import csv as _csv
     import io as _io
@@ -851,7 +878,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "stats": _stats(pool, uid, _adm),
             "plan": _plan(),
             "plan_row": pool.fetchrow(
-                "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid),
+                "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1 "
+                "AND (plan_expires_at IS NULL OR plan_expires_at > now())", uid),
             "exp_row": pool.fetchrow(
                 "SELECT plan, expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
                 "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid),
@@ -873,30 +901,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         stats = r["stats"] or {"bots": 0, "channels": 0, "subscribers": 0,
                                "campaigns_active": 0, "funnels_active": 0,
                                "accounts": 0, "ops_running": 0}
-        # План
+        # План. Подписка может жить в РАЗНЫХ источниках (subscriptions — оплата/бот;
+        # platform_users.current_plan — ручная выдача админом), а per-process кеш
+        # get_plan мог устареть (оплату обработал другой процесс). Раньше логика
+        # была `stats["plan"]=get_plan; if not plan: fallback` — но "free" ИСТИННО,
+        # поэтому фолбэк на platform_users НЕ срабатывал: Enterprise, выданный в
+        # platform_users, показывался как Free. Берём НАИВЫСШИЙ тариф среди всех
+        # источников (каждый уже отфильтрован по сроку действия в своём запросе).
         plan_row = r["plan_row"]
         try:
-            stats["plan"] = r["plan"]
-            if not stats.get("plan"):
-                stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
-            # exp_row = активная неистёкшая подписка из subscriptions (ПРЯМОЙ запрос,
-            # мимо per-process кеша get_plan). Её наличие ДОКАЗЫВАЕТ платный тариф.
-            # Раньше exp_row использовался только для даты истечения, а не для плана →
-            # дашборд показывал «free» при живой подписке, если кеш get_plan этого
-            # процесса устарел (оплату обработал ДРУГОЙ процесс — бот). Тот же
-            # источник истины, что и /subscription.
-            if r["exp_row"] and (not stats.get("plan") or stats["plan"] == "free"):
-                stats["plan"] = r["exp_row"]["plan"] if "plan" in r["exp_row"] else "paid"
-            try:
-                from bot.utils.subscription import coerce_plan as _cp
-                stats["plan"] = _cp(stats["plan"])
-            except Exception as e:
-                log.warning("dashboard coerce_plan: %s", e)
+            stats["plan"] = _resolve_best_plan(
+                r["plan"],                                          # get_plan (админ → paid)
+                (r["exp_row"]["plan"] if r["exp_row"] else None),   # активная подписка
+                (plan_row["current_plan"] if plan_row else None),   # ручная выдача (не истёкшая)
+            )
             if r["exp_row"]:
                 stats["plan_expires_at"] = str(r["exp_row"]["expires_at"])
+            elif plan_row and plan_row["plan_expires_at"]:
+                stats["plan_expires_at"] = str(plan_row["plan_expires_at"])
             else:
-                stats["plan_expires_at"] = str(plan_row["plan_expires_at"]) if plan_row and plan_row["plan_expires_at"] else None
+                stats["plan_expires_at"] = None  # бессрочный или free
         except Exception:
+            log.exception("dashboard plan resolve uid=%s", uid)
             stats["plan"] = "free"
             stats["plan_expires_at"] = None
         # Лента активности

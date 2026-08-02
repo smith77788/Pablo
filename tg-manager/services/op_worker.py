@@ -1092,7 +1092,14 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
             """SELECT id, op_type, status, owner_id,
                       EXTRACT(EPOCH FROM (now() - COALESCE(started_at, created_at)))/60 AS age_min
                FROM operation_queue
-               WHERE (status='pending'  AND created_at < now() - make_interval(mins => $1))
+               WHERE (status='pending'
+                        AND created_at < now() - make_interval(mins => $1)
+                        -- Отложенные операции (напр. инвайт «продолжим завтра»,
+                        -- повтор после cooldown) ЖДУТ scheduled_for и НЕ застряли.
+                        -- Поллер их тоже пропускает (scheduled_for <= now()); без
+                        -- этого условия каждая продолжающаяся операция сыпала
+                        -- ложным алертом «застряла» админам (с чужими owner_id).
+                        AND (scheduled_for IS NULL OR scheduled_for <= now()))
                   OR (status='running'  AND started_at < now() - make_interval(mins => $2))
                ORDER BY age_min DESC
                LIMIT 20""",
@@ -8586,14 +8593,23 @@ async def _exec_mass_invite(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Учёт задействования аккаунтов — чтобы честно объяснить «выбрал 28, работали 20»
+    # (класс багов #4: молчаливый итог). _selected — сколько отобрано; _quarantined_n —
+    # сколько снято риск-пульсом; _used_accounts заполняется в цикле.
+    _selected_n = len(accounts)
+    _quarantined_n = 0
+    _used_accounts: set[int] = set()
+    _daily_capped: set[int] = set()
+
     # Риск-пульс (Волна S/1B + M, fail-open): инвайт с флагнутого аккаунта = быстрый
     # бан. Отсеиваем карантинные; пустой результат НЕ обнуляет операцию.
     try:
         _kept = [a for a in accounts
                  if not await _infra_mem.is_account_quarantined(pool, a["id"])]
         if _kept and len(_kept) != len(accounts):
+            _quarantined_n = len(accounts) - len(_kept)
             log.info("mass_invite op=%d: пропущено %d аккаунтов в карантине",
-                     op_id, len(accounts) - len(_kept))
+                     op_id, _quarantined_n)
             accounts = _kept
     except Exception:
         log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
@@ -8844,6 +8860,10 @@ async def _exec_mass_invite(
             cap = budget[acc_id]
             if cap <= 0:
                 retired.add(acc_id)
+                # Аккаунт выбыл по суточному лимиту, ни разу не сработав → его
+                # «не задействовали» именно из-за лимита (для честного итога).
+                if acc_id not in _used_accounts:
+                    _daily_capped.add(acc_id)
                 continue
 
             take_n = min(batch_size, cap)
@@ -8884,6 +8904,9 @@ async def _exec_mass_invite(
             total_ok += ok_n
             total_fail += fail_n
             step += attempted
+            if attempted:
+                _used_accounts.add(acc_id)
+                _daily_capped.discard(acc_id)  # сработал → уже не «только из-за лимита»
             budget[acc_id] = max(0, cap - attempted)
             if attempted:
                 await pool.execute(
@@ -9052,9 +9075,28 @@ async def _exec_mass_invite(
             _next_op = await _schedule_invite_continuation(
                 pool, owner_id, params, list(q_users), list(q_phones), _chain + 1)
 
+    # Честный учёт задействования аккаунтов (ответ на «выбрал 28, работали ~20»).
+    # Не задействованы = отобранные, прошедшие карантин, но ни разу не сработавшие
+    # (суточный лимит / мёртвая сессия / сбой подключения).
+    _engaged_n = len(_used_accounts)
+    _idle_n = max(0, len(accounts) - _engaged_n)
+    _acc_parts = []
+    if _quarantined_n:
+        _acc_parts.append(f"🚫 в карантине (риск бана): {_quarantined_n}")
+    if _daily_capped:
+        _acc_parts.append(f"⏳ исчерпан суточный лимит: {len(_daily_capped)}")
+    _idle_other = _idle_n - len(_daily_capped)
+    if _idle_other > 0:
+        _acc_parts.append(f"⚪ не ответили (сессия/сеть): {_idle_other}")
+    _acc_line = (
+        f"\n👤 Аккаунты: работали {_engaged_n} из {_selected_n}"
+        + (("\n   " + " · ".join(_acc_parts)) if _acc_parts else "")
+    ) if _selected_n else ""
+
     summary = (
         f"👥 Инвайтер: {group}\n"
         f"✅ Добавлено: {total_ok}/{total}"
+        + _acc_line
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")

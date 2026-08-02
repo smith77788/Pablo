@@ -118,6 +118,10 @@ _pending_qr: dict[int, tuple] = {}
 
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
+# Прогрев кэша участников для резолва инвайтера при автовыдаче админки. Недавно
+# вступившие идут первыми в ChannelParticipantsRecent, поэтому потолок умеренный —
+# он ограничивает и время, и нагрузку на больших каналах (fail-open при промахе).
+_PROMOTE_WARM_LIMIT = 3000
 # Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
 _OP_TIMEOUT = 45
 
@@ -3653,7 +3657,22 @@ async def promote_to_admin(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
         channel = await _resolve_channel_peer(client, channel_id, access_hash)
-        input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+        try:
+            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+        except (ValueError, TypeError):
+            # StringSession НЕ хранит кэш сущностей между подключениями, поэтому
+            # get_input_entity(PeerUser(id)) на свежем клиенте-промоутере не может
+            # разрешить участника по голому id (нет access_hash). Это и есть причина
+            # «администраторов не назначает» при автовыдаче: промоутер не видит
+            # инвайтеров. Прогреваем кэш участниками канала (инвайтер — участник),
+            # затем повторяем. Ветка срабатывает только при промахе прямого резолва.
+            try:
+                await asyncio.wait_for(
+                    client.get_participants(channel, limit=_PROMOTE_WARM_LIMIT),
+                    timeout=60)
+            except Exception:
+                log_exc_swallow(log, "promote_to_admin: participant warm failed")
+            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
 
         rights = ChatAdminRights(
             post_messages=post_messages,
