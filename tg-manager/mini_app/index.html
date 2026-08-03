@@ -3863,6 +3863,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         </select>
       </div>
       <div id="massInviteAudience" style="font-size:12px;color:var(--hint);margin:-6px 0 10px;padding:0 2px"></div>
+      <div id="massInvitePreflight" style="font-size:12px;margin:-4px 0 10px;padding:0 2px"></div>
       <div class="field" id="massInviteFilters">
         <label>Фильтры аудитории</label>
         <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px">
@@ -13558,10 +13559,40 @@ async function loadInviteAudienceSize() {
     const capped = d.capped_at && INV_AUDIENCE > d.capped_at
       ? ` · за прогон возьмём ${num(d.capped_at)}` : '';
     el.innerHTML = `👥 Доступно целей: <b>${num(INV_AUDIENCE)}</b>${capped}`;
+    loadInvitePreflight(INV_AUDIENCE);
   } catch(e) {
     // Не знаем — молчим. Ноль здесь означал бы «пусто» и оттолкнул бы от запуска
     // рабочей операции.
     INV_AUDIENCE = null; el.textContent = '';
+  }
+}
+
+// Предполётная проверка: флот, прокси, оценка проходов — ДО запуска инвайта.
+async function loadInvitePreflight(audience) {
+  const el = document.getElementById('massInvitePreflight');
+  if (!el) return;
+  el.innerHTML = '<span style="color:var(--hint)">Проверяю флот…</span>';
+  try {
+    const d = await api('/api/miniapp/invite/preflight?audience=' + (audience||0));
+    const a = d.accounts || {};
+    const passLine = (audience && d.est_passes)
+      ? (d.one_pass
+          ? '<span style="color:var(--green)">✅ Уйдёт за один проход</span>'
+          : `<span style="color:var(--orange,#e6a100)">🔁 ~${d.est_passes} прохода(ов)</span> (суточный лимит флота ~${num(d.per_pass||0)})`)
+      : '';
+    const parts = [];
+    parts.push(`🛡 Пригодно аккаунтов: <b>${num(d.usable||0)}</b> из ${num(a.total||0)}`);
+    if (a.with_proxy) parts.push(`🔒 с прокси: ${num(a.with_proxy)}`);
+    if (a.direct) parts.push(`🌐 без прокси: ${num(a.direct)}`);
+    if (a.proxy_broken) parts.push(`🚫 прокси битый: ${num(a.proxy_broken)}`);
+    if (a.quarantined) parts.push(`⏸ на отдыхе: ${num(a.quarantined)}`);
+    const warns = (d.warnings||[]).map(w =>
+      `<div style="margin-top:4px;padding:6px 8px;background:var(--card-2,rgba(255,180,0,.08));border-radius:8px;line-height:1.4">${esc(w)}</div>`
+    ).join('');
+    el.innerHTML =
+      `<div style="line-height:1.5">${parts.join(' · ')}` + (passLine?` · ${passLine}`:'') + `</div>` + warns;
+  } catch(e) {
+    el.innerHTML = '';  // не мешаем запуску, если проверка недоступна
   }
 }
 async function submitMassInvite() {

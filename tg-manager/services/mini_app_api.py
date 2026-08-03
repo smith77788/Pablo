@@ -5875,6 +5875,105 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "hint": hint if not total else "",
         })
 
+    async def invite_preflight(request: web.Request) -> web.Response:
+        """Предполётная проверка инвайта ДО запуска: флот, прокси, оценка проходов.
+
+        Отвечает на «почему за один проход не уходит» и «работают ли аккаунты без
+        прокси» ЧЕСТНО, ещё до старта: сколько аккаунтов реально пригодны, сколько
+        без прокси (работают напрямую — риск), сколько заблокированы (назначен
+        прокси, но он недоступен — прямое соединение убьёт сессию), суточный
+        суммарный лимит флота и во сколько проходов уйдёт аудитория.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            audience = int(request.query.get("audience") or 0)
+        except (TypeError, ValueError):
+            audience = 0
+        try:
+            # Разбивка флота по транспорту. proxy_broken = назначен прокси, но он
+            # неактивен/удалён → напрямую подключать НЕЛЬЗЯ (AUTH_KEY_DUPLICATED),
+            # такие аккаунты в инвайт не идут. direct = прокси не назначен вовсе →
+            # каноничное прямое соединение, работает, но с риском (предупреждаем).
+            rows = await _safe_fetch(pool,
+                """SELECT a.id,
+                          (a.proxy_id IS NOT NULL AND p.id IS NOT NULL) AS has_proxy,
+                          (a.proxy_id IS NOT NULL AND p.id IS NULL)     AS proxy_broken
+                   FROM tg_accounts a
+                   LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+                   WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
+                     AND COALESCE(a.acc_status,'active')
+                         NOT IN ('banned','deactivated','session_expired')""",
+                uid) or []
+            total = len(rows)
+            with_proxy = sum(1 for r in rows if r["has_proxy"])
+            proxy_broken = sum(1 for r in rows if r["proxy_broken"])
+            direct = total - with_proxy - proxy_broken
+            # Пригодны = всё, кроме заблокированных по битому прокси. Аккаунты без
+            # прокси РАЗРЕШЕНЫ (работают напрямую) — но помечаем предупреждением.
+            usable_rows = [r for r in rows if not r["proxy_broken"]]
+
+            # Суммарный суточный бюджет флота (с учётом уже потраченного сегодня и
+            # выученных лимитов на аккаунт) + карантин. Это и есть «сколько уйдёт за
+            # один проход».
+            from services.flood_engine import recommended_daily_limit
+            from services import infra_memory as _im
+            per_pass, quarantined = 0, 0
+            for r in usable_rows[:200]:  # предел на случай огромного флота
+                try:
+                    if await _im.is_account_quarantined(pool, r["id"]):
+                        quarantined += 1
+                        continue
+                    _rec = await recommended_daily_limit(pool, int(r["id"]))
+                    per_pass += int(_rec.get("remaining") or 0)
+                except Exception:
+                    per_pass += 15  # консервативный дефолт при сбое расчёта
+            import math as _math
+            est_passes = (_math.ceil(audience / per_pass) if audience and per_pass else
+                          (1 if audience and audience <= per_pass else 0))
+
+            warnings = []
+            if proxy_broken:
+                warnings.append(
+                    f"🚫 {proxy_broken} аккаунт(ов) с назначенным, но недоступным прокси — "
+                    "в инвайт не пойдут (прямое подключение убьёт сессию, AUTH_KEY_DUPLICATED). "
+                    "Почините прокси или снимите привязку.")
+            if direct:
+                warnings.append(
+                    f"⚠️ {direct} аккаунт(ов) без прокси — работают напрямую (разрешено), "
+                    "но выше риск бана и AUTH_KEY_DUPLICATED, если та же сессия активна "
+                    "где-то ещё (телефон/другой софт). Для массового инвайта надёжнее прокси.")
+            if quarantined:
+                warnings.append(
+                    f"🚫 {quarantined} аккаунт(ов) под риск-пульсом — временно исключены "
+                    "(недавнее ограничение). Дайте им отдохнуть.")
+            if audience and est_passes and est_passes > 1:
+                warnings.append(
+                    f"🔁 Аудитория {audience} при суточном лимите флота ~{per_pass} уйдёт за "
+                    f"~{est_passes} прохода(ов) (по дню на проход). Один проход — это "
+                    "аккаунты × безопасный суточный лимит; лимит растёт по мере прогрева. "
+                    "Больше аккаунтов = меньше проходов.")
+
+            usable = len(usable_rows) - quarantined
+            return _json_resp({
+                "accounts": {
+                    "total": total, "with_proxy": with_proxy,
+                    "direct": direct, "proxy_broken": proxy_broken,
+                    "quarantined": quarantined,
+                },
+                "usable": max(0, usable),
+                "audience": audience,
+                "per_pass": per_pass,
+                "est_passes": est_passes,
+                "one_pass": bool(audience and est_passes <= 1 and usable > 0),
+                "can_launch": usable > 0,
+                "warnings": warnings,
+            })
+        except Exception as exc:
+            log.exception("invite_preflight uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def invite_advice(request: web.Request) -> web.Response:
         """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
 
@@ -12750,6 +12849,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
+    app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
