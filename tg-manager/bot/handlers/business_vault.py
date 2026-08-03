@@ -156,22 +156,41 @@ async def on_business_message(message: Message, pool: asyncpg.Pool) -> None:
 
 
 @router.edited_business_message()
-async def on_edited_business_message(message: Message, pool: asyncpg.Pool) -> None:
-    """Правка сообщения — сохраняем и старую, и новую версию."""
+async def on_edited_business_message(message: Message, bot: Bot,
+                                     pool: asyncpg.Pool) -> None:
+    """Правка сообщения — сохраняем и старую, и новую версию; «ловец» шлёт
+    было→стало (только для входящих правок собеседника)."""
     conn_id = getattr(message, "business_connection_id", None)
     owner_id = await _owner_for(pool, conn_id)
     if owner_id is None:
         return
     try:
-        await vault.record_edit(pool, message, owner_id)
+        info = await vault.record_edit(pool, message, owner_id)
     except Exception:
         log.exception("vault: record_edit failed owner=%s", owner_id)
+        return
+    if not info.get("changed") or info.get("direction") != "in":
+        return
+    try:
+        prefs = await vault.get_notify_prefs(pool, owner_id)
+        if not prefs["notify_edited"]:
+            return
+        who = _esc(info.get("peer_name") or "Собеседник")
+        await bot.send_message(
+            prefs["user_chat_id"] or owner_id,
+            f"✏️ <b>{who}</b> изменил сообщение:\n\n"
+            f"<b>Было:</b> {_esc(_short(info['old']))}\n"
+            f"<b>Стало:</b> {_esc(_short(info['new']))}",
+            parse_mode="HTML")
+    except Exception:
+        log.debug("vault: edit-уведомление не отправлено owner=%s", owner_id)
 
 
 @router.deleted_business_messages()
-async def on_deleted_business_messages(event: BusinessMessagesDeleted,
+async def on_deleted_business_messages(event: BusinessMessagesDeleted, bot: Bot,
                                        pool: asyncpg.Pool) -> None:
-    """Удаление у пользователя — помечаем в архиве, контент СОХРАНЯЕМ."""
+    """Удаление у пользователя — помечаем в архиве, контент СОХРАНЯЕМ; «ловец»
+    шлёт, что именно удалил собеседник."""
     owner_id = await _owner_for(pool, getattr(event, "business_connection_id", None))
     if owner_id is None:
         return
@@ -180,7 +199,35 @@ async def on_deleted_business_messages(event: BusinessMessagesDeleted,
     if chat_id is None or not msg_ids:
         return
     try:
+        # Сначала достаём содержимое ВХОДЯЩИХ (для уведомления), пока не потеряли контекст.
+        incoming = await vault.deleted_incoming_rows(pool, owner_id, chat_id, msg_ids)
         n = await vault.mark_deleted(pool, owner_id, chat_id, msg_ids)
         log.info("vault: помечено удалёнными %d сообщ. owner=%s chat=%s", n, owner_id, chat_id)
     except Exception:
         log.exception("vault: mark_deleted failed owner=%s", owner_id)
+        return
+    if not incoming:
+        return  # удалены только исходящие самого пользователя — не сигнал
+    try:
+        prefs = await vault.get_notify_prefs(pool, owner_id)
+        if not prefs["notify_deleted"]:
+            return
+        who = _esc((incoming[0].get("peer_name")) or "Собеседник")
+        lines = [f"🗑 <b>{who}</b> удалил сообщений: {len(incoming)}"]
+        for m in incoming[:5]:
+            body = m["text"] or m["media_label"] or "—"
+            lines.append(f"• {_esc(_short(body))}")
+        await bot.send_message(prefs["user_chat_id"] or owner_id,
+                               "\n".join(lines), parse_mode="HTML")
+    except Exception:
+        log.debug("vault: delete-уведомление не отправлено owner=%s", owner_id)
+
+
+def _esc(s) -> str:
+    import html
+    return html.escape(str(s or ""))
+
+
+def _short(s, n: int = 200) -> str:
+    s = " ".join(str(s or "").split())
+    return (s[:n] + "…") if len(s) > n else (s or "—")

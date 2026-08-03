@@ -158,16 +158,20 @@ async def archive_message(pool, message: Any, owner_id: int,
     )
 
 
-async def record_edit(pool, message: Any, owner_id: int) -> None:
+async def record_edit(pool, message: Any, owner_id: int) -> dict:
     """Правка сообщения: старую версию текста складываем в edit_history, ставим
-    новый текст и is_edited. Так видно и что было, и что стало."""
+    новый текст и is_edited. Так видно и что было, и что стало.
+
+    Возвращает {changed, direction, peer_name, old, new} — чтобы «ловец» мог
+    прислать «было → стало» (только для входящих правок собеседника)."""
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     msg_id = getattr(message, "message_id", None)
     if chat_id is None or msg_id is None:
-        return
+        return {"changed": False}
     row = await pool.fetchrow(
-        "SELECT text_enc, edit_history FROM vault_messages "
+        "SELECT text_enc, edit_history, direction, peer_name FROM vault_messages "
         "WHERE owner_id=$1 AND chat_id=$2 AND msg_id=$3", owner_id, chat_id, msg_id)
+    new_text = text_of(message)
     if not row:
         # Правка сообщения, которого нет в архиве (пришло до подключения) — просто
         # сохраняем как новое, чтобы не потерять текущий текст.
@@ -175,17 +179,24 @@ async def record_edit(pool, message: Any, owner_id: int) -> None:
         await pool.execute(
             "UPDATE vault_messages SET is_edited=TRUE, edited_at=now() "
             "WHERE owner_id=$1 AND chat_id=$2 AND msg_id=$3", owner_id, chat_id, msg_id)
-        return
+        return {"changed": False}
+    old_text = decrypt_token(row["text_enc"]) if row["text_enc"] else ""
     hist = _load_json(row["edit_history"]) or []
     if row["text_enc"]:
         hist.append(row["text_enc"])          # прошлые версии — тоже зашифрованы
-    text = text_of(message)
     await pool.execute(
         "UPDATE vault_messages SET text_enc=$4, is_edited=TRUE, edited_at=now(), "
         "edit_history=$5::jsonb WHERE owner_id=$1 AND chat_id=$2 AND msg_id=$3",
         owner_id, chat_id, msg_id,
-        encrypt_token(text) if text else None, json.dumps(hist[-20:]),
+        encrypt_token(new_text) if new_text else None, json.dumps(hist[-20:]),
     )
+    return {
+        "changed": (old_text or "") != (new_text or ""),
+        "direction": row["direction"],
+        "peer_name": row["peer_name"],
+        "old": old_text or "",
+        "new": new_text or "",
+    }
 
 
 async def mark_deleted(pool, owner_id: int, chat_id: int, msg_ids: list[int]) -> int:
@@ -203,26 +214,114 @@ async def mark_deleted(pool, owner_id: int, chat_id: int, msg_ids: list[int]) ->
         return 0
 
 
+async def deleted_incoming_rows(pool, owner_id: int, chat_id: int,
+                                msg_ids: list[int]) -> list[dict]:
+    """Расшифрованные ВХОДЯЩИЕ сообщения из указанных удалённых — для уведомления
+    «ловца» (owner удалил своё — не сигнал; собеседник удалил — сигнал)."""
+    if not msg_ids:
+        return []
+    rows = await pool.fetch(
+        "SELECT msg_id, text_enc, media_type, peer_name FROM vault_messages "
+        "WHERE owner_id=$1 AND chat_id=$2 AND msg_id=ANY($3::bigint[]) AND direction='in'",
+        owner_id, chat_id, [int(m) for m in msg_ids])
+    out = []
+    for r in rows:
+        out.append({
+            "msg_id": r["msg_id"],
+            "peer_name": r["peer_name"],
+            "text": decrypt_token(r["text_enc"]) if r["text_enc"] else "",
+            "media_label": _MEDIA_LABEL.get(r["media_type"], "📎 Вложение") if r["media_type"] else "",
+        })
+    return out
+
+
+# ── Настройки уведомлений «ловца» ────────────────────────────────────────────
+
+async def get_notify_prefs(pool, owner_id: int) -> dict:
+    row = await pool.fetchrow(
+        "SELECT user_chat_id, notify_deleted, notify_edited FROM business_connections "
+        "WHERE owner_id=$1 AND is_enabled=TRUE ORDER BY updated_at DESC LIMIT 1", owner_id)
+    if not row:
+        return {"user_chat_id": None, "notify_deleted": False, "notify_edited": False}
+    return {"user_chat_id": row["user_chat_id"],
+            "notify_deleted": bool(row["notify_deleted"]),
+            "notify_edited": bool(row["notify_edited"])}
+
+
+async def set_notify_prefs(pool, owner_id: int, notify_deleted: bool | None = None,
+                           notify_edited: bool | None = None) -> None:
+    sets, args, i = [], [owner_id], 2
+    if notify_deleted is not None:
+        sets.append(f"notify_deleted=${i}"); args.append(bool(notify_deleted)); i += 1
+    if notify_edited is not None:
+        sets.append(f"notify_edited=${i}"); args.append(bool(notify_edited)); i += 1
+    if not sets:
+        return
+    await pool.execute(
+        f"UPDATE business_connections SET {', '.join(sets)}, updated_at=now() WHERE owner_id=$1",
+        *args)
+
+
+# ── Лента «Недавно удалённое / изменённое» (кросс-чат) ───────────────────────
+
+async def recent_activity(pool, owner_id: int, kind: str = "deleted",
+                          limit: int = 100) -> list[dict]:
+    """Последние удалённые (kind='deleted') или изменённые (kind='edited') сообщения
+    по всем чатам — экран «ловца»."""
+    if kind == "edited":
+        cond, order = "is_edited=TRUE", "edited_at DESC"
+    else:
+        cond, order = "is_deleted=TRUE", "deleted_at DESC"
+    rows = await pool.fetch(
+        f"""SELECT chat_id, msg_id, direction, text_enc, edit_history, media_type,
+                   peer_name, peer_username, msg_date, deleted_at, edited_at,
+                   is_deleted, is_edited
+            FROM vault_messages WHERE owner_id=$1 AND {cond}
+            ORDER BY {order} NULLS LAST LIMIT $2""",
+        owner_id, min(int(limit), 500))
+    out = []
+    for r in rows:
+        d = _ui_message(r)
+        d["chat_id"] = r["chat_id"]
+        d["peer_name"] = r["peer_name"] or (f"@{r['peer_username']}" if r["peer_username"] else str(r["chat_id"]))
+        d["when"] = (r["deleted_at"] if kind != "edited" else r["edited_at"])
+        d["when"] = d["when"].isoformat() if d["when"] else None
+        if kind == "edited":
+            hist = _load_json(r["edit_history"]) or []
+            d["was"] = decrypt_token(hist[-1]) if hist else ""   # прошлая версия
+        out.append(d)
+    return out
+
+
 # ── Чтение архива (для мини-аппа), строго owner-scoped ───────────────────────
 
 async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
-    """Список чатов в хранилище с последним сообщением и счётчиками."""
+    """Список чатов в хранилище с последним сообщением и счётчиками.
+
+    ОДИН запрос: агрегаты + последнее сообщение через DISTINCT ON (раньше был
+    N+1 — отдельный запрос за последним сообщением на КАЖДЫЙ чат)."""
     rows = await pool.fetch(
-        """SELECT chat_id,
-                  MAX(peer_name)      AS peer_name,
-                  MAX(peer_username)  AS peer_username,
-                  COUNT(*)            AS total,
-                  COUNT(*) FILTER (WHERE is_deleted) AS deleted,
-                  MAX(msg_date)       AS last_date
-           FROM vault_messages WHERE owner_id=$1
-           GROUP BY chat_id ORDER BY last_date DESC NULLS LAST LIMIT $2""",
+        """WITH agg AS (
+               SELECT chat_id,
+                      MAX(peer_name)     AS peer_name,
+                      MAX(peer_username) AS peer_username,
+                      COUNT(*)           AS total,
+                      COUNT(*) FILTER (WHERE is_deleted) AS deleted,
+                      MAX(msg_date)      AS last_date
+               FROM vault_messages WHERE owner_id=$1 GROUP BY chat_id
+           ),
+           last AS (
+               SELECT DISTINCT ON (chat_id) chat_id, text_enc, media_type, is_deleted
+               FROM vault_messages WHERE owner_id=$1
+               ORDER BY chat_id, msg_date DESC NULLS LAST, msg_id DESC
+           )
+           SELECT a.chat_id, a.peer_name, a.peer_username, a.total, a.deleted, a.last_date,
+                  l.text_enc, l.media_type
+           FROM agg a LEFT JOIN last l USING (chat_id)
+           ORDER BY a.last_date DESC NULLS LAST LIMIT $2""",
         owner_id, limit)
     out = []
     for r in rows:
-        last = await pool.fetchrow(
-            "SELECT text_enc, media_type, is_deleted FROM vault_messages "
-            "WHERE owner_id=$1 AND chat_id=$2 ORDER BY msg_date DESC NULLS LAST LIMIT 1",
-            owner_id, r["chat_id"])
         out.append({
             "chat_id": r["chat_id"],
             "peer_name": r["peer_name"] or (f"@{r['peer_username']}" if r["peer_username"] else str(r["chat_id"])),
@@ -230,20 +329,69 @@ async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
             "total": int(r["total"] or 0),
             "deleted": int(r["deleted"] or 0),
             "last_date": r["last_date"].isoformat() if r["last_date"] else None,
-            "last_preview": _preview(last),
+            "last_preview": _preview(r),
         })
     return out
 
 
 async def list_messages(pool, owner_id: int, chat_id: int,
-                        limit: int = 200, offset: int = 0) -> list[dict]:
+                        limit: int = 200, offset: int = 0,
+                        filters: dict | None = None) -> list[dict]:
+    """Сообщения чата с опциональными фильтрами: media_only / deleted_only /
+    edited_only / direction ('in'|'out'). Всё скоупится по owner_id."""
+    f = filters or {}
+    cond = ["owner_id=$1", "chat_id=$2"]
+    if f.get("media_only"):
+        cond.append("media_type IS NOT NULL")
+    if f.get("deleted_only"):
+        cond.append("is_deleted=TRUE")
+    if f.get("edited_only"):
+        cond.append("is_edited=TRUE")
+    args = [owner_id, chat_id]
+    if f.get("direction") in ("in", "out"):
+        args.append(f["direction"]); cond.append(f"direction=${len(args)}")
+    args.append(min(int(limit), 1000)); lim_i = len(args)
+    args.append(max(int(offset), 0)); off_i = len(args)
     rows = await pool.fetch(
-        """SELECT msg_id, direction, text_enc, media_type, media_file_id, media_name,
-                  media_size, msg_date, is_deleted, is_edited
-           FROM vault_messages WHERE owner_id=$1 AND chat_id=$2
-           ORDER BY msg_date ASC NULLS FIRST, msg_id ASC LIMIT $3 OFFSET $4""",
-        owner_id, chat_id, min(int(limit), 1000), max(int(offset), 0))
+        f"""SELECT msg_id, direction, text_enc, media_type, media_file_id, media_name,
+                   media_size, msg_date, is_deleted, is_edited
+            FROM vault_messages WHERE {' AND '.join(cond)}
+            ORDER BY msg_date ASC NULLS FIRST, msg_id ASC LIMIT ${lim_i} OFFSET ${off_i}""",
+        *args)
     return [_ui_message(r) for r in rows]
+
+
+async def export_data(pool, owner_id: int, chat_id: int | None = None) -> dict:
+    """Данные для экспорта архива (весь или один чат): расшифрованные сообщения,
+    сгруппированные по чатам. Owner-scoped."""
+    if chat_id is not None:
+        rows = await pool.fetch(
+            """SELECT chat_id, peer_name, peer_username, msg_id, direction, text_enc,
+                      media_type, media_name, msg_date, is_deleted, is_edited
+               FROM vault_messages WHERE owner_id=$1 AND chat_id=$2
+               ORDER BY msg_date ASC NULLS FIRST, msg_id ASC""", owner_id, chat_id)
+    else:
+        rows = await pool.fetch(
+            """SELECT chat_id, peer_name, peer_username, msg_id, direction, text_enc,
+                      media_type, media_name, msg_date, is_deleted, is_edited
+               FROM vault_messages WHERE owner_id=$1
+               ORDER BY chat_id, msg_date ASC NULLS FIRST, msg_id ASC""", owner_id)
+    chats: dict = {}
+    for r in rows:
+        c = chats.setdefault(r["chat_id"], {
+            "chat_id": r["chat_id"],
+            "peer_name": r["peer_name"] or (f"@{r['peer_username']}" if r["peer_username"] else str(r["chat_id"])),
+            "messages": [],
+        })
+        c["messages"].append({
+            "msg_id": r["msg_id"], "direction": r["direction"],
+            "text": decrypt_token(r["text_enc"]) if r["text_enc"] else "",
+            "media": _MEDIA_LABEL.get(r["media_type"], "") if r["media_type"] else "",
+            "media_name": r["media_name"],
+            "date": r["msg_date"].isoformat() if r["msg_date"] else None,
+            "deleted": bool(r["is_deleted"]), "edited": bool(r["is_edited"]),
+        })
+    return {"owner_id": owner_id, "chats": list(chats.values())}
 
 
 async def search_messages(pool, owner_id: int, query: str, limit: int = 100) -> list[dict]:

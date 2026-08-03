@@ -341,6 +341,31 @@ def _resolve_best_plan(get_plan_result, exp_plan, pu_plan) -> str:
     return best
 
 
+def _vault_export_html(data: dict) -> str:
+    """Простой самодостаточный HTML-экспорт архива (для скачивания/печати)."""
+    import html as _html
+    parts = ["<!doctype html><meta charset='utf-8'><title>Экспорт хранилища</title>",
+             "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;"
+             "margin:0 auto;padding:16px;background:#0f1115;color:#e6e6e6}"
+             "h2{border-bottom:1px solid #333;padding-bottom:6px;margin-top:28px}"
+             ".m{margin:6px 0;padding:8px 12px;border-radius:10px;background:#1b1f27}"
+             ".out{background:#2a3550;margin-left:40px}.d{color:#f77;text-decoration:line-through}"
+             ".meta{font-size:11px;color:#888;margin-top:3px}</style>",
+             "<h1>🗄 Экспорт хранилища</h1>"]
+    for c in data.get("chats", []):
+        parts.append(f"<h2>{_html.escape(str(c.get('peer_name') or c.get('chat_id')))}</h2>")
+        for m in c.get("messages", []):
+            cls = "m out" if m.get("direction") == "out" else "m"
+            txt = _html.escape(m.get("text") or m.get("media") or "—")
+            if m.get("deleted"):
+                txt = f"<span class='d'>{txt}</span>"
+            marks = " · ".join(x for x in (
+                "изменено" if m.get("edited") else "", "удалено" if m.get("deleted") else "") if x)
+            meta = _html.escape((m.get("date") or "")) + (f" · {marks}" if marks else "")
+            parts.append(f"<div class='{cls}'>{txt}<div class='meta'>{meta}</div></div>")
+    return "\n".join(parts)
+
+
 def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Response:
     import csv as _csv
     import io as _io
@@ -4329,10 +4354,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import vault_service as _v
         conn = await _v.active_connection_for_owner(pool, uid)
         botname = await _resolve_bot_username()
+        prefs = await _v.get_notify_prefs(pool, uid)
         return _json_resp({
             "connected": bool(conn),
             "can_reply": bool(conn.get("can_reply")) if conn else False,
             "bot_username": botname,
+            "notify_deleted": prefs["notify_deleted"],
+            "notify_edited": prefs["notify_edited"],
         })
 
     async def vault_chats(request: web.Request) -> web.Response:
@@ -4360,13 +4388,85 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             offset = max(int(request.query.get("offset", 0)), 0)
         except (TypeError, ValueError):
             limit, offset = 200, 0
+        q = request.query
+        filters = {
+            "media_only": q.get("media_only") in ("1", "true"),
+            "deleted_only": q.get("deleted_only") in ("1", "true"),
+            "edited_only": q.get("edited_only") in ("1", "true"),
+            "direction": q.get("direction") if q.get("direction") in ("in", "out") else None,
+        }
         from services import vault_service as _v
         try:
-            msgs = await _v.list_messages(pool, uid, chat_id, limit=limit, offset=offset)
+            msgs = await _v.list_messages(pool, uid, chat_id, limit=limit, offset=offset,
+                                          filters=filters)
         except Exception as exc:
             log.exception("vault_messages uid=%s chat=%s", uid, chat_id)
             return _err(f"Ошибка: {str(exc)[:140]}", 500)
         return _json_resp({"messages": msgs, "limit": limit, "offset": offset})
+
+    async def vault_recent(request: web.Request) -> web.Response:
+        """Лента «Недавно удалённое/изменённое» по всем чатам (экран «ловца»)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        kind = request.query.get("type", "deleted")
+        if kind not in ("deleted", "edited"):
+            kind = "deleted"
+        from services import vault_service as _v
+        try:
+            items = await _v.recent_activity(pool, uid, kind, limit=100)
+        except Exception as exc:
+            log.exception("vault_recent uid=%s", uid)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        return _json_resp({"items": items, "kind": kind, "total": len(items)})
+
+    async def vault_settings(request: web.Request) -> web.Response:
+        """GET — текущие настройки уведомлений; POST — переключить."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import vault_service as _v
+        if request.method == "POST":
+            try:
+                body = await request.json()
+            except Exception:
+                return _err("bad request", 400)
+            await _v.set_notify_prefs(
+                pool, uid,
+                notify_deleted=body.get("notify_deleted"),
+                notify_edited=body.get("notify_edited"))
+        prefs = await _v.get_notify_prefs(pool, uid)
+        return _json_resp({"notify_deleted": prefs["notify_deleted"],
+                           "notify_edited": prefs["notify_edited"]})
+
+    async def vault_export(request: web.Request) -> web.Response:
+        """Экспорт архива (весь или ?chat_id=) в файл: format=json|html."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        chat_id = None
+        if request.query.get("chat_id"):
+            try:
+                chat_id = int(request.query["chat_id"])
+            except (TypeError, ValueError):
+                return _err("bad chat_id", 400)
+        fmt = request.query.get("format", "html")
+        from services import vault_service as _v
+        try:
+            data = await _v.export_data(pool, uid, chat_id)
+        except Exception as exc:
+            log.exception("vault_export uid=%s", uid)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        if fmt == "json":
+            body = json.dumps(data, ensure_ascii=False, indent=2)
+            ctype, ext = "application/json; charset=utf-8", "json"
+        else:
+            body = _vault_export_html(data)
+            ctype, ext = "text/html; charset=utf-8", "html"
+        return web.Response(
+            body=body.encode("utf-8"), content_type=ctype.split(";")[0],
+            charset="utf-8",
+            headers={"Content-Disposition": f'attachment; filename="vault_export.{ext}"'})
 
     async def vault_search(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -13120,6 +13220,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vault/chats", vault_chats)
     app.router.add_get("/api/miniapp/vault/chat/{chat_id}/messages", vault_messages)
     app.router.add_get("/api/miniapp/vault/search", vault_search)
+    app.router.add_get("/api/miniapp/vault/recent", vault_recent)
+    app.router.add_get("/api/miniapp/vault/export", vault_export)
+    app.router.add_get("/api/miniapp/vault/settings", vault_settings)
+    app.router.add_post("/api/miniapp/vault/settings", vault_settings)
     app.router.add_post("/api/miniapp/vault/chat/{chat_id}/reply", vault_reply)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)

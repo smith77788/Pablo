@@ -195,3 +195,77 @@ def test_owner_scope_isolation(pool):
     assert _run(v.list_chats(pool, OWNER2)) == []
     assert _run(v.list_messages(pool, OWNER2, 50)) == []
     assert _run(v.search_messages(pool, OWNER2, "мои")) == []
+
+
+# ── «ловец»: было→стало, что удалил собеседник, лента, фильтры, экспорт ───────
+
+def test_record_edit_returns_change_for_incoming(pool):
+    _clean(pool)
+    from services import vault_service as v
+    _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
+    _run(v.archive_message(pool, _msg(50, 1, 50, "старое"), OWNER, CONN))     # входящее
+    info = _run(v.record_edit(pool, _msg(50, 1, 50, "новое"), OWNER))
+    assert info["changed"] is True and info["direction"] == "in"
+    assert info["old"] == "старое" and info["new"] == "новое"
+    # правка собственного (out) — direction 'out', уведомлять не будем
+    _run(v.archive_message(pool, _msg(50, 2, OWNER, "моё"), OWNER, CONN))
+    info2 = _run(v.record_edit(pool, _msg(50, 2, OWNER, "моё-2"), OWNER))
+    assert info2["direction"] == "out"
+
+
+def test_deleted_incoming_rows_only_incoming(pool):
+    _clean(pool)
+    from services import vault_service as v
+    _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
+    _run(v.archive_message(pool, _msg(50, 1, 50, "входящее удалят"), OWNER, CONN))
+    _run(v.archive_message(pool, _msg(50, 2, OWNER, "исходящее удалят"), OWNER, CONN))
+    rows = _run(v.deleted_incoming_rows(pool, OWNER, 50, [1, 2]))
+    assert len(rows) == 1 and rows[0]["text"] == "входящее удалят", \
+        "уведомляем только про удаления собеседника, не про свои"
+
+
+def test_recent_activity_deleted_and_edited(pool):
+    _clean(pool)
+    from services import vault_service as v
+    _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
+    _run(v.archive_message(pool, _msg(50, 1, 50, "удалю"), OWNER, CONN))
+    _run(v.archive_message(pool, _msg(60, 1, 60, "правлю"), OWNER, CONN))
+    _run(v.mark_deleted(pool, OWNER, 50, [1]))
+    _run(v.record_edit(pool, _msg(60, 1, 60, "поправлено"), OWNER))
+    dele = _run(v.recent_activity(pool, OWNER, "deleted"))
+    assert len(dele) == 1 and dele[0]["chat_id"] == 50 and dele[0]["deleted"] is True
+    edi = _run(v.recent_activity(pool, OWNER, "edited"))
+    assert len(edi) == 1 and edi[0]["text"] == "поправлено" and edi[0]["was"] == "правлю"
+
+
+def test_list_messages_filters(pool):
+    _clean(pool)
+    from services import vault_service as v
+    _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
+    _run(v.archive_message(pool, _msg(50, 1, 50, "текст"), OWNER, CONN))
+    _run(v.archive_message(pool, _msg(50, 2, 50, None,
+         photo=[N(file_id="p", file_unique_id="u", file_size=1, mime_type=None, file_name=None)]), OWNER, CONN))
+    _run(v.archive_message(pool, _msg(50, 3, OWNER, "моё"), OWNER, CONN))
+    _run(v.mark_deleted(pool, OWNER, 50, [1]))
+    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"media_only": True}))) == 1
+    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"deleted_only": True}))) == 1
+    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"direction": "out"}))) == 1
+
+
+def test_export_data_decrypted_grouped(pool):
+    _clean(pool)
+    from services import vault_service as v
+    _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
+    _run(v.archive_message(pool, _msg(50, 1, 50, "экспорт-текст"), OWNER, CONN))
+    exp = _run(v.export_data(pool, OWNER))
+    assert exp["chats"] and exp["chats"][0]["messages"][0]["text"] == "экспорт-текст"
+
+
+def test_notify_prefs_default_on_and_toggle(pool):
+    _clean(pool)
+    from services import vault_service as v
+    _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
+    prefs = _run(v.get_notify_prefs(pool, OWNER))
+    assert prefs["notify_deleted"] is True and prefs["notify_edited"] is True  # по умолчанию ВКЛ
+    _run(v.set_notify_prefs(pool, OWNER, notify_deleted=False))
+    assert _run(v.get_notify_prefs(pool, OWNER))["notify_deleted"] is False

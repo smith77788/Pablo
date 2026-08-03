@@ -43,8 +43,28 @@ def test_api_routes_registered():
         '"/api/miniapp/vault/chat/{chat_id}/messages"',
         '"/api/miniapp/vault/search"',
         '"/api/miniapp/vault/chat/{chat_id}/reply"',
+        '"/api/miniapp/vault/recent"',
+        '"/api/miniapp/vault/export"',
+        '"/api/miniapp/vault/settings"',
     ):
         assert route in API, f"маршрут не зарегистрирован: {route}"
+
+
+def test_catcher_notifications_wired():
+    """«Ловец»: хендлеры удаления/правки шлют уведомление только про ВХОДЯЩИЕ,
+    уважая настройки notify_deleted/notify_edited."""
+    assert "deleted_incoming_rows(" in HANDLER, "delete-хендлер не достаёт входящие для уведомления"
+    assert "get_notify_prefs(" in HANDLER, "уведомления не уважают настройки"
+    # правку уведомляем только для входящих (direction == 'in')
+    m = re.search(r"async def on_edited_business_message\(.*?async def on_deleted", HANDLER, re.S)
+    assert m and '!= "in"' in m.group(0), "edit-уведомление шлётся и на свои правки"
+
+
+def test_recent_and_export_screens():
+    assert 'id="s-vaultrecent"' in HTML, "нет экрана ленты удалённых/изменённых"
+    assert 'id="mo-vault-settings"' in HTML, "нет модалки настроек уведомлений"
+    for fn in ("openVaultRecent", "downloadVaultExport", "setVaultFilter", "saveVaultSettings"):
+        assert re.search(rf"function {fn}\(", HTML), f"нет функции {fn}"
 
 
 def test_api_owner_scoped():
