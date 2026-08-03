@@ -83,7 +83,9 @@ def test_make_client_decrypts_session(monkeypatch):
 
     monkeypatch.setattr(ts, "StringSession", _CapSession, raising=False)
     monkeypatch.setattr(account_manager, "_resolve_client_proxy", lambda d, low_risk=False: None)
-    monkeypatch.setattr(account_manager, "_get_pool_proxy_url", lambda: None, raising=False)
+    # Сигнатура стала account-scoped (_get_pool_proxy_url(account_id)) — «залипающий»
+    # пул-прокси по аккаунту против AUTH_KEY_DUPLICATED. Стаб принимает аргумент.
+    monkeypatch.setattr(account_manager, "_get_pool_proxy_url", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(account_manager, "CF_RELAY_URL", "", raising=False)
     monkeypatch.setattr(
         account_manager,
