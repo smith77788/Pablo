@@ -3918,6 +3918,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <input type="number" id="massInvitePerAcc" min="0" placeholder="без лимита">
           <div class="field-note">Инвайт — самая баноопасная операция. Меньше на аккаунт = дольше живёт</div>
         </div>
+        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+          <input type="checkbox" id="massInviteOnePass" onchange="loadInvitePreflight(INV_AUDIENCE)">
+          <span>🚀 Один проход (макс. интенсивность)</span>
+        </label>
+        <div class="field-note" style="margin-top:-6px">Закрыть аудиторию за один прогон до потолка ёмкости (≈50/аккаунт), полагаясь на живые сигналы флуда, а не на предсказанный суточный лимит. <b style="color:var(--red)">Выше риск бана.</b> Реальную защиту держат FloodWait/PeerFlood и стоп-кран флота.</div>
       </details>
       <div class="field-err" id="massInviteErr"></div>
       <button class="btn btn-p" id="massInviteBtn" onclick="submitMassInvite()" style="width:100%">🚀 Запустить инвайт</button>
@@ -13573,7 +13578,8 @@ async function loadInvitePreflight(audience) {
   if (!el) return;
   el.innerHTML = '<span style="color:var(--hint)">Проверяю флот…</span>';
   try {
-    const d = await api('/api/miniapp/invite/preflight?audience=' + (audience||0));
+    const _op = document.getElementById('massInviteOnePass')?.checked ? '&one_pass=1' : '';
+    const d = await api('/api/miniapp/invite/preflight?audience=' + (audience||0) + _op);
     const a = d.accounts || {};
     const passLine = (audience && d.est_passes)
       ? (d.one_pass
@@ -13622,6 +13628,8 @@ async function submitMassInvite() {
   if (_b) body.batch_size = parseInt(_b);
   if (_m) body.max_invites = parseInt(_m);
   if (_pa) body.per_account_limit = parseInt(_pa);
+  const _onePass = document.getElementById('massInviteOnePass')?.checked;
+  if (_onePass) body.one_pass = true;
   // Фильтры аудитории (только с username / не бот / premium / активные) —
   // применяются в исполнителе теми же условиями, что парсер-вью.
   const _af = {};
@@ -13634,7 +13642,8 @@ async function submitMassInvite() {
   // Без лимита на аккаунт риск бана максимальный — предупреждаем явно.
   const _paceLbl = {auto:'🤖 авто (по состоянию флота)', slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;
   const _warn = _pa ? '' : '\n\n⚠️ Лимит на аккаунт не задан — риск бана выше. Задайте его в «⚙️ Лимиты».';
-  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_warn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
+  const _opWarn = _onePass ? '\n\n🚀 Режим «один проход»: аккаунты работают до потолка ёмкости (≈50/аккаунт) по живым сигналам флуда, без предсказанного суточного лимита. Это ЗАМЕТНО выше риск бана — используйте на прогретых аккаунтах с прокси.' : '';
+  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_warn+_opWarn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
   const btn = document.getElementById('massInviteBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {

@@ -8446,6 +8446,13 @@ async def _exec_mass_invite(
         _per_acc_limit = max(0, int(params.get("per_account_limit") or 0))
     except (TypeError, ValueError):
         _per_acc_limit = 0
+    # Режим «один проход»: осознанный выбор пользователя закрыть аудиторию за один
+    # прогон, НЕ полагаясь на консервативный ПРЕДСКАЗАННЫЙ суточный лимит. Мы не
+    # снимаем защиту целиком — потолок остаётся _INVITE_LIMIT_CEILING (за ним бан
+    # почти гарантирован), а реальными тормозами становятся живые сигналы Telegram
+    # (FloodWait/PeerFlood → аккаунт в cooldown) и стоп-кран флота (flood_storm).
+    # Т.е. меняем ГАДАНИЕ о безопасном числе на реакцию по ФАКТУ, как у конкурентов.
+    _one_pass = bool(params.get("one_pass"))
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
@@ -8839,6 +8846,13 @@ async def _exec_mass_invite(
         вчера; рекомендация это знает. Уже израсходованное за сегодня
         вычитается, поэтому повторный запуск не удваивает суточный объём.
         """
+        # Режим «один проход»: не клампим к предсказанному суточному лимиту —
+        # берём потолок ёмкости (или явный лимит пользователя, но не выше потолка).
+        # Реальную безопасность держат сигналы флуда + стоп-кран флота, а не гадание.
+        if _one_pass:
+            from services.flood_engine import _INVITE_LIMIT_CEILING as _ceil
+            _cap = _per_acc_limit or _ceil
+            return max(1, min(int(_cap), _ceil))
         _acc_cap = _per_acc_limit
         try:
             from services.flood_engine import recommended_daily_limit
@@ -9159,6 +9173,8 @@ async def _exec_mass_invite(
         + (f"\n⚠️ Ошибок: {total_fail}" + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")
            if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
+        + ("\n🚀 Режим «один проход»: работали до потолка ёмкости по живым сигналам "
+           "флуда (без предсказанного суточного лимита)." if _one_pass else "")
         + (f"\n🚫 Не удалось добавлять в чат — операция остановлена.\n   Причина: {_group_reason}"
            if group_broken and _group_reason else
            ("\n🚫 Группа недоступна — операция остановлена" if group_broken else ""))

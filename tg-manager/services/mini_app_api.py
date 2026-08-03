@@ -5891,6 +5891,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             audience = int(request.query.get("audience") or 0)
         except (TypeError, ValueError):
             audience = 0
+        # В режиме «один проход» оценка ёмкости считается по потолку (до
+        # _INVITE_LIMIT_CEILING на аккаунт), а не по консервативному предсказанию.
+        one_pass = str(request.query.get("one_pass") or "").lower() in ("1", "true", "yes", "on")
         try:
             # Разбивка флота по транспорту. proxy_broken = назначен прокси, но он
             # неактивен/удалён → напрямую подключать НЕЛЬЗЯ (AUTH_KEY_DUPLICATED),
@@ -5917,7 +5920,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Суммарный суточный бюджет флота (с учётом уже потраченного сегодня и
             # выученных лимитов на аккаунт) + карантин. Это и есть «сколько уйдёт за
             # один проход».
-            from services.flood_engine import recommended_daily_limit
+            from services.flood_engine import recommended_daily_limit, _INVITE_LIMIT_CEILING
             from services import infra_memory as _im
             per_pass, quarantined = 0, 0
             for r in usable_rows[:200]:  # предел на случай огромного флота
@@ -5925,10 +5928,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     if await _im.is_account_quarantined(pool, r["id"]):
                         quarantined += 1
                         continue
-                    _rec = await recommended_daily_limit(pool, int(r["id"]))
-                    per_pass += int(_rec.get("remaining") or 0)
+                    if one_pass:
+                        # ёмкость одного прохода = потолок на аккаунт
+                        per_pass += _INVITE_LIMIT_CEILING
+                    else:
+                        _rec = await recommended_daily_limit(pool, int(r["id"]))
+                        per_pass += int(_rec.get("remaining") or 0)
                 except Exception:
-                    per_pass += 15  # консервативный дефолт при сбое расчёта
+                    per_pass += _INVITE_LIMIT_CEILING if one_pass else 15
             import math as _math
             est_passes = (_math.ceil(audience / per_pass) if audience and per_pass else
                           (1 if audience and audience <= per_pass else 0))
@@ -6899,6 +6906,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 params["max_invites"] = max_invites
             if per_account_limit:
                 params["per_account_limit"] = per_account_limit
+            # Режим «один проход»: закрыть аудиторию за один прогон до потолка ёмкости,
+            # полагаясь на реальные сигналы флуда, а не на предсказанный суточный лимит.
+            # Осознанно повышает риск — фронт подтверждает отдельно.
+            if bool(body.get("one_pass")):
+                params["one_pass"] = True
             if account_ids:
                 params["account_ids"] = account_ids
             op_id = await pool.fetchval(
