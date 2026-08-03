@@ -89,9 +89,10 @@ def test_chain_is_bounded():
 
 def test_no_continuation_when_the_problem_is_not_limits():
     body = _exec_body()
-    m = re.search(r"if _left and not group_broken[^\n]*", body)
-    assert m, "условие продолжения не найдено"
-    cond = m.group(0)
+    # Условие продолжения обёрнуто в скобки и занимает несколько строк —
+    # проверяем блок вокруг предела цепочки, а не одну конкретную строку.
+    i = body.index("_chain < _MAX_INVITE_CHAIN")
+    cond = body[i - 220:i + 60]
     assert "not group_broken" in cond, "закрытая группа: повтор бессмыслен"
     assert "not flood_storm" in cond, "перегретый флот: повтор навредит"
 

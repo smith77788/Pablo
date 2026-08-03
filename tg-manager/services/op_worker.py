@@ -8600,6 +8600,7 @@ async def _exec_mass_invite(
     _quarantined_n = 0
     _used_accounts: set[int] = set()
     _daily_capped: set[int] = set()
+    _noconnect_errs: list[str] = []   # тексты ошибок «не подключился» — для распознавания причины
 
     # Риск-пульс (Волна S/1B + M, fail-open): инвайт с флагнутого аккаунта = быстрый
     # бан. Отсеиваем карантинные; пустой результат НЕ обнуляет операцию.
@@ -8892,6 +8893,7 @@ async def _exec_mass_invite(
                 log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
                 _give_back(queue, batch)
                 retired.add(acc_id)
+                _noconnect_errs.append(str(exc)[:160])
                 continue
 
             ok_n = int(res.get("ok") or 0)
@@ -8985,11 +8987,13 @@ async def _exec_mass_invite(
 
             if attempted == 0:
                 # Ни одной попытки без флуда = аккаунт не смог подключиться.
+                _errs = "; ".join(str(e) for e in (res.get("errors") or []))
                 log.warning(
                     "mass_invite op=%d acc=%s: батч не отработан (%s) — выведен из круга",
-                    op_id, acc.get("id"), "; ".join(str(e) for e in (res.get("errors") or []))[:120],
+                    op_id, acc.get("id"), _errs[:120],
                 )
                 retired.add(acc_id)
+                _noconnect_errs.append(_errs[:160] or "аккаунт не ответил (сессия/сеть)")
                 continue
 
             await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
@@ -9068,9 +9072,16 @@ async def _exec_mass_invite(
     # Теперь остаток уезжает в ОТДЕЛЬНУЮ операцию на завтра. Не продолжаем, если
     # флот перегрет (flood_storm) или группа закрыта — там проблема не в лимитах,
     # и повтор только навредит.
+    # Все аккаунты не подключились (сессия/сеть) и ни один не сработал — это НЕ про
+    # суточные лимиты. Продолжать «завтра» бессмысленно: те же мёртвые/задублированные
+    # сессии упадут так же (и так до _MAX_INVITE_CHAIN дней холостых операций). Не
+    # планируем продолжение — вместо ложной надежды даём честную причину и что делать.
+    _all_failed_connect = (len(_used_accounts) == 0) and bool(_noconnect_errs)
+
     _next_op = None
     _chain = int(params.get("invite_chain") or 0)
-    if _left and not group_broken and not flood_storm and _chain < _MAX_INVITE_CHAIN:
+    if (_left and not group_broken and not flood_storm
+            and not _all_failed_connect and _chain < _MAX_INVITE_CHAIN):
         if not await _is_cancelled(pool, op_id):
             _next_op = await _schedule_invite_continuation(
                 pool, owner_id, params, list(q_users), list(q_phones), _chain + 1)
@@ -9092,6 +9103,23 @@ async def _exec_mass_invite(
         f"\n👤 Аккаунты: работали {_engaged_n} из {_selected_n}"
         + (("\n   " + " · ".join(_acc_parts)) if _acc_parts else "")
     ) if _selected_n else ""
+
+    # Подсказка по типовой причине сбоя подключения (для «одного прохода без ошибок»):
+    # сырой английский текст Telethon пользователю не нужен — нужна причина + действие.
+    _sess_hint = ""
+    if _noconnect_errs:
+        _blob = " ".join(_noconnect_errs).upper()
+        if "TWO DIFFERENT IP" in _blob or "AUTH_KEY_DUPLICATED" in _blob:
+            _sess_hint = (
+                "\n⚠️ Сессия использовалась с двух IP одновременно (AUTH_KEY_DUPLICATED). "
+                "Причины: аккаунт залогинен где-то ещё (телефон/другой софт) ИЛИ у него "
+                "нет/сменился прокси. Не держите сессию активной в другом месте, задайте "
+                "каждому аккаунту рабочий прокси и переавторизуйте в разделе «Аккаунты»."
+            )
+        elif ("AUTH_KEY_UNREGISTERED" in _blob or "SESSION_REVOKED" in _blob
+              or "SESSION_EXPIRED" in _blob or "AUTHORIZATION KEY" in _blob):
+            _sess_hint = ("\n⚠️ Сессии недействительны — переавторизуйте аккаунты "
+                          "в разделе «Аккаунты».")
 
     summary = (
         f"👥 Инвайтер: {group}\n"
@@ -9116,13 +9144,20 @@ async def _exec_mass_invite(
         + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
            "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
            if flood_storm else "")
+        + _sess_hint
+        + (f"\n🛑 Инвайт не выполнен: ни один аккаунт не подключился. Остаток {_left} "
+           "НЕ отложен — сначала почините аккаунты (см. выше), иначе повтор бесполезен."
+           if _all_failed_connect else "")
         + (f"\n🔁 Осталось {_left} — продолжим завтра автоматически (операция #{_next_op})"
            if _next_op else "")
         + (f"\n⏸ Осталось в очереди: {_left} (аккаунты исчерпали лимит на сегодня)"
-           if _left and not _next_op and not group_broken and not flood_storm else "")
+           if _left and not _next_op and not group_broken and not flood_storm
+           and not _all_failed_connect else "")
     )
     return {"status": "done", "ok": total_ok, "failed": total_fail,
             "left": _left, "next_op_id": _next_op,
+            "worked_accounts": _engaged_n, "noconnect": _idle_other,
+            "all_failed_connect": _all_failed_connect,
             "flood_storm": flood_storm, "summary": summary}
 
 
