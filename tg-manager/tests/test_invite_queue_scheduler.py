@@ -26,6 +26,20 @@ import pytest
 from services import op_worker
 
 
+@pytest.fixture(autouse=True)
+def _reset_account_claims():
+    """_exec_mass_invite теперь клеймит аккаунты (_claim_available_accounts). В
+    проде claim освобождается в finally _run_op_task, но тут мы зовём исполнитель
+    НАПРЯМУЮ — авто-release не срабатывает, и claim протекает в глобальный
+    _accounts_in_use, отравляя следующие тесты (аккаунты видятся «занятыми»).
+    Сбрасываем состояние вокруг каждого теста."""
+    op_worker._accounts_in_use.clear()
+    op_worker._operation_account_locks.clear()
+    yield
+    op_worker._accounts_in_use.clear()
+    op_worker._operation_account_locks.clear()
+
+
 # ── стенд ────────────────────────────────────────────────────────────────────
 
 class _Pool:
@@ -144,6 +158,10 @@ def _run(pool, refs, **params):
             op_worker._exec_mass_invite(pool, None, 42, 100, p)
         )
     finally:
+        # В проде claim аккаунтов освобождает finally _run_op_task; здесь зовём
+        # исполнитель напрямую, поэтому освобождаем сами (op_id=42), иначе второй
+        # _run в одном тесте увидит аккаунты «занятыми».
+        loop.run_until_complete(op_worker.release_operation_accounts(42))
         loop.close()
 
 

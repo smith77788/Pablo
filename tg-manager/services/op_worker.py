@@ -8615,6 +8615,34 @@ async def _exec_mass_invite(
     except Exception:
         log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
 
+    # Клейм аккаунтов под эту операцию — защита от AUTH_KEY_DUPLICATED («сессия
+    # использовалась с двух IP одновременно»): берём атомарно только СВОБОДНЫЕ (не
+    # занятые прогревом/другой операцией) и помечаем занятыми, чтобы никто не
+    # подключил ту же сессию параллельно = мгновенный бан ключа. Инвайт был
+    # единственным массовым исполнителем БЕЗ клейма (в отличие от strike/warmup/
+    # publish). Освобождение — автоматически в finally _run_op_task
+    # (release_operation_accounts по op_id), утечки claim нет.
+    _busy_skipped = 0
+    try:
+        _free = await _claim_available_accounts(op_id, accounts)
+        _busy_skipped = len(accounts) - len(_free)
+        if _busy_skipped:
+            log.info("mass_invite op=%d: %d аккаунтов заняты другой операцией — пропущены",
+                     op_id, _busy_skipped)
+        accounts = _free
+    except Exception:
+        log_exc_swallow(log, f"mass_invite op={op_id}: claim accounts failed")
+
+    if not accounts:
+        return {
+            "status": "done", "ok": 0, "failed": 0,
+            "left": len(user_refs) + len(phones),
+            "summary": ("⏸ Все подходящие аккаунты сейчас заняты другими операциями "
+                        "(прогрев/страйк/другой инвайт). Дождитесь их завершения и "
+                        "повторите — параллельно одну сессию использовать нельзя "
+                        "(риск AUTH_KEY_DUPLICATED)."),
+        }
+
     async def _rest_invite_account(acc_id: int, res: dict) -> None:
         """Дать флагнутому/зафлуженному инвайт-аккаунту cooldown через ЕДИНЫЙ
         flood-сигнал. Без этого переключение внутри операции недостаточно: флаг

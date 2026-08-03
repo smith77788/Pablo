@@ -2352,3 +2352,19 @@ used under two different IP addresses simultaneously» (AUTH_KEY_DUPLICATED), и
 + N дней холостых операций — гейти продолжение по ПРИЗНАКУ прогресса, а сырой
 английский текст ошибки превращай в причину+действие.** Гейт:
 test_invite_no_defer_dead_sessions.
+
+## Инвайт: клейм аккаунтов — защита от AUTH_KEY_DUPLICATED — 2026-08-01
+Корень ошибки со скриншота «authorization key used under two different IP addresses
+simultaneously»: _exec_mass_invite был ЕДИНСТВЕННЫМ массовым исполнителем БЕЗ клейма
+аккаунтов (strike/warmup/publish клеймят через _claim_available_accounts). Без клейма
+прогрев/другая операция мог подключить ту же сессию параллельно = два IP одновременно
+= мгновенный бан ключа. Фикс: после отбора+карантина берём аккаунты через
+_claim_available_accounts(op_id, …) — атомарно только СВОБОДНЫЕ, помечаем занятыми;
+release автоматически в finally _run_op_task (release_operation_accounts по op_id),
+утечки нет. Все заняты → честный ответ «дождитесь завершения других операций», а не
+молчаливые нули. Тест-стенды, зовущие исполнитель НАПРЯМУЮ (в обход _run_op_task),
+теперь освобождают claim сами (autouse-reset + release в _run). Урок В СВОД: **любой
+исполнитель, подключающий сессию аккаунта, ОБЯЗАН клеймить его
+(_claim_available_accounts) — параллельные клиенты на одном auth_key = AUTH_KEY_
+DUPLICATED/бан; проверь при добавлении нового массового исполнителя.** Гейт:
+test_invite_claims_accounts.
