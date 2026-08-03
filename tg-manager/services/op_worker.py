@@ -389,8 +389,10 @@ _FATAL_ERRORS = {
 }
 # Fatal message fragments — if present in exception message, never retry
 _FATAL_MSG_PATTERNS = re.compile(
+    # NB: AUTH_KEY_DUPLICATED сюда НЕ входит — это временный конфликт двух IP, а не
+    # фатал (см. _is_session_conflict_error): деактивировать аккаунт из-за него нельзя.
     r"USER_DEACTIVATED|ACCOUNT_BANNED|USER_BANNED|SESSION_PASSWORD_NEEDED|"
-    r"AUTH_KEY_DUPLICATED|PHONE_NUMBER_BANNED|BOT_KICKED|CHANNEL_BANNED|"
+    r"PHONE_NUMBER_BANNED|BOT_KICKED|CHANNEL_BANNED|"
     r"permanently banned|account is banned",
     re.IGNORECASE,
 )
@@ -407,6 +409,23 @@ _NETWORK_PATTERNS = re.compile(
     r"connection aborted|no route to host|transport closed",
     re.IGNORECASE,
 )
+
+# AUTH_KEY_DUPLICATED / «used under two different IP addresses simultaneously» — это
+# НЕ смерть сессии, а ВРЕМЕННЫЙ конфликт: одна и та же сессия секунду коннектилась с
+# двух IP (аккаунт кратко был онлайн на телефоне/другом устройстве, либо дёрнулся
+# прокси и IP на миг разъехался). Telegram гасит одно из соединений, но сессия обычно
+# оживает, когда конфликт уходит. Такой аккаунт НЕЛЬЗЯ деактивировать — только
+# остудить и повторить. Многосессионность у Telegram штатная: у каждого устройства
+# СВОЙ auth_key, и наличие сессии на телефоне само по себе конфликта не вызывает —
+# его вызывает лишь ОБЩАЯ (импортированная) сессия, используемая с двух IP разом.
+_SESSION_CONFLICT_PATTERNS = re.compile(
+    r"AUTH_KEY_DUPLICATED|AuthKeyDuplicated|two different IP",
+    re.IGNORECASE,
+)
+
+
+def _is_session_conflict_error(error_text: str) -> bool:
+    return bool(_SESSION_CONFLICT_PATTERNS.search(error_text or ""))
 
 
 def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
@@ -447,6 +466,11 @@ def _classify_op_error(exc: Exception) -> str:
     """Классифицирует ошибку операции: 'retry' | 'flood' | 'fatal' | 'skip'."""
     name = type(exc).__name__
     msg = str(exc)
+    # AUTH_KEY_DUPLICATED (конфликт двух IP) — НЕ фатал: сессия временно
+    # конфликтует, а не мертва. Повторяем (после кулдауна аккаунта), не деактивируем.
+    # Проверяем ПЕРЕД fatal, иначе бы поймалось на "AUTH_KEY" in msg ниже.
+    if _is_session_conflict_error(msg):
+        return "retry"
     # Fatal: known class names OR fatal message patterns — do NOT retry these
     if (
         name in _FATAL_ERRORS
@@ -475,7 +499,9 @@ def _classify_op_error(exc: Exception) -> str:
 
 
 def _is_network_or_proxy_error(error_text: str) -> bool:
-    return bool(_NETWORK_PATTERNS.search(error_text))
+    # Конфликт двух IP лечится как транспортная проблема: остудить аккаунт и
+    # повторить (а НЕ деактивировать) — поэтому включаем его сюда.
+    return bool(_NETWORK_PATTERNS.search(error_text)) or _is_session_conflict_error(error_text)
 
 
 _DEAD_SESSION_PATTERNS = re.compile(
@@ -486,6 +512,11 @@ _DEAD_SESSION_PATTERNS = re.compile(
 
 
 def _is_dead_session_error(error_text: str) -> bool:
+    # AUTH_KEY_DUPLICATED матчится общим паттерном (AUTH_KEY/AuthKeyDuplicated), но это
+    # ВРЕМЕННЫЙ конфликт, а не мёртвая сессия — исключаем, чтобы аккаунт не
+    # деактивировался (is_active=FALSE) из-за кратковременного пересечения IP.
+    if _is_session_conflict_error(error_text):
+        return False
     return bool(_DEAD_SESSION_PATTERNS.search(error_text))
 
 
@@ -9153,10 +9184,13 @@ async def _exec_mass_invite(
         _blob = " ".join(_noconnect_errs).upper()
         if "TWO DIFFERENT IP" in _blob or "AUTH_KEY_DUPLICATED" in _blob:
             _sess_hint = (
-                "\n⚠️ Сессия использовалась с двух IP одновременно (AUTH_KEY_DUPLICATED). "
-                "Причины: аккаунт залогинен где-то ещё (телефон/другой софт) ИЛИ у него "
-                "нет/сменился прокси. Не держите сессию активной в другом месте, задайте "
-                "каждому аккаунту рабочий прокси и переавторизуйте в разделе «Аккаунты»."
+                "\n⚠️ Кратковременный конфликт: сессия шла с двух IP одновременно "
+                "(AUTH_KEY_DUPLICATED). Аккаунты НЕ отключены — это временно. Обычно "
+                "это ЭТА ЖЕ сессия, активная где-то ещё (телефон/другой софт), либо "
+                "нестабильный IP без прокси. Дайте каждому аккаунту свой прокси "
+                "(стабильный IP); если нужен отдельный от телефона сеанс — переавторизуйте "
+                "здесь: у каждого устройства свой ключ, они спокойно сосуществуют. "
+                "Повторите инвайт — при снятии конфликта аккаунты подключатся."
             )
         elif ("AUTH_KEY_UNREGISTERED" in _blob or "SESSION_REVOKED" in _blob
               or "SESSION_EXPIRED" in _blob or "AUTHORIZATION KEY" in _blob):

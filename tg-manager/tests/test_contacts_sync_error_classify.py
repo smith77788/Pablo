@@ -31,11 +31,23 @@ def test_screenshot_authkey_unregistered_is_translated():
     assert "релог" in low or "недействительна" in low
 
 
-def test_duplicated_and_deactivated_are_dead():
+def test_deactivated_is_dead():
+    # Только НЕОБРАТИМАЯ смерть (аккаунт удалён/деактивирован Telegram) = dead.
+    _f, status = classify_session_error("The user has been deactivated")
+    assert status == "dead"
+
+
+def test_duplicated_is_transient_conflict_not_dead():
+    """РАНЬШЕ AUTH_KEY_DUPLICATED = 'dead' → аккаунт деактивировался. Это неверно:
+    конфликт двух IP временный (та же сессия секунду шла с двух адресов — аккаунт
+    кратко онлайн на телефоне/другом устройстве или флап прокси). Многосессионность
+    у Telegram штатная; телефон сам по себе не конфликтует. Теперь это 'net' —
+    аккаунт НЕ деактивируется, только остужается и повторяет."""
     for msg in ("AUTH_KEY_DUPLICATED (406): used from two different IP",
-                "The user has been deactivated"):
+                "The authorization key was used under two different IP addresses simultaneously"):
         _f, status = classify_session_error(msg)
-        assert status == "dead", msg
+        assert status == "net", msg
+        assert status != "dead", msg
 
 
 def test_transient_errors_not_dead():
