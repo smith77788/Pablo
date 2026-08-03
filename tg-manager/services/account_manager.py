@@ -202,27 +202,31 @@ def set_pool_proxy_cache(urls: list[str]) -> None:
         _acc_pool_proxy.pop(_aid, None)
 
 
-def _get_pool_proxy_url(account_id: int | None = None) -> str:
+def _get_pool_proxy_url(key: object | None = None) -> str:
     """Прокси из бесплатного пула. Возвращает '' если пул пуст.
 
-    С account_id — ЗАЛИПАЮЩИЙ выбор: один и тот же аккаунт всегда получает ОДИН
-    прокси (стабильный exit IP), пока тот жив в пуле. Это критично: без залипания
-    round-robin отдавал бы аккаунту разные IP на каждый коннект, и одна и та же
-    сессия виделась бы Telegram с нескольких IP → AUTH_KEY_DUPLICATED (ключ
-    убивается), даже если сессия только что переавторизована. Назначение
-    детерминировано (по account_id) и запоминается; пропавший из пула прокси
-    переназначается на живой. Без account_id — прежний round-robin (совместимость
-    для не-аккаунтных вызовов)."""
+    С key (стабильный идентификатор аккаунта — телефон или account_id) — ЗАЛИПАЮЩИЙ
+    выбор: один и тот же аккаунт всегда получает ОДИН прокси (стабильный exit IP),
+    пока тот жив в пуле. Это критично: без залипания round-robin отдавал бы аккаунту
+    разные IP на каждый коннект, и одна и та же сессия виделась бы Telegram с
+    нескольких IP → AUTH_KEY_DUPLICATED (ключ убивается), даже если сессия только что
+    переавторизована. ВАЖНО: ключ обязан быть одинаковым на ЛОГИНЕ и в операциях —
+    иначе сессия авторизуется с одного IP, а первая операция идёт с другого. Поэтому
+    ключом служит ТЕЛЕФОН (есть и на логине, и у аккаунта), а не account_id (на логине
+    его ещё нет). Назначение детерминировано (по хэшу ключа), запоминается; пропавший
+    из пула прокси переназначается. Без key — прежний round-robin (совместимость)."""
     global _pool_proxy_idx
     if not _pool_proxy_cache:
         return ""
-    if account_id is not None:
-        aid = int(account_id)
-        assigned = _acc_pool_proxy.get(aid)
+    if key is not None and str(key):
+        k = str(key)
+        assigned = _acc_pool_proxy.get(k)
         if assigned and assigned in _pool_proxy_cache:
             return assigned  # тот же IP, что и в прошлый раз — сессия не «скачет»
-        url = _pool_proxy_cache[aid % len(_pool_proxy_cache)]
-        _acc_pool_proxy[aid] = url
+        # Детерминированный, но не по порядку добавления в пул: хэш ключа.
+        idx = (hash(k) & 0x7FFFFFFF) % len(_pool_proxy_cache)
+        url = _pool_proxy_cache[idx]
+        _acc_pool_proxy[k] = url
         return url
     url = _pool_proxy_cache[_pool_proxy_idx % len(_pool_proxy_cache)]
     _pool_proxy_idx = (_pool_proxy_idx + 1) % len(_pool_proxy_cache)
@@ -940,9 +944,11 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         if not has_bound_proxy:
             # Нет аккаунт-прокси, TG_PROXY и CF relay не заданы — последний резерв:
             # бесплатный пул публичных SOCKS5-прокси (populated by proxy_scraper).
-            # ЗАЛИПАЮЩИЙ по account_id: один аккаунт = один стабильный exit IP, иначе
-            # round-robin ронял бы сессию в AUTH_KEY_DUPLICATED (разные IP на коннект).
-            pool_url = _get_pool_proxy_url(_acc_id)
+            # ЗАЛИПАЮЩИЙ по ТЕЛЕФОНУ (а не account_id): телефон известен и на логине,
+            # и в операциях, поэтому сессия авторизуется и работает с ОДНОГО exit IP.
+            # account_id — резерв (на логине его ещё нет). Иначе — AUTH_KEY_DUPLICATED.
+            _pool_key = (device.get("phone") if device else None) or _acc_id
+            pool_url = _get_pool_proxy_url(_pool_key)
             proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
 
@@ -1003,6 +1009,10 @@ async def start_login(
     )
     if proxy_url:
         device["proxy_url"] = proxy_url
+    # Телефон в device → _make_client при фолбэке в пул залипает по нему. Так ЛОГИН
+    # и будущие ОПЕРАЦИИ этого аккаунта берут ОДИН и тот же pool-прокси (один exit IP),
+    # и свежеавторизованная сессия не падает в AUTH_KEY_DUPLICATED на первой операции.
+    device["phone"] = phone
     _pending_device[phone] = device
     client = _make_client("", device)
     try:

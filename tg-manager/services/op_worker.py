@@ -722,9 +722,11 @@ async def _maybe_requeue(
 #
 # Дальше — один текст на всех: разойтись копиям больше негде.
 _ACC_COLS = (
+    # a.phone — чтобы фолбэк в пул-прокси залипал по телефону ТАК ЖЕ, как на логине
+    # (один exit IP на логине и в операциях → нет AUTH_KEY_DUPLICATED на первой опе).
     "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
     "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
-    "COALESCE(p.proxy_url, NULL) AS proxy_url "
+    "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
     "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
     "WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
     "AND a.is_active=TRUE AND a.session_str IS NOT NULL"
