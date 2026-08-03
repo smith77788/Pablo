@@ -183,6 +183,11 @@ _TG_JOIN_URI_RE = re.compile(r"^tg://join\?invite=([\w-]+)", re.IGNORECASE)
 # Round-robin selection — no lock needed (list writes are GIL-safe for simple ops)
 _pool_proxy_cache: list[str] = []
 _pool_proxy_idx: int = 0
+# account_id → ЗАЛИПШИЙ pool-прокси. Один аккаунт = один стабильный exit IP на всё
+# время, пока прокси жив в пуле. Иначе round-robin отдавал бы РАЗНЫЙ IP на каждый
+# коннект → одна сессия видится Telegram с нескольких IP подряд → AUTH_KEY_DUPLICATED
+# (ключ убивается). Это и есть причина «переавторизовал, а всё равно падает».
+_acc_pool_proxy: dict[int, str] = {}
 
 
 def set_pool_proxy_cache(urls: list[str]) -> None:
@@ -190,13 +195,35 @@ def set_pool_proxy_cache(urls: list[str]) -> None:
     global _pool_proxy_cache, _pool_proxy_idx
     _pool_proxy_cache = list(urls)
     _pool_proxy_idx = 0
+    # Чистим залипшие назначения, которых больше нет в пуле (self-heal мёртвых
+    # прокси): пропавший прокси переназначится на живой при следующем запросе.
+    _live = set(_pool_proxy_cache)
+    for _aid in [k for k, v in _acc_pool_proxy.items() if v not in _live]:
+        _acc_pool_proxy.pop(_aid, None)
 
 
-def _get_pool_proxy_url() -> str:
-    """Round-robin pick from free proxy pool. Returns '' if pool is empty."""
+def _get_pool_proxy_url(account_id: int | None = None) -> str:
+    """Прокси из бесплатного пула. Возвращает '' если пул пуст.
+
+    С account_id — ЗАЛИПАЮЩИЙ выбор: один и тот же аккаунт всегда получает ОДИН
+    прокси (стабильный exit IP), пока тот жив в пуле. Это критично: без залипания
+    round-robin отдавал бы аккаунту разные IP на каждый коннект, и одна и та же
+    сессия виделась бы Telegram с нескольких IP → AUTH_KEY_DUPLICATED (ключ
+    убивается), даже если сессия только что переавторизована. Назначение
+    детерминировано (по account_id) и запоминается; пропавший из пула прокси
+    переназначается на живой. Без account_id — прежний round-robin (совместимость
+    для не-аккаунтных вызовов)."""
     global _pool_proxy_idx
     if not _pool_proxy_cache:
         return ""
+    if account_id is not None:
+        aid = int(account_id)
+        assigned = _acc_pool_proxy.get(aid)
+        if assigned and assigned in _pool_proxy_cache:
+            return assigned  # тот же IP, что и в прошлый раз — сессия не «скачет»
+        url = _pool_proxy_cache[aid % len(_pool_proxy_cache)]
+        _acc_pool_proxy[aid] = url
+        return url
     url = _pool_proxy_cache[_pool_proxy_idx % len(_pool_proxy_cache)]
     _pool_proxy_idx = (_pool_proxy_idx + 1) % len(_pool_proxy_cache)
     return url
@@ -913,7 +940,9 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         if not has_bound_proxy:
             # Нет аккаунт-прокси, TG_PROXY и CF relay не заданы — последний резерв:
             # бесплатный пул публичных SOCKS5-прокси (populated by proxy_scraper).
-            pool_url = _get_pool_proxy_url()
+            # ЗАЛИПАЮЩИЙ по account_id: один аккаунт = один стабильный exit IP, иначе
+            # round-robin ронял бы сессию в AUTH_KEY_DUPLICATED (разные IP на коннект).
+            pool_url = _get_pool_proxy_url(_acc_id)
             proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
 
