@@ -206,8 +206,12 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
                             getattr(ent_obj, "last_name", None)) if x) or None
         except Exception:
             pass
-        collected = await asyncio.wait_for(
-            client.get_messages(entity, limit=limit), timeout=_ACTION_TIMEOUT)
+        from services.telethon_guard import guarded_call
+        collected = await guarded_call(
+            client,
+            lambda: asyncio.wait_for(client.get_messages(entity, limit=limit),
+                                     timeout=_ACTION_TIMEOUT),
+            action="history")
         for m in collected:
             media = type(m.media).__name__ if getattr(m, "media", None) is not None else None
             msgs.append({
@@ -249,8 +253,12 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
                                         timeout=_ACTION_TIMEOUT)
-        sent = await asyncio.wait_for(client.send_message(entity, text),
-                                      timeout=_ACTION_TIMEOUT)
+        from services.telethon_guard import guarded_call
+        sent = await guarded_call(
+            client,
+            lambda: asyncio.wait_for(client.send_message(entity, text),
+                                     timeout=_ACTION_TIMEOUT),
+            action="dm_send")
         return {"ok": True, "message_id": getattr(sent, "id", None)}
     except Exception as exc:
         code, human = classify_error(str(exc))
@@ -284,9 +292,13 @@ async def send_file(session_string: str, acc: dict | None, peer: int | str,
                                         timeout=_ACTION_TIMEOUT)
         bio = io.BytesIO(file_bytes)
         bio.name = filename or "file"
-        sent = await asyncio.wait_for(
-            client.send_file(entity, bio, caption=(caption or "")[:1024] or None),
-            timeout=120)
+        from services.telethon_guard import guarded_call
+        sent = await guarded_call(
+            client,
+            lambda: asyncio.wait_for(
+                client.send_file(entity, bio, caption=(caption or "")[:1024] or None),
+                timeout=120),
+            action="dm_file")
         return {"ok": True, "message_id": getattr(sent, "id", None)}
     except Exception as exc:
         code, human = classify_error(str(exc))
