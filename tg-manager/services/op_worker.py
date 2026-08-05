@@ -9185,9 +9185,20 @@ async def _exec_mass_invite(
     _idle_other = _idle_n - len(_daily_capped)
     if _idle_other > 0:
         _acc_parts.append(f"⚪ не ответили (сессия/сеть): {_idle_other}")
+    # Предупреждение о риске: аккаунты БЕЗ назначенного прокси могли работать
+    # напрямую с IP хоста (разрешено политикой allow_direct как последний резерв,
+    # но это риск блокировок). Показываем оператору — это его сигнал назначить прокси.
+    _no_proxy_n = sum(
+        1 for a in accounts
+        if int(a["id"]) in _used_accounts
+        and not (str(a.get("proxy_url") or "").strip() or a.get("proxy_id")))
+    _proxy_warn = (
+        f"\n⚠️ Без прокси (прямой выход с IP хоста, риск блокировок): {_no_proxy_n} — "
+        "назначьте прокси для изоляции." if _no_proxy_n else "")
     _acc_line = (
         f"\n👤 Аккаунты: работали {_engaged_n} из {_selected_n}"
         + (("\n   " + " · ".join(_acc_parts)) if _acc_parts else "")
+        + _proxy_warn
     ) if _selected_n else ""
 
     # Подсказка по типовой причине сбоя подключения (для «одного прохода без ошибок»):

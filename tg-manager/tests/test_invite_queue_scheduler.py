@@ -207,6 +207,16 @@ def test_summary_reports_account_engagement_honestly(stand):
     assert "суточный лимит" in summary, "не назван мотив, почему аккаунт не задействован"
 
 
+def test_summary_warns_about_direct_no_proxy(stand):
+    """Аккаунты без назначенного прокси работают напрямую с host-IP — итог обязан
+    ПРЕДУПРЕДИТЬ оператора о риске (прямой выход разрешён, но палевно)."""
+    # оба аккаунта из стенда без proxy_url/proxy_id → оба «без прокси»
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    res = _run(_Pool(), TARGETS)
+    assert "Без прокси" in res["summary"] and "риск" in res["summary"], (
+        f"нет предупреждения о прямом выходе без прокси: {res['summary']!r}")
+
+
 def test_free_account_picks_up_the_rest(stand):
     """Свободный аккаунт не простаивает: разбирает общую очередь дальше."""
     s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)), limits={1: 5})

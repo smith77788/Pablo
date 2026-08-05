@@ -957,14 +957,24 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         if effective_proxy is None and not low_risk:
             from services.proxy_policy import proxy_decision as _pdec
             _has_assigned = bool(str(d.get("proxy_url") or "").strip()) or bool(d.get("proxy_id"))
-            if _pdec(has_proxy_url=_has_assigned, proxy_parsed_ok=False,
-                     policy=_effective_proxy_policy(d),
-                     enforce=bool(d.get("enforce_proxy")), low_risk=low_risk) == "block":
+            _dec = _pdec(has_proxy_url=_has_assigned, proxy_parsed_ok=False,
+                         policy=_effective_proxy_policy(d),
+                         enforce=bool(d.get("enforce_proxy")), low_risk=low_risk)
+            if _dec == "block":
+                # Только ЯВНЫЙ strict (per-owner/env) жёстко запрещает прямой выход.
                 raise ProxyIsolationError(
-                    "Kill-switch: у аккаунта нет прокси/релея/IPv6 — прямое соединение с "
-                    "IP хоста запрещено политикой strict. Назначьте прокси аккаунту либо "
-                    "разрешите прямой выход через env PROXY_POLICY=allow_direct."
+                    "Kill-switch (strict): у аккаунта нет прокси/релея/IPv6 — прямое "
+                    "соединение с IP хоста запрещено политикой strict. Назначьте прокси "
+                    "аккаунту либо снимите strict (PROXY_POLICY=allow_direct)."
                 )
+            # Дефолт allow_direct: прямой выход РАЗРЕШЁН как последний резерв, но это
+            # риск блокировок (Telegram видит IP хоста) — предупреждаем в лог. Флаг
+            # для user-facing предупреждения оператору проставляет слой операции
+            # (у аккаунта нет назначенного прокси).
+            log.warning(
+                "acc=%s connects DIRECT (host IP: нет прокси/релея/IPv6/пула) — риск "
+                "блокировок. Назначьте прокси; для жёсткой изоляции — PROXY_POLICY=strict.",
+                d.get("id"))
 
     _extra_kwargs = {}
     if local_addr is not None:

@@ -136,11 +136,14 @@ def test_set_owner_proxy_policy_normalizes_and_ignores_none():
 
 # ── Стадия 2 #2: enterprise-дефолт strict + kill-switch ──────────────────────
 
-def test_default_is_strict_now():
-    """Дефолт переведён в strict: массовая операция без прокси не уходит напрямую."""
-    assert DEFAULT_POLICY == "strict"
-    # без явной политики (fallback на дефолт) и без прокси, не low_risk → block
-    assert _d(policy=None) == "block"
+def test_default_is_allow_direct_last_resort():
+    """Дефолт allow_direct: если других транспортов нет — работаем напрямую с host-IP
+    (последний резерв), но с предупреждением. Жёсткая изоляция — только явный strict."""
+    assert DEFAULT_POLICY == "allow_direct"
+    # без явной политики (fallback на дефолт), без прокси, не low_risk → fallback (не block)
+    assert _d(policy=None) == "fallback"
+    # ЯВНЫЙ strict по-прежнему блокирует прямой выход
+    assert _d(policy="strict") == "block"
 
 
 def test_killswitch_blocks_true_direct_but_not_relay_ipv6(monkeypatch):
