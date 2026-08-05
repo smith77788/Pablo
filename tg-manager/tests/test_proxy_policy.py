@@ -100,7 +100,10 @@ def test_resolver_keys_on_proxy_id_not_just_url():
     with open(os.path.join(ROOT, "services/account_manager.py"), encoding="utf-8") as f:
         am = f.read()
     assert 'has_assigned_proxy = bool(acc_proxy_url) or bool(device.get("proxy_id"))' in am
-    assert "has_proxy_url=has_assigned_proxy" in am
+    # Битый назначенный прокси → жёсткий блок в резолвере (не уходим на другой IP).
+    assert "if has_assigned_proxy and proxy is None:" in am
+    # Kill-switch в _make_client опирается на назначение (proxy_id/url), а не только URL.
+    assert '_has_assigned = bool(str(d.get("proxy_url") or "").strip()) or bool(d.get("proxy_id"))' in am
 
 
 def test_mass_detach_proxy_scoped_and_nulls():
@@ -128,4 +131,50 @@ def test_set_owner_proxy_policy_normalizes_and_ignores_none():
     # что set_owner_proxy_policy нормализует так же (контракт normalize_policy).
     from services.proxy_policy import normalize_policy
     assert normalize_policy("STRICT") == "strict"
-    assert normalize_policy("bogus") == "allow_direct"
+    assert normalize_policy("bogus") == DEFAULT_POLICY
+
+
+# ── Стадия 2 #2: enterprise-дефолт strict + kill-switch ──────────────────────
+
+def test_default_is_strict_now():
+    """Дефолт переведён в strict: массовая операция без прокси не уходит напрямую."""
+    assert DEFAULT_POLICY == "strict"
+    # без явной политики (fallback на дефолт) и без прокси, не low_risk → block
+    assert _d(policy=None) == "block"
+
+
+def test_killswitch_blocks_true_direct_but_not_relay_ipv6(monkeypatch):
+    """_make_client: strict роняет ТОЛЬКО истинный прямой выход с host-IP.
+
+    Не-host транспорты (CF-relay/IPv6/free-pool) под strict НЕ блокируются —
+    kill-switch стоит в самом конце цепочки, после них.
+    """
+    from services import account_manager as am
+    from services.account_manager import ProxyIsolationError
+    import telethon.sessions as ts
+
+    class _Cap:
+        def __init__(self, s): pass
+        def __getattr__(self, _n): return lambda *a, **k: None
+    monkeypatch.setattr(ts, "StringSession", _Cap, raising=False)
+    monkeypatch.setattr(am, "_resolve_client_proxy", lambda d, low_risk=False: None)
+    monkeypatch.setattr(am, "_get_pool_proxy_url", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(am, "CF_RELAY_URL", "", raising=False)
+
+    dev = {"device_model": "x", "system_version": "x", "app_version": "x",
+           "lang_code": "en", "system_lang_code": "en"}
+
+    # strict + нет прокси/релея/IPv6/пула → истинный direct → kill-switch блокирует
+    import pytest
+    with pytest.raises(ProxyIsolationError):
+        am._make_client("SESS", {**dev, "proxy_policy": "strict"})
+
+    # allow_direct → тот же путь разрешён
+    am._make_client("SESS", {**dev, "proxy_policy": "allow_direct"})
+
+    # low_risk-чтение под strict НЕ блокируется (одиночное чтение не требует прокси)
+    am._make_client("SESS", {**dev, "proxy_policy": "strict"}, low_risk=True)
+
+    # CF-relay доступен → strict НЕ блокирует (не host-IP транспорт)
+    monkeypatch.setattr(am, "CF_RELAY_URL", "wss://relay.example/ws", raising=False)
+    am._make_client("SESS", {**dev, "proxy_policy": "strict"})

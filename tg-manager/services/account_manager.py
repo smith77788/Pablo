@@ -781,20 +781,10 @@ def _resolve_client_proxy(device: dict[str, Any], low_risk: bool = False) -> Any
     берётся из device['proxy_policy'] ('strict'|'allow_direct'), по умолчанию —
     процессная _DEFAULT_PROXY_POLICY.
     """
-    from services.proxy_policy import proxy_decision
-
     # Аккаунт-словарь может пометить соединение низкорисковым (одиночное чтение),
     # чтобы не тащить low_risk через все сигнатуры движков.
     low_risk = low_risk or bool(device.get("_low_risk"))
     acc_proxy_url = str(device.get("proxy_url") or "").strip()
-    # Приоритет политики: явная в словаре аккаунта → per-owner кэш (массовый путь
-    # кладёт owner_id) → процессный дефолт.
-    policy = device.get("proxy_policy")
-    if not policy:
-        _oid = device.get("owner_id")
-        policy = _OWNER_PROXY_POLICY.get(int(_oid)) if _oid is not None else None
-    policy = policy or _DEFAULT_PROXY_POLICY
-    enforce = bool(device.get("enforce_proxy"))
     proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else None
     # «Привязан к прокси» = НАЗНАЧЕН proxy_id ЛИБО есть URL. Ключевой момент: если
     # proxy_id задан, но прокси неактивен (JOIN вернул proxy_url=NULL), аккаунт всё
@@ -802,23 +792,30 @@ def _resolve_client_proxy(device: dict[str, Any], low_risk: bool = False) -> Any
     # AUTH_KEY_DUPLICATED убьёт сессию). Поэтому опираемся на proxy_id, а не только
     # на наличие распарсенного URL.
     has_assigned_proxy = bool(acc_proxy_url) or bool(device.get("proxy_id"))
-    decision = proxy_decision(
-        has_proxy_url=has_assigned_proxy,
-        proxy_parsed_ok=proxy is not None,
-        policy=policy,
-        enforce=enforce,
-        low_risk=low_risk,
-    )
-    if decision == "use":
-        return proxy
-    if decision == "block":
+    # Назначенный, но битый/неактивный прокси — жёсткий блок В ЛЮБОМ режиме (включая
+    # low_risk): сессия привязана к IP прокси, ходить с другого адреса нельзя.
+    if has_assigned_proxy and proxy is None:
         raise ProxyIsolationError(
-            "Требуется прокси по политике изоляции, но у аккаунта его нет либо он недоступен."
+            "Аккаунту назначен прокси, но он недоступен — исправьте прокси (подключение "
+            "с другого IP убьёт сессию: AUTH_KEY_DUPLICATED)."
         )
-    # fallback: глобальный TG_PROXY или прямое соединение (риск блокировок)
-    if not acc_proxy_url and not TG_PROXY:
-        log.warning("account connects DIRECT (no proxy) — ban risk; policy=%s low_risk=%s", policy, low_risk)
+    if proxy is not None:
+        return proxy
+    # Нет назначенного прокси: отдаём глобальный TG_PROXY (если задан), иначе None.
+    # Решение «идти ли НАПРЯМУЮ с IP хоста» принимает _make_client В КОНЦЕ цепочки
+    # транспорта (после CF-relay/IPv6/free-pool) — kill-switch strict ставится там,
+    # чтобы strict НЕ рубил легитимные не-host транспорты (реле/IPv6/пул).
     return _parse_proxy(TG_PROXY) if TG_PROXY else None
+
+
+def _effective_proxy_policy(device: dict[str, Any]) -> str:
+    """Итоговая политика прокси для аккаунта: явная в словаре → per-owner кэш
+    (массовый путь кладёт owner_id) → процессный дефолт (_DEFAULT_PROXY_POLICY)."""
+    policy = device.get("proxy_policy")
+    if not policy:
+        _oid = device.get("owner_id")
+        policy = _OWNER_PROXY_POLICY.get(int(_oid)) if _oid is not None else None
+    return _normalize_policy(policy or _DEFAULT_PROXY_POLICY)
 
 
 def device_manufacturers() -> list[str]:
@@ -951,6 +948,23 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
             pool_url = _get_pool_proxy_url(_pool_key)
             proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
+        # ── KILL-SWITCH (strict) ──────────────────────────────────────────────
+        # Сюда попадаем, только когда все не-host транспорты недоступны (нет
+        # аккаунт-прокси/TG_PROXY, нет CF-relay, нет IPv6, пуст free-pool). Если
+        # effective_proxy всё ещё None — соединение уйдёт НАПРЯМУЮ с IP хоста.
+        # По политике strict это запрещаем (не сливаем реальный адрес); low_risk-
+        # чтения не трогаем — им прямой канал разрешён.
+        if effective_proxy is None and not low_risk:
+            from services.proxy_policy import proxy_decision as _pdec
+            _has_assigned = bool(str(d.get("proxy_url") or "").strip()) or bool(d.get("proxy_id"))
+            if _pdec(has_proxy_url=_has_assigned, proxy_parsed_ok=False,
+                     policy=_effective_proxy_policy(d),
+                     enforce=bool(d.get("enforce_proxy")), low_risk=low_risk) == "block":
+                raise ProxyIsolationError(
+                    "Kill-switch: у аккаунта нет прокси/релея/IPv6 — прямое соединение с "
+                    "IP хоста запрещено политикой strict. Назначьте прокси аккаунту либо "
+                    "разрешите прямой выход через env PROXY_POLICY=allow_direct."
+                )
 
     _extra_kwargs = {}
     if local_addr is not None:

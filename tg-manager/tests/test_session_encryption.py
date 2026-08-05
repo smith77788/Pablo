@@ -96,6 +96,9 @@ def test_make_client_decrypts_session(monkeypatch):
             "app_version": "x",
             "lang_code": "en",
             "system_lang_code": "en",
+            # Тест про РАСШИФРОВКУ сессии, не про политику: разрешаем прямой канал,
+            # иначе kill-switch (дефолт strict) заблокирует клиент без прокси.
+            "proxy_policy": "allow_direct",
         },
     )
 

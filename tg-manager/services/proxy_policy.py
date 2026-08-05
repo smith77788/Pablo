@@ -17,7 +17,11 @@
 from __future__ import annotations
 
 VALID_POLICIES = ("strict", "allow_direct")
-DEFAULT_POLICY = "allow_direct"
+# Enterprise-дефолт: strict — массовая операция без прокси/релея/IPv6 НЕ уходит
+# напрямую с IP хоста (kill-switch), а честно падает ProxyIsolationError. Оператор
+# может вернуть прежнее лояльное поведение через env PROXY_POLICY=allow_direct.
+# Низкорисковые одиночные чтения (low_risk) от этого НЕ страдают — они не блокируются.
+DEFAULT_POLICY = "strict"
 
 
 def normalize_policy(value) -> str:
