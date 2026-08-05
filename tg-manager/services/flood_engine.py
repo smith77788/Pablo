@@ -99,6 +99,57 @@ def get_account_state(account_id: int) -> _AccountFloodState:
     return _flood_state[account_id]
 
 
+# Аккаунты, чьё состояние уже гидрировано из БД в этом процессе — чтобы не читать
+# БД повторно на каждый вызов операции.
+_hydrated: set[int] = set()
+
+
+async def hydrate_states(pool, account_ids) -> int:
+    """Восстановить in-memory flood-state из ДОЛГОВЕЧНЫХ полей БД после рестарта.
+
+    Проблема (аудит #5): _flood_state держит cooldown_until/consecutive_floods в
+    памяти на monotonic-таймере. После редеплоя они обнулялись → «умный темп»
+    (накопленная осторожность по прошлым флудам) терялся, и первые действия шли
+    базовым темпом. Здесь поднимаем durable-сигналы: остаток cooldown из
+    tg_accounts.cooldown_until и число флудов за сутки из account_flood_log.
+    Возвращает, сколько аккаунтов гидрировано. Идемпотентно (по _hydrated).
+    """
+    if not pool or not account_ids:
+        return 0
+    ids = [int(a) for a in account_ids if int(a) not in _hydrated]
+    if not ids:
+        return 0
+    now_mono = time.monotonic()
+    try:
+        rows = await pool.fetch(
+            "SELECT id, EXTRACT(EPOCH FROM (cooldown_until - NOW())) AS cd_left "
+            "FROM tg_accounts WHERE id = ANY($1::bigint[])", ids)
+    except Exception as e:
+        log_exc_swallow(log, f"flood_engine.hydrate_states cooldown read: {e}")
+        rows = []
+    for r in rows:
+        st = get_account_state(int(r["id"]))
+        cd_left = r["cd_left"]
+        if cd_left is not None and float(cd_left) > 0:
+            # берём строжайший: не занижаем уже стоящий в памяти cooldown
+            st.cooldown_until = max(st.cooldown_until, now_mono + float(cd_left))
+    try:
+        frows = await pool.fetch(
+            "SELECT account_id, COUNT(*) AS n FROM account_flood_log "
+            "WHERE account_id = ANY($1::bigint[]) AND created_at > NOW() - INTERVAL '24 hours' "
+            "GROUP BY account_id", ids)
+        for r in frows:
+            st = get_account_state(int(r["account_id"]))
+            n = int(r["n"] or 0)
+            st.total_floods_24h = max(st.total_floods_24h, n)
+            # осторожность после рестарта: подтягиваем risk по недавним флудам
+            st.risk_score = min(1.0, max(st.risk_score, 0.15 * n))
+    except Exception as e:
+        log_exc_swallow(log, f"flood_engine.hydrate_states log read: {e}")
+    _hydrated.update(ids)
+    return len(ids)
+
+
 def clear_account_cooldown(account_id: int) -> None:
     """Clear in-memory cooldown for one account (call after DB reset).
 

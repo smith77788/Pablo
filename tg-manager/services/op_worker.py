@@ -1392,6 +1392,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             except Exception:
                 log_exc_swallow(log, f"prime proxy_policy op#{op_id}")
 
+            # Гидрируем flood-state владельца из БД (аудит #5): после рестарта
+            # процесса накопленная осторожность по флудам (cooldown/риск) должна
+            # восстановиться, а не начинаться с нуля базовым темпом.
+            try:
+                from services import flood_engine as _fe
+                _acc_ids = [int(r["id"]) for r in (await _safe_fetch(
+                    pool, "SELECT id FROM tg_accounts WHERE owner_id=$1", owner_id) or [])]
+                await _fe.hydrate_states(pool, _acc_ids)
+            except Exception:
+                log_exc_swallow(log, f"hydrate flood-state op#{op_id}")
+
             # Запустить фоновый монитор прогресса для длинных операций.
             # Обслуживающие op-типы (contacts_sync) НЕ мониторим — иначе поминутный
             # спам «0%» по одной и той же операции.

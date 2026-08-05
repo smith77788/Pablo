@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 from typing import Any
 
@@ -95,6 +96,33 @@ def classify_error(msg: str) -> tuple[str, str]:
     if "could not find" in s or "cannot find" in s or "no user has" in s:
         return ("not_found", "❓ Собеседник не найден — начните диалог из общего чата.")
     return ("error", f"⚠️ Ошибка: {(msg or 'неизвестная')[:120]}")
+
+
+def typing_duration(text_len: int) -> float:
+    """Правдоподобная длительность «печатает…» по длине текста.
+
+    Гаусс вокруг оценки набора (≈220 знаков/мин) + clamp [0.6; 8.0] c — чтобы не
+    было ни мгновенной отправки, ни аномально долгой паузы (оба — палевные тайминги).
+    Чистая функция — тестируется без сети.
+    """
+    n = max(0, int(text_len or 0))
+    base = min(0.6 + n * (60.0 / 220.0) / 60.0 * 3.0, 6.0)  # растёт с длиной, потолок ~6с
+    sampled = random.gauss(base, base * 0.25)
+    return max(0.6, min(sampled, 8.0))
+
+
+async def _simulate_typing(client: Any, entity: Any, text: str) -> None:
+    """Показать статус «печатает…» и выдержать паузу набора. Fail-open: любая
+    ошибка (нет прав/сеть) не мешает самой отправке."""
+    try:
+        from telethon.tl.functions.messages import SetTypingRequest
+        from telethon.tl.types import SendMessageTypingAction
+        await asyncio.wait_for(
+            client(SetTypingRequest(entity, SendMessageTypingAction())),
+            timeout=_ACTION_TIMEOUT)
+    except Exception:
+        return  # статус не критичен — молча продолжаем к отправке
+    await asyncio.sleep(typing_duration(len(text or "")))
 
 
 def parse_peer(raw: str) -> int | str:
@@ -253,6 +281,10 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
                                         timeout=_ACTION_TIMEOUT)
+        # Естественное поведение клиента: перед отправкой в ЛС показать «печатает…»
+        # (корректно информирует API о действии). Длительность — по длине текста с
+        # гауссовым джиттером и clamp, чтобы не было аномально ровных таймингов.
+        await _simulate_typing(client, entity, text)
         from services.telethon_guard import guarded_call
         sent = await guarded_call(
             client,
