@@ -25,7 +25,7 @@ class SmmPanelClient:
         data["key"] = self.api_key
         try:
             async with session.post(
-                self.api_url, data=data, timeout=_DEFAULT_TIMEOUT, ssl=False
+                self.api_url, data=data, timeout=_DEFAULT_TIMEOUT
             ) as resp:
                 resp.raise_for_status()
                 text = await resp.text()

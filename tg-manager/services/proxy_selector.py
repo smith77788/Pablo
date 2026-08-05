@@ -598,7 +598,7 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
                 async with _sess.get(
                     "https://api.telegram.org",
                     timeout=aiohttp.ClientTimeout(total=10),
-                    ssl=False,
+                    ssl=False,  # ssl=False намеренно: проверяем ЗАВЕДОМО недоверенный публичный прокси (не боевой API)
                 ) as resp:
                     latency_ms = int((_time.monotonic() - t0) * 1000)
                     alive = resp.status < 500
@@ -664,7 +664,7 @@ async def probe_proxy(proxy_url: str, timeout: float = 10.0) -> dict:
             async with _sess.get(
                 "https://api.telegram.org",
                 timeout=aiohttp.ClientTimeout(total=timeout),
-                ssl=False,
+                ssl=False,  # ssl=False намеренно: проверяем ЗАВЕДОМО недоверенный публичный прокси (не боевой API)
             ) as resp:
                 latency_ms = int((_t.monotonic() - t0) * 1000)
                 ok = resp.status < 500

@@ -17,17 +17,10 @@ _BATCH_SIZE    = 50   # max runs to process per cycle
 
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
-    ssl_import = None
-    try:
-        import ssl as ssl_module
-        import aiohttp as _aiohttp
-        ssl_ctx = ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_CLIENT)
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl_module.CERT_NONE
-        connector = _aiohttp.TCPConnector(ssl=ssl_ctx)
-        http = _aiohttp.ClientSession(connector=connector)
-    except Exception:
-        http = aiohttp.ClientSession()
+    # TLS-верификация включена (по умолчанию в aiohttp). Раньше здесь снималась
+    # проверка сертификата на всех исходящих вызовах воронки (webhook'и/внешние
+    # API), что открывало MITM. Внешние эндпоинты доверенные — проверка обязательна.
+    http = aiohttp.ClientSession()
 
     log.info("Auto-Funnel service started")
     try:

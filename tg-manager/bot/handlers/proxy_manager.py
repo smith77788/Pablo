@@ -100,7 +100,7 @@ async def _check_proxy_alive(proxy_url: str) -> dict:
             async with session.get(
                 "https://api.telegram.org",
                 timeout=aiohttp.ClientTimeout(total=10),
-                ssl=False,
+                ssl=False,  # ssl=False намеренно: проверяем ЗАВЕДОМО недоверенный публичный прокси (не боевой API)
             ) as resp:
                 latency_ms = int((_time.monotonic() - t0) * 1000)
                 return {"alive": resp.status < 500, "latency_ms": latency_ms}

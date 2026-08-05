@@ -190,7 +190,6 @@ async def ping_providers(timeout: int = 8) -> list[dict]:
                     headers={"Authorization": f"Bearer {p.api_key}",
                              "Content-Type": "application/json"},
                     timeout=aiohttp.ClientTimeout(total=timeout),
-                    ssl=False,
                 ) as resp:
                     return {"name": p.name, "ok": resp.status < 500,
                             "ms": int((_time.monotonic() - t0) * 1000)}

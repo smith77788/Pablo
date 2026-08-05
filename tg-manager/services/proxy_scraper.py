@@ -64,7 +64,7 @@ def _norm(raw: str) -> Optional[str]:
 async def _fetch_source(session, url: str) -> list[str]:
     """Download one proxy list, return normalised URLs."""
     try:
-        async with session.get(url, timeout=20, ssl=False) as resp:
+        async with session.get(url, timeout=20, ssl=False) as resp:  # ssl=False намеренно: проверяем ЗАВЕДОМО недоверенный публичный прокси (не боевой API)
             text = await resp.text()
         proxies = []
         for line in text.splitlines():
@@ -93,7 +93,7 @@ async def _validate_one(
                 async with session.get(
                     _VALIDATE_URL,
                     timeout=aiohttp.ClientTimeout(total=_VALIDATE_TIMEOUT),
-                    ssl=False,
+                    ssl=False,  # ssl=False намеренно: проверяем ЗАВЕДОМО недоверенный публичный прокси (не боевой API)
                 ) as resp:
                     latency_ms = int((_time.monotonic() - t0) * 1000)
                     # Any HTTP response means proxy reached Telegram

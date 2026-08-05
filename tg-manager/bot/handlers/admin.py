@@ -1150,7 +1150,6 @@ async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     json=payload,
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=8),
-                    ssl=False,
                 ) as resp:
                     ok = resp.status < 500
                     ms = int((_time.monotonic() - t0) * 1000)
