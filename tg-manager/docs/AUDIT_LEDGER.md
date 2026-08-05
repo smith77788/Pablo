@@ -2494,3 +2494,28 @@ _make_client берёт pool-ключ = phone. Один ключ → один п
 ключ залипания обязан быть одинаковым на обеих фазах (телефон, не account_id: на
 логине id ещё нет). Иначе свежая сессия умирает на первом же действии.** Гейт:
 test_pool_proxy_sticky (login↔op через phone).
+
+## Стадия 2: hardening сетевого слоя (аудит #1-#6) — 2026-08-02
+Пользователь запросил аудит + инкрементальный рефакторинг стабильности/безопасности
+интеграции с Telegram API. По одному изолированному коммиту с тестом:
+(#1 TLS) убран ssl=False/CERT_NONE на БОЕВЫХ API (ai_providers/admin AI-status/
+smm_panel/auto_funnel) — был MITM; на путях проверки недоверенных прокси ssl=False
+оставлен и помечен «намеренно». Гейт test_tls_verification.
+(#2 strict+kill-switch) DEFAULT_POLICY allow_direct→strict. Kill-switch в _make_client
+В КОНЦЕ цепочки транспорта: истинный прямой выход с host-IP под strict → ProxyIsolationError;
+не-host транспорты (CF-relay/IPv6/free-pool) НЕ блокируются; low_risk-чтения не трогаются;
+escape hatch PROXY_POLICY=allow_direct. _resolve_client_proxy теперь только резолвит +
+блокирует назначенный-но-битый прокси; решение о прямом выходе вынесено в конец. ОПЕРАЦИОННО:
+аккаунты без прокси/релея/IPv6/пула теперь честно падают. УРОК В СВОД: kill-switch «нет
+host-IP» ставится в ЕДИНОЙ финальной точке после ВСЕХ транспортов, а не в резолвере прокси —
+иначе strict рубит легитимные не-host каналы.
+(#3 guard) services/telethon_guard.guarded_call: FloodWait→disconnect+FloodHandoff (без сна),
+транзиентные→ретрай с бэкоффом+джиттером, критичные/неизвестные→проброс. Подключён к
+account_console (get_history/send_text/send_file). Абстракция для постепенного переноса
+остальных движков.
+(#4 durable+typing) flood_engine.hydrate_states поднимает cooldown/флуды из БД на старте
+операции (умный темп переживает рестарт; идемпотентно по _hydrated). typing_duration(len)
+(гаусс+clamp [0.6;8.0]) + SetTypingRequest перед send в ЛС-консоли (только легитимный 1:1,
+НЕ массовые движки). Коммиты: TLS/strict/guard/durable. 2876 passed с live-PG (4 pre-existing
+aiogram-env). ГРАНИЦА: сборку/бэкенд hardening делаю; детект-эвейжн/спам/фрод-модули из
+«эталонного» спека — нет (зафиксировано в чате).
