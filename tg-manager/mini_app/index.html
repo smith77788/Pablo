@@ -14898,13 +14898,22 @@ async function loadParserRuns() {
 }
 let AUD_FILTERS = {premium:false, with_username:false, not_bot:false, active:false, with_phone:false};
 let AUD_SOURCE = '';
+// Last Seen фильтр: 0=выкл, иначе «был в сети ≤ N дней назад». Циклим off→7→30→off.
+let AUD_LAST_SEEN = 0;
+const AUD_LAST_SEEN_STEPS = [0, 7, 30];
 function audFilterQS() {
   let qs = '';
   if (AUD_SOURCE) qs += '&source='+encodeURIComponent(AUD_SOURCE);
   for (const k in AUD_FILTERS) if (AUD_FILTERS[k]) qs += '&'+k+'=1';
+  if (AUD_LAST_SEEN>0) qs += '&last_seen='+AUD_LAST_SEEN;
   return qs;
 }
 function toggleAudFilter(k) { AUD_FILTERS[k] = !AUD_FILTERS[k]; loadParsedAudience(AUD_SOURCE); }
+function cycleLastSeen() {
+  const i = AUD_LAST_SEEN_STEPS.indexOf(AUD_LAST_SEEN);
+  AUD_LAST_SEEN = AUD_LAST_SEEN_STEPS[(i+1) % AUD_LAST_SEEN_STEPS.length];
+  loadParsedAudience(AUD_SOURCE);
+}
 function exportAudience(fmt) {
   const f = (fmt==='txt'||fmt==='json') ? fmt : 'csv';
   const url = '/api/miniapp/parser/audience/export?format='+f+'&token='+encodeURIComponent(TK)+audFilterQS();
@@ -14923,6 +14932,7 @@ async function loadParsedAudience(source) {
       ${chip('with_username','@ Username'+(sl.with_username!=null?' '+num(sl.with_username):''))}
       ${chip('with_phone','📱 С телефоном'+(sl.with_phone!=null?' '+num(sl.with_phone):''))}
       ${chip('active','🔥 Активные'+(sl.active!=null?' '+num(sl.active):''))}
+      <button class="btn ${AUD_LAST_SEEN>0?'btn-p':'btn-s'}" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="cycleLastSeen()" title="Был в сети не позже N дней назад">👁 ${AUD_LAST_SEEN>0?'≤'+AUD_LAST_SEEN+'д':'Был в сети'}</button>
       ${chip('not_bot','🚫🤖 Не боты')}
       <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('csv')">📥 CSV</button>
       <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="exportAudience('txt')" title="@username/id построчно — для инвайтера">📄 TXT</button>

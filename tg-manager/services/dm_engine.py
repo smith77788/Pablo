@@ -24,6 +24,47 @@ from services import infra_memory
 
 log = logging.getLogger(__name__)
 
+_MAX_MEDIA_BYTES = 20 * 1024 * 1024  # потолок скачивания медиа кампании
+
+_CT_EXT = {
+    "image/jpeg": ".jpg", "image/pjpeg": ".jpg", "image/png": ".png",
+    "image/webp": ".webp", "image/gif": ".gif", "video/mp4": ".mp4",
+    "video/quicktime": ".mov", "application/pdf": ".pdf",
+}
+
+
+def _media_filename(url: str, content_type: str) -> str:
+    """Имя файла для BytesIO — Telethon по расширению решает фото/видео/документ."""
+    ct = (content_type or "").split(";")[0].strip().lower()
+    ext = _CT_EXT.get(ct)
+    if not ext:
+        tail = url.split("?")[0].rsplit("/", 1)[-1]
+        if "." in tail:
+            ext = "." + tail.rsplit(".", 1)[-1][:5].lower()
+        else:
+            ext = ".jpg"
+    return "media" + ext
+
+
+async def _download_media(url: str) -> tuple[bytes, str]:
+    """Скачать медиа кампании один раз. Возвращает (bytes, filename). Бросает при
+    неверной схеме/пустом/слишком большом файле/сетевой ошибке."""
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise ValueError("URL должен начинаться с http:// или https://")
+    import aiohttp
+
+    async with aiohttp.ClientSession() as sess:
+        async with sess.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            if resp.status >= 400:
+                raise ValueError(f"URL вернул HTTP {resp.status}")
+            ct = resp.headers.get("Content-Type", "")
+            data = await resp.read()
+    if not data:
+        raise ValueError("Пустой ответ по URL")
+    if len(data) > _MAX_MEDIA_BYTES:
+        raise ValueError(f"Медиа слишком большое ({len(data) // 1024 // 1024} МБ)")
+    return data, _media_filename(url, ct)
+
 
 # ── Spintax ───────────────────────────────────────────────────────────────────
 
@@ -193,6 +234,9 @@ async def send_dm(
     _acc: dict | None = None,
     username: str | None = None,
     media_url: str | None = None,
+    media_bytes: bytes | None = None,
+    media_filename: str | None = None,
+    uniquify_media: bool = False,
 ) -> dict:
     """
     Отправить одно личное сообщение через личный аккаунт Telegram.
@@ -213,7 +257,15 @@ async def send_dm(
     target: str | int = username.lstrip("@") if username else user_id
 
     async def _deliver(dest):
-        if media_url:
+        if media_bytes is not None:
+            # Массовая рассылка: медиа скачано один раз, уникализируем под каждого
+            # получателя (анти-детект). URL валидируется на уровне API (SSRF-гард).
+            await account_manager.send_media_via_account(
+                session_str, dest, caption=text, _acc=_acc,
+                media_bytes=media_bytes, media_filename=media_filename,
+                uniquify=uniquify_media,
+            )
+        elif media_url:
             # Медиа с подписью (caption). URL валидируется на уровне API (SSRF-гард).
             await account_manager.send_media_via_account(session_str, dest, media_url, text, _acc=_acc)
         else:
@@ -481,6 +533,17 @@ async def run_campaign(
             log.debug('campaign params parse error')
             _cp = {}
     _media_url = (_cp or {}).get("media_url") or None
+    # Массовая рассылка с медиа: скачиваем файл ОДИН раз, дальше уникализируем под
+    # каждого получателя (анти-детект — иначе у всех одинаковый серверный хэш).
+    # Скачивание не удалось → откат на прежний путь (Telethon качает URL сам).
+    _media_bytes: bytes | None = None
+    _media_filename: str | None = None
+    if _media_url:
+        try:
+            _media_bytes, _media_filename = await _download_media(_media_url)
+        except Exception as _mexc:  # noqa: BLE001 — не срываем кампанию из-за медиа
+            log_exc_swallow(log, f"dm_engine: медиа не скачано ({_mexc}), шлём по URL")
+            _media_bytes = None
     try:
         _pace = (_cp or {}).get("pace")
         if _pace == "auto":
@@ -600,7 +663,9 @@ async def run_campaign(
         text = expand_spintax(template)
         t0_dm = time.monotonic()
         result = await send_dm(
-            acc["session_str"], user_id, text, _acc=acc, username=username, media_url=_media_url
+            acc["session_str"], user_id, text, _acc=acc, username=username,
+            media_url=_media_url, media_bytes=_media_bytes,
+            media_filename=_media_filename, uniquify_media=_media_bytes is not None,
         )
         status = result["status"]
 

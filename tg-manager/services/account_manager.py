@@ -1903,14 +1903,24 @@ async def send_message_via_account(
 
 
 async def send_media_via_account(
-    session_string: str, chat_id, media_url: str, caption: str = "",
+    session_string: str, chat_id, media_url: str | None = None, caption: str = "",
     _acc: dict | None = None,
+    *,
+    media_bytes: bytes | None = None,
+    media_filename: str | None = None,
+    uniquify: bool = False,
 ) -> bool:
-    """Отправляет медиа (фото/видео/док) по URL с подписью через личный аккаунт.
+    """Отправляет медиа (фото/видео/док) с подписью через личный аккаунт.
 
-    Telethon сам скачивает файл по URL. URL должен быть заранее провалидирован
-    вызывающей стороной (SSRF-гард на уровне API). Обработка ошибок как в
-    send_message_via_account (флуд/dead-session пробрасываются).
+    Два источника медиа:
+      • `media_url` — Telethon сам скачивает файл (URL должен быть заранее
+        провалидирован вызывающей стороной, SSRF-гард на уровне API);
+      • `media_bytes` — готовые байты (для массовой рассылки: скачали один раз,
+        уникализируем под каждого получателя). При `uniquify=True` каждая копия
+        делается пиксельно/байт-различной (анти-детект, см. media_uniquifier).
+
+    Обработка ошибок как в send_message_via_account (флуд/dead-session
+    пробрасываются).
     """
     from telethon.errors import (
         FloodWaitError,
@@ -1920,11 +1930,23 @@ async def send_media_via_account(
         UserDeactivatedError,
     )
 
+    if media_bytes is not None:
+        payload = media_bytes
+        if uniquify:
+            from services import media_uniquifier
+            payload = media_uniquifier.uniquify(media_bytes, filename=media_filename or "")
+        import io as _io
+        _fobj = _io.BytesIO(payload)
+        _fobj.name = media_filename or "media.jpg"
+        send_target: Any = _fobj
+    else:
+        send_target = media_url
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         await asyncio.wait_for(
-            client.send_file(chat_id, file=media_url, caption=caption or None),
+            client.send_file(chat_id, file=send_target, caption=caption or None),
             timeout=max(_OP_TIMEOUT, 60),
         )
         return True

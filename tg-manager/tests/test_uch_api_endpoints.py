@@ -1695,6 +1695,18 @@ class TestMiniAppAPIPureFunctions:
         sql, params = parsed_audience_filters({"with_phone": "1"})
         assert "phone IS NOT NULL" in sql
 
+    def test_parsed_audience_filters_last_seen(self):
+        from services.mini_app_api import parsed_audience_filters
+        sql, params = parsed_audience_filters({"last_seen": "7"})
+        assert "last_seen_days" in sql and "<= $2" in sql
+        assert params == [7]
+
+    def test_parsed_audience_filters_last_seen_ignores_garbage(self):
+        from services.mini_app_api import parsed_audience_filters
+        # нечисловое/нулевое значение — фильтр не добавляется
+        assert parsed_audience_filters({"last_seen": "abc"})[0] == ""
+        assert parsed_audience_filters({"last_seen": "0"})[0] == ""
+
     def test_parsed_audience_filters_base_offset(self):
         from services.mini_app_api import parsed_audience_filters
         sql, params = parsed_audience_filters({"source": "admin"}, base_params_count=3)

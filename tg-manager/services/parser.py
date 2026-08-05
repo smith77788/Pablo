@@ -60,6 +60,37 @@ def normalize_source_ref(raw: str) -> str:
     return s.strip()
 
 
+def status_to_days(status) -> int | None:
+    """Telethon User.status → примерное число дней с последнего онлайна (Last Seen).
+
+    Telegram отдаёт статус вёдрами (точное время скрыто privacy-настройкой):
+    online→0, recently→~2, last_week→~7, last_month→~30, offline→точная дата.
+    None/empty/скрыт → None (неизвестно). Используется для фильтра «активные».
+    """
+    if status is None:
+        return None
+    name = type(status).__name__
+    if name == "UserStatusOnline":
+        return 0
+    if name == "UserStatusRecently":
+        return 2
+    if name == "UserStatusLastWeek":
+        return 7
+    if name == "UserStatusLastMonth":
+        return 30
+    if name == "UserStatusOffline":
+        was = getattr(status, "was_online", None)
+        if was is not None:
+            try:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                delta = now - (was if was.tzinfo else was.replace(tzinfo=timezone.utc))
+                return max(0, delta.days)
+            except Exception:  # noqa: BLE001 — битая дата → неизвестно
+                return None
+    return None
+
+
 # ── Чистые хелперы экспорта аудитории (тестируемые, без БД/Telethon) ───────
 # Форматы для многоформатного экспорта parsed_audiences. CSV делает эндпоинт
 # через _csv_resp; TXT/JSON — эти хелперы (паритет Telegram Expert по экспорту).
@@ -144,16 +175,23 @@ async def _save_users(
         display_name = " ".join(
             p for p in [u.get("first_name"), u.get("last_name")] if p
         ).strip() or None
+        # Last Seen: last_seen_days из статуса; активным считаем ≤7 дней (online/
+        # recently/last_week) — база для фильтра «активная аудитория».
+        last_seen_days = u.get("last_seen_days")
+        is_active = None if last_seen_days is None else (last_seen_days <= 7)
         try:
             result = await pool.execute(
                 """INSERT INTO parsed_audiences(
                        owner_id, source_type, source_id, source_title, source_username,
                        parse_run_id, tg_user_id, username, first_name, last_name,
-                       is_premium, is_bot, parsed_at
-                   ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+                       is_premium, is_bot, last_seen_days, is_active, parsed_at
+                   ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
                    ON CONFLICT (owner_id, source_id, tg_user_id) DO UPDATE
                    SET parse_run_id=$6, username=$8, first_name=$9, last_name=$10,
-                       is_premium=$11, parsed_at=NOW()""",
+                       is_premium=$11,
+                       last_seen_days=COALESCE(EXCLUDED.last_seen_days, parsed_audiences.last_seen_days),
+                       is_active=COALESCE(EXCLUDED.is_active, parsed_audiences.is_active),
+                       parsed_at=NOW()""",
                 owner_id,
                 source_type,
                 source_id,
@@ -166,6 +204,8 @@ async def _save_users(
                 u.get("last_name"),
                 bool(u.get("premium")),
                 bool(u.get("bot")),
+                last_seen_days,
+                is_active,
             )
             if "INSERT" in str(result):
                 saved += 1
@@ -253,6 +293,7 @@ async def parse_members(
                         "last_name": u.last_name,
                         "premium": getattr(u, "premium", False),
                         "bot": u.bot,
+                        "last_seen_days": status_to_days(getattr(u, "status", None)),
                     }
                     for u in result.users
                     if not u.deleted
@@ -375,6 +416,7 @@ async def _collect_and_save_senders(
                     "last_name": getattr(user, "last_name", None),
                     "premium": getattr(user, "premium", False),
                     "bot": getattr(user, "bot", False),
+                    "last_seen_days": status_to_days(getattr(user, "status", None)),
                 }
             ]
             saved = await _save_users(
@@ -601,8 +643,13 @@ async def get_parsed_audience(
     offset: int = 0,
     limit: int = 200,
     active_only: bool = False,
+    max_last_seen_days: int | None = None,
 ) -> list[dict]:
-    """Получить сохранённую аудиторию с фильтрами."""
+    """Получить сохранённую аудиторию с фильтрами.
+
+    max_last_seen_days: оставить только тех, кто был в сети не позже N дней назад
+    (Last Seen фильтр) — пользователи с неизвестным статусом отсекаются.
+    """
     conditions = ["owner_id=$1"]
     params: list = [owner_id]
     p = 2
@@ -619,6 +666,11 @@ async def get_parsed_audience(
 
     if active_only:
         conditions.append("is_active=TRUE")
+
+    if max_last_seen_days is not None:
+        conditions.append(f"last_seen_days IS NOT NULL AND last_seen_days <= ${p}")
+        params.append(int(max_last_seen_days))
+        p += 1
 
     where = " AND ".join(conditions)
     rows = await pool.fetch(

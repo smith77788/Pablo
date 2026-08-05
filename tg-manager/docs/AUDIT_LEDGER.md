@@ -366,6 +366,31 @@ select_all_active`) и прогрев (`account_warmer` проверяет `is_a
 Исправлено (доп., коммит 4): `operation_bus.submit()` теперь централизованно enforced `min_plan` (defense-in-depth поверх хендлеров) — `_enforce_min_plan`/`PlanRequiredError`, fail-open при сбое проверки, обход `bypass_plan_check`, admin/free-mode проходят. Регресс: `tests/test_operation_plan_gate.py` (8). Так объявленный min_plan стал авторитетным — free-юзер не поставит платную операцию даже при забытом гейте в хендлере.
 Решено (коммит 5, выбор владельца — вариант A): операции строго платные (гейт `min_plan` в `submit()`). Мёртвая квота-машинерия удалена целиком (0 внешних ссылок): `tariffs.operation_quota/operation_quotas/operation_types/_OPERATION_DEFAULTS`, `subscription.check_operation_limit/count_operations_by_type/_OPERATION_LIMITS`, env-ключи `QUOTA_*`. Доступ к операциям бинарный по тарифу — конфиг больше не вводит в заблуждение, мёртвого кода нет.
 
+## services/media_uniquifier + dm_engine/account_manager — 2026-08-05 — добавлена уникализация медиа в рассылках (анти-детект)
+Проверено: аудит проекта против 9-модульной спеки «топового TG-софта». Модуль 4
+(Рассылки): flood-реакция в dm_engine отличная (flood→cooldown→вывод аккаунта из
+ротации→продолжение чистыми, позиция сохраняется через dm_campaign_log ON CONFLICT).
+Найдено: уникализации медиа НЕ было нигде — одно фото слалось всем получателям
+одинаковым (после серверной переупаковки Telegram хэш контента совпадает → спам-сигнал).
+Исправлено: да. services/media_uniquifier.py — пиксельный джиттер (яркость/контраст
+±1.5%, обрезка 0-2px, пересохранение) для JPEG/PNG/WEBP/BMP (переживает переупаковку),
+байтовый (free-бокс для mp4, хвост иначе) для видео/прочего; никогда не бросает.
+dm_engine скачивает медиа кампании ОДИН раз (_download_media) и уникализирует под
+каждого получателя; send_media_via_account принимает media_bytes+uniquify (откат на
+URL при сбое скачивания). Pillow добавлен в requirements (и так тянулся qrcode[pil]).
+Регресс: tests/test_media_uniquifier.py (7). 1779 passed.
+
+## services/parser + mini_app parser-фильтр — 2026-08-05 — Last Seen фильтр парсера (Модуль 3)
+Проверено: parsed_audiences в schema_v41 УЖЕ имеет колонки is_active/last_seen_days,
+но парсер их не заполнял (u.status выбрасывался), а фильтр `active` в API был мёртв
+(is_active всегда NULL).
+Найдено: спека Модуль 3 требует Last Seen фильтр — отсутствовал на уровне кода
+(колонки были, данных не было).
+Исправлено: да. parser.status_to_days() (Telethon UserStatus*→дни); _save_users пишет
+last_seen_days+is_active (active=≤7д); оба места сбора юзеров заполняют last_seen_days;
+get_parsed_audience и mini_app_api.parsed_audience_filters получили фильтр last_seen;
+в mini_app — чип «👁 Был в сети» (off→≤7д→≤30д). Регресс: test_parser_last_seen.py (6)
++ 2 в test_uch_api_endpoints. Render-харнесс parser: 0 js-ошибок, без overflow.
 
 ## services/ai_claude.py + spintax_ai — 2026-07-18 — добавлен Claude Opus 4.8 как предпочтительный AI-путь
 Проверено: весь AI-слой был OpenAI-совместимый (OpenRouter/Groq/Gemini/Ollama)

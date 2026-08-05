@@ -43,5 +43,16 @@ def parsed_audience_filters(q, base_params_count: int = 1):
         conds.append("is_active=TRUE")
     if _truthy(get("with_phone")):
         conds.append("phone IS NOT NULL AND phone<>''")
+    # Last Seen: оставить тех, кто был онлайн не позже N дней назад (0/мусор → без фильтра).
+    ls_raw = str(get("last_seen") or "").strip()
+    if ls_raw:
+        try:
+            ls_days = int(ls_raw)
+        except (TypeError, ValueError):
+            ls_days = 0
+        if ls_days > 0:
+            idx += 1
+            conds.append(f"last_seen_days IS NOT NULL AND last_seen_days <= ${idx}")
+            params.append(ls_days)
     sql = (" AND " + " AND ".join(conds)) if conds else ""
     return sql, params
