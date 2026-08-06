@@ -205,20 +205,22 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         group = await _resolve_group_entity(client, group_ref)
         me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
+        _chan_id = getattr(group, "id", None)  # id чата — чтобы вызвать promote_all_admins
         part = await asyncio.wait_for(
             client(GetParticipantRequest(channel=group, participant="me")),
             timeout=_ACTION_TIMEOUT)
         p = part.participant
         if isinstance(p, ChannelParticipantCreator):
             return {"ok": True, "user_id": me.id, "creator": True,
-                    "can_promote": True, "can_invite": True}
+                    "can_promote": True, "can_invite": True, "channel_id": _chan_id}
         if isinstance(p, ChannelParticipantAdmin):
             r = getattr(p, "admin_rights", None)
             return {"ok": True, "user_id": me.id, "creator": False,
                     "can_promote": bool(getattr(r, "add_admins", False)),
-                    "can_invite": bool(getattr(r, "invite_users", False))}
+                    "can_invite": bool(getattr(r, "invite_users", False)),
+                    "channel_id": _chan_id}
         return {"ok": True, "user_id": me.id, "creator": False,
-                "can_promote": False, "can_invite": False}
+                "can_promote": False, "can_invite": False, "channel_id": _chan_id}
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:120]}
     finally:

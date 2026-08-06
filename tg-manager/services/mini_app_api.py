@@ -6178,6 +6178,73 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_rights_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def invite_grant_admin(request: web.Request) -> web.Response:
+        """В один тап: найти аккаунт-админа чата и через него выдать ОСТАЛЬНЫМ
+        аккаунтам право приглашать (операция promote_all_admins).
+
+        Убирает ручной шаг «сделай каждый аккаунт админом в Telegram». Промоутер
+        подбирается автоматически (создатель/админ с add_admins). Идёт как
+        Operation через operation_bus (прогресс/отмена/гейт по тарифу), а не инлайн.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        group = (str(body.get("group") or "").strip()
+                 or (request.query.get("group") or "").strip())
+        if not group:
+            return _err("Укажите группу/канал", 400)
+        try:
+            rows = await _safe_fetch(pool,
+                "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
+                "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
+                "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+                "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
+                "ORDER BY a.id LIMIT 8", uid) or []
+            if not rows:
+                return _err("Нет доступных аккаунтов", 404)
+            from services.mass_inviter_engine import channel_admin_status
+            import asyncio as _aio
+            promoter = None
+            channel_id = None
+            for r in rows:
+                try:
+                    st = await _aio.wait_for(
+                        channel_admin_status(r["session_str"], dict(r), group), timeout=25)
+                except Exception:
+                    continue
+                if st.get("ok") and st.get("can_promote") and st.get("channel_id"):
+                    promoter = r
+                    channel_id = int(st["channel_id"])
+                    break
+            if promoter is None:
+                return _json_resp({
+                    "ok": False, "no_promoter": True,
+                    "message": ("Ни один аккаунт не админ этого чата с правом «Назначать "
+                                "администраторов». Сделайте один свой аккаунт таким админом "
+                                "в Telegram — тогда я раздам право приглашать остальным."),
+                })
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "promote_all_admins",
+                {"channel_id": channel_id, "owner_acc_id": int(promoter["id"])},
+                total_items=1, label="Выдача прав инвайтерам")
+            return _json_resp({
+                "ok": True, "op_id": op_id,
+                "promoter_label": str(promoter["phone"] or f"#{promoter['id']}"),
+            })
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("invite_grant_admin uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def invite_advice(request: web.Request) -> web.Response:
         """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
 
@@ -13061,6 +13128,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
+    app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
