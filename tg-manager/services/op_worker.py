@@ -8789,6 +8789,8 @@ async def _exec_mass_invite(
     _promoter = None            # (acc_dict) — аккаунт с правами выдавать админку
     _privacy_blocked: list = []  # цели, отклонённые приватностью (для промоут-трюка)
     _promoted_n = 0
+    _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
+    _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
     _auto_promote = params.get("auto_promote", True)
     _promote_trick = params.get("promote_trick", True)
     if (_auto_promote or _promote_trick) and accounts:
@@ -8811,6 +8813,7 @@ async def _exec_mass_invite(
                 _promoter = a
                 break
         if _promoter is None:
+            _promote_skipped_no_admin = bool(_auto_promote)
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','skip',$2)", op_id,
@@ -8822,6 +8825,24 @@ async def _exec_mass_invite(
                     continue
                 _u = _acc_uid.get(int(a["id"]))
                 if not _u:
+                    # tg_user_id не заполнен (частый случай при импорте сессий) —
+                    # промоутить по id некого. Раньше аккаунт молча пропускался, и
+                    # автовыдача админки тихо не срабатывала → инвайтер без прав.
+                    # Резолвим id вживую по его же сессии, сохраняем и используем.
+                    try:
+                        _u = await asyncio.wait_for(
+                            account_manager.resolve_self_user_id(a["session_str"], dict(a)),
+                            timeout=30)
+                    except Exception:
+                        _u = None
+                    if _u:
+                        _acc_uid[int(a["id"])] = int(_u)
+                        await _safe_execute(
+                            pool, "UPDATE tg_accounts SET tg_user_id=$2 "
+                            "WHERE id=$1 AND (tg_user_id IS NULL OR tg_user_id=0)",
+                            int(a["id"]), int(_u))
+                if not _u:
+                    _promote_no_uid += 1
                     continue
                 try:
                     okp = await asyncio.wait_for(
@@ -8834,10 +8855,13 @@ async def _exec_mass_invite(
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 except Exception as _pe:
                     log.debug("mass_invite op=%d: promote acc=%s failed: %s", op_id, a.get("id"), _pe)
+            _promote_msg = f"выдана админка (invite_users) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}"
+            if _promote_no_uid:
+                _promote_msg += (f"; {_promote_no_uid} пропущено — не удалось получить их user_id "
+                                 "(переавторизуйте эти аккаунты)")
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                "VALUES($1,0,'promote','ok',$2)", op_id,
-                f"выдана админка (invite_users) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}")
+                "VALUES($1,0,'promote','ok',$2)", op_id, _promote_msg)
 
     # ── Очередь-планировщик ──────────────────────────────────────────────────
     # Раньше аудитория НАРЕЗАЛАСЬ по аккаунтам заранее (_chunks). Цену платил
@@ -9246,6 +9270,17 @@ async def _exec_mass_invite(
         + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
            "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
            if flood_storm else "")
+        # Честная причина «вступили, но не инвайтят»: без прав приглашать инвайт в
+        # чат/канал не стартует. Раньше это пряталось в лог шага promote — теперь в итоге.
+        + ("\n🛡 Некому выдать право приглашать: ни один ваш аккаунт не админ этого чата "
+           "с правом «Назначать администраторов». Сделайте один аккаунт админом чата (с этим "
+           "правом) и включите его в операцию — он автоматически выдаст право приглашать "
+           "остальным. Без этого аккаунты вступают, но не инвайтят."
+           if _promote_skipped_no_admin and total_ok == 0 else "")
+        + (f"\n🛡 Промоутер есть, но {_promote_no_uid} инвайтерам не выдалась админка — "
+           "не удалось получить их user_id. Переавторизуйте эти аккаунты в разделе «Аккаунты»."
+           if _promote_no_uid and _promoted_n == 0 and total_ok == 0
+           and not _promote_skipped_no_admin else "")
         + _sess_hint
         + (f"\n🛑 Инвайт не выполнен: ни один аккаунт не подключился. Остаток {_left} "
            "НЕ отложен — сначала почините аккаунты (см. выше), иначе повтор бесполезен."

@@ -71,6 +71,29 @@ def _invalidate_me_cache(session_id: int) -> None:
     _GET_ME_CACHE.pop(session_id, None)
 
 
+async def resolve_self_user_id(session_string: str, _acc: dict | None = None) -> Optional[int]:
+    """Вернуть Telegram user_id аккаунта по его сессии (me.id), либо None.
+
+    Нужно, когда `tg_accounts.tg_user_id` не заполнен (частый случай при импорте
+    сессий): без него автовыдача админки инвайтеру молча пропускалась. Только
+    чтение, fail-soft — любая ошибка возвращает None, вызывающий решает дальше.
+    """
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        uid = getattr(me, "id", None) if me else None
+        return int(uid) if uid else None
+    except Exception as exc:
+        log.debug("resolve_self_user_id failed: %s", exc)
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "resolve_self_user_id: disconnect")
+
+
 def _parse_proxy(proxy_url: str):
     """Parse socks5://user:pass@host:port → (socks.SOCKS5, host, port, True, user, pass).
     Returns None if proxy_url is empty.
