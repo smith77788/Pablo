@@ -3897,7 +3897,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </details>
     <div class="sec">Настройка инвайта</div>
     <div style="padding:8px 16px">
-      <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
+      <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group" onblur="checkInviteRights()"></div>
+      <div id="massInviteRights" style="font-size:12px;margin:-6px 0 10px;padding:0 2px"></div>
       <div class="field">
         <label>Источник аудитории</label>
         <select id="massInviteSrc" onchange="massInviteSrcToggle()" class="sel">
@@ -13601,6 +13602,8 @@ async function openMassInvite() {
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  ['massInviteRights','massInviteListPreview'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
+  INV_IMPORT_OK = 0;
   massInviteSrcToggle();
   document.getElementById('massInviteAccsLoad').textContent = 'Загрузка аккаунтов…';
   const [opsD, accsD] = await Promise.allSettled([
@@ -13726,6 +13729,37 @@ async function loadInviteAudienceSize() {
 }
 
 // Предполётная проверка: флот, прокси, оценка проходов — ДО запуска инвайта.
+// Проверка прав ДО запуска: есть ли аккаунт-админ целевого чата, способный
+// раздать право приглашать. Живой Telegram-вызов → только по blur поля группы.
+let _rightsT = null;
+function checkInviteRights() {
+  const g = document.getElementById('massInviteGroup');
+  const el = document.getElementById('massInviteRights');
+  if (!g || !el) return;
+  const group = g.value.trim();
+  if (!group) { el.innerHTML=''; return; }
+  clearTimeout(_rightsT);
+  el.innerHTML = '<span style="color:var(--hint)">Проверяю права в чате…</span>';
+  _rightsT = setTimeout(async () => {
+    try {
+      const d = await api('/api/miniapp/invite/rights_check?group=' + encodeURIComponent(group));
+      const box = (bg, col, html) => `<div style="padding:7px 9px;background:${bg};border-left:3px solid ${col};border-radius:8px;line-height:1.4">${html}</div>`;
+      if (d.has_promoter) {
+        el.innerHTML = box('rgba(34,197,94,.10)', '#22c55e',
+          `<span style="color:#22c55e">✓ Есть аккаунт-админ${d.promoter_label?' ('+esc(d.promoter_label)+')':''}</span> — право приглашать раздастся остальным автоматически.`);
+      } else if (d.has_inviter) {
+        el.innerHTML = box('rgba(245,158,11,.10)', '#f59e0b',
+          `⚠️ Есть аккаунт с правом приглашать, но нет админа с правом «Назначать администраторов» — остальные инвайтеры право <b>не получат</b>. Сделайте один аккаунт админом чата с этим правом, чтобы работал весь флот.`);
+      } else if (!d.usable) {
+        el.innerHTML = box('rgba(239,68,68,.10)', '#ef4444', '⚠️ Нет доступных аккаунтов для проверки.');
+      } else {
+        el.innerHTML = box('rgba(239,68,68,.10)', '#ef4444',
+          `⚠️ Ни один из ваших аккаунтов не админ этого чата. Инвайтеры <b>вступят, но не смогут приглашать</b>. Сделайте один свой аккаунт админом чата с правом «Назначать администраторов» и включите его в операцию.`);
+      }
+    } catch(e) { el.innerHTML=''; }  // не мешаем запуску, если проверка недоступна
+  }, 400);
+}
+
 async function loadInvitePreflight(audience) {
   const el = document.getElementById('massInvitePreflight');
   if (!el) return;

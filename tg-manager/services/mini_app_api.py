@@ -6117,6 +6117,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_preflight uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def invite_rights_check(request: web.Request) -> web.Response:
+        """Живая проверка прав ДО запуска: есть ли среди аккаунтов админ ЦЕЛЕВОГО
+        чата, способный раздать право приглашать остальным.
+
+        Главная причина «вступили, но не инвайтят»: инвайт в чат/канал требует
+        права invite_users, а раздаёт его только аккаунт-создатель/админ с
+        «Назначать администраторов». Раньше это выяснялось только по факту
+        провала. Здесь — до старта: подключаем несколько аккаунтов к чату и
+        смотрим их права (channel_admin_status). Дорогой живой вызов → отдельный
+        on-demand эндпоинт, не на горячем пути.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        group = (request.query.get("group") or "").strip()
+        if not group:
+            return _err("Укажите группу/канал", 400)
+        try:
+            rows = await _safe_fetch(pool,
+                "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
+                "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
+                "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
+                "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
+                "ORDER BY a.id LIMIT 8", uid) or []
+            if not rows:
+                return _json_resp({"has_promoter": False, "has_inviter": False,
+                                   "checked": 0, "usable": 0, "promoter_label": None})
+            from services.mass_inviter_engine import channel_admin_status
+            import asyncio as _aio
+            has_promoter = has_inviter = False
+            promoter_label = None
+            checked = 0
+            for r in rows:
+                try:
+                    st = await _aio.wait_for(
+                        channel_admin_status(r["session_str"], dict(r), group), timeout=25)
+                except Exception:
+                    continue
+                if not st.get("ok"):
+                    continue
+                checked += 1
+                if st.get("can_invite") or st.get("creator"):
+                    has_inviter = True
+                if st.get("can_promote"):
+                    has_promoter = True
+                    promoter_label = str(r["phone"] or f"#{r['id']}")
+                    break  # достаточно одного — он раздаст право остальным
+            return _json_resp({
+                "has_promoter": has_promoter,
+                "has_inviter": has_inviter,
+                "promoter_label": promoter_label,
+                "checked": checked,
+                "usable": len(rows),
+            })
+        except Exception as exc:
+            log.exception("invite_rights_check uid=%d", uid)
+            return _err(str(exc), 500)
+
     async def invite_advice(request: web.Request) -> web.Response:
         """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
 
@@ -12999,6 +13060,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
     app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
+    app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
