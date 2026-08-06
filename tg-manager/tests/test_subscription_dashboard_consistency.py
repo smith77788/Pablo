@@ -48,11 +48,16 @@ def test_dashboard_corrects_plan_from_active_subscription():
 
 
 def test_subscription_endpoint_uses_direct_subscriptions_authority():
-    # /subscription правит план из прямого запроса subscriptions даже когда
-    # get_plan вернул «free» — тот же принцип, что теперь у дашборда.
+    # /subscription резолвит тариф по НАИВЫСШЕМУ среди источников (тот же принцип,
+    # что у дашборда), а не по мёртвому фолбэку `if not plan:` — иначе тариф из
+    # subscriptions/platform_users терялся, когда get_plan вернул «free».
     m = re.search(r"async def subscription\(.*?\n(.*?)\n    async def ", _SRC, re.DOTALL)
     assert m, "subscription handler not found"
     body = m.group(1)
-    assert "FROM subscriptions" in body and 'plan == "free"' in body, (
+    assert "FROM subscriptions" in body, (
         "/subscription должен использовать прямой запрос subscriptions как авторитет"
+    )
+    assert "_resolve_best_plan(" in body and "platform_users" in body, (
+        "/subscription должен брать наивысший тариф среди get_plan/subscriptions/"
+        "platform_users через _resolve_best_plan (как дашборд)"
     )

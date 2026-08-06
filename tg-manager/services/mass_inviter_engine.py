@@ -481,3 +481,48 @@ def parse_phones(text: str) -> list[str]:
                 token = "+" + token
             phones.append(token)
     return list(dict.fromkeys(phones))[:500]
+
+
+# Telegram user-ID сейчас укладывается в 10 цифр (< 10^10); телефон в формате
+# E.164 со страновым кодом — это 11–15 цифр. Поэтому чисто цифровой токен без «+»
+# из 11+ цифр — это номер телефона, потерявший ведущий «+», а не ID.
+_PHONE_MIN_DIGITS = 11
+
+
+def _looks_like_bare_phone(token: str) -> bool:
+    """True, если токен — телефон без «+»: только цифры и длина ≥ _PHONE_MIN_DIGITS.
+
+    Не трогает @username и короткие числовые ID: у них либо есть буквы/@, либо
+    цифр ≤ 10.
+    """
+    return token.isdigit() and len(token) >= _PHONE_MIN_DIGITS
+
+
+def split_invite_targets(raw: str) -> tuple[list[str], list[str]]:
+    """Разбить вставленный список на (user_refs, phones), взаимоисключающе.
+
+    Классификация одного токена (по одному на строку/через разделитель):
+      * начинается с «+»                      → телефон;
+      * только цифры и длина ≥ 11             → телефон без ведущего «+»
+        (напр. 79991234567 — Telegram ID короче, до 10 цифр);
+      * «@name» или буквенно-цифровой «name»  → @username;
+      * только цифры и длина ≤ 10             → числовой ID.
+
+    Раньше эндпоинт делил токены строго по префиксу «+», из-за чего вставленный
+    список номеров БЕЗ «+» целиком уходил в user_refs и трактовался как Telegram
+    ID → инвайт добавлял 0 из 0. Числовой ID по-прежнему не попадает в телефоны
+    (нет двойного инвайта): взаимоисключающе по длине/префиксу.
+    """
+    ref_src: list[str] = []
+    phone_src: list[str] = []
+    for token in re.split(r"[,;\s\n]+", (raw or "").strip()):
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("+") or _looks_like_bare_phone(token):
+            phone_src.append(token)
+        else:
+            ref_src.append(token)
+    phones = parse_phones(" ".join(phone_src))
+    user_refs = parse_user_refs(" ".join(ref_src))
+    return user_refs, phones

@@ -6955,14 +6955,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         user_refs: list = []
         phones: list = []
         if source == "import_list":
-            import re as _re_il
-            from services.mass_inviter_engine import parse_user_refs, parse_phones
+            from services.mass_inviter_engine import split_invite_targets
             raw = body.get("import_list") or ""
-            # Взаимоисключающий разбор: токен с '+' → телефон, иначе @username/ID.
-            # Иначе числовой ID попал бы и в refs, и в phones (двойной инвайт).
-            _tokens = [t for t in _re_il.split(r"[,;\s\n]+", str(raw).strip()) if t]
-            phones = parse_phones(" ".join(t for t in _tokens if t.startswith("+")))
-            user_refs = parse_user_refs(" ".join(t for t in _tokens if not t.startswith("+")))
+            # Взаимоисключающий разбор: «+» ИЛИ 11+ цифр → телефон, иначе @username/ID.
+            # Раньше делили строго по префиксу «+», и вставленный список номеров без
+            # «+» (79991234567) целиком уходил в refs как Telegram ID → «Добавлено 0/0».
+            # split_invite_targets — единый источник правды для этой классификации.
+            user_refs, phones = split_invite_targets(str(raw))
             if not user_refs and not phones:
                 return _err("Список пуст или невалиден", 400)
         # Настройки безопасности/темпа.
@@ -10609,52 +10608,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        # Источник истины — тот же, что у бота: активная не истёкшая подписка в
-        # subscriptions (get_plan). Раньше Mini App читал platform_users.current_plan,
-        # который часть платёжных путей не обновляет → приложение показывало «free»
-        # при реально оплаченном тарифе.
-        plan = None
+        # Тариф живёт в РАЗНЫХ источниках, и любой из них может быть истиной:
+        #   • get_plan       — админ→paid ИЛИ активная подписка (кеш, может устареть);
+        #   • subscriptions  — оплата/бот (активная не истёкшая строка);
+        #   • platform_users — ручная выдача админом (current_plan, не истёкший).
+        # Раньше здесь был фолбэк `if not plan:` на platform_users — но get_plan
+        # возвращает "free" (истинную строку), поэтому ветка НЕ срабатывала: тариф,
+        # выданный только в platform_users (напр. enterprise от админа), показывался
+        # как Free. Берём НАИВЫСШИЙ тариф среди источников — как это уже делает
+        # дашборд через тот же _resolve_best_plan.
+        gp_plan = None
         try:
             from bot.utils.subscription import get_plan as _gp
-            plan = await _gp(pool, uid)
+            gp_plan = await _gp(pool, uid)
         except Exception:
-            plan = None
+            gp_plan = None
         expires = None
-        is_active = False
+        exp_plan = None
         try:
             srow = await pool.fetchrow(
                 "SELECT plan, expires_at FROM subscriptions "
                 "WHERE user_id=$1 AND is_active=true AND expires_at > now() "
                 "ORDER BY expires_at DESC LIMIT 1", uid)
             if srow:
-                is_active = True
+                exp_plan = srow["plan"]
                 expires = str(srow["expires_at"])
-                if not plan or plan == "free":
-                    plan = srow["plan"] or plan
         except Exception as e:
             log.warning("subscription fetch subscriptions: %s", e)
-        # Фолбэк на platform_users только если источник истины недоступен.
-        if not plan:
-            try:
-                prow = await pool.fetchrow(
-                    "SELECT current_plan, plan_expires_at FROM platform_users WHERE user_id=$1", uid)
-                if prow:
-                    plan = prow["current_plan"] or "free"
-                    if not expires and prow["plan_expires_at"]:
-                        expires = str(prow["plan_expires_at"])
-            except Exception as e:
-                log.warning("subscription fetch platform_users: %s", e)
-        # Нормализуем к бинарной модели (starter/pro/enterprise → paid),
-        # чтобы клиент корректно показал платный тариф.
+        pu_plan = None
+        pu_expires = None
         try:
-            from bot.utils.subscription import coerce_plan as _cp
-            plan = _cp(plan or "free")
-        except Exception:
-            plan = plan or "free"
+            prow = await pool.fetchrow(
+                "SELECT current_plan, plan_expires_at FROM platform_users "
+                "WHERE user_id=$1 AND (plan_expires_at IS NULL OR plan_expires_at > now())", uid)
+            if prow:
+                pu_plan = prow["current_plan"]
+                pu_expires = prow["plan_expires_at"]
+        except Exception as e:
+            log.warning("subscription fetch platform_users: %s", e)
+        # Наивысший тариф среди всех источников (канон free/paid).
+        plan = _resolve_best_plan(gp_plan, exp_plan, pu_plan)
+        # Срок: активная подписка приоритетна, иначе — из ручной выдачи.
+        if not expires and plan != "free" and pu_expires:
+            expires = str(pu_expires)
         return _json_resp({
             "plan": plan,
             "expires_at": expires,
-            "is_active": is_active or plan != "free",
+            "is_active": plan != "free",
         })
 
     async def user_settings_get(request: web.Request) -> web.Response:
