@@ -350,6 +350,9 @@ async def invite_by_phones(
     flood_wait = 0
     group_broken = False
     imported_users: list = []
+    invited_phones: list[str] = []   # номера, реально добавленные (для дедупа впредь)
+    _uid_to_phone: dict = {}          # user_id → исходный номер (по client_id)
+    _resolved_phones: set = set()     # номера, которые Telegram сопоставил юзеру
 
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -365,20 +368,32 @@ async def invite_by_phones(
             timeout=_ACTION_TIMEOUT,
         )
         imported_users = list(result.users)
+        # client_id → номер: какие именно номера Telegram сопоставил юзеру (по нему
+        # различаем «добавлен» и «не найден», а не только считаем разницу длин).
+        for _imp in (getattr(result, "imported", None) or []):
+            _ci = getattr(_imp, "client_id", None)
+            if _ci is not None and 0 <= int(_ci) < len(phones):
+                _uid_to_phone[getattr(_imp, "user_id", None)] = phones[int(_ci)]
+                _resolved_phones.add(phones[int(_ci)])
         log.info("invite_by_phones: imported %d/%d users", len(imported_users), len(phones))
 
         for user in imported_users:
             if peer_flood or flood_wait or group_broken:
                 break
+            _ph = _uid_to_phone.get(getattr(user, "id", None))
             try:
                 await asyncio.wait_for(
                     client(InviteToChannelRequest(channel=group, users=[user])),
                     timeout=_ACTION_TIMEOUT,
                 )
                 ok += 1
+                if _ph:
+                    invited_phones.append(_ph)
                 await asyncio.sleep(random.uniform(2.5, 5.0))
             except UserAlreadyParticipantError:
                 ok += 1
+                if _ph:
+                    invited_phones.append(_ph)
             except ChatAdminRequiredError:
                 # Права на добавление в чат отсутствуют — падает каждая попытка,
                 # стоп сразу (group error), как и в invite_batch.
@@ -416,8 +431,10 @@ async def invite_by_phones(
             except Exception as e:
                 log_exc_swallow(log, "invite_by_phones: import")
 
-        # Пользователи из телефонов которых не нашли
-        not_found = len(phones) - len(imported_users)
+        # Номера, которые Telegram НЕ сопоставил юзеру — не найдены (не в Telegram).
+        # Их НЕ помечаем приглашёнными: человек может зарегистрироваться позже.
+        not_found_phones = [p for p in phones if p not in _resolved_phones]
+        not_found = len(not_found_phones)
         if not_found:
             failed += not_found
             errors.append(f"{not_found} номеров не зарегистрированы в Telegram")
@@ -425,6 +442,7 @@ async def invite_by_phones(
     except Exception as exc:
         log.warning("invite_by_phones error: %s", exc)
         errors.append(str(exc)[:100])
+        not_found_phones = []
     finally:
         try:
             await client.disconnect()
@@ -432,7 +450,10 @@ async def invite_by_phones(
             log_exc_swallow(log, "invite_by_phones: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
-            "flood_wait": flood_wait, "errors": errors}
+            "flood_wait": flood_wait, "errors": errors,
+            # Для дедупа впредь и честного пер-номер отчёта:
+            "invited_phones": list(dict.fromkeys(invited_phones)),
+            "not_found_phones": not_found_phones}
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────

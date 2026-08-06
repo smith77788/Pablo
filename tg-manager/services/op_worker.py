@@ -8597,15 +8597,22 @@ async def _exec_mass_invite(
 
     # Дедуп уже-приглашённых в ЭТУ группу (вкл. по умолчанию, отключается
     # skip_invited=False). Ключ — нормализованная группа, чтобы повторный прогон
-    # не тыкал тех же людей. Телефоны не дедупим (номер→user неизвестен заранее).
+    # не тыкал тех же людей. Телефоны дедупим по НОРМАЛИЗОВАННОМУ номеру: движок
+    # теперь запоминает УСПЕШНО приглашённые номера (не «не найден в Telegram» —
+    # такие можно пробовать позже, когда человек зарегистрируется).
     _group_key = inv.parse_group_ref(group)
     _deduped = 0
-    if params.get("skip_invited", True) and user_refs:
+    if params.get("skip_invited", True) and (user_refs or phones):
         _already = await _load_invited_targets(pool, owner_id, _group_key)
         if _already:
-            _before = len(user_refs)
-            user_refs = [r for r in user_refs if str(r) not in _already]
-            _deduped = _before - len(user_refs)
+            if user_refs:
+                _before = len(user_refs)
+                user_refs = [r for r in user_refs if str(r) not in _already]
+                _deduped += _before - len(user_refs)
+            if phones:
+                _before_p = len(phones)
+                phones = [p for p in phones if str(p) not in _already]
+                _deduped += _before_p - len(phones)
     if not user_refs and not phones:
         return {
             "status": "done", "ok": 0, "failed": 0, "left": 0,
@@ -8888,6 +8895,7 @@ async def _exec_mass_invite(
     flood_storm = False
     flood_streak = 0
     invited_this_run: set = set()  # цели, реально отданные движку — для дедупа впредь
+    _phones_not_found = 0          # номеров не в Telegram (для честного отчёта)
     import os as _os_env
     try:
         _flood_stop_streak = max(0, int(_os_env.getenv("INVITE_FLOOD_STOP_STREAK", "5")))
@@ -9011,8 +9019,14 @@ async def _exec_mass_invite(
             # Движок обрывает батч на флуде/закрытой группе — хвост НЕ пробовали.
             attempted = max(0, min(len(batch), ok_n + fail_n))
             leftover = batch[attempted:]
-            if not by_phone and attempted:
-                invited_this_run.update(batch[:attempted])
+            if attempted:
+                if by_phone:
+                    # Дедупим только УСПЕШНО приглашённые номера; «не в Telegram»
+                    # не помечаем — их можно пробовать позже.
+                    invited_this_run.update(res.get("invited_phones") or [])
+                    _phones_not_found += len(res.get("not_found_phones") or [])
+                else:
+                    invited_this_run.update(batch[:attempted])
             total_ok += ok_n
             total_fail += fail_n
             step += attempted
@@ -9252,6 +9266,7 @@ async def _exec_mass_invite(
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
+        + (f"\n📵 Номеров не в Telegram (пропущены): {_phones_not_found}" if _phones_not_found else "")
         + (f"\n⚠️ Ошибок: {total_fail}" + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")
            if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
