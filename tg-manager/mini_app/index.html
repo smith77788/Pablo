@@ -3888,10 +3888,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">📨 Массовый инвайт</div>
   </div>
   <div class="sub-sb">
-    <div class="sec">Сегодня по флоту</div>
-    <div id="invAnalytics" style="padding:6px 0 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec">Разбор и рекомендации</div>
-    <div id="invAdvice" style="padding:6px 14px 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <details style="margin:2px 0 8px">
+      <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 16px">📊 Аналитика флота и рекомендации</summary>
+      <div class="sec">Сегодня по флоту</div>
+      <div id="invAnalytics" style="padding:6px 0 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
+      <div class="sec">Разбор и рекомендации</div>
+      <div id="invAdvice" style="padding:6px 14px 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </details>
     <div class="sec">Настройка инвайта</div>
     <div style="padding:8px 16px">
       <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
@@ -13477,13 +13480,18 @@ async function loadInviteAnalytics() {
     // Конверсия null при нуле попыток: честнее показать «—», чем 0%.
     const conv = (t.conversion_pct === null || t.conversion_pct === undefined) ? '—' : t.conversion_pct + '%';
     const floodCls = (t.floods || 0) > 0 ? 'var(--red)' : 'var(--green)';
-    const wk = (d.week || []);
+    // Стабильные 7 столбцов: недостающие дни дополняем пустыми слева, иначе
+    // 1–2 дня с данными растягивались во всю ширину («кривой» график из 2 полос).
+    const wk = (d.week || []).slice(-7);
+    while (wk.length < 7) wk.unshift({ day: '', ok: 0, floods: 0, empty: true });
     const maxOk = Math.max(1, ...wk.map(w => +w.ok || 0));
+    const hasWeek = wk.some(w => (+w.ok || 0) > 0 || (+w.floods || 0) > 0);
     const bars = wk.map(w => {
-      const h = Math.max(3, Math.round((+w.ok || 0) / maxOk * 34));
+      const h = w.empty ? 0 : Math.max(3, Math.round((+w.ok || 0) / maxOk * 34));
       const c = (+w.floods || 0) > 0 ? 'var(--red)' : 'var(--accent)';
-      return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px" title="${esc(w.day)}: ${w.ok} инвайтов, флудов ${w.floods}">
-        <div style="width:70%;height:${h}px;background:${c};border-radius:2px 2px 0 0"></div></div>`;
+      const tip = w.empty ? '' : `${esc(w.day)}: ${w.ok} инвайтов, флудов ${w.floods}`;
+      return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center" title="${tip}">
+        <div style="width:60%;max-width:14px;height:${h}px;background:${c};border-radius:2px 2px 0 0"></div></div>`;
     }).join('');
     txt('invAnalytics', `
       <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -13491,7 +13499,7 @@ async function loadInviteAnalytics() {
         <div class="kpi-card"><div class="kpi-val" style="color:${floodCls}">${num(t.floods||0)}</div><div class="kpi-lbl">Флудов</div></div>
         <div class="kpi-card"><div class="kpi-val">${conv}</div><div class="kpi-lbl">Конверсия</div></div>
       </div>
-      ${wk.length ? `<div style="display:flex;gap:3px;align-items:flex-end;height:38px;margin-bottom:6px">${bars}</div>
+      ${hasWeek ? `<div style="display:flex;gap:4px;align-items:flex-end;height:38px;margin-bottom:6px">${bars}</div>
       <div style="font-size:11px;color:var(--hint);margin-bottom:8px">7 дней · красный столбец = были флуды</div>` : ''}
       ${d.best ? `<div style="font-size:12px;color:var(--hint)">🏅 Лучший: ${esc(d.best.label)} — ${d.best.ok} инвайтов, флудов ${d.best.floods}</div>` : ''}
       ${d.worst && (+d.worst.floods > 0) ? `<div style="font-size:12px;color:var(--red);margin-top:2px">⚠️ Проблемный: ${esc(d.worst.label)} — флудов ${d.worst.floods}</div>` : ''}

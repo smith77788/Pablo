@@ -5852,15 +5852,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                WHERE a.owner_id = $1 AND s.stat_date = CURRENT_DATE""",
             uid,
         ) or {}
+        # ПЛОТНЫЙ ряд из 7 дней: generate_series даёт по строке на каждый из
+        # последних 7 дней, дни без активности → 0. Раньше GROUP BY по факту
+        # возвращал ТОЛЬКО дни с данными, и график в мини-аппе из 1–2 столбцов
+        # растягивал их на пол-ширины («кривой» график). Теперь всегда 7 столбцов.
         week = await _safe_fetch(
             pool,
-            """SELECT s.stat_date::text AS day,
-                      COALESCE(SUM(s.invites_ok), 0)   AS ok,
-                      COALESCE(SUM(s.flood_events), 0) AS floods
-               FROM account_daily_stats s
-               JOIN tg_accounts a ON a.id = s.account_id
-               WHERE a.owner_id = $1 AND s.stat_date >= CURRENT_DATE - INTERVAL '6 days'
-               GROUP BY s.stat_date ORDER BY s.stat_date""",
+            """SELECT to_char(d.day, 'YYYY-MM-DD')          AS day,
+                      COALESCE(SUM(s.invites_ok), 0)         AS ok,
+                      COALESCE(SUM(s.flood_events), 0)       AS floods
+               FROM generate_series(
+                        (CURRENT_DATE - INTERVAL '6 days')::date,
+                        CURRENT_DATE,
+                        INTERVAL '1 day') AS d(day)
+               LEFT JOIN (
+                   SELECT s.stat_date, s.invites_ok, s.flood_events
+                   FROM account_daily_stats s
+                   JOIN tg_accounts a ON a.id = s.account_id
+                   WHERE a.owner_id = $1
+               ) s ON s.stat_date = d.day::date
+               GROUP BY d.day ORDER BY d.day""",
             uid,
         )
         # Лучший/худший за неделю: лучший — больше всего успешных при нуле флудов,
