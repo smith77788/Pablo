@@ -498,31 +498,75 @@ def _looks_like_bare_phone(token: str) -> bool:
     return token.isdigit() and len(token) >= _PHONE_MIN_DIGITS
 
 
+_PHONE_MAX_DIGITS = 15  # E.164 — максимум 15 цифр вместе со страновым кодом
+# Токен-ref, который примет parse_user_refs: числовой ID или @username ≥ 3 симв.
+_REF_TOKEN_RE = re.compile(r"^(?:\d+|[A-Za-z0-9_]{3,})$")
+
+
+def _digits(s: str) -> str:
+    return re.sub(r"\D", "", s or "")
+
+
+def classify_invite_list(raw: str) -> dict[str, list[str]]:
+    """Разобрать вставленный список на телефоны / @username-ID / нераспознанное.
+
+    Возвращает ``{"phones": [...], "user_refs": [...], "unrecognized": [...]}``.
+    Устойчив к человеческому вводу:
+      * строка-телефон в любом формате (``+7 999 123-45-67``, ``7(911)149-11-99``)
+        распознаётся целиком — разделители внутри номера не рвут его на куски;
+      * несколько токенов в строке через пробел (``@a @b 12345``) разбираются
+        по отдельности;
+      * «+» ИЛИ 11–15 цифр → телефон; числовой токен ≤10 цифр → ID; ``@name`` или
+        буквенно-цифровое имя ≥3 симв. → @username; остальное — в ``unrecognized``
+        (чтобы показать пользователю, что именно не понято, а не молча потерять).
+    """
+    phones_src: list[str] = []
+    refs_src: list[str] = []
+    unrec: list[str] = []
+    # Делим на «строки» по переносам/запятым/точкам-с-запятой, НЕ по пробелам —
+    # иначе форматированный номер разорвётся на части.
+    for line in re.split(r"[\n,;]+", (raw or "").strip()):
+        line = line.strip()
+        if not line:
+            continue
+        has_alpha = any(c.isalpha() for c in line)
+        d = _digits(line)
+        # Одиночный номер в строке (с «+» или без), возможно с форматированием.
+        # Кладём УЖЕ нормализованные цифры ("+"+d), а не сырую строку: parse_phones
+        # режет по пробелам, и "+7 (999) 123-45-67" иначе распалось бы на куски.
+        if not has_alpha and "@" not in line:
+            if line.startswith("+") and 10 <= len(d) <= _PHONE_MAX_DIGITS:
+                phones_src.append("+" + d)
+                continue
+            if _PHONE_MIN_DIGITS <= len(d) <= _PHONE_MAX_DIGITS:
+                phones_src.append("+" + d)
+                continue
+        # Иначе — несколько токенов через пробел: классифицируем каждый.
+        for tok in line.split():
+            if not tok:
+                continue
+            td = _digits(tok)
+            if tok.startswith("+"):
+                (phones_src if 10 <= len(td) <= _PHONE_MAX_DIGITS else unrec).append(tok)
+            elif tok.isdigit() and _PHONE_MIN_DIGITS <= len(tok) <= _PHONE_MAX_DIGITS:
+                phones_src.append(tok)
+            elif _REF_TOKEN_RE.match(tok.lstrip("@")):
+                refs_src.append(tok)
+            else:
+                unrec.append(tok)
+    return {
+        "phones": parse_phones(" ".join(phones_src)),
+        "user_refs": parse_user_refs(" ".join(refs_src)),
+        "unrecognized": unrec[:50],
+    }
+
+
 def split_invite_targets(raw: str) -> tuple[list[str], list[str]]:
     """Разбить вставленный список на (user_refs, phones), взаимоисключающе.
 
-    Классификация одного токена (по одному на строку/через разделитель):
-      * начинается с «+»                      → телефон;
-      * только цифры и длина ≥ 11             → телефон без ведущего «+»
-        (напр. 79991234567 — Telegram ID короче, до 10 цифр);
-      * «@name» или буквенно-цифровой «name»  → @username;
-      * только цифры и длина ≤ 10             → числовой ID.
-
-    Раньше эндпоинт делил токены строго по префиксу «+», из-за чего вставленный
-    список номеров БЕЗ «+» целиком уходил в user_refs и трактовался как Telegram
-    ID → инвайт добавлял 0 из 0. Числовой ID по-прежнему не попадает в телефоны
-    (нет двойного инвайта): взаимоисключающе по длине/префиксу.
+    Тонкая обёртка над :func:`classify_invite_list` (единый источник правды
+    классификации) — сохраняет прежнюю сигнатуру для инвайт-эндпоинта и тестов.
+    Числовой ID (≤10 цифр) не попадает в телефоны → нет двойного инвайта.
     """
-    ref_src: list[str] = []
-    phone_src: list[str] = []
-    for token in re.split(r"[,;\s\n]+", (raw or "").strip()):
-        token = token.strip()
-        if not token:
-            continue
-        if token.startswith("+") or _looks_like_bare_phone(token):
-            phone_src.append(token)
-        else:
-            ref_src.append(token)
-    phones = parse_phones(" ".join(phone_src))
-    user_refs = parse_user_refs(" ".join(ref_src))
-    return user_refs, phones
+    r = classify_invite_list(raw)
+    return r["user_refs"], r["phones"]

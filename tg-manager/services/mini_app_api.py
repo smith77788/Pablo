@@ -5913,6 +5913,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "has_data": bool(ranked),
         })
 
+    async def invite_parse_list(request: web.Request) -> web.Response:
+        """Предпросмотр «Своего списка» ДО запуска: сколько распознано и что нет.
+
+        Раньше пользователь узнавал результат разбора только по факту операции
+        («Добавлено 0/0»). Теперь мини-апп показывает сразу: N номеров + M
+        @username/ID распознано, K строк не понято — и какие именно.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        raw = str(body.get("import_list") or "")
+        from services.mass_inviter_engine import classify_invite_list
+        r = classify_invite_list(raw)
+        return _json_resp({
+            "phones": len(r["phones"]),
+            "user_refs": len(r["user_refs"]),
+            "total": len(r["phones"]) + len(r["user_refs"]),
+            "unrecognized": r["unrecognized"],
+            "unrecognized_count": len(r["unrecognized"]),
+        })
+
     async def invite_audience_size(request: web.Request) -> web.Response:
         """Сколько целей даст выбранный источник — ДО запуска операции.
 
@@ -12972,6 +12997,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
+    app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)

@@ -3921,8 +3921,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="field" id="massInviteImportField" style="display:none">
         <label>Список для инвайта</label>
-        <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567"></textarea>
+        <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567" oninput="massInviteListPreview()"></textarea>
         <div class="field-note">По одному на строку. Телефон — с «+» или 11+ цифр (напр. 79991234567); иначе @username или ID</div>
+        <div id="massInviteListPreview" style="font-size:12px;margin-top:4px;padding:0 2px"></div>
       </div>
       <div class="field">
         <label>Аккаунты-инвайтеры (не выбрано = все активные)</label>
@@ -13658,6 +13659,37 @@ function massInviteSrcToggle() {
   const f = document.getElementById('massInviteImportField');
   if (f) f.style.display = (src==='import_list') ? 'block' : 'none';
   loadInviteAudienceSize();
+  if (src==='import_list') massInviteListPreview();
+}
+
+// Предпросмотр «Своего списка» ДО запуска: сколько распознано номеров/юзеров и
+// какие строки не поняты. Раньше это выяснялось только по факту («Добавлено 0/0»).
+let _invPreviewT = null;
+let INV_IMPORT_OK = 0;     // распознанных целей в текущем списке (для подтверждения)
+function massInviteListPreview() {
+  const ta = document.getElementById('massInviteImport');
+  const el = document.getElementById('massInviteListPreview');
+  if (!ta || !el) return;
+  const raw = ta.value.trim();
+  if (!raw) { el.textContent=''; INV_IMPORT_OK = 0; return; }
+  clearTimeout(_invPreviewT);
+  _invPreviewT = setTimeout(async () => {
+    try {
+      const d = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: raw})});
+      INV_IMPORT_OK = d.total || 0;
+      const parts = [];
+      if (d.phones) parts.push(`📞 номеров: <b>${num(d.phones)}</b>`);
+      if (d.user_refs) parts.push(`👤 @username/ID: <b>${num(d.user_refs)}</b>`);
+      let html = parts.length
+        ? `<span style="color:var(--green)">✓ распознано ${d.total}</span> · ${parts.join(' · ')}`
+        : `<span style="color:var(--red)">Ничего не распознано</span>`;
+      if (d.unrecognized_count) {
+        const sample = (d.unrecognized||[]).slice(0,5).map(esc).join(', ');
+        html += `<div style="color:var(--orange,#e6a100);margin-top:2px">⚠️ не распознано строк: ${d.unrecognized_count}${sample?` (${sample}${d.unrecognized_count>5?'…':''})`:''}</div>`;
+      }
+      el.innerHTML = html;
+    } catch(e) { el.textContent=''; }
+  }, 350);
 }
 
 // Сколько целей даст выбранный источник — ДО запуска. Без этого сценарий
@@ -13739,6 +13771,12 @@ async function submitMassInvite() {
     const imp = document.getElementById('massInviteImport').value.trim();
     if (!imp) { errEl.textContent='Вставьте список для инвайта'; return; }
     body.import_list = imp;
+    // Свежий разбор перед запуском: не даём стартовать по нераспознанному списку.
+    try {
+      const chk = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: imp})});
+      if (!chk.total) { errEl.textContent='В списке не распознано ни одной цели — проверьте формат (номер с «+» или 11+ цифр, @username или ID).'; return; }
+      INV_IMPORT_OK = chk.total;
+    } catch(e) {}
   }
   const checked = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')].map(c=>parseInt(c.value));
   if (checked.length) body.account_ids = checked;
@@ -13764,7 +13802,8 @@ async function submitMassInvite() {
   const _paceLbl = {auto:'🤖 авто (по состоянию флота)', slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;
   const _warn = _pa ? '' : '\n\n⚠️ Лимит на аккаунт не задан — риск бана выше. Задайте его в «⚙️ Лимиты».';
   const _opWarn = _onePass ? '\n\n🚀 Режим «один проход»: аккаунты работают до потолка ёмкости (≈50/аккаунт) по живым сигналам флуда, без предсказанного суточного лимита. Это ЗАМЕТНО выше риск бана — используйте на прогретых аккаунтах с прокси.' : '';
-  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_warn+_opWarn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
+  const _tgtLine = (source==='import_list' && INV_IMPORT_OK) ? '\nЦелей в списке: '+INV_IMPORT_OK+'.' : '';
+  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_tgtLine+_warn+_opWarn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
   const btn = document.getElementById('massInviteBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
