@@ -35,6 +35,13 @@ def main() -> None:
     receive_p.add_argument("quantity", type=int)
     receive_p.add_argument("--reason", default="Надходження товару")
 
+    sub.add_parser("guardian-queue", help="Review child-safety evidence queue")
+
+    guardian_report_p = sub.add_parser(
+        "guardian-report", help="Build an authority-submission package for a case"
+    )
+    guardian_report_p.add_argument("report_id")
+
     args = parser.parse_args()
 
     from orchestrator import Pablo
@@ -56,6 +63,10 @@ def main() -> None:
         print(pablo.add_tracking(args.order_number, args.tracking))
     elif args.command == "receive":
         print(pablo.receive_stock(args.product_id, args.quantity, args.reason))
+    elif args.command == "guardian-queue":
+        print(pablo.guardian_queue())
+    elif args.command == "guardian-report":
+        print(pablo.guardian_report(args.report_id))
     else:
         parser.print_help()
 

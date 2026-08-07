@@ -24,6 +24,7 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 from tools.telegram_tools import _call as _tg_call
 from database.models import get_client
@@ -89,9 +90,14 @@ _SIGNALS: list[tuple[str, int, str]] = [
     (r"\b(сколько|скільки)\s+(тебе|тобі)\s+лет\b.{0,30}\b(пришли|скинь|надішли|покажи)", 4, "grooming"),
     (r"\b(вебк|webcam|видеозвон|відеодзв)\b.{0,30}\b(один|одна|наедине|наодинці|без\s+родител)", 3, "grooming"),
     # --- Прямые предложения торговли / «услуг» ---
-    (r"\b(прода|продаж|прода[её]тся|продається)\b.{0,30}\b(дет|дит|ребён|дитин|органы|органів)", 5, "trafficking"),
-    (r"\b(услуг|послуг)[а-яіїєґ]*\s+(девоч|мальчик|дет|дит|малолет)", 5, "trafficking"),
-    (r"\b(на\s+органы|на\s+органи|донор.{0,10}орган)\b", 4, "trafficking"),
+    # Основы намеренно без завершающего \b, чтобы ловить и существительные
+    # («продажа»), и глаголы («продаётся»). Одиночный сигнал = «review»:
+    # автоблокировка (high) наступает только при комбинации, чтобы не банить
+    # безобидные фразы вроде «корм для детей питомцев».
+    (r"\b(прода|продаж|торг)[а-яіїєґ]*\b.{0,30}\b(дет[еяи]|дит[иья]|реб[её]н|дитин)", 3, "trafficking"),
+    (r"\b(услуг|послуг)[а-яіїєґ]*\s+.{0,15}(девоч|мальчик|дет[еяи]|дит[иья]|малолет|неповнолітн)", 4, "trafficking"),
+    (r"\b(на\s+орган[ыи]|на\s+органів|донор.{0,10}орган)\b", 3, "trafficking"),
+    (r"\b(дет[еяи]|дит[иья]|реб[её]н|дитин)[а-яіїєґ]*\b.{0,20}\bна\s+орган", 4, "trafficking"),
     # --- Терминология CSAM-сообществ (индикаторы каналов, без инструкций) ---
     (r"\b(cp|цп)\b.{0,15}\b(канал|channel|ссылк|посилан|слив|архив|архів)", 5, "csam_channel"),
     (r"\b(0\-?12|preteen|препубер|мала я|малолет)\b.{0,20}\b(контент|канал|архив|архів)", 5, "csam_channel"),
@@ -317,4 +323,51 @@ def build_authority_report(report_id: str) -> dict[str, Any]:
         "report_id": report_id,
         "report_text": report_text,
         "submit_to": REPORTING_AUTHORITIES,
+        "submission_links": _build_submission_links(ev, report_text),
     }
+
+
+def _build_submission_links(ev: dict, report_text: str) -> dict[str, str]:
+    """
+    Готовые ссылки для РУЧНОЙ подачи человеком. Веб-формы открываются, чтобы
+    оператор заполнил и отправил; письмо в abuse Telegram — с предзаполненным
+    текстом. Модуль ничего не отправляет сам.
+    """
+    subject = "Report: suspected child sexual exploitation content on Telegram"
+    body = report_text
+    telegram_mailto = (
+        "mailto:abuse@telegram.org"
+        f"?subject={quote(subject)}&body={quote(body)}"
+    )
+    return {
+        # Веб-формы приёма — открыть и подать вручную:
+        "ncmec": REPORTING_AUTHORITIES["ncmec"]["url"],
+        "iwf": REPORTING_AUTHORITIES["iwf"]["url"],
+        "inhope": REPORTING_AUTHORITIES["inhope"]["url"],
+        "ua_cyberpolice": REPORTING_AUTHORITIES["ua_cyberpolice"]["url"],
+        # Письмо в Telegram с уже вставленным текстом отчёта:
+        "telegram_abuse_email": telegram_mailto,
+    }
+
+
+def submit_report_manually(report_id: str, authority_key: str, operator_note: str = "") -> dict:
+    """
+    Зафиксировать, что человек-оператор подал отчёт в конкретный приёмник.
+    Меняет статус доказательства на 'submitted_to_authority'. НЕ отправляет
+    ничего сам — это отметка о факте ручной подачи для аудита.
+    """
+    if authority_key not in REPORTING_AUTHORITIES:
+        return {"error": f"unknown authority: {authority_key}"}
+
+    note = f"Подано вручную в {REPORTING_AUTHORITIES[authority_key]['name']}."
+    if operator_note:
+        note += f" {operator_note}"
+
+    get_client().table("pablo_csam_reports").update({
+        "status": "submitted_to_authority",
+        "submitted_to": authority_key,
+        "reviewer_note": note,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", report_id).execute()
+
+    return {"report_id": report_id, "submitted_to": authority_key, "status": "submitted_to_authority"}
