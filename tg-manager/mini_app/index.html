@@ -933,7 +933,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🗄 Хранилище</div>
-    <div class="hdr-meta"><span style="font-size:17px;cursor:pointer;opacity:.75" onclick="openVaultSettings()" title="Уведомления">🔔</span></div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span style="font-size:17px;cursor:pointer;opacity:.75" onclick="openVaultSettings()" title="Уведомления">🔔</span></div>
   </div>
   <div class="sub-sb">
     <div id="vaultConnect" style="display:none"></div>
@@ -12081,7 +12081,7 @@ function renderVaultConnect(botUsername) {
 }
 
 function renderVaultChats(list) {
-  document.getElementById('vaultCnt').textContent = list.length ? (list.length+' чат.') : '';
+  { const cntEl = document.getElementById('vaultCnt'); if (cntEl) cntEl.textContent = list.length ? (list.length+' чат.') : ''; }
   if (!list.length) {
     txt('vaultList', empty('🗄','Архив пуст','Подключите бота к бизнес-аккаунту — и переписка начнёт сохраняться'));
     return;
@@ -12305,7 +12305,7 @@ async function loadContacts(append=false) {
           `<button id="contactsMore" class="btn btn-s" style="width:100%;margin:8px 0" onclick="loadContacts(true)">Показать ещё · ${num(CONTACT_OFFSET)} из ${num(total)}</button>`);
       }
     }
-  } catch(e) { if(!append) txt('contactsList', errHtml(e.message)); else toast('⚠️ '+(e.message||'Ошибка')); }
+  } catch(e) { if(!append) txt('contactsList', errHtml(e.message,'loadContacts()')); else toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function searchContacts() { loadContacts(); }
