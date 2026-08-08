@@ -87,7 +87,7 @@ async def invite_batch(
     Возвращает:
       {"ok": int, "failed": int, "peer_flood": bool, "errors": list[str]}
     """
-    from services.account_manager import _make_client
+    from services.account_manager import connect_client
     from telethon.tl.functions.channels import InviteToChannelRequest
     from telethon.errors import (
         UserPrivacyRestrictedError,
@@ -104,7 +104,7 @@ async def invite_batch(
     except Exception:  # имя может отличаться между версиями telethon
         UsersTooMuchError = ()
 
-    client = _make_client(session_string, _acc)
+    client = None
     ok, failed = 0, 0
     errors: list[str] = []
     peer_flood = False
@@ -114,7 +114,7 @@ async def invite_batch(
     privacy_failed: list = []
 
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref)
 
         for ref in user_refs:
@@ -196,13 +196,13 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
     Нужно, чтобы выбрать «промоутера» — аккаунт, который вправе выдавать админку
     остальным инвайтерам (и добавлять через промоут-трюк). Только чтение.
     """
-    from services.account_manager import _make_client
+    from services.account_manager import connect_client
     from telethon.tl.functions.channels import GetParticipantRequest
     from telethon.tl.types import ChannelParticipantCreator, ChannelParticipantAdmin
 
-    client = _make_client(session_string, _acc)
+    client = None
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref)
         me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
         _chan_id = getattr(group, "id", None)  # id чата — чтобы вызвать promote_all_admins
@@ -240,7 +240,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     у вызывающего аккаунта (создатель/админ). Медленнее и заметнее обычного
     инвайта — только как запасной путь для заблокированных целей.
     """
-    from services.account_manager import _make_client
+    from services.account_manager import connect_client
     from telethon.tl.functions.channels import EditAdminRequest
     from telethon.tl.types import ChatAdminRights
     from telethon.errors import (
@@ -259,13 +259,13 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
         manage_call=False, other=False, change_info=False, anonymous=False,
         manage_topics=False)
 
-    client = _make_client(session_string, _acc)
+    client = None
     ok, failed = 0, 0
     errors: list[str] = []
     peer_flood = False
     flood_wait = 0
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref)
         for ref in user_refs:
             try:
@@ -333,7 +333,7 @@ async def invite_by_phones(
 
     Алгоритм: ImportContactsRequest → получить user_id → InviteToChannel → DeleteContacts.
     """
-    from services.account_manager import _make_client
+    from services.account_manager import connect_client
     from telethon.tl.functions.channels import InviteToChannelRequest
     from telethon.tl.functions.contacts import ImportContactsRequest, DeleteContactsRequest
     from telethon.tl.types import InputPhoneContact
@@ -345,7 +345,7 @@ async def invite_by_phones(
         ChatAdminRequiredError,
     )
 
-    client = _make_client(session_string, _acc)
+    client = None
     ok, failed = 0, 0
     errors: list[str] = []
     peer_flood = False
@@ -357,7 +357,7 @@ async def invite_by_phones(
     _resolved_phones: set = set()     # номера, которые Telegram сопоставил юзеру
 
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref)
 
         # Импортируем контакты

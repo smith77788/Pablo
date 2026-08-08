@@ -114,6 +114,12 @@ def test_operations_wired_to_track_proxy_success():
         ("get_dialogs", "dialogs"),
     ]:
         src = inspect.getsource(getattr(account_manager, fn_name))
-        assert f'_connect_and_track(client, _acc, "{action}")' in src, (
-            f"{fn_name} не трекает успех прокси через _connect_and_track"
+        # Успех прокси трекается либо напрямую _connect_and_track, либо через
+        # connect_client (fallback-обёртка, внутри вызывает _connect_and_track).
+        tracked = (
+            f'_connect_and_track(client, _acc, "{action}")' in src
+            or f'connect_client(session_string, _acc, "{action}")' in src
+        )
+        assert tracked, (
+            f"{fn_name} не трекает успех прокси (ни _connect_and_track, ни connect_client)"
         )

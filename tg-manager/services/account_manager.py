@@ -883,8 +883,17 @@ def generate_device_fingerprint(
     }
 
 
-def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False):
+def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False,
+                 _no_pool: bool = False):
     """Создать TelegramClient с правильным fingerprint и транспортом.
+
+    _no_pool=True — НЕ брать прокси из free-pool для безпроксёвого аккаунта, а идти
+    напрямую (host IP). Используется `connect_client` как fallback, когда пул-прокси
+    не отвечает: под allow_direct прямой стабильный IP лучше мёртвого публичного
+    прокси, иначе аккаунт без назначенного прокси не подключается вовсе.
+    На возвращаемый клиент вешается атрибут `_infragram_transport`
+    ('bound'|'ipv6'|'relay'|'pool'|'direct') — по нему `connect_client` решает,
+    можно ли фолбэкнуться на прямое подключение.
 
     Приоритет транспорта (от высшего к низшему):
     1. Аккаунт-bound прокси (proxy_url в device dict) — строгая изоляция,
@@ -921,6 +930,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # приоритет над глобальным CF_RELAY_URL — это и даёт «уникальный edge-IP на аккаунт».
     # Аккаунт со своим relay всегда ходит через него (стабильный exit → без рассинхрона IP).
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
+    _transport = "bound" if has_bound_proxy else "direct"  # уточняется ниже по ветке
     acc_relay = ""
     if device:
         acc_relay = str(device.get("cf_relay_url") or "").strip()
@@ -951,6 +961,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
             use_ipv6 = True
             connection_cls = ConnectionTcpObfuscated
             effective_proxy = None
+            _transport = "ipv6"
             log.debug("acc=%s → уникальный IPv6 %s (без прокси)", _acc_id, _v6)
 
     if local_addr is not None:
@@ -959,9 +970,13 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         from services.cf_relay import make_cf_relay_connection as _make_relay
         connection_cls = _make_relay(relay_url)
         effective_proxy = None  # relay сам маршрутизирует
+        _transport = "relay"
     else:
         connection_cls = ConnectionTcpObfuscated
-        if not has_bound_proxy:
+        if not has_bound_proxy and _no_pool:
+            # Fallback-режим: пропускаем free-pool, идём напрямую (host IP).
+            proxy = None
+        elif not has_bound_proxy:
             # Нет аккаунт-прокси, TG_PROXY и CF relay не заданы — последний резерв:
             # бесплатный пул публичных SOCKS5-прокси (populated by proxy_scraper).
             # ЗАЛИПАЮЩИЙ по ТЕЛЕФОНУ (а не account_id): телефон известен и на логине,
@@ -971,6 +986,9 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
             pool_url = _get_pool_proxy_url(_pool_key)
             proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
+        if not has_bound_proxy:
+            # 'pool' → connect_client может фолбэкнуться на прямое; 'direct' — уже прямой.
+            _transport = "pool" if effective_proxy is not None else "direct"
         # ── KILL-SWITCH (strict) ──────────────────────────────────────────────
         # Сюда попадаем, только когда все не-host транспорты недоступны (нет
         # аккаунт-прокси/TG_PROXY, нет CF-relay, нет IPv6, пуст free-pool). Если
@@ -1006,7 +1024,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         _extra_kwargs["use_ipv6"] = use_ipv6
         _extra_kwargs["local_addr"] = local_addr
 
-    return TelegramClient(
+    _client = TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),
         TG_API_HASH,
@@ -1023,6 +1041,58 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         connection=connection_cls,
         **_extra_kwargs,
     )
+    try:
+        _client._infragram_transport = _transport
+    except Exception:
+        pass
+    return _client
+
+
+def _direct_fallback_ok(transport: str | None, policy: str) -> bool:
+    """Можно ли после сбоя коннекта переподключиться НАПРЯМУЮ (host IP).
+
+    Только если шли через free-pool ('pool') и политика допускает прямой выход
+    (не strict). Для bound-прокси/relay/ipv6 прямой fallback запрещён: там смена IP
+    ломает auth key либо это осознанная изоляция. strict запрещает host IP всегда."""
+    return transport == "pool" and policy != "strict"
+
+
+async def connect_client(session_string: str = "", device: dict | None = None,
+                         action_type: str = "op", low_risk: bool = False):
+    """Построить и подключить клиента с ФОЛБЭКОМ на прямое подключение.
+
+    Корень жалобы «аккаунты без прокси не стартуют»: у безпроксёвого аккаунта
+    транспорт по цепочке падает в free-pool публичных SOCKS5. Пул валидируется на
+    скрейпе, но прокси умирают между циклами — и аккаунт намертво залипал на мёртвом
+    прокси, коннект падал сетевой ошибкой, операция не выполнялась. Теперь: если шли
+    через free-pool ('pool'), политика допускает прямой выход (allow_direct) и коннект
+    упал сетевой ошибкой — один раз переподключаемся НАПРЯМУЮ (стабильный host IP).
+
+    Прямой fallback НЕ трогает аккаунты с назначенным прокси (там смена IP ломает
+    auth key) и strict-политику (там прямой выход запрещён осознанно). Возвращает
+    подключённого клиента или пробрасывает исходную ошибку."""
+    client = _make_client(session_string, device, low_risk=low_risk)
+    try:
+        await _connect_and_track(client, device, action_type)
+        return client
+    except (OSError, ConnectionError, asyncio.TimeoutError) as e:
+        if isinstance(e, ProxyIsolationError):
+            raise  # изоляция bound-прокси — прямой выход недопустим
+        transport = getattr(client, "_infragram_transport", None)
+        policy = _effective_proxy_policy(device or {})
+        if not _direct_fallback_ok(transport, policy):
+            raise
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        log.warning(
+            "acc=%s: free-pool прокси недоступен (%s) — fallback на прямое подключение (allow_direct)",
+            (device or {}).get("id"), str(e)[:80],
+        )
+        client = _make_client(session_string, device, low_risk=low_risk, _no_pool=True)
+        await _connect_and_track(client, device, action_type)
+        return client
 
 
 async def start_login(
@@ -2809,9 +2879,9 @@ async def join_channel(
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.functions.messages import ImportChatInviteRequest
 
-    client = _make_client(session_string, _acc)
+    client = None
     try:
-        await _connect_and_track(client, _acc, "join")
+        client = await connect_client(session_string, _acc, "join")
         ref_kind, ref_value = normalize_telegram_join_ref(invite_or_username)
         if not ref_value:
             return {"error": "Telegram target is empty"}
@@ -2871,10 +2941,11 @@ async def join_channel(
         log.exception("join_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "Сбой в join_channel")
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "Сбой в join_channel")
 
 
 async def is_premium_account(session_string: str, _acc: dict | None = None) -> bool:
