@@ -1,0 +1,1037 @@
+// This is your Prisma schema file.
+// Multi-tenant Telegram SaaS platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── TENANTS ─────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  plan      String   @default("starter") // starter|pro|enterprise
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bots          Bot[]
+  operators     Operator[]
+  telegramUsers TelegramUser[]
+  conversations Conversation[]
+  messages      Message[]
+  broadcasts    Broadcast[]
+  templates     Template[]
+  tags          Tag[]
+  segments      Segment[]
+  automations   Automation[]
+  apiKeys       ApiKey[]
+  webhooks      Webhook[]
+
+  projects         Project[]
+  telegramAccounts TelegramAccount[]
+  proxies          Proxy[]
+  clusters         Cluster[]
+  assets           Asset[]
+  operations       Operation[]
+  keywords         Keyword[]
+  competitors      Competitor[]
+  auditLogs        AuditLog[]
+
+  telegramSessions TelegramUserSession[]
+  operationQueues  OperationQueue[]
+  assetTemplates   AssetTemplate[]
+
+  @@map("tenants")
+}
+
+// ─── OPERATORS (platform users) ──────────────────────────────────────────────
+
+model Operator {
+  id           String       @id @default(uuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  name         String
+  avatarUrl    String?
+  role             OperatorRole @default(AGENT)
+  isActive         Boolean      @default(true)
+  lastSeenAt       DateTime?
+  telegramChatId   String?      // для получения AI-брифингов в Telegram
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedConversations Conversation[]     @relation("AssignedOperator")
+  sentMessages        Message[]
+  notes               InternalNote[]
+  refreshTokens       RefreshToken[]
+
+  @@unique([tenantId, email])
+  @@map("operators")
+}
+
+enum OperatorRole {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  operatorId String
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  operator Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  keyHash   String   @unique
+  lastUsedAt DateTime?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// ─── BOTS ─────────────────────────────────────────────────────────────────────
+
+model Bot {
+  id          String   @id @default(uuid())
+  tenantId    String
+  token       String   @unique
+  telegramId  BigInt   @unique
+  username    String?
+  firstName   String
+  isActive    Boolean  @default(true)
+  webhookUrl  String?
+  webhookSet  Boolean  @default(false)
+  avatarUrl   String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  broadcasts    Broadcast[]
+  botCommands   BotCommand[]
+  flowNodes     FlowNode[]
+
+  @@index([tenantId])
+  @@map("bots")
+}
+
+model BotCommand {
+  id           String   @id @default(uuid())
+  botId        String
+  command      String
+  description  String
+  languageCode String   @default("")
+  createdAt    DateTime @default(now())
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, command, languageCode])
+  @@map("bot_commands")
+}
+
+// ─── TELEGRAM USERS (end users / subscribers) ────────────────────────────────
+
+model TelegramUser {
+  id           String   @id @default(uuid())
+  tenantId     String
+  telegramId   BigInt
+  username     String?
+  firstName    String?
+  lastName     String?
+  languageCode String?
+  isPremium    Boolean  @default(false)
+
+  // CRM fields
+  email        String?
+  phone        String?
+  notes        String?
+  customFields Json     @default("{}")
+
+  // Lifecycle
+  activationScore Float    @default(0)
+  retentionScore  Float    @default(0)
+  ltv             Float    @default(0)
+
+  firstSeenAt  DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  firstBotId   String?
+  isBlocked    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  userTags      UserTag[]
+  segmentUsers  SegmentUser[]
+
+  @@unique([tenantId, telegramId])
+  @@index([tenantId])
+  @@index([tenantId, lastSeenAt])
+  @@map("telegram_users")
+}
+
+// ─── CONVERSATIONS ────────────────────────────────────────────────────────────
+
+model Conversation {
+  id        String             @id @default(uuid())
+  tenantId  String
+  botId     String
+  userId    String
+  status    ConversationStatus @default(OPEN)
+  priority  Priority           @default(NORMAL)
+
+  assignedToId String?
+  lockedById   String?
+  lockedAt     DateTime?
+
+  subject       String?
+  lastMessageAt DateTime?
+  firstReplyAt  DateTime?
+  resolvedAt    DateTime?
+  slaBreachedAt DateTime?
+
+  // SLA
+  slaMinutes    Int?
+  slaDueAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bot        Bot          @relation(fields: [botId], references: [id])
+  user       TelegramUser @relation(fields: [userId], references: [id])
+  assignedTo Operator?    @relation("AssignedOperator", fields: [assignedToId], references: [id])
+  messages   Message[]
+  notes      InternalNote[]
+  convTags   ConversationTag[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, assignedToId])
+  @@index([tenantId, botId])
+  @@index([tenantId, lastMessageAt])
+  @@map("conversations")
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  LOCKED
+  RESOLVED
+  SPAM
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// ─── MESSAGES ─────────────────────────────────────────────────────────────────
+
+model Message {
+  id             String           @id @default(uuid())
+  tenantId       String
+  conversationId String
+  operatorId     String?
+
+  telegramMessageId Int?
+  direction         MessageDirection
+  senderType        SenderType
+  senderId          String?
+
+  type     MessageType @default(TEXT)
+  text     String?
+  caption  String?
+
+  // Media
+  mediaFileId String?
+  mediaUrl    String?
+  mediaSize   Int?
+  mimeType    String?
+  fileName    String?
+
+  // Reply chain
+  replyToId String?
+
+  // Relay tracking
+  deliveredAt  DateTime?
+  readAt       DateTime?
+  failedAt     DateTime?
+  errorMessage String?
+
+  isEdited  Boolean  @default(false)
+  isDeleted Boolean  @default(false)
+  editedAt  DateTime?
+
+  metadata Json     @default("{}")
+  sentAt   DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  operator     Operator?    @relation(fields: [operatorId], references: [id])
+  replyTo      Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies      Message[]    @relation("MessageReplies")
+
+  @@index([conversationId, sentAt])
+  @@index([tenantId, sentAt])
+  @@index([telegramMessageId])
+  @@map("messages")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum SenderType {
+  USER
+  BOT
+  OPERATOR
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  PHOTO
+  VIDEO
+  AUDIO
+  VOICE
+  DOCUMENT
+  STICKER
+  ANIMATION
+  LOCATION
+  CONTACT
+  POLL
+  VENUE
+  GAME
+}
+
+// ─── INTERNAL NOTES ───────────────────────────────────────────────────────────
+
+model InternalNote {
+  id             String   @id @default(uuid())
+  conversationId String
+  operatorId     String
+  text           String
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  operator     Operator     @relation(fields: [operatorId], references: [id])
+
+  @@map("internal_notes")
+}
+
+// ─── TAGS ─────────────────────────────────────────────────────────────────────
+
+model Tag {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  color    String @default("#6366f1")
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userTags          UserTag[]
+  conversationTags  ConversationTag[]
+
+  @@unique([tenantId, name])
+  @@map("tags")
+}
+
+model UserTag {
+  userId String
+  tagId  String
+
+  user TelegramUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tag  Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([userId, tagId])
+  @@map("user_tags")
+}
+
+model ConversationTag {
+  conversationId String
+  tagId          String
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tag          Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, tagId])
+  @@map("conversation_tags")
+}
+
+// ─── SEGMENTS ─────────────────────────────────────────────────────────────────
+
+model Segment {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  filters   Json
+  userCount Int      @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  segmentUsers SegmentUser[]
+  broadcasts   Broadcast[]
+
+  @@map("segments")
+}
+
+model SegmentUser {
+  segmentId String
+  userId    String
+  addedAt   DateTime @default(now())
+
+  segment Segment      @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  user    TelegramUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([segmentId, userId])
+  @@map("segment_users")
+}
+
+// ─── BROADCASTS ───────────────────────────────────────────────────────────────
+
+model Broadcast {
+  id        String          @id @default(uuid())
+  tenantId  String
+  botId     String
+  segmentId String?
+  name      String
+  message   Json
+  status    BroadcastStatus @default(DRAFT)
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  totalCount  Int @default(0)
+  sentCount   Int @default(0)
+  failedCount Int @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bot       Bot       @relation(fields: [botId], references: [id])
+  segment   Segment?  @relation(fields: [segmentId], references: [id])
+  recipients BroadcastRecipient[]
+
+  @@index([tenantId, status])
+  @@map("broadcasts")
+}
+
+model BroadcastRecipient {
+  id          String                   @id @default(uuid())
+  broadcastId String
+  telegramId  BigInt
+  status      BroadcastRecipientStatus @default(PENDING)
+  sentAt      DateTime?
+  errorCode   Int?
+  errorMsg    String?
+
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId, status])
+  @@map("broadcast_recipients")
+}
+
+enum BroadcastStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum BroadcastRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+  BLOCKED
+}
+
+// ─── TEMPLATES ────────────────────────────────────────────────────────────────
+
+model Template {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  content   Json
+  category  String?
+  usageCount Int     @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@map("templates")
+}
+
+// ─── AUTOMATION ───────────────────────────────────────────────────────────────
+
+model Automation {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  trigger   Json
+  conditions Json    @default("[]")
+  actions   Json
+  isActive  Boolean  @default(true)
+  runCount  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("automations")
+}
+
+// ─── BOT CMS / FLOWS ──────────────────────────────────────────────────────────
+
+model FlowNode {
+  id       String  @id @default(uuid())
+  botId    String
+  type     String
+  trigger  String?
+  content  Json
+  children Json    @default("[]")
+  position Json    @default("{\"x\":0,\"y\":0}")
+  isStart  Boolean @default(false)
+  version  Int     @default(1)
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@map("flow_nodes")
+}
+
+// ─── WEBHOOKS ─────────────────────────────────────────────────────────────────
+
+model Webhook {
+  id        String   @id @default(uuid())
+  tenantId  String
+  url       String
+  events    String[]
+  secret    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("webhooks")
+}
+
+// ─── PROJECTS ─────────────────────────────────────────────────────────────────
+
+model Project {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  niche       String?
+  language    String   @default("ru")
+  region      String?
+  tags        String[] @default([])
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assets    Asset[]
+  clusters  Cluster[]
+  operations Operation[]
+  keywords  Keyword[]
+
+  @@index([tenantId])
+  @@map("projects")
+}
+
+// ─── ASSETS (Unified Asset Registry) ─────────────────────────────────────────
+
+enum AssetType {
+  TELEGRAM_ACCOUNT
+  TELEGRAM_BOT
+  CHANNEL
+  GROUP
+  CHAT
+  PROXY
+  SESSION
+  KEYWORD
+  COMPETITOR
+  OPERATION_TEMPLATE
+}
+
+enum AssetStatus {
+  ACTIVE
+  INACTIVE
+  WARNING
+  LIMITED
+  UNSTABLE
+  DISCONNECTED
+  ARCHIVED
+}
+
+model Asset {
+  id              String      @id @default(uuid())
+  tenantId        String
+  projectId       String?
+  clusterId       String?
+  type            AssetType
+  name            String
+  username        String?
+  externalId      String?
+  status          AssetStatus @default(ACTIVE)
+  healthScore     Float       @default(1.0)
+  riskScore       Float       @default(0.0)
+  visibilityScore Float       @default(0.0)
+  activityScore   Float       @default(0.0)
+  operationalLoad Float       @default(0.0)
+  tags            String[]    @default([])
+  metadata        Json        @default("{}")
+  notes           String?
+  lastActivityAt  DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id])
+  cluster Cluster? @relation(fields: [clusterId], references: [id])
+
+  @@index([tenantId, type])
+  @@index([tenantId, status])
+  @@map("assets")
+}
+
+// ─── TELEGRAM ACCOUNTS ────────────────────────────────────────────────────────
+
+enum TgAccountStatus {
+  ACTIVE
+  DISCONNECTED
+  REQUIRES_LOGIN
+  WARNING
+  LIMITED
+  UNSTABLE
+  ARCHIVED
+}
+
+model TelegramAccount {
+  id               String          @id @default(uuid())
+  tenantId         String
+  projectId        String?
+  clusterId        String?
+  proxyId          String?
+  phone            String?
+  username         String?
+  firstName        String?
+  lastName         String?
+  tgUserId         BigInt?
+  sessionEncrypted String?
+  status           TgAccountStatus @default(ACTIVE)
+  healthScore      Float           @default(1.0)
+  trustScore       Float           @default(1.0)
+  riskScore        Float           @default(0.0)
+  floodCount7d     Int             @default(0)
+  lastFloodAt      DateTime?
+  cooldownUntil    DateTime?
+  deviceModel      String?
+  systemVersion    String?
+  appVersion       String?
+  tags             String[]        @default([])
+  notes            String?
+  isActive         Boolean         @default(true)
+  lastUsedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  proxy          Proxy?            @relation(fields: [proxyId], references: [id])
+  timingProfile  TimingProfile?
+  operationSteps OperationStep[]
+  floodLogs      AccountFloodLog[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("telegram_accounts")
+}
+
+model AccountFloodLog {
+  id          String   @id @default(uuid())
+  accountId   String
+  operation   String?
+  waitSeconds Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  account TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_flood_logs")
+}
+
+// ─── PROXIES ──────────────────────────────────────────────────────────────────
+
+enum ProxyType {
+  SOCKS5
+  HTTP
+  HTTPS
+  MTPROTO
+}
+
+enum ProxyStatus {
+  ACTIVE
+  INACTIVE
+  FAILED
+  CHECKING
+}
+
+model Proxy {
+  id                    String      @id @default(uuid())
+  tenantId              String
+  host                  String
+  port                  Int
+  type                  ProxyType   @default(SOCKS5)
+  usernameEncrypted     String?
+  passwordEncrypted     String?
+  region                String?
+  status                ProxyStatus @default(ACTIVE)
+  latencyMs             Int?
+  healthScore           Float       @default(1.0)
+  failureCount          Int         @default(0)
+  assignedAccountsCount Int         @default(0)
+  lastCheckedAt         DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accounts TelegramAccount[]
+
+  @@index([tenantId])
+  @@map("proxies")
+}
+
+// ─── CLUSTERS ─────────────────────────────────────────────────────────────────
+
+model Cluster {
+  id              String   @id @default(uuid())
+  tenantId        String
+  projectId       String?
+  name            String
+  description     String?
+  type            String   @default("general")
+  language        String?
+  region          String?
+  niche           String?
+  tags            String[] @default([])
+  assetsCount     Int      @default(0)
+  accountsCount   Int      @default(0)
+  botsCount       Int      @default(0)
+  channelsCount   Int      @default(0)
+  healthScore     Float    @default(1.0)
+  visibilityScore Float    @default(0.0)
+  activityScore   Float    @default(0.0)
+  operationalLoad Float    @default(0.0)
+  riskScore       Float    @default(0.0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project  Project?          @relation(fields: [projectId], references: [id])
+  assets   Asset[]
+  accounts TelegramAccount[]
+
+  @@index([tenantId])
+  @@map("clusters")
+}
+
+// ─── OPERATIONS CENTER ────────────────────────────────────────────────────────
+
+enum OperationStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  QUEUED
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum OperationStepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+model Operation {
+  id                String          @id @default(uuid())
+  tenantId          String
+  projectId         String?
+  createdById       String
+  approvedById      String?
+  name              String
+  description       String?
+  type              String
+  targetScope       Json            @default("{}")
+  selectedAssets    String[]        @default([])
+  selectedClusters  String[]        @default([])
+  status            OperationStatus @default(DRAFT)
+  riskScore         Float           @default(0.0)
+  safetyScore       Float           @default(1.0)
+  estimatedDuration Int?
+  scheduledAt       DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  result            Json?
+  errorMessage      String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   Project?        @relation(fields: [projectId], references: [id])
+  steps     OperationStep[]
+  auditLogs AuditLog[]
+
+  @@index([tenantId, status])
+  @@map("operations")
+}
+
+model OperationStep {
+  id           String              @id @default(uuid())
+  operationId  String
+  accountId    String?
+  assetId      String?
+  actionType   String
+  payload      Json                @default("{}")
+  scheduledFor DateTime?
+  status       OperationStepStatus @default(PENDING)
+  attempts     Int                 @default(0)
+  result       Json?
+  errorMessage String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  operation Operation        @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  account   TelegramAccount? @relation(fields: [accountId], references: [id])
+
+  @@index([operationId, status])
+  @@map("operation_steps")
+}
+
+// ─── TIMING ENGINE ────────────────────────────────────────────────────────────
+
+model TimingProfile {
+  id                        String    @id @default(uuid())
+  accountId                 String    @unique
+  allowedOperationTypes     String[]  @default([])
+  dailyActionBudget         Int       @default(50)
+  hourlyActionBudget        Int       @default(10)
+  minIntervalSeconds        Int       @default(30)
+  reliabilityScore          Float     @default(1.0)
+  historicalSuccessRate     Float     @default(1.0)
+  operationalTemperature    Float     @default(0.0)
+  projectedNextSafeActionAt DateTime?
+  lastActionAt              DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  account TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("timing_profiles")
+}
+
+// ─── VISIBILITY ENGINE ────────────────────────────────────────────────────────
+
+model Keyword {
+  id        String   @id @default(uuid())
+  tenantId  String
+  projectId String?
+  groupName String?
+  keyword   String
+  language  String   @default("ru")
+  region    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   Project?          @relation(fields: [projectId], references: [id])
+  positions KeywordPosition[]
+
+  @@unique([tenantId, keyword])
+  @@index([tenantId])
+  @@map("visibility_keywords")
+}
+
+model KeywordPosition {
+  id          String   @id @default(uuid())
+  keywordId   String
+  assetId     String?
+  assetType   String?
+  position    Int?
+  previousPos Int?
+  delta       Int?
+  checkedAt   DateTime @default(now())
+
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@index([keywordId, checkedAt])
+  @@map("keyword_positions")
+}
+
+model Competitor {
+  id        String   @id @default(uuid())
+  tenantId  String
+  projectId String?
+  name      String
+  username  String?
+  type      String   @default("channel")
+  isTracked Boolean  @default(true)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("competitors")
+}
+
+// ─── AUDIT LOGS ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenantId    String
+  operatorId  String?
+  operationId String?
+  action      String
+  entityType  String?
+  entityId    String?
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operation Operation? @relation(fields: [operationId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ── Telegram-native State Management ─────────────────────────────
+
+model TelegramUserSession {
+  id           String   @id @default(cuid())
+  telegramId   BigInt   @unique
+  tenantId     String?
+  currentMenu  String   @default("main")
+  currentSection String @default("")
+  wizardState  Json?
+  wizardStep   Int      @default(0)
+  tempData     Json?
+  paginationPage Int    @default(0)
+  lastActivity DateTime @default(now()) @updatedAt
+  createdAt    DateTime @default(now())
+
+  tenant               Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  pendingConfirmations PendingConfirmation[]
+
+  @@map("telegram_user_sessions")
+}
+
+model PendingConfirmation {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     TelegramUserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  actionType  String
+  actionData  Json
+  expiresAt   DateTime
+  confirmedAt DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@map("pending_confirmations")
+}
+
+model OperationQueue {
+  id          String   @id @default(cuid())
+  tenantId    String
+  opType      String
+  status      OperationQueueStatus @default(PENDING)
+  params      Json     @default("{}")
+  result      Json?
+  totalItems  Int      @default(0)
+  doneItems   Int      @default(0)
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps       OperationQueueStep[]
+
+  @@index([tenantId, status])
+  @@map("operation_queues")
+}
+
+enum OperationQueueStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+model OperationQueueStep {
+  id          String   @id @default(cuid())
+  operationId String
+  operation   OperationQueue @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  stepNum     Int
+  target      String?
+  status      String
+  message     String?
+  createdAt   DateTime @default(now())
+
+  @@index([operationId])
+  @@map("operation_queue_steps")
+}
+
+model AssetTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  assetType   String   // "bot" | "channel" | "group" | "post" | "cluster" | "moderation"
+  template    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, assetType])
+  @@map("asset_templates")
+}

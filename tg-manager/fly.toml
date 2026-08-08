@@ -1,0 +1,33 @@
+# Конфиг для fly.io — бесплатный хостинг (256 MB RAM)
+# Установка: https://fly.io/docs/hands-on/install-flyctl/
+# Деплой: fly launch && fly deploy
+
+app = "tg-manager"
+primary_region = "ams"  # Амстердам — ближайший к СНГ
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  BROADCAST_DELAY = "0.05"
+  MAX_CONCURRENT = "20"
+
+# Секреты задаются через: fly secrets set MANAGER_BOT_TOKEN=xxx DATABASE_URL=xxx
+
+[[services]]
+  # Бот не слушает HTTP — процесс без входящих соединений
+  internal_port = 8080
+  protocol = "tcp"
+
+[checks]
+  [checks.alive]
+    type = "command"
+    command = ["pgrep", "-f", "python.*main.py"]
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "20s"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

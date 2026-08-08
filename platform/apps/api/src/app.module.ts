@@ -1,0 +1,54 @@
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { BullModule } from '@nestjs/bull';
+import { AuthModule } from './auth/auth.module';
+import { BotsModule } from './bots/bots.module';
+import { ConversationsModule } from './conversations/conversations.module';
+import { UsersModule } from './users/users.module';
+import { BroadcastsModule } from './broadcasts/broadcasts.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { InboxModule } from './inbox/inbox.module';
+import { StatsModule } from './stats/stats.module';
+import { AutomationsModule } from './automations/automations.module';
+import { TemplatesModule } from './templates/templates.module';
+import { TagsModule } from './tags/tags.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
+import { AssetsModule } from './assets/assets.module';
+import { TelegramAccountsModule } from './telegram-accounts/telegram-accounts.module';
+import { ProxiesModule } from './proxies/proxies.module';
+import { ClustersModule } from './clusters/clusters.module';
+import { OperationsModule } from './operations/operations.module';
+import { BotFactoryModule } from './bot-factory/bot-factory.module';
+import { ChannelFactoryModule } from './channel-factory/channel-factory.module';
+
+@Module({
+  imports: [
+    JwtModule.register({
+      global: true,
+      secret: process.env.JWT_SECRET ?? 'fallback-secret',
+      signOptions: { expiresIn: process.env.JWT_EXPIRES_IN ?? '15m' },
+    }),
+    BullModule.forRoot({ redis: process.env.REDIS_URL ?? 'redis://localhost:6379' }),
+    BullModule.registerQueue({ name: 'broadcasts' }),
+    AuthModule,
+    BotsModule,
+    ConversationsModule,
+    UsersModule,
+    BroadcastsModule,
+    AnalyticsModule,
+    InboxModule,
+    StatsModule,
+    AutomationsModule,
+    TemplatesModule,
+    TagsModule,
+    ApiKeysModule,
+    AssetsModule,
+    TelegramAccountsModule,
+    ProxiesModule,
+    ClustersModule,
+    OperationsModule,
+    BotFactoryModule,
+    ChannelFactoryModule,
+  ],
+})
+export class AppModule {}

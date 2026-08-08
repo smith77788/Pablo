@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    paths:
+      - "tg-manager/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "tg-manager/**"
+
+# Отменяем устаревшие прогоны для той же ветки — при частых push (параллельные
+# агенты) очередь не копится и не задерживает проверки/деплой.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tg-manager
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (runtime subset + test tooling; telethon is stubbed in conftest)
+        run: |
+          python -m pip install --upgrade pip
+          # Рантайм-зависимости, нужные для импорта хендлеров/сервисов в тестах.
+          # telethon НЕ ставим — он застаблен в tests/conftest.py (и pyaes не собирается).
+          pip install \
+            "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai python-dotenv \
+            openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks \
+            pytest pytest-asyncio
+
+      - name: Run tests
+        run: python -m pytest tests/ -q

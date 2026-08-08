@@ -1,0 +1,2930 @@
+"""Geo data: presets of cities/countries for Global Presence Factory."""
+
+from __future__ import annotations
+
+EUROPE_CAPITALS: list[dict] = [
+    {
+        "city": "Vienna",
+        "city_native": "Wien",
+        "city_slug": "vienna",
+        "country": "Austria",
+        "country_code": "at",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    {
+        "city": "Brussels",
+        "city_native": "Bruxelles",
+        "city_slug": "brussels",
+        "country": "Belgium",
+        "country_code": "be",
+        "language": "fr",
+        "timezone": "Europe/Brussels",
+    },
+    {
+        "city": "Sofia",
+        "city_native": "София",
+        "city_slug": "sofia",
+        "country": "Bulgaria",
+        "country_code": "bg",
+        "language": "bg",
+        "timezone": "Europe/Sofia",
+    },
+    {
+        "city": "Zagreb",
+        "city_slug": "zagreb",
+        "country": "Croatia",
+        "country_code": "hr",
+        "language": "hr",
+        "timezone": "Europe/Zagreb",
+    },
+    {
+        "city": "Nicosia",
+        "city_native": "Λευκωσία",
+        "city_slug": "nicosia",
+        "country": "Cyprus",
+        "country_code": "cy",
+        "language": "el",
+        "timezone": "Asia/Nicosia",
+    },
+    {
+        "city": "Prague",
+        "city_native": "Praha",
+        "city_slug": "prague",
+        "country": "Czech Republic",
+        "country_code": "cz",
+        "language": "cs",
+        "timezone": "Europe/Prague",
+    },
+    {
+        "city": "Copenhagen",
+        "city_native": "København",
+        "city_slug": "copenhagen",
+        "country": "Denmark",
+        "country_code": "dk",
+        "language": "da",
+        "timezone": "Europe/Copenhagen",
+    },
+    {
+        "city": "Tallinn",
+        "city_slug": "tallinn",
+        "country": "Estonia",
+        "country_code": "ee",
+        "language": "et",
+        "timezone": "Europe/Tallinn",
+    },
+    {
+        "city": "Helsinki",
+        "city_slug": "helsinki",
+        "country": "Finland",
+        "country_code": "fi",
+        "language": "fi",
+        "timezone": "Europe/Helsinki",
+    },
+    {
+        "city": "Paris",
+        "city_slug": "paris",
+        "country": "France",
+        "country_code": "fr",
+        "language": "fr",
+        "timezone": "Europe/Paris",
+    },
+    {
+        "city": "Berlin",
+        "city_slug": "berlin",
+        "country": "Germany",
+        "country_code": "de",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Athens",
+        "city_native": "Αθήνα",
+        "city_slug": "athens",
+        "country": "Greece",
+        "country_code": "gr",
+        "language": "el",
+        "timezone": "Europe/Athens",
+    },
+    {
+        "city": "Budapest",
+        "city_slug": "budapest",
+        "country": "Hungary",
+        "country_code": "hu",
+        "language": "hu",
+        "timezone": "Europe/Budapest",
+    },
+    {
+        "city": "Dublin",
+        "city_slug": "dublin",
+        "country": "Ireland",
+        "country_code": "ie",
+        "language": "en",
+        "timezone": "Europe/Dublin",
+    },
+    {
+        "city": "Rome",
+        "city_native": "Roma",
+        "city_slug": "rome",
+        "country": "Italy",
+        "country_code": "it",
+        "language": "it",
+        "timezone": "Europe/Rome",
+    },
+    {
+        "city": "Riga",
+        "city_slug": "riga",
+        "country": "Latvia",
+        "country_code": "lv",
+        "language": "lv",
+        "timezone": "Europe/Riga",
+    },
+    {
+        "city": "Vilnius",
+        "city_slug": "vilnius",
+        "country": "Lithuania",
+        "country_code": "lt",
+        "language": "lt",
+        "timezone": "Europe/Vilnius",
+    },
+    {
+        "city": "Luxembourg",
+        "city_slug": "luxembourg",
+        "country": "Luxembourg",
+        "country_code": "lu",
+        "language": "fr",
+        "timezone": "Europe/Luxembourg",
+    },
+    {
+        "city": "Valletta",
+        "city_slug": "valletta",
+        "country": "Malta",
+        "country_code": "mt",
+        "language": "mt",
+        "timezone": "Europe/Malta",
+    },
+    {
+        "city": "Amsterdam",
+        "city_slug": "amsterdam",
+        "country": "Netherlands",
+        "country_code": "nl",
+        "language": "nl",
+        "timezone": "Europe/Amsterdam",
+    },
+    {
+        "city": "Warsaw",
+        "city_native": "Warszawa",
+        "city_slug": "warsaw",
+        "country": "Poland",
+        "country_code": "pl",
+        "language": "pl",
+        "timezone": "Europe/Warsaw",
+    },
+    {
+        "city": "Lisbon",
+        "city_native": "Lisboa",
+        "city_slug": "lisbon",
+        "country": "Portugal",
+        "country_code": "pt",
+        "language": "pt",
+        "timezone": "Europe/Lisbon",
+    },
+    {
+        "city": "Bucharest",
+        "city_native": "București",
+        "city_slug": "bucharest",
+        "country": "Romania",
+        "country_code": "ro",
+        "language": "ro",
+        "timezone": "Europe/Bucharest",
+    },
+    {
+        "city": "Bratislava",
+        "city_slug": "bratislava",
+        "country": "Slovakia",
+        "country_code": "sk",
+        "language": "sk",
+        "timezone": "Europe/Bratislava",
+    },
+    {
+        "city": "Ljubljana",
+        "city_slug": "ljubljana",
+        "country": "Slovenia",
+        "country_code": "si",
+        "language": "sl",
+        "timezone": "Europe/Ljubljana",
+    },
+    {
+        "city": "Madrid",
+        "city_slug": "madrid",
+        "country": "Spain",
+        "country_code": "es",
+        "language": "es",
+        "timezone": "Europe/Madrid",
+    },
+    {
+        "city": "Stockholm",
+        "city_slug": "stockholm",
+        "country": "Sweden",
+        "country_code": "se",
+        "language": "sv",
+        "timezone": "Europe/Stockholm",
+    },
+    {
+        "city": "Bern",
+        "city_slug": "bern",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "language": "de",
+        "timezone": "Europe/Zurich",
+    },
+    {
+        "city": "London",
+        "city_slug": "london",
+        "country": "United Kingdom",
+        "country_code": "gb",
+        "language": "en",
+        "timezone": "Europe/London",
+    },
+    {
+        "city": "Oslo",
+        "city_slug": "oslo",
+        "country": "Norway",
+        "country_code": "no",
+        "language": "no",
+        "timezone": "Europe/Oslo",
+    },
+    {
+        "city": "Reykjavik",
+        "city_native": "Reykjavík",
+        "city_slug": "reykjavik",
+        "country": "Iceland",
+        "country_code": "is",
+        "language": "is",
+        "timezone": "Atlantic/Reykjavik",
+    },
+    {
+        "city": "Tirana",
+        "city_native": "Tiranë",
+        "city_slug": "tirana",
+        "country": "Albania",
+        "country_code": "al",
+        "language": "sq",
+        "timezone": "Europe/Tirane",
+    },
+    {
+        "city": "Sarajevo",
+        "city_slug": "sarajevo",
+        "country": "Bosnia",
+        "country_code": "ba",
+        "language": "bs",
+        "timezone": "Europe/Sarajevo",
+    },
+    {
+        "city": "Minsk",
+        "city_native": "Мінск",
+        "city_slug": "minsk",
+        "country": "Belarus",
+        "country_code": "by",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Podgorica",
+        "city_slug": "podgorica",
+        "country": "Montenegro",
+        "country_code": "me",
+        "language": "sr",
+        "timezone": "Europe/Podgorica",
+    },
+    {
+        "city": "Skopje",
+        "city_native": "Скопје",
+        "city_slug": "skopje",
+        "country": "North Macedonia",
+        "country_code": "mk",
+        "language": "mk",
+        "timezone": "Europe/Skopje",
+    },
+    {
+        "city": "Chisinau",
+        "city_native": "Chișinău",
+        "city_slug": "chisinau",
+        "country": "Moldova",
+        "country_code": "md",
+        "language": "ro",
+        "timezone": "Europe/Chisinau",
+    },
+    {
+        "city": "Monaco",
+        "city_slug": "monaco",
+        "country": "Monaco",
+        "country_code": "mc",
+        "language": "fr",
+        "timezone": "Europe/Monaco",
+    },
+    {
+        "city": "Pristina",
+        "city_native": "Prishtinë",
+        "city_slug": "pristina",
+        "country": "Kosovo",
+        "country_code": "xk",
+        "language": "sq",
+        "timezone": "Europe/Belgrade",
+    },
+    {
+        "city": "Belgrade",
+        "city_native": "Beograd",
+        "city_slug": "belgrade",
+        "country": "Serbia",
+        "country_code": "rs",
+        "language": "sr",
+        "timezone": "Europe/Belgrade",
+    },
+    {
+        "city": "Kyiv",
+        "city_native": "Київ",
+        "city_slug": "kyiv",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Andorra la Vella",
+        "city_slug": "andorra_la_vella",
+        "country": "Andorra",
+        "country_code": "ad",
+        "language": "ca",
+        "timezone": "Europe/Andorra",
+    },
+    {
+        "city": "Vaduz",
+        "city_slug": "vaduz",
+        "country": "Liechtenstein",
+        "country_code": "li",
+        "language": "de",
+        "timezone": "Europe/Vaduz",
+    },
+    {
+        "city": "San Marino",
+        "city_slug": "san_marino",
+        "country": "San Marino",
+        "country_code": "sm",
+        "language": "it",
+        "timezone": "Europe/Rome",
+    },
+]
+
+WORLD_CAPITALS: list[dict] = [
+    {
+        "city": "Washington DC",
+        "city_slug": "washington_dc",
+        "country": "United States",
+        "country_code": "us",
+        "language": "en",
+        "timezone": "America/New_York",
+    },
+    {
+        "city": "Ottawa",
+        "city_slug": "ottawa",
+        "country": "Canada",
+        "country_code": "ca",
+        "language": "en",
+        "timezone": "America/Toronto",
+    },
+    {
+        "city": "Mexico City",
+        "city_slug": "mexico_city",
+        "country": "Mexico",
+        "country_code": "mx",
+        "language": "es",
+        "timezone": "America/Mexico_City",
+    },
+    {
+        "city": "Brasilia",
+        "city_slug": "brasilia",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Sao_Paulo",
+    },
+    {
+        "city": "Buenos Aires",
+        "city_slug": "buenos_aires",
+        "country": "Argentina",
+        "country_code": "ar",
+        "language": "es",
+        "timezone": "America/Argentina/Buenos_Aires",
+    },
+    {
+        "city": "Santiago",
+        "city_slug": "santiago",
+        "country": "Chile",
+        "country_code": "cl",
+        "language": "es",
+        "timezone": "America/Santiago",
+    },
+    {
+        "city": "Bogota",
+        "city_slug": "bogota",
+        "country": "Colombia",
+        "country_code": "co",
+        "language": "es",
+        "timezone": "America/Bogota",
+    },
+    {
+        "city": "Lima",
+        "city_slug": "lima",
+        "country": "Peru",
+        "country_code": "pe",
+        "language": "es",
+        "timezone": "America/Lima",
+    },
+    {
+        "city": "Caracas",
+        "city_slug": "caracas",
+        "country": "Venezuela",
+        "country_code": "ve",
+        "language": "es",
+        "timezone": "America/Caracas",
+    },
+    {
+        "city": "Quito",
+        "city_slug": "quito",
+        "country": "Ecuador",
+        "country_code": "ec",
+        "language": "es",
+        "timezone": "America/Guayaquil",
+    },
+    {
+        "city": "Tokyo",
+        "city_slug": "tokyo",
+        "country": "Japan",
+        "country_code": "jp",
+        "language": "ja",
+        "timezone": "Asia/Tokyo",
+    },
+    {
+        "city": "Beijing",
+        "city_slug": "beijing",
+        "country": "China",
+        "country_code": "cn",
+        "language": "zh",
+        "timezone": "Asia/Shanghai",
+    },
+    {
+        "city": "Seoul",
+        "city_slug": "seoul",
+        "country": "South Korea",
+        "country_code": "kr",
+        "language": "ko",
+        "timezone": "Asia/Seoul",
+    },
+    {
+        "city": "New Delhi",
+        "city_slug": "new_delhi",
+        "country": "India",
+        "country_code": "in",
+        "language": "hi",
+        "timezone": "Asia/Kolkata",
+    },
+    {
+        "city": "Jakarta",
+        "city_slug": "jakarta",
+        "country": "Indonesia",
+        "country_code": "id",
+        "language": "id",
+        "timezone": "Asia/Jakarta",
+    },
+    {
+        "city": "Bangkok",
+        "city_slug": "bangkok",
+        "country": "Thailand",
+        "country_code": "th",
+        "language": "th",
+        "timezone": "Asia/Bangkok",
+    },
+    {
+        "city": "Kuala Lumpur",
+        "city_slug": "kuala_lumpur",
+        "country": "Malaysia",
+        "country_code": "my",
+        "language": "ms",
+        "timezone": "Asia/Kuala_Lumpur",
+    },
+    {
+        "city": "Singapore",
+        "city_slug": "singapore",
+        "country": "Singapore",
+        "country_code": "sg",
+        "language": "en",
+        "timezone": "Asia/Singapore",
+    },
+    {
+        "city": "Manila",
+        "city_slug": "manila",
+        "country": "Philippines",
+        "country_code": "ph",
+        "language": "tl",
+        "timezone": "Asia/Manila",
+    },
+    {
+        "city": "Hanoi",
+        "city_slug": "hanoi",
+        "country": "Vietnam",
+        "country_code": "vn",
+        "language": "vi",
+        "timezone": "Asia/Ho_Chi_Minh",
+    },
+    {
+        "city": "Islamabad",
+        "city_slug": "islamabad",
+        "country": "Pakistan",
+        "country_code": "pk",
+        "language": "ur",
+        "timezone": "Asia/Karachi",
+    },
+    {
+        "city": "Dhaka",
+        "city_slug": "dhaka",
+        "country": "Bangladesh",
+        "country_code": "bd",
+        "language": "bn",
+        "timezone": "Asia/Dhaka",
+    },
+    {
+        "city": "Colombo",
+        "city_slug": "colombo",
+        "country": "Sri Lanka",
+        "country_code": "lk",
+        "language": "si",
+        "timezone": "Asia/Colombo",
+    },
+    {
+        "city": "Kathmandu",
+        "city_slug": "kathmandu",
+        "country": "Nepal",
+        "country_code": "np",
+        "language": "ne",
+        "timezone": "Asia/Kathmandu",
+    },
+    {
+        "city": "Kabul",
+        "city_slug": "kabul",
+        "country": "Afghanistan",
+        "country_code": "af",
+        "language": "fa",
+        "timezone": "Asia/Kabul",
+    },
+    {
+        "city": "Riyadh",
+        "city_slug": "riyadh",
+        "country": "Saudi Arabia",
+        "country_code": "sa",
+        "language": "ar",
+        "timezone": "Asia/Riyadh",
+    },
+    {
+        "city": "Abu Dhabi",
+        "city_slug": "abu_dhabi",
+        "country": "UAE",
+        "country_code": "ae",
+        "language": "ar",
+        "timezone": "Asia/Dubai",
+    },
+    {
+        "city": "Tehran",
+        "city_slug": "tehran",
+        "country": "Iran",
+        "country_code": "ir",
+        "language": "fa",
+        "timezone": "Asia/Tehran",
+    },
+    {
+        "city": "Baghdad",
+        "city_slug": "baghdad",
+        "country": "Iraq",
+        "country_code": "iq",
+        "language": "ar",
+        "timezone": "Asia/Baghdad",
+    },
+    {
+        "city": "Ankara",
+        "city_slug": "ankara",
+        "country": "Turkey",
+        "country_code": "tr",
+        "language": "tr",
+        "timezone": "Europe/Istanbul",
+    },
+    {
+        "city": "Jerusalem",
+        "city_slug": "jerusalem",
+        "country": "Israel",
+        "country_code": "il",
+        "language": "he",
+        "timezone": "Asia/Jerusalem",
+    },
+    {
+        "city": "Amman",
+        "city_slug": "amman",
+        "country": "Jordan",
+        "country_code": "jo",
+        "language": "ar",
+        "timezone": "Asia/Amman",
+    },
+    {
+        "city": "Beirut",
+        "city_slug": "beirut",
+        "country": "Lebanon",
+        "country_code": "lb",
+        "language": "ar",
+        "timezone": "Asia/Beirut",
+    },
+    {
+        "city": "Damascus",
+        "city_slug": "damascus",
+        "country": "Syria",
+        "country_code": "sy",
+        "language": "ar",
+        "timezone": "Asia/Damascus",
+    },
+    {
+        "city": "Cairo",
+        "city_slug": "cairo",
+        "country": "Egypt",
+        "country_code": "eg",
+        "language": "ar",
+        "timezone": "Africa/Cairo",
+    },
+    {
+        "city": "Nairobi",
+        "city_slug": "nairobi",
+        "country": "Kenya",
+        "country_code": "ke",
+        "language": "sw",
+        "timezone": "Africa/Nairobi",
+    },
+    {
+        "city": "Lagos",
+        "city_slug": "lagos",
+        "country": "Nigeria",
+        "country_code": "ng",
+        "language": "en",
+        "timezone": "Africa/Lagos",
+    },
+    {
+        "city": "Johannesburg",
+        "city_slug": "johannesburg",
+        "country": "South Africa",
+        "country_code": "za",
+        "language": "en",
+        "timezone": "Africa/Johannesburg",
+    },
+    {
+        "city": "Accra",
+        "city_slug": "accra",
+        "country": "Ghana",
+        "country_code": "gh",
+        "language": "en",
+        "timezone": "Africa/Accra",
+    },
+    {
+        "city": "Casablanca",
+        "city_slug": "casablanca",
+        "country": "Morocco",
+        "country_code": "ma",
+        "language": "ar",
+        "timezone": "Africa/Casablanca",
+    },
+    {
+        "city": "Tunis",
+        "city_slug": "tunis",
+        "country": "Tunisia",
+        "country_code": "tn",
+        "language": "ar",
+        "timezone": "Africa/Tunis",
+    },
+    {
+        "city": "Algiers",
+        "city_slug": "algiers",
+        "country": "Algeria",
+        "country_code": "dz",
+        "language": "ar",
+        "timezone": "Africa/Algiers",
+    },
+    {
+        "city": "Addis Ababa",
+        "city_slug": "addis_ababa",
+        "country": "Ethiopia",
+        "country_code": "et",
+        "language": "am",
+        "timezone": "Africa/Addis_Ababa",
+    },
+    {
+        "city": "Kinshasa",
+        "city_slug": "kinshasa",
+        "country": "DR Congo",
+        "country_code": "cd",
+        "language": "fr",
+        "timezone": "Africa/Kinshasa",
+    },
+    {
+        "city": "Canberra",
+        "city_slug": "canberra",
+        "country": "Australia",
+        "country_code": "au",
+        "language": "en",
+        "timezone": "Australia/Sydney",
+    },
+    {
+        "city": "Wellington",
+        "city_slug": "wellington",
+        "country": "New Zealand",
+        "country_code": "nz",
+        "language": "en",
+        "timezone": "Pacific/Auckland",
+    },
+    {
+        "city": "Moscow",
+        "city_slug": "moscow",
+        "city_native": "Москва",
+        "country": "Russia",
+        "country_code": "ru",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Astana",
+        "city_slug": "astana",
+        "country": "Kazakhstan",
+        "country_code": "kz",
+        "language": "kk",
+        "timezone": "Asia/Almaty",
+    },
+    {
+        "city": "Tashkent",
+        "city_slug": "tashkent",
+        "country": "Uzbekistan",
+        "country_code": "uz",
+        "language": "uz",
+        "timezone": "Asia/Tashkent",
+    },
+    {
+        "city": "Tbilisi",
+        "city_slug": "tbilisi",
+        "country": "Georgia",
+        "country_code": "ge",
+        "language": "ka",
+        "timezone": "Asia/Tbilisi",
+    },
+    {
+        "city": "Baku",
+        "city_slug": "baku",
+        "country": "Azerbaijan",
+        "country_code": "az",
+        "language": "az",
+        "timezone": "Asia/Baku",
+    },
+    {
+        "city": "Yerevan",
+        "city_slug": "yerevan",
+        "country": "Armenia",
+        "country_code": "am",
+        "language": "hy",
+        "timezone": "Asia/Yerevan",
+    },
+]
+
+TIER1_GLOBAL: list[dict] = [
+    {
+        "city": "New York",
+        "city_slug": "new_york",
+        "country": "United States",
+        "country_code": "us",
+        "language": "en",
+        "timezone": "America/New_York",
+    },
+    {
+        "city": "London",
+        "city_slug": "london",
+        "country": "United Kingdom",
+        "country_code": "gb",
+        "language": "en",
+        "timezone": "Europe/London",
+    },
+    {
+        "city": "Tokyo",
+        "city_slug": "tokyo",
+        "country": "Japan",
+        "country_code": "jp",
+        "language": "ja",
+        "timezone": "Asia/Tokyo",
+    },
+    {
+        "city": "Singapore",
+        "city_slug": "singapore",
+        "country": "Singapore",
+        "country_code": "sg",
+        "language": "en",
+        "timezone": "Asia/Singapore",
+    },
+    {
+        "city": "Shanghai",
+        "city_slug": "shanghai",
+        "country": "China",
+        "country_code": "cn",
+        "language": "zh",
+        "timezone": "Asia/Shanghai",
+    },
+    {
+        "city": "Hong Kong",
+        "city_slug": "hong_kong",
+        "country": "Hong Kong",
+        "country_code": "hk",
+        "language": "zh",
+        "timezone": "Asia/Hong_Kong",
+    },
+    {
+        "city": "Paris",
+        "city_slug": "paris",
+        "country": "France",
+        "country_code": "fr",
+        "language": "fr",
+        "timezone": "Europe/Paris",
+    },
+    {
+        "city": "Dubai",
+        "city_slug": "dubai",
+        "country": "UAE",
+        "country_code": "ae",
+        "language": "ar",
+        "timezone": "Asia/Dubai",
+    },
+    {
+        "city": "Sydney",
+        "city_slug": "sydney",
+        "country": "Australia",
+        "country_code": "au",
+        "language": "en",
+        "timezone": "Australia/Sydney",
+    },
+    {
+        "city": "Frankfurt",
+        "city_slug": "frankfurt",
+        "country": "Germany",
+        "country_code": "de",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Chicago",
+        "city_slug": "chicago",
+        "country": "United States",
+        "country_code": "us",
+        "language": "en",
+        "timezone": "America/Chicago",
+    },
+    {
+        "city": "Los Angeles",
+        "city_slug": "los_angeles",
+        "country": "United States",
+        "country_code": "us",
+        "language": "en",
+        "timezone": "America/Los_Angeles",
+    },
+    {
+        "city": "Berlin",
+        "city_slug": "berlin",
+        "country": "Germany",
+        "country_code": "de",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Zurich",
+        "city_slug": "zurich",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "language": "de",
+        "timezone": "Europe/Zurich",
+    },
+    {
+        "city": "Amsterdam",
+        "city_slug": "amsterdam",
+        "country": "Netherlands",
+        "country_code": "nl",
+        "language": "nl",
+        "timezone": "Europe/Amsterdam",
+    },
+    {
+        "city": "Toronto",
+        "city_slug": "toronto",
+        "country": "Canada",
+        "country_code": "ca",
+        "language": "en",
+        "timezone": "America/Toronto",
+    },
+    {
+        "city": "Seoul",
+        "city_slug": "seoul",
+        "country": "South Korea",
+        "country_code": "kr",
+        "language": "ko",
+        "timezone": "Asia/Seoul",
+    },
+    {
+        "city": "Beijing",
+        "city_slug": "beijing",
+        "country": "China",
+        "country_code": "cn",
+        "language": "zh",
+        "timezone": "Asia/Shanghai",
+    },
+    {
+        "city": "Mumbai",
+        "city_slug": "mumbai",
+        "country": "India",
+        "country_code": "in",
+        "language": "hi",
+        "timezone": "Asia/Kolkata",
+    },
+    {
+        "city": "Sao Paulo",
+        "city_slug": "sao_paulo",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Sao_Paulo",
+    },
+    {
+        "city": "Moscow",
+        "city_slug": "moscow",
+        "city_native": "Москва",
+        "country": "Russia",
+        "country_code": "ru",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Madrid",
+        "city_slug": "madrid",
+        "country": "Spain",
+        "country_code": "es",
+        "language": "es",
+        "timezone": "Europe/Madrid",
+    },
+    {
+        "city": "Riyadh",
+        "city_slug": "riyadh",
+        "country": "Saudi Arabia",
+        "country_code": "sa",
+        "language": "ar",
+        "timezone": "Asia/Riyadh",
+    },
+    {
+        "city": "Istanbul",
+        "city_slug": "istanbul",
+        "country": "Turkey",
+        "country_code": "tr",
+        "language": "tr",
+        "timezone": "Europe/Istanbul",
+    },
+    {
+        "city": "Mexico City",
+        "city_slug": "mexico_city",
+        "country": "Mexico",
+        "country_code": "mx",
+        "language": "es",
+        "timezone": "America/Mexico_City",
+    },
+    {
+        "city": "Johannesburg",
+        "city_slug": "johannesburg",
+        "country": "South Africa",
+        "country_code": "za",
+        "language": "en",
+        "timezone": "Africa/Johannesburg",
+    },
+    {
+        "city": "Milan",
+        "city_slug": "milan",
+        "country": "Italy",
+        "country_code": "it",
+        "language": "it",
+        "timezone": "Europe/Rome",
+    },
+    {
+        "city": "Vienna",
+        "city_slug": "vienna",
+        "country": "Austria",
+        "country_code": "at",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    {
+        "city": "Stockholm",
+        "city_slug": "stockholm",
+        "country": "Sweden",
+        "country_code": "se",
+        "language": "sv",
+        "timezone": "Europe/Stockholm",
+    },
+    {
+        "city": "Warsaw",
+        "city_slug": "warsaw",
+        "country": "Poland",
+        "country_code": "pl",
+        "language": "pl",
+        "timezone": "Europe/Warsaw",
+    },
+    {
+        "city": "Brussels",
+        "city_slug": "brussels",
+        "country": "Belgium",
+        "country_code": "be",
+        "language": "fr",
+        "timezone": "Europe/Brussels",
+    },
+    {
+        "city": "Dublin",
+        "city_slug": "dublin",
+        "country": "Ireland",
+        "country_code": "ie",
+        "language": "en",
+        "timezone": "Europe/Dublin",
+    },
+    {
+        "city": "Copenhagen",
+        "city_slug": "copenhagen",
+        "country": "Denmark",
+        "country_code": "dk",
+        "language": "da",
+        "timezone": "Europe/Copenhagen",
+    },
+    {
+        "city": "Helsinki",
+        "city_slug": "helsinki",
+        "country": "Finland",
+        "country_code": "fi",
+        "language": "fi",
+        "timezone": "Europe/Helsinki",
+    },
+    {
+        "city": "Oslo",
+        "city_slug": "oslo",
+        "country": "Norway",
+        "country_code": "no",
+        "language": "no",
+        "timezone": "Europe/Oslo",
+    },
+    {
+        "city": "Prague",
+        "city_slug": "prague",
+        "country": "Czech Republic",
+        "country_code": "cz",
+        "language": "cs",
+        "timezone": "Europe/Prague",
+    },
+    {
+        "city": "Budapest",
+        "city_slug": "budapest",
+        "country": "Hungary",
+        "country_code": "hu",
+        "language": "hu",
+        "timezone": "Europe/Budapest",
+    },
+    {
+        "city": "Bucharest",
+        "city_slug": "bucharest",
+        "country": "Romania",
+        "country_code": "ro",
+        "language": "ro",
+        "timezone": "Europe/Bucharest",
+    },
+    {
+        "city": "Bangkok",
+        "city_slug": "bangkok",
+        "country": "Thailand",
+        "country_code": "th",
+        "language": "th",
+        "timezone": "Asia/Bangkok",
+    },
+    {
+        "city": "Jakarta",
+        "city_slug": "jakarta",
+        "country": "Indonesia",
+        "country_code": "id",
+        "language": "id",
+        "timezone": "Asia/Jakarta",
+    },
+    {
+        "city": "Kuala Lumpur",
+        "city_slug": "kuala_lumpur",
+        "country": "Malaysia",
+        "country_code": "my",
+        "language": "ms",
+        "timezone": "Asia/Kuala_Lumpur",
+    },
+    {
+        "city": "Manila",
+        "city_slug": "manila",
+        "country": "Philippines",
+        "country_code": "ph",
+        "language": "tl",
+        "timezone": "Asia/Manila",
+    },
+    {
+        "city": "Taipei",
+        "city_slug": "taipei",
+        "country": "Taiwan",
+        "country_code": "tw",
+        "language": "zh",
+        "timezone": "Asia/Taipei",
+    },
+    {
+        "city": "Tel Aviv",
+        "city_slug": "tel_aviv",
+        "country": "Israel",
+        "country_code": "il",
+        "language": "he",
+        "timezone": "Asia/Jerusalem",
+    },
+    {
+        "city": "Cairo",
+        "city_slug": "cairo",
+        "country": "Egypt",
+        "country_code": "eg",
+        "language": "ar",
+        "timezone": "Africa/Cairo",
+    },
+    {
+        "city": "Casablanca",
+        "city_slug": "casablanca",
+        "country": "Morocco",
+        "country_code": "ma",
+        "language": "ar",
+        "timezone": "Africa/Casablanca",
+    },
+    {
+        "city": "Lagos",
+        "city_slug": "lagos",
+        "country": "Nigeria",
+        "country_code": "ng",
+        "language": "en",
+        "timezone": "Africa/Lagos",
+    },
+    {
+        "city": "Nairobi",
+        "city_slug": "nairobi",
+        "country": "Kenya",
+        "country_code": "ke",
+        "language": "sw",
+        "timezone": "Africa/Nairobi",
+    },
+    {
+        "city": "Buenos Aires",
+        "city_slug": "buenos_aires",
+        "country": "Argentina",
+        "country_code": "ar",
+        "language": "es",
+        "timezone": "America/Argentina/Buenos_Aires",
+    },
+    {
+        "city": "Bogota",
+        "city_slug": "bogota",
+        "country": "Colombia",
+        "country_code": "co",
+        "language": "es",
+        "timezone": "America/Bogota",
+    },
+]
+
+DACH_CITIES: list[dict] = [
+    # Germany
+    {
+        "city": "Berlin",
+        "city_slug": "berlin",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Berlin",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Hamburg",
+        "city_slug": "hamburg",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Hamburg",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Munich",
+        "city_slug": "munich",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Bavaria",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Cologne",
+        "city_slug": "cologne",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "North Rhine-Westphalia",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Frankfurt",
+        "city_slug": "frankfurt",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Hesse",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Stuttgart",
+        "city_slug": "stuttgart",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Baden-Wurttemberg",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Dusseldorf",
+        "city_slug": "dusseldorf",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "North Rhine-Westphalia",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Leipzig",
+        "city_slug": "leipzig",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Saxony",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Dortmund",
+        "city_slug": "dortmund",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "North Rhine-Westphalia",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    {
+        "city": "Bremen",
+        "city_slug": "bremen",
+        "country": "Germany",
+        "country_code": "de",
+        "region": "Bremen",
+        "language": "de",
+        "timezone": "Europe/Berlin",
+    },
+    # Austria
+    {
+        "city": "Vienna",
+        "city_slug": "vienna",
+        "country": "Austria",
+        "country_code": "at",
+        "region": "Vienna",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    {
+        "city": "Graz",
+        "city_slug": "graz",
+        "country": "Austria",
+        "country_code": "at",
+        "region": "Styria",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    {
+        "city": "Linz",
+        "city_slug": "linz",
+        "country": "Austria",
+        "country_code": "at",
+        "region": "Upper Austria",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    {
+        "city": "Salzburg",
+        "city_slug": "salzburg",
+        "country": "Austria",
+        "country_code": "at",
+        "region": "Salzburg",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    {
+        "city": "Innsbruck",
+        "city_slug": "innsbruck",
+        "country": "Austria",
+        "country_code": "at",
+        "region": "Tyrol",
+        "language": "de",
+        "timezone": "Europe/Vienna",
+    },
+    # Switzerland
+    {
+        "city": "Zurich",
+        "city_slug": "zurich",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "region": "Zurich",
+        "language": "de",
+        "timezone": "Europe/Zurich",
+    },
+    {
+        "city": "Geneva",
+        "city_slug": "geneva",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "region": "Geneva",
+        "language": "fr",
+        "timezone": "Europe/Zurich",
+    },
+    {
+        "city": "Basel",
+        "city_slug": "basel",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "region": "Basel",
+        "language": "de",
+        "timezone": "Europe/Zurich",
+    },
+    {
+        "city": "Bern",
+        "city_slug": "bern",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "region": "Bern",
+        "language": "de",
+        "timezone": "Europe/Zurich",
+    },
+    {
+        "city": "Lausanne",
+        "city_slug": "lausanne",
+        "country": "Switzerland",
+        "country_code": "ch",
+        "region": "Vaud",
+        "language": "fr",
+        "timezone": "Europe/Zurich",
+    },
+]
+
+LATAM_CITIES: list[dict] = [
+    {
+        "city": "Sao Paulo",
+        "city_slug": "sao_paulo",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Sao_Paulo",
+    },
+    {
+        "city": "Rio de Janeiro",
+        "city_slug": "rio_de_janeiro",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Sao_Paulo",
+    },
+    {
+        "city": "Brasilia",
+        "city_slug": "brasilia",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Sao_Paulo",
+    },
+    {
+        "city": "Salvador",
+        "city_slug": "salvador",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Bahia",
+    },
+    {
+        "city": "Fortaleza",
+        "city_slug": "fortaleza",
+        "country": "Brazil",
+        "country_code": "br",
+        "language": "pt",
+        "timezone": "America/Fortaleza",
+    },
+    {
+        "city": "Buenos Aires",
+        "city_slug": "buenos_aires",
+        "country": "Argentina",
+        "country_code": "ar",
+        "language": "es",
+        "timezone": "America/Argentina/Buenos_Aires",
+    },
+    {
+        "city": "Cordoba",
+        "city_slug": "cordoba",
+        "country": "Argentina",
+        "country_code": "ar",
+        "language": "es",
+        "timezone": "America/Argentina/Cordoba",
+    },
+    {
+        "city": "Rosario",
+        "city_slug": "rosario",
+        "country": "Argentina",
+        "country_code": "ar",
+        "language": "es",
+        "timezone": "America/Argentina/Buenos_Aires",
+    },
+    {
+        "city": "Mexico City",
+        "city_slug": "mexico_city",
+        "country": "Mexico",
+        "country_code": "mx",
+        "language": "es",
+        "timezone": "America/Mexico_City",
+    },
+    {
+        "city": "Guadalajara",
+        "city_slug": "guadalajara",
+        "country": "Mexico",
+        "country_code": "mx",
+        "language": "es",
+        "timezone": "America/Mazatlan",
+    },
+    {
+        "city": "Monterrey",
+        "city_slug": "monterrey",
+        "country": "Mexico",
+        "country_code": "mx",
+        "language": "es",
+        "timezone": "America/Monterrey",
+    },
+    {
+        "city": "Bogota",
+        "city_slug": "bogota",
+        "country": "Colombia",
+        "country_code": "co",
+        "language": "es",
+        "timezone": "America/Bogota",
+    },
+    {
+        "city": "Medellin",
+        "city_slug": "medellin",
+        "country": "Colombia",
+        "country_code": "co",
+        "language": "es",
+        "timezone": "America/Bogota",
+    },
+    {
+        "city": "Cali",
+        "city_slug": "cali",
+        "country": "Colombia",
+        "country_code": "co",
+        "language": "es",
+        "timezone": "America/Bogota",
+    },
+    {
+        "city": "Lima",
+        "city_slug": "lima",
+        "country": "Peru",
+        "country_code": "pe",
+        "language": "es",
+        "timezone": "America/Lima",
+    },
+    {
+        "city": "Santiago",
+        "city_slug": "santiago",
+        "country": "Chile",
+        "country_code": "cl",
+        "language": "es",
+        "timezone": "America/Santiago",
+    },
+    {
+        "city": "Caracas",
+        "city_slug": "caracas",
+        "country": "Venezuela",
+        "country_code": "ve",
+        "language": "es",
+        "timezone": "America/Caracas",
+    },
+    {
+        "city": "Montevideo",
+        "city_slug": "montevideo",
+        "country": "Uruguay",
+        "country_code": "uy",
+        "language": "es",
+        "timezone": "America/Montevideo",
+    },
+    {
+        "city": "Asuncion",
+        "city_slug": "asuncion",
+        "country": "Paraguay",
+        "country_code": "py",
+        "language": "es",
+        "timezone": "America/Asuncion",
+    },
+    {
+        "city": "Quito",
+        "city_slug": "quito",
+        "country": "Ecuador",
+        "country_code": "ec",
+        "language": "es",
+        "timezone": "America/Guayaquil",
+    },
+    {
+        "city": "La Paz",
+        "city_slug": "la_paz",
+        "country": "Bolivia",
+        "country_code": "bo",
+        "language": "es",
+        "timezone": "America/La_Paz",
+    },
+    {
+        "city": "Havana",
+        "city_slug": "havana",
+        "country": "Cuba",
+        "country_code": "cu",
+        "language": "es",
+        "timezone": "America/Havana",
+    },
+    {
+        "city": "Santo Domingo",
+        "city_slug": "santo_domingo",
+        "country": "Dominican Republic",
+        "country_code": "do",
+        "language": "es",
+        "timezone": "America/Santo_Domingo",
+    },
+    {
+        "city": "San Jose",
+        "city_slug": "san_jose",
+        "country": "Costa Rica",
+        "country_code": "cr",
+        "language": "es",
+        "timezone": "America/Costa_Rica",
+    },
+    {
+        "city": "Panama City",
+        "city_slug": "panama_city",
+        "country": "Panama",
+        "country_code": "pa",
+        "language": "es",
+        "timezone": "America/Panama",
+    },
+]
+
+RUSSIA_CITIES: list[dict] = [
+    {
+        "city": "Moscow",
+        "city_native": "Москва",
+        "city_slug": "moscow",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Moscow",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Saint Petersburg",
+        "city_native": "Санкт-Петербург",
+        "city_slug": "saint_petersburg",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Saint Petersburg",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Novosibirsk",
+        "city_native": "Новосибирск",
+        "city_slug": "novosibirsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Novosibirsk Oblast",
+        "language": "ru",
+        "timezone": "Asia/Novosibirsk",
+    },
+    {
+        "city": "Yekaterinburg",
+        "city_native": "Екатеринбург",
+        "city_slug": "yekaterinburg",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Sverdlovsk Oblast",
+        "language": "ru",
+        "timezone": "Asia/Yekaterinburg",
+    },
+    {
+        "city": "Kazan",
+        "city_native": "Казань",
+        "city_slug": "kazan",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Tatarstan",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Nizhny Novgorod",
+        "city_native": "Нижний Новгород",
+        "city_slug": "nizhny_novgorod",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Nizhny Novgorod Oblast",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Chelyabinsk",
+        "city_native": "Челябинск",
+        "city_slug": "chelyabinsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Chelyabinsk Oblast",
+        "language": "ru",
+        "timezone": "Asia/Yekaterinburg",
+    },
+    {
+        "city": "Samara",
+        "city_native": "Самара",
+        "city_slug": "samara",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Samara Oblast",
+        "language": "ru",
+        "timezone": "Europe/Samara",
+    },
+    {
+        "city": "Omsk",
+        "city_native": "Омск",
+        "city_slug": "omsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Omsk Oblast",
+        "language": "ru",
+        "timezone": "Asia/Omsk",
+    },
+    {
+        "city": "Rostov-on-Don",
+        "city_native": "Ростов-на-Дону",
+        "city_slug": "rostov_on_don",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Rostov Oblast",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Ufa",
+        "city_native": "Уфа",
+        "city_slug": "ufa",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Bashkortostan",
+        "language": "ru",
+        "timezone": "Asia/Yekaterinburg",
+    },
+    {
+        "city": "Krasnoyarsk",
+        "city_native": "Красноярск",
+        "city_slug": "krasnoyarsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Krasnoyarsk Krai",
+        "language": "ru",
+        "timezone": "Asia/Krasnoyarsk",
+    },
+    {
+        "city": "Voronezh",
+        "city_native": "Воронеж",
+        "city_slug": "voronezh",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Voronezh Oblast",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Perm",
+        "city_native": "Пермь",
+        "city_slug": "perm",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Perm Krai",
+        "language": "ru",
+        "timezone": "Asia/Yekaterinburg",
+    },
+    {
+        "city": "Volgograd",
+        "city_native": "Волгоград",
+        "city_slug": "volgograd",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Volgograd Oblast",
+        "language": "ru",
+        "timezone": "Europe/Volgograd",
+    },
+    {
+        "city": "Krasnodar",
+        "city_native": "Краснодар",
+        "city_slug": "krasnodar",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Krasnodar Krai",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Saratov",
+        "city_native": "Саратов",
+        "city_slug": "saratov",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Saratov Oblast",
+        "language": "ru",
+        "timezone": "Europe/Saratov",
+    },
+    {
+        "city": "Tyumen",
+        "city_native": "Тюмень",
+        "city_slug": "tyumen",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Tyumen Oblast",
+        "language": "ru",
+        "timezone": "Asia/Yekaterinburg",
+    },
+    {
+        "city": "Tolyatti",
+        "city_native": "Тольятти",
+        "city_slug": "tolyatti",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Samara Oblast",
+        "language": "ru",
+        "timezone": "Europe/Samara",
+    },
+    {
+        "city": "Izhevsk",
+        "city_native": "Ижевск",
+        "city_slug": "izhevsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Udmurtia",
+        "language": "ru",
+        "timezone": "Europe/Samara",
+    },
+    {
+        "city": "Barnaul",
+        "city_native": "Барнаул",
+        "city_slug": "barnaul",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Altai Krai",
+        "language": "ru",
+        "timezone": "Asia/Barnaul",
+    },
+    {
+        "city": "Irkutsk",
+        "city_native": "Иркутск",
+        "city_slug": "irkutsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Irkutsk Oblast",
+        "language": "ru",
+        "timezone": "Asia/Irkutsk",
+    },
+    {
+        "city": "Khabarovsk",
+        "city_native": "Хабаровск",
+        "city_slug": "khabarovsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Khabarovsk Krai",
+        "language": "ru",
+        "timezone": "Asia/Vladivostok",
+    },
+    {
+        "city": "Vladivostok",
+        "city_native": "Владивосток",
+        "city_slug": "vladivostok",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Primorsky Krai",
+        "language": "ru",
+        "timezone": "Asia/Vladivostok",
+    },
+    {
+        "city": "Yaroslavl",
+        "city_native": "Ярославль",
+        "city_slug": "yaroslavl",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Yaroslavl Oblast",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Makhachkala",
+        "city_native": "Махачкала",
+        "city_slug": "makhachkala",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Dagestan",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+    {
+        "city": "Tomsk",
+        "city_native": "Томск",
+        "city_slug": "tomsk",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Tomsk Oblast",
+        "language": "ru",
+        "timezone": "Asia/Tomsk",
+    },
+    {
+        "city": "Orenburg",
+        "city_native": "Оренбург",
+        "city_slug": "orenburg",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Orenburg Oblast",
+        "language": "ru",
+        "timezone": "Asia/Yekaterinburg",
+    },
+    {
+        "city": "Kemerovo",
+        "city_native": "Кемерово",
+        "city_slug": "kemerovo",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Kemerovo Oblast",
+        "language": "ru",
+        "timezone": "Asia/Novosibirsk",
+    },
+    {
+        "city": "Sochi",
+        "city_native": "Сочи",
+        "city_slug": "sochi",
+        "country": "Russia",
+        "country_code": "ru",
+        "region": "Krasnodar Krai",
+        "language": "ru",
+        "timezone": "Europe/Moscow",
+    },
+]
+
+UKRAINE_CITIES: list[dict] = [
+    {
+        "city": "Kyiv",
+        "city_native": "Київ",
+        "city_slug": "kyiv",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Kyiv",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Kharkiv",
+        "city_native": "Харків",
+        "city_slug": "kharkiv",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Kharkiv Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Odessa",
+        "city_native": "Одеса",
+        "city_slug": "odessa",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Odessa Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Dnipro",
+        "city_native": "Дніпро",
+        "city_slug": "dnipro",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Dnipropetrovsk Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Donetsk",
+        "city_native": "Донецьк",
+        "city_slug": "donetsk",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Donetsk Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Zaporizhzhia",
+        "city_native": "Запоріжжя",
+        "city_slug": "zaporizhzhia",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Zaporizhzhia Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Lviv",
+        "city_native": "Львів",
+        "city_slug": "lviv",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Lviv Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Mykolaiv",
+        "city_native": "Миколаїв",
+        "city_slug": "mykolaiv",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Mykolaiv Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Mariupol",
+        "city_native": "Маріуполь",
+        "city_slug": "mariupol",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Donetsk Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Vinnytsia",
+        "city_native": "Вінниця",
+        "city_slug": "vinnytsia",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Vinnytsia Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Simferopol",
+        "city_native": "Сімферополь",
+        "city_slug": "simferopol",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Crimea",
+        "language": "uk",
+        "timezone": "Europe/Simferopol",
+    },
+    {
+        "city": "Chernivtsi",
+        "city_native": "Чернівці",
+        "city_slug": "chernivtsi",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Chernivtsi Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Khmelnytskyi",
+        "city_native": "Хмельницький",
+        "city_slug": "khmelnytskyi",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Khmelnytskyi Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Cherkasy",
+        "city_native": "Черкаси",
+        "city_slug": "cherkasy",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Cherkasy Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Zhytomyr",
+        "city_native": "Житомир",
+        "city_slug": "zhytomyr",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Zhytomyr Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Sumy",
+        "city_native": "Суми",
+        "city_slug": "sumy",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Sumy Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Rivne",
+        "city_native": "Рівне",
+        "city_slug": "rivne",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Rivne Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Ivano-Frankivsk",
+        "city_native": "Івано-Франківськ",
+        "city_slug": "ivano_frankivsk",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Ivano-Frankivsk Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Ternopil",
+        "city_native": "Тернопіль",
+        "city_slug": "ternopil",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Ternopil Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Poltava",
+        "city_native": "Полтава",
+        "city_slug": "poltava",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Poltava Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Kryvyi Rih",
+        "city_native": "Кривий Ріг",
+        "city_slug": "kryvyi_rih",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Dnipropetrovsk Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Luhansk",
+        "city_native": "Луганськ",
+        "city_slug": "luhansk",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Luhansk Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Uzhhorod",
+        "city_native": "Ужгород",
+        "city_slug": "uzhhorod",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Zakarpattia Oblast",
+        "language": "uk",
+        "timezone": "Europe/Uzhgorod",
+    },
+    {
+        "city": "Lutsk",
+        "city_native": "Луцьк",
+        "city_slug": "lutsk",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Volyn Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+    {
+        "city": "Chernihiv",
+        "city_native": "Чернігів",
+        "city_slug": "chernihiv",
+        "country": "Ukraine",
+        "country_code": "ua",
+        "region": "Chernihiv Oblast",
+        "language": "uk",
+        "timezone": "Europe/Kiev",
+    },
+]
+
+BELARUS_CITIES: list[dict] = [
+    {
+        "city": "Minsk",
+        "city_native": "Мінск",
+        "city_slug": "minsk",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Minsk",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Gomel",
+        "city_native": "Гомель",
+        "city_slug": "gomel",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Gomel Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Mogilev",
+        "city_native": "Магілёў",
+        "city_slug": "mogilev",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Mogilev Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Vitebsk",
+        "city_native": "Віцебск",
+        "city_slug": "vitebsk",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Vitebsk Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Grodno",
+        "city_native": "Гродна",
+        "city_slug": "grodno",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Grodno Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Brest",
+        "city_native": "Брэст",
+        "city_slug": "brest",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Brest Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Bobruisk",
+        "city_native": "Бабруйск",
+        "city_slug": "bobruisk",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Mogilev Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Baranovichi",
+        "city_native": "Баранавічы",
+        "city_slug": "baranovichi",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Brest Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Pinsk",
+        "city_native": "Пінск",
+        "city_slug": "pinsk",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Brest Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+    {
+        "city": "Orsha",
+        "city_native": "Орша",
+        "city_slug": "orsha",
+        "country": "Belarus",
+        "country_code": "by",
+        "region": "Vitebsk Oblast",
+        "language": "be",
+        "timezone": "Europe/Minsk",
+    },
+]
+
+CIS_CITIES: list[dict] = (
+    RUSSIA_CITIES
+    + BELARUS_CITIES
+    + UKRAINE_CITIES
+    + [
+        # Kazakhstan
+        {
+            "city": "Almaty",
+            "city_native": "Алматы",
+            "city_slug": "almaty",
+            "country": "Kazakhstan",
+            "country_code": "kz",
+            "region": "Almaty",
+            "language": "kk",
+            "timezone": "Asia/Almaty",
+        },
+        {
+            "city": "Astana",
+            "city_native": "Астана",
+            "city_slug": "astana",
+            "country": "Kazakhstan",
+            "country_code": "kz",
+            "region": "Astana",
+            "language": "kk",
+            "timezone": "Asia/Almaty",
+        },
+        # Azerbaijan
+        {
+            "city": "Baku",
+            "city_native": "Bakı",
+            "city_slug": "baku",
+            "country": "Azerbaijan",
+            "country_code": "az",
+            "region": "Baku",
+            "language": "az",
+            "timezone": "Asia/Baku",
+        },
+        # Georgia
+        {
+            "city": "Tbilisi",
+            "city_native": "თბილისი",
+            "city_slug": "tbilisi",
+            "country": "Georgia",
+            "country_code": "ge",
+            "region": "Tbilisi",
+            "language": "ka",
+            "timezone": "Asia/Tbilisi",
+        },
+        # Armenia
+        {
+            "city": "Yerevan",
+            "city_native": "Երևան",
+            "city_slug": "yerevan",
+            "country": "Armenia",
+            "country_code": "am",
+            "region": "Yerevan",
+            "language": "hy",
+            "timezone": "Asia/Yerevan",
+        },
+        # Uzbekistan
+        {
+            "city": "Tashkent",
+            "city_native": "Toshkent",
+            "city_slug": "tashkent",
+            "country": "Uzbekistan",
+            "country_code": "uz",
+            "region": "Tashkent",
+            "language": "uz",
+            "timezone": "Asia/Tashkent",
+        },
+        # Moldova
+        {
+            "city": "Chisinau",
+            "city_native": "Chișinău",
+            "city_slug": "chisinau",
+            "country": "Moldova",
+            "country_code": "md",
+            "region": "Chisinau",
+            "language": "ro",
+            "timezone": "Europe/Chisinau",
+        },
+    ]
+)
+
+# Registry of all presets
+GEO_PRESETS: dict[str, dict] = {
+    "eu_capitals": {
+        "label": "🌍 Европейские столицы",
+        "cities": EUROPE_CAPITALS,
+        "count": len(EUROPE_CAPITALS),
+    },
+    "world_capitals": {
+        "label": "🌎 Мировые столицы",
+        "cities": WORLD_CAPITALS,
+        "count": len(WORLD_CAPITALS),
+    },
+    "tier1": {
+        "label": "🏙️ Tier-1 глобальные",
+        "cities": TIER1_GLOBAL,
+        "count": len(TIER1_GLOBAL),
+    },
+    "dach": {
+        "label": "🇩🇪 DACH (DE+AT+CH)",
+        "cities": DACH_CITIES,
+        "count": len(DACH_CITIES),
+    },
+    "latam": {
+        "label": "🌐 LATAM",
+        "cities": LATAM_CITIES,
+        "count": len(LATAM_CITIES),
+    },
+    "russia": {
+        "label": "🇷🇺 Россия",
+        "cities": RUSSIA_CITIES,
+        "count": len(RUSSIA_CITIES),
+    },
+    "ukraine": {
+        "label": "🇺🇦 Україна",
+        "cities": UKRAINE_CITIES,
+        "count": len(UKRAINE_CITIES),
+    },
+    "belarus": {
+        "label": "🇧🇾 Беларусь",
+        "cities": BELARUS_CITIES,
+        "count": len(BELARUS_CITIES),
+    },
+    "cis": {
+        "label": "🌐 СНГ (RU+UA+BY+KZ)",
+        "cities": CIS_CITIES,
+        "count": len(CIS_CITIES),
+    },
+}
+
+
+def parse_custom_geo_list(text: str) -> list[dict]:
+    """Parse newline-separated city names into minimal geo dicts with native names."""
+    from services.username_engine import slugify
+
+    cities = []
+    for line in text.strip().splitlines():
+        line = line.strip().strip(",").strip()
+        if not line:
+            continue
+        city_name = line.split(",")[0].strip()
+        if not city_name:
+            continue
+        cities.append(
+            {
+                "city": city_name,
+                "city_slug": slugify(city_name),
+                "country": "",
+                "country_code": "",
+                "language": "",
+                "timezone": "",
+            }
+        )
+    # Enrich all cities with native names if available
+    return enrich_geo_list(cities)
+
+
+def preset_city_options(preset_key: str, min_population: int = 0) -> list[dict]:
+    """Компактный список городов пресета для выбора галочками в UI:
+    [{city, city_native, city_slug, country, population, federal_district}].
+    Пустой список — неизвестный пресет.
+
+    population/federal_district добавлены, чтобы UI мог показывать население,
+    сортировать/группировать по федеральному округу и фильтровать «города > N».
+    min_population>0 → оставить только города с известным населением >= порога
+    (по умолчанию 0 — фильтр выключен, обратная совместимость)."""
+    preset = GEO_PRESETS.get(preset_key)
+    if not preset:
+        return []
+    out = []
+    for c in preset.get("cities", []):
+        slug = c.get("city_slug", "")
+        out.append({
+            "city": c.get("city", ""),
+            "city_native": c.get("city_native", "") or c.get("city", ""),
+            "city_slug": slug,
+            "country": c.get("country", ""),
+            "population": city_population(slug),
+            "federal_district": federal_district(c.get("region", "")),
+        })
+    if min_population > 0:
+        out = [o for o in out if o["population"] and o["population"] >= min_population]
+    return out
+
+
+def filter_preset_cities(preset_key: str, selected) -> list[dict]:
+    """Отфильтровать города пресета до выбранных (совпадение по city_slug ИЛИ city,
+    регистронезависимо). Пустой/None selected → вернуть ВЕСЬ пресет (выбор = «все
+    города пресета»), чтобы поведение по умолчанию не менялось."""
+    preset = GEO_PRESETS.get(preset_key)
+    if not preset:
+        return []
+    cities = list(preset.get("cities", []))
+    if not selected:
+        return cities
+    sel = {str(s).strip().lower() for s in selected if str(s).strip()}
+    if not sel:
+        return cities
+    return [
+        c for c in cities
+        if str(c.get("city_slug", "")).lower() in sel
+        or str(c.get("city", "")).lower() in sel
+    ]
+
+
+def enrich_geo_with_native(geo: dict) -> dict:
+    """Add city_native and other missing fields by looking up from master city lists.
+
+    Uses exact city name match (case-insensitive) to find native name.
+    Preserves all existing fields, only adds missing ones.
+    """
+    city_name = geo.get("city", "")
+    if not city_name:
+        return geo
+
+    # Build master lookup: lowercase city -> native name (case-insensitive)
+    if not hasattr(enrich_geo_with_native, "_cache"):
+        # Build cache once
+        cache = {}
+        for city_list in [
+            RUSSIA_CITIES,
+            UKRAINE_CITIES,
+            BELARUS_CITIES,
+            EUROPE_CAPITALS,
+            WORLD_CAPITALS,
+            TIER1_GLOBAL,
+            DACH_CITIES,
+            LATAM_CITIES,
+            CIS_CITIES,
+        ]:
+            for entry in city_list:
+                city_val = entry.get("city", "")
+                if city_val and "city_native" in entry:
+                    # Store both original and lowercase variants
+                    cache[city_val] = entry.get("city_native")
+                    cache[city_val.lower()] = entry.get("city_native")
+
+        # Add aliases for common English spellings (lowercase)
+        alias_map = {
+            "kiev": "kyiv",
+            "st. petersburg": "saint petersburg",
+            "st petersburg": "saint petersburg",
+            "saint-petersburg": "saint petersburg",
+        }
+        for alias, canonical in alias_map.items():
+            canonical_lower = canonical.lower()
+            if canonical_lower in cache:
+                cache[alias] = cache[canonical_lower]
+        enrich_geo_with_native._cache = cache
+
+    native_name = enrich_geo_with_native._cache.get(city_name.lower(), "")
+
+    result = dict(geo)
+    if "city_native" not in result and native_name:
+        result["city_native"] = native_name
+
+    return result
+
+
+def enrich_geo_list(geo_list: list[dict]) -> list[dict]:
+    """Enrich a list of geo dicts with missing fields (city_native, etc)."""
+    return [enrich_geo_with_native(g) for g in geo_list]
+
+
+# ── Названия стран на русском ───────────────────────────────────────────────
+# Пресеты хранят страну по-английски (Russia, Germany) — это удобно для слагов,
+# но федеральный уровень Global Presence подставляет страну прямо в название
+# канала. «Новости Russia» в русскоязычном продукте выглядит как машинный
+# перевод, поэтому для отображения берём русское имя.
+COUNTRY_NATIVE_RU: dict[str, str] = {
+    "ru": "Россия",
+    "ua": "Україна",
+    "by": "Беларусь",
+    "kz": "Казахстан",
+    "uz": "Узбекистан",
+    "az": "Азербайджан",
+    "am": "Армения",
+    "ge": "Грузия",
+    "md": "Молдова",
+    "kg": "Кыргызстан",
+    "tj": "Таджикистан",
+    "de": "Германия",
+    "at": "Австрия",
+    "ch": "Швейцария",
+    "fr": "Франция",
+    "es": "Испания",
+    "it": "Италия",
+    "pt": "Португалия",
+    "nl": "Нидерланды",
+    "be": "Бельгия",
+    "pl": "Польша",
+    "cz": "Чехия",
+    "sk": "Словакия",
+    "hu": "Венгрия",
+    "ro": "Румыния",
+    "bg": "Болгария",
+    "gr": "Греция",
+    "hr": "Хорватия",
+    "si": "Словения",
+    "rs": "Сербия",
+    "se": "Швеция",
+    "no": "Норвегия",
+    "fi": "Финляндия",
+    "dk": "Дания",
+    "ee": "Эстония",
+    "lv": "Латвия",
+    "lt": "Литва",
+    "ie": "Ирландия",
+    "gb": "Великобритания",
+    "uk": "Великобритания",
+    "us": "США",
+    "ca": "Канада",
+    "mx": "Мексика",
+    "br": "Бразилия",
+    "ar": "Аргентина",
+    "cl": "Чили",
+    "co": "Колумбия",
+    "pe": "Перу",
+    "tr": "Турция",
+    "il": "Израиль",
+    "ae": "ОАЭ",
+    "sa": "Саудовская Аравия",
+    "eg": "Египет",
+    "za": "ЮАР",
+    "in": "Индия",
+    "cn": "Китай",
+    "jp": "Япония",
+    "kr": "Южная Корея",
+    "th": "Таиланд",
+    "vn": "Вьетнам",
+    "id": "Индонезия",
+    "sg": "Сингапур",
+    "my": "Малайзия",
+    "ph": "Филиппины",
+    "au": "Австралия",
+    "nz": "Новая Зеландия",
+    "cy": "Кипр",
+    "mt": "Мальта",
+    "lu": "Люксембург",
+    "is": "Исландия",
+    "rs_xk": "Косово",
+}
+
+
+def country_display_name(geo: dict) -> str:
+    """Название страны для показа пользователю: явное native → русское → английское.
+
+    Пустая строка, если страна в гео-записи не указана вовсе.
+    """
+    explicit = (geo.get("country_native") or "").strip()
+    if explicit:
+        return explicit
+    code = (geo.get("country_code") or "").strip().lower()
+    if code and code in COUNTRY_NATIVE_RU:
+        return COUNTRY_NATIVE_RU[code]
+    return (geo.get("country") or "").strip()
+
+
+# ── Население городов (для фильтра «города с населением > N») ─────────────────
+# Ключ — city_slug (совпадает с записями в *_CITIES). Значение — население
+# (человек, округлённо). Отдельная таблица (а не поле в каждом dict), чтобы
+# добавление не трогало сотни существующих записей. Отсутствие города в таблице
+# = население неизвестно (фильтр по населению его пропускает при заданном min_pop).
+CITY_POPULATION: dict[str, int] = {
+    # Россия — города-миллионники и крупные центры
+    "moscow": 13_100_000,
+    "saint_petersburg": 5_600_000,
+    "novosibirsk": 1_630_000,
+    "yekaterinburg": 1_540_000,
+    "kazan": 1_310_000,
+    "nizhny_novgorod": 1_230_000,
+    "krasnoyarsk": 1_190_000,
+    "chelyabinsk": 1_180_000,
+    "samara": 1_140_000,
+    "ufa": 1_140_000,
+    "rostov_on_don": 1_140_000,
+    "omsk": 1_110_000,
+    "krasnodar": 1_050_000,
+    "voronezh": 1_050_000,
+    "perm": 1_050_000,
+    "volgograd": 1_020_000,
+    "saratov": 830_000,
+    "tyumen": 830_000,
+    "tolyatti": 685_000,
+    "izhevsk": 645_000,
+    "barnaul": 630_000,
+    "irkutsk": 615_000,
+    "khabarovsk": 610_000,
+    "yaroslavl": 605_000,
+    "makhachkala": 605_000,
+    "vladivostok": 600_000,
+    "tomsk": 570_000,
+    "orenburg": 550_000,
+    "kemerovo": 550_000,
+    "sochi": 465_000,
+    # Украина
+    "kyiv": 2_950_000,
+    "kharkiv": 1_430_000,
+    "odessa": 1_010_000,
+    "dnipro": 970_000,
+    "donetsk": 900_000,
+    "zaporizhzhia": 720_000,
+    "lviv": 720_000,
+    "kryvyi_rih": 615_000,
+    "mykolaiv": 480_000,
+    "mariupol": 430_000,
+    "luhansk": 400_000,
+    "vinnytsia": 370_000,
+    "simferopol": 340_000,
+    "poltava": 285_000,
+    "chernihiv": 285_000,
+    "kherson": 280_000,
+    "cherkasy": 275_000,
+    "khmelnytskyi": 275_000,
+    "chernivtsi": 265_000,
+    "zhytomyr": 260_000,
+    "sumy": 260_000,
+    "rivne": 245_000,
+    "ivano_frankivsk": 240_000,
+    "ternopil": 225_000,
+    "lutsk": 215_000,
+    "uzhhorod": 115_000,
+    # Беларусь
+    "minsk": 2_000_000,
+    "gomel": 510_000,
+    "mogilev": 360_000,
+    "vitebsk": 360_000,
+    "grodno": 360_000,
+    "brest": 340_000,
+    "bobruisk": 215_000,
+    "baranovichi": 175_000,
+    "pinsk": 125_000,
+    "orsha": 115_000,
+    # Казахстан и др. СНГ
+    "almaty": 2_000_000,
+    "astana": 1_350_000,
+    "baku": 2_300_000,
+    "tbilisi": 1_200_000,
+}
+
+# Дальнее зарубежье (столицы/мегаполисы, приблизительно) — отдельным блоком,
+# чтобы фильтр «города > N» работал и для пресетов Европа/Мир/Tier-1/DACH/LATAM.
+# Значения — городская агломерация/город; точность достаточна для порогов.
+_INTL_POPULATION: dict[str, int] = {
+    # Европа
+    "vienna": 1_900_000, "brussels": 1_200_000, "sofia": 1_240_000, "zagreb": 770_000,
+    "nicosia": 200_000, "prague": 1_300_000, "copenhagen": 640_000, "tallinn": 440_000,
+    "helsinki": 660_000, "paris": 2_100_000, "berlin": 3_770_000, "athens": 660_000,
+    "budapest": 1_700_000, "dublin": 550_000, "rome": 2_800_000, "riga": 610_000,
+    "vilnius": 580_000, "luxembourg": 130_000, "valletta": 6_000, "amsterdam": 870_000,
+    "warsaw": 1_790_000, "lisbon": 550_000, "bucharest": 1_830_000, "bratislava": 440_000,
+    "ljubljana": 285_000, "madrid": 3_300_000, "stockholm": 980_000, "bern": 135_000,
+    "london": 8_900_000, "oslo": 700_000, "reykjavik": 130_000, "tirana": 420_000,
+    "sarajevo": 275_000, "podgorica": 150_000, "skopje": 545_000, "chisinau": 640_000,
+    "monaco": 38_000, "pristina": 200_000, "belgrade": 1_390_000,
+    "andorra_la_vella": 22_000, "vaduz": 5_000, "san_marino": 4_000,
+    # Мир
+    "washington_dc": 700_000, "ottawa": 1_000_000, "mexico_city": 9_200_000,
+    "brasilia": 3_000_000, "buenos_aires": 3_050_000, "santiago": 6_200_000,
+    "bogota": 7_400_000, "lima": 9_700_000, "caracas": 2_000_000, "quito": 1_900_000,
+    "tokyo": 13_900_000, "beijing": 21_500_000, "seoul": 9_700_000, "new_delhi": 30_000_000,
+    "jakarta": 10_600_000, "bangkok": 10_700_000, "kuala_lumpur": 1_800_000,
+    "singapore": 5_900_000, "manila": 13_000_000, "hanoi": 8_000_000, "islamabad": 1_100_000,
+    "dhaka": 10_300_000, "colombo": 750_000, "kathmandu": 1_000_000, "kabul": 4_600_000,
+    "riyadh": 7_600_000, "abu_dhabi": 1_500_000, "tehran": 9_000_000, "baghdad": 7_500_000,
+    "ankara": 5_700_000, "jerusalem": 950_000, "amman": 4_000_000, "beirut": 2_400_000,
+    "damascus": 2_500_000, "cairo": 10_000_000, "nairobi": 4_400_000, "lagos": 15_000_000,
+    "johannesburg": 5_600_000, "accra": 2_500_000, "casablanca": 3_700_000,
+    "tunis": 2_700_000, "algiers": 3_500_000, "addis_ababa": 5_000_000,
+    "kinshasa": 17_000_000, "canberra": 460_000, "wellington": 210_000,
+    "tashkent": 2_900_000, "yerevan": 1_100_000,
+    # Tier-1 глобальные
+    "new_york": 8_400_000, "shanghai": 27_000_000, "hong_kong": 7_500_000,
+    "dubai": 3_600_000, "sydney": 5_300_000, "frankfurt": 770_000, "chicago": 2_700_000,
+    "los_angeles": 4_000_000, "zurich": 435_000, "toronto": 3_000_000, "mumbai": 20_000_000,
+    "sao_paulo": 12_300_000, "istanbul": 15_500_000, "milan": 1_400_000, "taipei": 2_600_000,
+    "tel_aviv": 460_000,
+    # DACH
+    "hamburg": 1_900_000, "munich": 1_500_000, "cologne": 1_100_000, "stuttgart": 630_000,
+    "dusseldorf": 620_000, "leipzig": 600_000, "dortmund": 590_000, "bremen": 570_000,
+    "graz": 290_000, "linz": 205_000, "salzburg": 155_000, "innsbruck": 130_000,
+    "geneva": 200_000, "basel": 175_000, "lausanne": 140_000,
+    # LATAM
+    "rio_de_janeiro": 6_700_000, "salvador": 2_900_000, "fortaleza": 2_700_000,
+    "cordoba": 1_400_000, "rosario": 1_300_000, "guadalajara": 1_500_000,
+    "monterrey": 1_100_000, "medellin": 2_500_000, "cali": 2_200_000,
+    "montevideo": 1_300_000, "asuncion": 520_000, "la_paz": 800_000, "havana": 2_100_000,
+    "santo_domingo": 1_000_000, "san_jose": 340_000, "panama_city": 880_000,
+}
+# Своё население приоритетнее (RU/CIS) — intl только добавляет отсутствующее.
+for _slug, _pop in _INTL_POPULATION.items():
+    CITY_POPULATION.setdefault(_slug, _pop)
+
+
+def city_population(city_slug: str) -> int | None:
+    """Население города по city_slug (или None, если неизвестно)."""
+    return CITY_POPULATION.get((city_slug or "").strip().lower())
+
+
+def enrich_with_population(cities: list[dict]) -> list[dict]:
+    """Проставить поле `population` каждому городу по city_slug (in-place-safe копия)."""
+    from services.username_engine import slugify
+    out: list[dict] = []
+    for c in cities:
+        slug = c.get("city_slug") or slugify(c.get("city", ""))
+        out.append({**c, "population": city_population(slug)})
+    return out
+
+
+def filter_by_population(cities: list[dict], min_pop: int) -> list[dict]:
+    """Оставить города с известным населением >= min_pop.
+
+    Города без данных о населении ИСКЛЮЧАЮТСЯ (нельзя честно утверждать, что они
+    проходят порог) — так «города >50 000» не тянет случайные записи без данных.
+    min_pop<=0 → фильтр не применяется (вернуть как есть).
+    """
+    if min_pop <= 0:
+        return list(cities)
+    from services.username_engine import slugify
+    out: list[dict] = []
+    for c in cities:
+        pop = c.get("population")
+        if pop is None:
+            pop = city_population(c.get("city_slug") or slugify(c.get("city", "")))
+        if pop is not None and pop >= min_pop:
+            out.append(c)
+    return out
+
+
+# ── Федеральные округа РФ (иерархия «Федеральный → Региональный → Городской») ──
+# Регион хранится по-английски (как в RUSSIA_CITIES). Округ — по-русски (для
+# отображения дерева). Отсутствие региона в карте → округ неизвестен (None).
+RU_FEDERAL_DISTRICTS: dict[str, str] = {
+    # Центральный
+    "Moscow": "Центральный ФО",
+    "Voronezh Oblast": "Центральный ФО",
+    "Yaroslavl Oblast": "Центральный ФО",
+    # Северо-Западный
+    "Saint Petersburg": "Северо-Западный ФО",
+    # Южный
+    "Krasnodar Krai": "Южный ФО",
+    "Rostov Oblast": "Южный ФО",
+    "Volgograd Oblast": "Южный ФО",
+    # Северо-Кавказский
+    "Dagestan": "Северо-Кавказский ФО",
+    # Приволжский
+    "Bashkortostan": "Приволжский ФО",
+    "Nizhny Novgorod Oblast": "Приволжский ФО",
+    "Orenburg Oblast": "Приволжский ФО",
+    "Perm Krai": "Приволжский ФО",
+    "Samara Oblast": "Приволжский ФО",
+    "Saratov Oblast": "Приволжский ФО",
+    "Tatarstan": "Приволжский ФО",
+    "Udmurtia": "Приволжский ФО",
+    # Уральский
+    "Chelyabinsk Oblast": "Уральский ФО",
+    "Sverdlovsk Oblast": "Уральский ФО",
+    "Tyumen Oblast": "Уральский ФО",
+    # Сибирский
+    "Altai Krai": "Сибирский ФО",
+    "Irkutsk Oblast": "Сибирский ФО",
+    "Kemerovo Oblast": "Сибирский ФО",
+    "Krasnoyarsk Krai": "Сибирский ФО",
+    "Novosibirsk Oblast": "Сибирский ФО",
+    "Omsk Oblast": "Сибирский ФО",
+    "Tomsk Oblast": "Сибирский ФО",
+    # Дальневосточный
+    "Khabarovsk Krai": "Дальневосточный ФО",
+    "Primorsky Krai": "Дальневосточный ФО",
+}
+
+
+def federal_district(region: str) -> str | None:
+    """Федеральный округ РФ по названию региона (или None, если не РФ/неизвестен)."""
+    return RU_FEDERAL_DISTRICTS.get((region or "").strip())
+
+
+def group_by_region(cities: list[dict]) -> dict[str, list[dict]]:
+    """{регион: [города]} — сохраняет порядок появления регионов."""
+    out: dict[str, list[dict]] = {}
+    for c in cities:
+        out.setdefault(c.get("region") or "—", []).append(c)
+    return out
+
+
+def group_by_federal_district(cities: list[dict]) -> dict[str, dict[str, list[dict]]]:
+    """{федеральный округ: {регион: [города]}} для РФ.
+
+    Регионы без известного округа собираются под «Прочие регионы», чтобы ни один
+    город не потерялся из дерева. Города не-РФ группируются под своим регионом
+    как есть (округ им не применим).
+    """
+    out: dict[str, dict[str, list[dict]]] = {}
+    for c in cities:
+        region = c.get("region") or "—"
+        cc = (c.get("country_code") or "").lower()
+        level = federal_district(region) if cc == "ru" else None
+        level = level or ("Прочие регионы" if cc == "ru" else region)
+        out.setdefault(level, {}).setdefault(region, []).append(c)
+    return out
+
+
+# ── Внутригородские районы/округа (4-й уровень: город → район) ────────────────
+# Ключ — city_slug. Значение — список {name (короткое, для меток), native
+# (для подстановки в названия через {{SCOPE}}), slug (для username)}.
+# Покрыты примеры из видения: Москва (12 адм. округов), СПб (15 районов),
+# Сочи (4 района: Адлерский…). Отсутствие города = разбиение недоступно.
+CITY_DISTRICTS: dict[str, list[dict]] = {
+    "moscow": [
+        {"name": "ЦАО", "native": "Центральный округ", "slug": "cao"},
+        {"name": "САО", "native": "Северный округ", "slug": "sao"},
+        {"name": "СВАО", "native": "Северо-Восточный округ", "slug": "svao"},
+        {"name": "ВАО", "native": "Восточный округ", "slug": "vao"},
+        {"name": "ЮВАО", "native": "Юго-Восточный округ", "slug": "yuvao"},
+        {"name": "ЮАО", "native": "Южный округ", "slug": "yuao"},
+        {"name": "ЮЗАО", "native": "Юго-Западный округ", "slug": "yuzao"},
+        {"name": "ЗАО", "native": "Западный округ", "slug": "zao"},
+        {"name": "СЗАО", "native": "Северо-Западный округ", "slug": "szao"},
+        {"name": "ЗелАО", "native": "Зеленоградский округ", "slug": "zelao"},
+        {"name": "НАО", "native": "Новомосковский округ", "slug": "nao"},
+        {"name": "ТАО", "native": "Троицкий округ", "slug": "tao"},
+    ],
+    "saint_petersburg": [
+        {"name": "Адмиралтейский", "native": "Адмиралтейский район", "slug": "admiralteysky"},
+        {"name": "Василеостровский", "native": "Василеостровский район", "slug": "vasileostrovsky"},
+        {"name": "Выборгский", "native": "Выборгский район", "slug": "vyborgsky"},
+        {"name": "Калининский", "native": "Калининский район", "slug": "kalininsky"},
+        {"name": "Кировский", "native": "Кировский район", "slug": "kirovsky"},
+        {"name": "Колпинский", "native": "Колпинский район", "slug": "kolpinsky"},
+        {"name": "Красногвардейский", "native": "Красногвардейский район", "slug": "krasnogvardeysky"},
+        {"name": "Красносельский", "native": "Красносельский район", "slug": "krasnoselsky"},
+        {"name": "Московский", "native": "Московский район", "slug": "moskovsky"},
+        {"name": "Невский", "native": "Невский район", "slug": "nevsky"},
+        {"name": "Петроградский", "native": "Петроградский район", "slug": "petrogradsky"},
+        {"name": "Приморский", "native": "Приморский район", "slug": "primorsky"},
+        {"name": "Пушкинский", "native": "Пушкинский район", "slug": "pushkinsky"},
+        {"name": "Фрунзенский", "native": "Фрунзенский район", "slug": "frunzensky"},
+        {"name": "Центральный", "native": "Центральный район", "slug": "tsentralny"},
+    ],
+    "sochi": [
+        {"name": "Адлерский", "native": "Адлерский район", "slug": "adler"},
+        {"name": "Хостинский", "native": "Хостинский район", "slug": "khosta"},
+        {"name": "Центральный", "native": "Центральный район", "slug": "tsentralny"},
+        {"name": "Лазаревский", "native": "Лазаревский район", "slug": "lazarevskoe"},
+    ],
+}
+
+
+def city_districts(city_slug: str) -> list[dict]:
+    """Список районов/округов города (пусто, если разбиение недоступно)."""
+    return CITY_DISTRICTS.get((city_slug or "").strip().lower(), [])
+
+
+def expand_city_to_districts(city: dict) -> list[dict]:
+    """Развернуть город в узлы-районы (4-й уровень дерева).
+
+    Совместимо со scope-моделью presence_planner: у каждого узла проставлены
+    scope/scope_slug (имя района) — шаблон «Новости {{SCOPE}}» даст «Новости
+    Адлерский район», а city_slug = город_район делает username уникальным.
+    Город без данных о районах → возвращается сам город (без разбиения).
+    """
+    from services.username_engine import slugify
+    slug = city.get("city_slug") or slugify(city.get("city", ""))
+    districts = city_districts(slug)
+    if not districts:
+        return [city]
+    out: list[dict] = []
+    for d in districts:
+        out.append({
+            **city,
+            "scope": d["native"],
+            "scope_slug": d["slug"],
+            "district": d["native"],
+            "district_slug": d["slug"],
+            "city_slug": f"{slug}_{d['slug']}",
+        })
+    return out

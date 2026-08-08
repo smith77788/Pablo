@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+data/
+*.db
+*.sqlite
+.DS_Store
+.claude/
+platform/apps/web/tsconfig.tsbuildinfo

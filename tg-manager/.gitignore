@@ -1,0 +1,6 @@
+
+.pytest_cache/
+tests/__pycache__/
+
+# Render-артефакты mini-app (deploy/scripts/render_miniapp.mjs)
+miniapp_*.png

@@ -1,0 +1,8 @@
+{
+  "name": "@platform/clickhouse",
+  "version": "0.0.1",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@clickhouse/client": "^1.0.0"
+  }
+}
