@@ -733,6 +733,36 @@ _ACC_COLS = (
 )
 
 
+def _acc_has_bound_proxy(acc) -> bool:
+    """Привязан ли аккаунт к КОНКРЕТНОМУ прокси: назначен proxy_id ЛИБО есть активный
+    proxy_url. Зеркалит `has_assigned_proxy` в account_manager._resolve_client_proxy.
+
+    Аккаунт БЕЗ такой привязки ходит напрямую/через пул — его сбой подключения это НЕ
+    «прокси недоступен», и смена IP ему auth key не ломает (нет IP, к которому сессия
+    привязана). Поэтому советовать такому аккаунту «исправьте прокси» — ложь, которая
+    уводит пользователя чинить несуществующую проблему."""
+    try:
+        return bool(acc.get("proxy_id")) or bool(str(acc.get("proxy_url") or "").strip())
+    except AttributeError:
+        return False
+
+
+def _proxy_skip_reason(acc) -> tuple[str, str]:
+    """(текст в лог, текст пользователю) при изоляции аккаунта после proxy_error в
+    bound-режиме. Для привязанного к прокси — «исправьте прокси»; для аккаунта, которому
+    прокси НЕ назначали, — честно про сессию/сеть (см. `_acc_has_bound_proxy`)."""
+    if _acc_has_bound_proxy(acc):
+        return (
+            "прокси недоступен — пропуск оставшихся (смена IP ломает auth key)",
+            "❌ Прокси недоступен — смена IP ломает auth key. Исправьте прокси.",
+        )
+    return (
+        "без назначенного прокси не подключился (сессия/сеть) — пропуск оставшихся",
+        "❌ Не удалось подключиться (сессия/сеть). Аккаунту прокси не назначен — "
+        "проверьте сеть/сессию или назначьте прокси (это не проблема прокси).",
+    )
+
+
 def interleave_by_source(pairs: list) -> list:
     """Разложить цели так, чтобы соседние шли из РАЗНЫХ источников.
 
@@ -2882,16 +2912,17 @@ async def _exec_bulk_join_inner(
                 # Proxy error → do NOT retry with different IP (causes auth key collision).
                 # Instead, mark account as proxy-broken and skip remaining links.
                 if res.get("proxy_error") and proxy_mode == "bound":
-                    log.warning(
-                        "bulk_join: прокси недоступен acc=%s — пропуск оставшихся ссылок (смена IP ломает auth key)",
-                        acc_dict.get("phone", "?"),
-                    )
+                    # Изолируем аккаунт (транспорт-клиент переиспользуется на все ссылки —
+                    # после сбоя подключения следующие ссылки всё равно упадут так же).
+                    # НО причину даём честную: аккаунту без назначенного прокси нельзя
+                    # писать «исправьте прокси» — это уводит чинить несуществующее.
+                    _logmsg, _usermsg = _proxy_skip_reason(acc)
+                    log.warning("bulk_join: acc=%s %s", acc_dict.get("phone", "?"), _logmsg)
                     await _safe_execute(
                         pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                         " VALUES($1,$2,$3,'error',$4)",
-                        op_id, step, link,
-                        f"❌ Прокси недоступен — смена IP ломает auth key. Исправьте прокси.",
+                        op_id, step, link, _usermsg,
                         log_ctx=f"[bulk_join_proxy_skip op={op_id}]",
                     )
                     isolated_accounts.add(acc["id"])
@@ -3193,17 +3224,14 @@ async def _exec_bulk_leave(
                 )
                 # Proxy error → do NOT retry with different IP (causes auth key collision).
                 if res.get("proxy_error") and proxy_mode == "bound":
-                    log.warning(
-                        "bulk_leave: прокси недоступен acc=%s — пропуск оставшихся (смена IP ломает auth key)",
-                        acc_dict.get("phone", "?"),
-                    )
+                    _logmsg, _usermsg = _proxy_skip_reason(acc)
+                    log.warning("bulk_leave: acc=%s %s", acc_dict.get("phone", "?"), _logmsg)
                     await _safe_execute(
                         pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                         " VALUES($1,$2,$3,'error',$4)",
-                        op_id, step, str(channel),
-                        f"❌ Прокси недоступен — смена IP ломает auth key. Исправьте прокси.",
-                    log_ctx=f"[bulk_leave_proxy_skip op={op_id}]",
+                        op_id, step, str(channel), _usermsg,
+                        log_ctx=f"[bulk_leave_proxy_skip op={op_id}]",
                     )
                     break  # stop all remaining channels for this account
                 if not res.get("ok"):
