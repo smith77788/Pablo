@@ -11,4 +11,5 @@
 `WORKING_STANDARD.md`, `QUALITY_STANDARD.md`, `SECURITY.md`, `TESTING.md`,
 `RELEASE_GATES.md`, `DATABASE.md`, `API.md`, `UI_GUIDELINES.md`.
 
-Журнал памяти между сессиями — `AUDIT_LEDGER.md`.
+Персистентной памяти/журнала между сессиями нет — источник истины только код и
+тесты в репозитории; отдельный файл-«память»/журнал находок не заводить.

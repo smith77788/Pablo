@@ -4,3 +4,7 @@ tests/__pycache__/
 
 # Render-артефакты mini-app (deploy/scripts/render_miniapp.mjs)
 miniapp_*.png
+
+# Персистентная память/журнал агента удалены намеренно — не воссоздавать.
+# Если файл появится снова, он не должен попасть в git.
+docs/AUDIT_LEDGER.md
