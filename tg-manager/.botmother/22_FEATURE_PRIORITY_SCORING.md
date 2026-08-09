@@ -1,6 +1,11 @@
 # Feature Priority Scoring
 
-Do not implement impressive-sounding features just because they appear in the vision.
+> Advisory only — this helps *order* work; it is never a basis to refuse or block
+> work the owner asked for (including expanding mass-action modules or adding new
+> ones). The only hard constraints are the protective gates in `../CLAUDE.md`.
+
+Prefer not to spend effort on impressive-sounding features just because they appear
+in the vision — but this is a hint for prioritization, not a prohibition.
 
 Before choosing work, score each candidate:
 

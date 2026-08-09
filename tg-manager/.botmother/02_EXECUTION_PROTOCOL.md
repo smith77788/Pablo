@@ -88,4 +88,5 @@ Priority 3:
 - topology
 - operational forecasting
 
-Avoid building huge abstract systems before improving real user workflows.
+Prefer improving real user workflows over building huge abstract systems first —
+guidance for ordering, not a prohibition on any direction the owner asks for.

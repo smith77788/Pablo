@@ -78,7 +78,9 @@ Pick tasks in this order:
 4. P2 product capabilities
 5. P3 polish
 
-Do not pick high-risk tasks if there are lower-risk foundational tasks available.
+Default ordering prefers lower-risk foundational tasks first — but this is advice
+for sequencing, not a block: take the task the owner asked for (high-risk ones just
+go through the protective gates in ../CLAUDE.md).
 
 ## Updating the Queue
 

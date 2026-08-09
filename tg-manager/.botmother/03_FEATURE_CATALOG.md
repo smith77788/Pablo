@@ -1,6 +1,7 @@
 # Infragram Feature Catalog (compact)
 
-Reference for feature scope. Pick highest-priority gaps per CLAUDE.md priority order.
+Reference for feature scope (advisory, not a restriction). Pick work by owner
+priority; expanding any area here — including mass-action modules — is allowed.
 
 ## Account Management
 connect · QR login · phone login · session import (StringSession/Pyrogram/tdata) · proxy binding · tags · pools · roles · health score · activity history · asset discovery · ecosystem assignment · regional assignment · warmup · auto-rotation
