@@ -49,7 +49,7 @@ def test_make_client_wires_ipv6_priority_over_relay():
     am = _read("services/account_manager.py")
     assert "def _account_ipv6" in am
     assert '_IPV6_SUBNET = _os.getenv("IPV6_SUBNET"' in am
-    seg = am[am.index("has_bound_proxy = bool(proxy)"):am.index("return TelegramClient")]
+    seg = am[am.index("has_bound_proxy = bool(proxy)"):am.index("_client = TelegramClient")]
     # IPv6 выбирается ДО ветки CF-релея (приоритет — реальный уникальный IP)
     assert seg.index("if not has_bound_proxy and _subnet and _acc_id") < seg.index("elif not has_bound_proxy and relay_url")
     assert "local_addr = _v6" in seg and "use_ipv6 = True" in seg

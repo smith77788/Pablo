@@ -21,7 +21,7 @@ def _read(rel: str) -> str:
 
 def test_per_account_relay_used_in_make_client():
     am = _read("services/account_manager.py")
-    seg = am[am.index("Выбор транспорта"):am.index("return TelegramClient")]
+    seg = am[am.index("Выбор транспорта"):am.index("_client = TelegramClient")]
     # приоритет пер-аккаунтного relay над глобальным env
     assert 'device.get("cf_relay_url")' in seg
     assert "acc_relay or CF_RELAY_URL" in seg
