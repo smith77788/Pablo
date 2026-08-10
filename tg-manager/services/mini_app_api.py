@@ -40,6 +40,125 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 30  # секунд
 
+# Инлайн-миграции схемы (self-heal при старте mini_app через on_startup).
+# Единый источник истины: применяются в проде _apply_inline_migrations, а в
+# e2e-тестах — тем же списком, чтобы тестовая БД совпадала с продовой схемой
+# (schema_v*.sql их НЕ содержат).
+INLINE_MIGRATIONS: list[str] = [
+    "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
+    "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
+    # Сигнал активности канала (для ecosystem auto_remove + аналитики):
+    # проставляется при реальной публикации (op_worker._exec_mass_publish).
+    "ALTER TABLE managed_channels ADD COLUMN IF NOT EXISTS last_post_at TIMESTAMPTZ",
+    # tg_accounts — добавляем поля если отсутствуют
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMPTZ",
+    # user_proxies — полная схема
+    """CREATE TABLE IF NOT EXISTS user_proxies (
+        id SERIAL PRIMARY KEY,
+        owner_id BIGINT NOT NULL,
+        label TEXT DEFAULT '',
+        proxy_url TEXT NOT NULL,
+        proxy_type TEXT DEFAULT 'socks5',
+        is_active BOOLEAN DEFAULT true,
+        is_alive BOOLEAN DEFAULT true,
+        last_check TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        UNIQUE(owner_id, proxy_url)
+    )""",
+    # auto_funnels — создаём если нет
+    """CREATE TABLE IF NOT EXISTS auto_funnels (
+        id SERIAL PRIMARY KEY,
+        owner_id BIGINT NOT NULL,
+        bot_id BIGINT,
+        name TEXT NOT NULL,
+        target_segment TEXT DEFAULT 'all',
+        enabled BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "ALTER TABLE auto_funnels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
+    """CREATE TABLE IF NOT EXISTS auto_funnel_steps (
+        id SERIAL PRIMARY KEY,
+        funnel_id INTEGER NOT NULL,
+        step_num INTEGER DEFAULT 1,
+        message_text TEXT,
+        delay_hours INTEGER DEFAULT 0,
+        completed BOOLEAN DEFAULT false
+    )""",
+    "ALTER TABLE auto_funnel_steps ADD COLUMN IF NOT EXISTS step_num INTEGER DEFAULT 1",
+    """CREATE TABLE IF NOT EXISTS auto_funnel_runs (
+        id SERIAL PRIMARY KEY,
+        funnel_id INTEGER NOT NULL,
+        user_id BIGINT,
+        status TEXT DEFAULT 'active',
+        started_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    # platform_users — settings_json column
+    "ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS settings_json TEXT",
+    # account_warmup_plans — создаём если нет
+    """CREATE TABLE IF NOT EXISTS account_warmup_plans (
+        id             BIGSERIAL PRIMARY KEY,
+        owner_id       BIGINT NOT NULL,
+        account_id     BIGINT NOT NULL,
+        plan_type      TEXT NOT NULL DEFAULT 'standard',
+        current_day    INT  DEFAULT 0,
+        target_days    INT  DEFAULT 14,
+        daily_actions  INT  DEFAULT 5,
+        status         TEXT DEFAULT 'active',
+        started_at     TIMESTAMPTZ DEFAULT now(),
+        completed_at   TIMESTAMPTZ,
+        last_action_at TIMESTAMPTZ,
+        meta           JSONB DEFAULT '{}'
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_warmup_account ON account_warmup_plans(account_id)",
+    # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
+    # crm_deals: fix stage CHECK constraint (schema had 'new/contacted/qualified',
+    # API and JS use 'lead/contact/proposal/negotiation')
+    "ALTER TABLE crm_deals ALTER COLUMN stage SET DEFAULT 'lead'",
+    "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
+    "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
+    "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
+    # Automation Workflows
+    """CREATE TABLE IF NOT EXISTS automation_workflows (
+        id BIGSERIAL PRIMARY KEY,
+        owner_id BIGINT NOT NULL,
+        name TEXT NOT NULL,
+        steps JSONB NOT NULL DEFAULT '[]',
+        status TEXT DEFAULT 'created',
+        created_at TIMESTAMPTZ DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_wf_owner ON automation_workflows(owner_id, created_at DESC)",
+    """CREATE TABLE IF NOT EXISTS workflow_step_runs (
+        id BIGSERIAL PRIMARY KEY,
+        workflow_id BIGINT NOT NULL REFERENCES automation_workflows(id) ON DELETE CASCADE,
+        step_num INTEGER NOT NULL,
+        action TEXT NOT NULL DEFAULT '',
+        params JSONB DEFAULT '{}',
+        status TEXT DEFAULT 'pending',
+        label TEXT DEFAULT '',
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        result_data JSONB DEFAULT '{}'
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_wf_steps_wf ON workflow_step_runs(workflow_id, step_num)",
+    """CREATE TABLE IF NOT EXISTS workflow_step_logs (
+        id BIGSERIAL PRIMARY KEY,
+        workflow_id BIGINT NOT NULL,
+        step_num INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT '',
+        message TEXT DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
+]
+
 def _cached(key: str, ttl: int = _CACHE_TTL):
     """Декоратор для кэширования результатов."""
     def wrapper(fn):
@@ -718,120 +837,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.middlewares.append(security_middleware())
 
     async def _apply_inline_migrations(application: web.Application) -> None:
-        stmts = [
-            "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
-            "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
-            # Сигнал активности канала (для ecosystem auto_remove + аналитики):
-            # проставляется при реальной публикации (op_worker._exec_mass_publish).
-            "ALTER TABLE managed_channels ADD COLUMN IF NOT EXISTS last_post_at TIMESTAMPTZ",
-            # tg_accounts — добавляем поля если отсутствуют
-            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
-            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
-            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMPTZ",
-            # user_proxies — полная схема
-            """CREATE TABLE IF NOT EXISTS user_proxies (
-                id SERIAL PRIMARY KEY,
-                owner_id BIGINT NOT NULL,
-                label TEXT DEFAULT '',
-                proxy_url TEXT NOT NULL,
-                proxy_type TEXT DEFAULT 'socks5',
-                is_active BOOLEAN DEFAULT true,
-                is_alive BOOLEAN DEFAULT true,
-                last_check TIMESTAMPTZ,
-                created_at TIMESTAMPTZ DEFAULT now(),
-                UNIQUE(owner_id, proxy_url)
-            )""",
-            # auto_funnels — создаём если нет
-            """CREATE TABLE IF NOT EXISTS auto_funnels (
-                id SERIAL PRIMARY KEY,
-                owner_id BIGINT NOT NULL,
-                bot_id BIGINT,
-                name TEXT NOT NULL,
-                target_segment TEXT DEFAULT 'all',
-                enabled BOOLEAN DEFAULT true,
-                created_at TIMESTAMPTZ DEFAULT now(),
-                updated_at TIMESTAMPTZ DEFAULT now()
-            )""",
-            "ALTER TABLE auto_funnels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
-            """CREATE TABLE IF NOT EXISTS auto_funnel_steps (
-                id SERIAL PRIMARY KEY,
-                funnel_id INTEGER NOT NULL,
-                step_num INTEGER DEFAULT 1,
-                message_text TEXT,
-                delay_hours INTEGER DEFAULT 0,
-                completed BOOLEAN DEFAULT false
-            )""",
-            "ALTER TABLE auto_funnel_steps ADD COLUMN IF NOT EXISTS step_num INTEGER DEFAULT 1",
-            """CREATE TABLE IF NOT EXISTS auto_funnel_runs (
-                id SERIAL PRIMARY KEY,
-                funnel_id INTEGER NOT NULL,
-                user_id BIGINT,
-                status TEXT DEFAULT 'active',
-                started_at TIMESTAMPTZ DEFAULT now()
-            )""",
-            # platform_users — settings_json column
-            "ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS settings_json TEXT",
-            # account_warmup_plans — создаём если нет
-            """CREATE TABLE IF NOT EXISTS account_warmup_plans (
-                id             BIGSERIAL PRIMARY KEY,
-                owner_id       BIGINT NOT NULL,
-                account_id     BIGINT NOT NULL,
-                plan_type      TEXT NOT NULL DEFAULT 'standard',
-                current_day    INT  DEFAULT 0,
-                target_days    INT  DEFAULT 14,
-                daily_actions  INT  DEFAULT 5,
-                status         TEXT DEFAULT 'active',
-                started_at     TIMESTAMPTZ DEFAULT now(),
-                completed_at   TIMESTAMPTZ,
-                last_action_at TIMESTAMPTZ,
-                meta           JSONB DEFAULT '{}'
-            )""",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_warmup_account ON account_warmup_plans(account_id)",
-            # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
-            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
-            "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
-            # crm_deals: fix stage CHECK constraint (schema had 'new/contacted/qualified',
-            # API and JS use 'lead/contact/proposal/negotiation')
-            "ALTER TABLE crm_deals ALTER COLUMN stage SET DEFAULT 'lead'",
-            "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
-            "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
-            "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
-            # Automation Workflows
-            """CREATE TABLE IF NOT EXISTS automation_workflows (
-                id BIGSERIAL PRIMARY KEY,
-                owner_id BIGINT NOT NULL,
-                name TEXT NOT NULL,
-                steps JSONB NOT NULL DEFAULT '[]',
-                status TEXT DEFAULT 'created',
-                created_at TIMESTAMPTZ DEFAULT now(),
-                started_at TIMESTAMPTZ,
-                finished_at TIMESTAMPTZ,
-                updated_at TIMESTAMPTZ DEFAULT now()
-            )""",
-            "CREATE INDEX IF NOT EXISTS idx_wf_owner ON automation_workflows(owner_id, created_at DESC)",
-            """CREATE TABLE IF NOT EXISTS workflow_step_runs (
-                id BIGSERIAL PRIMARY KEY,
-                workflow_id BIGINT NOT NULL REFERENCES automation_workflows(id) ON DELETE CASCADE,
-                step_num INTEGER NOT NULL,
-                action TEXT NOT NULL DEFAULT '',
-                params JSONB DEFAULT '{}',
-                status TEXT DEFAULT 'pending',
-                label TEXT DEFAULT '',
-                started_at TIMESTAMPTZ,
-                finished_at TIMESTAMPTZ,
-                result_data JSONB DEFAULT '{}'
-            )""",
-            "CREATE INDEX IF NOT EXISTS idx_wf_steps_wf ON workflow_step_runs(workflow_id, step_num)",
-            """CREATE TABLE IF NOT EXISTS workflow_step_logs (
-                id BIGSERIAL PRIMARY KEY,
-                workflow_id BIGINT NOT NULL,
-                step_num INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT '',
-                message TEXT DEFAULT '',
-                created_at TIMESTAMPTZ DEFAULT now()
-            )""",
-            "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
-        ]
+        stmts = INLINE_MIGRATIONS
         for stmt in stmts:
             try:
                 await pool.execute(stmt)

@@ -81,6 +81,14 @@ class _Stand:
             return {"status": "blocked", "error": "UserPrivacyRestricted"}
         return {"status": "sent"}
 
+    async def _post_to_channel(self, session, ref, text, **k):
+        if self.mode == "error":
+            return {"error": "ChatWriteForbidden"}
+        return {"resolved_access_hash": 0}
+
+    async def _get_dialogs(self, session, limit=None, _acc=None):
+        return []  # пре-скан access_hash в mass_publish — пусто, безвредно
+
     async def seed(self, *, accounts=2):
         p = self.pool
         await p.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER)
@@ -110,6 +118,21 @@ class _Stand:
         return await p.fetchval(
             "INSERT INTO dm_campaigns(owner_id,name,text_template,target_type,status) "
             "VALUES($1,'e2e','Привет','crm','pending') RETURNING id", OWNER)
+
+    async def seed_channels(self, *, channels=3):
+        """Аккаунт-владелец + managed_channels для mass_publish."""
+        p = self.pool
+        ids = await self.seed(accounts=1)
+        acc_id = ids[0]
+        await p.execute("DELETE FROM managed_channels WHERE owner_id=$1", OWNER)
+        chan_ids = []
+        for i in range(channels):
+            cid = 100000 + i
+            chan_ids.append(cid)
+            await p.execute(
+                "INSERT INTO managed_channels(owner_id,acc_id,channel_id,title,username,access_hash) "
+                "VALUES($1,$2,$3,$4,$5,0)", OWNER, acc_id, cid, f"Ch{i}", f"chan{i}")
+        return acc_id, chan_ids
 
     async def run(self, op_type, params, total=1):
         """Поставить операцию тем же SQL, что и хендлер, и провести воркером."""
@@ -153,6 +176,17 @@ def stand():
                 await conn.execute(open(f, encoding="utf-8").read())
             except Exception:
                 pass  # схемы идемпотентны; частичный сбой не рушит прогон
+        # Прод-достоверность: schema_v*.sql — НЕ вся схема. Часть колонок/таблиц
+        # заводится инлайн-миграциями mini_app при старте (on_startup). Без них
+        # тестовая БД отличается от продовой, и операции, пишущие в такие колонки
+        # (напр. managed_channels.last_post_at в mass_publish), молчано-опят —
+        # e2e перестаёт отражать реальность. Накатываем тем же списком-источником.
+        from services.mini_app_api import INLINE_MIGRATIONS
+        for stmt in INLINE_MIGRATIONS:
+            try:
+                await conn.execute(stmt)
+            except Exception:
+                pass
         await conn.close()
         return await asyncpg.create_pool(DSN, min_size=1, max_size=4)
 
@@ -173,6 +207,8 @@ def stand():
         "report_peer": reporter_engine.report_peer,
         "report_message": reporter_engine.report_message,
         "send_dm": dm_engine.send_dm,
+        "post_to_channel": account_manager.post_to_channel,
+        "get_dialogs": account_manager.get_dialogs,
         "sleep": w.asyncio.sleep,
         "dm_sleep": dm_engine.asyncio.sleep,
     }
@@ -181,6 +217,8 @@ def stand():
     reporter_engine.report_peer = s._report_peer
     reporter_engine.report_message = s._report_message
     dm_engine.send_dm = s._send_dm
+    account_manager.post_to_channel = s._post_to_channel
+    account_manager.get_dialogs = s._get_dialogs
 
     _sleep = asyncio.sleep
 
@@ -196,6 +234,8 @@ def stand():
     reporter_engine.report_peer = _orig["report_peer"]
     reporter_engine.report_message = _orig["report_message"]
     dm_engine.send_dm = _orig["send_dm"]
+    account_manager.post_to_channel = _orig["post_to_channel"]
+    account_manager.get_dialogs = _orig["get_dialogs"]
     w.asyncio.sleep = _orig["sleep"]
     dm_engine.asyncio.sleep = _orig["dm_sleep"]
     _run(pool.close())
@@ -314,3 +354,26 @@ def test_dm_campaign_blocked_targets_counted(stand):
     blocked = _run(stand.pool.fetchval(
         "SELECT COUNT(*) FROM dm_campaign_log WHERE campaign_id=$1 AND status='blocked'", cid))
     assert blocked == contacts
+
+
+# ── mass_publish (публикация во все каналы владельца + сигнал активности) ─────
+
+def test_mass_publish_happy_path_sets_activity_signal(stand):
+    stand.mode = "ok"
+    channels = 3
+    _acc_id, chan_ids = _run(stand.seed_channels(channels=channels))
+    params = {"target": "channels", "text": "Привет, друзья!"}
+    row = _run(stand.run("mass_publish", params, total=0))
+    assert row["status"] == "done", row["error_msg"]
+    assert row["done_items"] == channels
+    counts = _run(stand.log_counts())
+    assert counts.get("ok") == channels
+    # Ключевое: реальная публикация проставляет managed_channels.last_post_at —
+    # сигнал активности, который кормит ecosystem auto_remove_dead_channels. Колонка
+    # существует ТОЛЬКО благодаря инлайн-миграциям (в schema_v*.sql её нет) — тест
+    # заодно стережёт прод-достоверность стенда: без наката INLINE_MIGRATIONS этот
+    # SELECT упал бы «column does not exist».
+    posted = _run(stand.pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels "
+        "WHERE owner_id=$1 AND last_post_at IS NOT NULL", OWNER))
+    assert posted == channels
