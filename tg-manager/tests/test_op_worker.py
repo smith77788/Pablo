@@ -353,3 +353,36 @@ class TestBotmotherChannel:
     def test_module_importable(self):
         import services.botmother_channel
         assert hasattr(services.botmother_channel, '__name__')
+
+
+class TestNormalizeResultFailedAlias:
+    """_normalize_result: канонизация счётчика провалов "fail" → "failed".
+
+    Регрессия реального бага: ~25 exec-функций отдают провалы под ключом "fail",
+    а нормализатор статуса в _run_op_task читает "failed". Полностью провальная
+    операция (ok=0, ВСЕ цели упали) приходила как ok=0/failed=0 и помечалась
+    "done" (успех) — пользователь видел успех у пустой рассылки, circuit breaker
+    и pacing получали ложный сигнал успеха. Нормализация алиаса чинит всех сразу.
+    """
+
+    def test_fail_alias_becomes_failed(self):
+        from services.op_worker import _normalize_result
+        r = _normalize_result({"status": "done", "ok": 0, "fail": 3}, "self_promo_blast", 1.0)
+        assert r["failed"] == 3
+        assert r["total"] == 3  # ok(0)+failed(3), а не ok(0)+0
+
+    def test_canonical_failed_key_is_respected(self):
+        from services.op_worker import _normalize_result
+        r = _normalize_result({"status": "done", "ok": 5, "failed": 2}, "bulk_join", 1.0)
+        assert r["failed"] == 2
+
+    def test_no_failure_stays_zero(self):
+        from services.op_worker import _normalize_result
+        r = _normalize_result({"status": "done", "ok": 4}, "mass_publish", 1.0)
+        assert r["failed"] == 0
+
+    def test_failed_takes_precedence_over_fail_when_both_present(self):
+        from services.op_worker import _normalize_result
+        # "failed" каноничен: если он уже есть, "fail" не перетирает его.
+        r = _normalize_result({"status": "done", "ok": 1, "failed": 7, "fail": 999}, "x", 1.0)
+        assert r["failed"] == 7

@@ -54,6 +54,7 @@ class _Stand:
         # режим движка: "ok" → успех, "error" → каждый вызов возвращает ошибку.
         self.mode = "ok"
         self.last_op_id: int | None = None
+        self.bot_sends: list[int] = []  # chat_id'ы, ушедшие через aiogram Bot API
 
     # ── заглушки движка (единственная граница с Telegram) ────────────────────
     async def _join(self, session, ref, _acc=None):
@@ -118,6 +119,29 @@ class _Stand:
         return await p.fetchval(
             "INSERT INTO dm_campaigns(owner_id,name,text_template,target_type,status) "
             "VALUES($1,'e2e','Привет','crm','pending') RETURNING id", OWNER)
+
+    async def seed_promo(self, *, subscribers=4):
+        """managed_bot + подписчики + self_promo шаблон (owner_id — inline-колонка)."""
+        p = self.pool
+        bot_id = 555001
+        token = "555001:AAExampleTokenForTest_1234567890abcd"
+        # bot_id и token — глобально уникальны (не только в рамках owner): чистим
+        # по ним напрямую, иначе остаток от другого owner/прошлого прогона коллизит.
+        await p.execute("DELETE FROM bot_users WHERE bot_id=$1", bot_id)
+        await p.execute("DELETE FROM managed_bots WHERE bot_id=$1 OR token=$2", bot_id, token)
+        await p.execute("DELETE FROM self_promo_templates WHERE owner_id=$1", OWNER)
+        await p.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER)
+        await p.execute(
+            "INSERT INTO managed_bots(bot_id,token,added_by,is_active) VALUES($1,$2,$3,TRUE)",
+            bot_id, token, OWNER)
+        for i in range(subscribers):
+            await p.execute(
+                "INSERT INTO bot_users(bot_id,user_id,is_active) VALUES($1,$2,TRUE)",
+                bot_id, 700000 + i)
+        return await p.fetchval(
+            "INSERT INTO self_promo_templates(owner_id,style,title,content,cta_text,cta_url,is_active) "
+            "VALUES($1,'direct','T','Наш продукт','Открыть','https://t.me/x?start=y',TRUE) "
+            "RETURNING id", OWNER)
 
     async def seed_channels(self, *, channels=3):
         """Аккаунт-владелец + managed_channels для mass_publish."""
@@ -220,6 +244,16 @@ def stand():
     account_manager.post_to_channel = s._post_to_channel
     account_manager.get_dialogs = s._get_dialogs
 
+    import aiogram
+    _orig_bot_send = aiogram.Bot.send_message
+
+    async def _patched_bot_send(self, chat_id, text, **k):
+        s.bot_sends.append(int(chat_id))
+        if s.mode == "error":
+            raise Exception("Forbidden: bot was blocked by the user")
+        return True
+    aiogram.Bot.send_message = _patched_bot_send
+
     _sleep = asyncio.sleep
 
     async def _fast(x):
@@ -228,6 +262,8 @@ def stand():
     dm_engine.asyncio.sleep = _fast  # DM-раннер спит между отправками — гасим
 
     yield s
+
+    aiogram.Bot.send_message = _orig_bot_send
 
     account_manager.join_channel = _orig["join_channel"]
     account_manager.leave_channel = _orig["leave_channel"]
@@ -377,3 +413,38 @@ def test_mass_publish_happy_path_sets_activity_signal(stand):
         "SELECT COUNT(*) FROM managed_channels "
         "WHERE owner_id=$1 AND last_post_at IS NOT NULL", OWNER))
     assert posted == channels
+
+
+# ── self_promo_blast (рассылка подписчикам ботов через Bot API) ──────────────
+# Фильтр по self_promo_templates.owner_id — колонка существует ТОЛЬКО из
+# инлайн-миграций (в schema_v101 её нет). На schema-only стенде запрос упал бы,
+# т.е. без прод-достоверности эта массовая операция вообще непроверяема.
+
+def test_self_promo_blast_happy_path(stand):
+    stand.mode = "ok"
+    stand.bot_sends.clear()
+    subscribers = 4
+    tid = _run(stand.seed_promo(subscribers=subscribers))
+    row = _run(stand.run("self_promo_blast", {"template_id": tid}, total=0))
+    assert row["status"] == "done", row["error_msg"]
+    assert row["done_items"] == subscribers
+    assert len(stand.bot_sends) == subscribers
+    # use_count шаблона инкрементится после рассылки (учёт использования)
+    use_count = _run(stand.pool.fetchval(
+        "SELECT use_count FROM self_promo_templates WHERE id=$1", tid))
+    assert use_count == 1
+
+
+def test_self_promo_blast_deactivates_blockers(stand):
+    stand.mode = "error"  # каждый send → "bot was blocked by the user"
+    stand.bot_sends.clear()
+    subscribers = 3
+    tid = _run(stand.seed_promo(subscribers=subscribers))
+    row = _run(stand.run("self_promo_blast", {"template_id": tid}, total=0))
+    # ни одна не доставлена → op нормализуется в failed, но операция отработала
+    assert row["status"] == "failed", row["error_msg"]
+    # заблокировавшие боты помечаются is_active=FALSE — рассылка самоочищается
+    active_left = _run(stand.pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
+        "WHERE mb.added_by=$1 AND bu.is_active=TRUE", OWNER))
+    assert active_left == 0

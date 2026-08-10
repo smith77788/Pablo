@@ -447,7 +447,13 @@ def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
             result["ok"] = 0
 
     if "failed" not in result:
-        result["failed"] = 0
+        # Историч. разнобой: ~25 exec-функций отдают счётчик провалов под ключом
+        # "fail", а не каноническим "failed". Нормализуем алиас (как для ok выше).
+        # Без этого полностью провальная операция (ok=0, ВСЕ цели упали) приходила
+        # в нормализатор статуса как ok=0/failed=0 → помечалась "done" (успех):
+        # пользователь видел успех у пустой рассылки, а circuit breaker и pacing
+        # получали ложный сигнал успеха (подрыв анти-детекта).
+        result["failed"] = int(result.get("fail", 0) or 0)
 
     if "total" not in result:
         result["total"] = result.get("ok", 0) + result.get("failed", 0)
