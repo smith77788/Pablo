@@ -471,6 +471,7 @@ async def _render_ops(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
     if n == 1:
         kb.row()
         kb.button(text="🧹 Дедуп", callback_data=ParserCb(action="ops_dedup"))
+        kb.button(text="🚻 Определить пол", callback_data=ParserCb(action="ops_gender", run_id=selected[0]))
     if n:
         kb.row()
         kb.button(text="✖️ Сбросить выбор", callback_data=ParserCb(action="ops_reset"))
@@ -577,6 +578,82 @@ async def cb_parser_ops_dedup(callback: CallbackQuery, pool: asyncpg.Pool, state
         callback, state,
         audience_ops.dedup_run(pool, callback.from_user.id, selected[0]),
         "Дедуп базы")
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops_gender"))
+async def cb_parser_ops_gender(
+    callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    from services import gender_classifier as gc
+
+    run_id = callback_data.run_id
+    try:
+        res = await gc.classify_audience(pool, callback.from_user.id, run_id)
+    except Exception:
+        log_exc_swallow(log, "ops_gender classify failed")
+        await callback.answer("Ошибка разметки пола", show_alert=True)
+        return
+    total = res["total"] or 1
+    kb = InlineKeyboardBuilder()
+    if res["m"]:
+        kb.button(text=f"📥 Экспорт 👨 ({res['m']:,})",
+                  callback_data=ParserCb(action="gexp_m", run_id=run_id))
+    if res["f"]:
+        kb.button(text=f"📥 Экспорт 👩 ({res['f']:,})",
+                  callback_data=ParserCb(action="gexp_f", run_id=run_id))
+    kb.button(text="🧬 К операциям", callback_data=ParserCb(action="ops"))
+    kb.button(text="◀️ В меню", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🚻 <b>Определение пола</b> <i>(оценка по имени)</i>\n\n"
+        f"👨 Мужчины: <b>{res['m']:,}</b> ({res['m'] * 100 // total}%)\n"
+        f"👩 Женщины: <b>{res['f']:,}</b> ({res['f'] * 100 // total}%)\n"
+        f"❔ Неизвестно: <b>{res['unknown']:,}</b> ({res['unknown'] * 100 // total}%)\n\n"
+        f"Всего размечено: <b>{res['total']:,}</b>\n"
+        "Можно выгрузить только нужный пол для таргет-рассылки.",
+        parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ParserCb.filter(F.action.in_({"gexp_m", "gexp_f"})))
+async def cb_parser_gender_export(
+    callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
+) -> None:
+    gender = "m" if callback_data.action == "gexp_m" else "f"
+    run_id = callback_data.run_id or None
+    where = "owner_id=$1 AND gender=$2" + (" AND parse_run_id=$3" if run_id else "")
+    args = [callback.from_user.id, gender] + ([run_id] if run_id else [])
+    try:
+        rows = await pool.fetch(
+            f"SELECT tg_user_id, username, first_name, last_name, is_premium, "
+            f"source_title, parsed_at FROM parsed_audiences WHERE {where} "
+            f"ORDER BY tg_user_id LIMIT 50000", *args)
+    except Exception:
+        log_exc_swallow(log, "gender export query failed")
+        await callback.answer("Ошибка экспорта", show_alert=True)
+        return
+    if not rows:
+        await callback.answer("⚠️ Нет пользователей этого пола.", show_alert=True)
+        return
+    await callback.answer("⏳ Готовлю файл...")
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["tg_user_id", "username", "first_name", "last_name",
+                     "is_premium", "source_title", "parsed_at"])
+    for u in rows:
+        writer.writerow([
+            u["tg_user_id"], u.get("username") or "", u.get("first_name") or "",
+            u.get("last_name") or "", "yes" if u.get("is_premium") else "no",
+            u.get("source_title") or "", str(u.get("parsed_at", ""))[:19],
+        ])
+    csv_bytes = buf.getvalue().encode("utf-8-sig")
+    lbl = "male" if gender == "m" else "female"
+    await callback.message.answer_document(
+        BufferedInputFile(csv_bytes, filename=f"audience_{lbl}_{len(rows)}.csv"),
+        caption=f"📥 <b>Экспорт ({'👨 муж' if gender == 'm' else '👩 жен'})</b>\n"
+                f"{len(rows):,} пользователей",
+        parse_mode="HTML",
+    )
 
 
 # ── Просмотр аудитории ───────────────────────────────────────────────────

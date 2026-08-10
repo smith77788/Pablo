@@ -50,6 +50,9 @@ INLINE_MIGRATIONS: list[str] = [
     # Сигнал активности канала (для ecosystem auto_remove + аналитики):
     # проставляется при реальной публикации (op_worker._exec_mass_publish).
     "ALTER TABLE managed_channels ADD COLUMN IF NOT EXISTS last_post_at TIMESTAMPTZ",
+    # Пол участника аудитории ('m'|'f'|NULL) — таргетинг рассылок по полу
+    # (services/gender_classifier.py размечает по имени).
+    "ALTER TABLE parsed_audiences ADD COLUMN IF NOT EXISTS gender TEXT",
     # tg_accounts — добавляем поля если отсутствуют
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
