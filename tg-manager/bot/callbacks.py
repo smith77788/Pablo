@@ -356,6 +356,13 @@ class ParserCb(CallbackData, prefix="prs"):
     page: int = 0
 
 
+class KwCb(CallbackData, prefix="kw"):
+    action: str
+    watcher_id: int = 0
+    account_id: int = 0
+    page: int = 0
+
+
 class WarmupCb(CallbackData, prefix="wu"):
     action: str
     account_id: int = 0

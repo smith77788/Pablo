@@ -74,6 +74,7 @@ from bot.callbacks import (
     NetworkCb,
     NarrCb,
     ParserCb,
+    KwCb,
     PersonaCb,
     PromoCb,
     ProxyCb,
@@ -270,6 +271,7 @@ def _monitoring_kb():
     kb.button(text="❤️ Здоровье акк.", callback_data=HealthCb(action="menu"))
     kb.button(text="🔥 Прогрев акк.", callback_data=WarmupCb(action="menu"))
     kb.button(text="👥 Парсер аудитории", callback_data=ParserCb(action="menu"))
+    kb.button(text="🎯 Перехватчик лидов", callback_data=KwCb(action="menu"))
     kb.button(text="🧹 Очиститель акк.", callback_data=CleanerCb(action="menu"))
     kb.button(text="🎨 Сеттер профилей", callback_data=ProfileSetterCb(action="menu"))
     kb.button(text="📱 Чекер номеров", callback_data=PhoneCheckerCb(action="menu"))
@@ -282,7 +284,7 @@ def _monitoring_kb():
     kb.button(text="📡 Nodes (форум-воркспейс)", callback_data=NodesCb(action="menu"))
     kb.button(text="🤖 Авторег (SMS API)", callback_data=AutoRegCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

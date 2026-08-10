@@ -77,6 +77,7 @@ from bot.handlers import health_dashboard as health_handler
 from bot.handlers import proxy_manager as proxy_handler
 from bot.handlers import cluster_manager as cluster_handler
 from bot.handlers import audience_parser as audience_parser_handler
+from bot.handlers import keyword_interceptor as keyword_interceptor_handler
 from bot.handlers import account_warmup as account_warmup_handler
 from bot.handlers import infra_analytics as infra_analytics_handler
 from bot.handlers import boost as boost_handler
@@ -135,6 +136,7 @@ from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
 from services import funnel_runner
+from services import keyword_watcher
 from services import payment_checker
 from services import ranking_checker
 from services import search_observer
@@ -364,6 +366,7 @@ async def main() -> None:
     dp.include_router(proxy_handler.router)
     dp.include_router(cluster_handler.router)
     dp.include_router(audience_parser_handler.router)
+    dp.include_router(keyword_interceptor_handler.router)
     dp.include_router(account_warmup_handler.router)
     dp.include_router(infra_analytics_handler.router)
     dp.include_router(account_cleaner_handler.router)
@@ -640,6 +643,7 @@ async def main() -> None:
         )
         asyncio.create_task(_resilient("relay", relay_service.run, pool, http))
         asyncio.create_task(_resilient("funnel_runner", funnel_runner.run, pool, http))
+        asyncio.create_task(_resilient("keyword_watcher", keyword_watcher.run, pool, bot))
         asyncio.create_task(
             _resilient("payment_checker", payment_checker.run, pool, http, bot)
         )

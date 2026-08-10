@@ -2746,6 +2746,47 @@ async def get_recent_messages(
             log_exc_swallow(log, "Сбой в get_recent_messages")
 
 
+async def fetch_chat_messages(
+    session_string: str,
+    chat_ref,
+    min_id: int = 0,
+    limit: int = 100,
+    _acc: dict | None = None,
+) -> list[dict]:
+    """Прочитать НОВЫЕ сообщения чата/канала после min_id (курсор перехватчика).
+
+    Read-only (низкий риск): аккаунт уже состоит в чате. min_id>0 → только
+    сообщения новее последнего просмотренного (без повторной обработки).
+    Возвращает по возрастанию id: [{message_id, from_user_id, from_username,
+    text, date}]. Ошибку не глушим наружу молча — отдаём [], логируем.
+    """
+    client = await connect_client(session_string, _acc, "read", low_risk=True)
+    out: list[dict] = []
+    try:
+        async for msg in client.iter_messages(chat_ref, min_id=min_id, limit=limit):
+            text = (getattr(msg, "text", None) or getattr(msg, "message", None) or "").strip()
+            if not text:
+                continue
+            sender = getattr(msg, "sender", None)
+            out.append({
+                "message_id": int(getattr(msg, "id", 0) or 0),
+                "from_user_id": int(getattr(msg, "sender_id", 0) or 0),
+                "from_username": (getattr(sender, "username", None) if sender else None),
+                "text": text,
+                "date": msg.date.isoformat() if getattr(msg, "date", None) else None,
+            })
+        out.sort(key=lambda m: m["message_id"])  # по возрастанию — курсор растёт монотонно
+        return out
+    except Exception as e:
+        log.warning("fetch_chat_messages error chat=%s: %s", chat_ref, e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "fetch_chat_messages disconnect")
+
+
 async def search_in_telegram(
     session_string: str, query: str, limit: int = 20, _acc: dict | None = None
 ) -> list[dict]:
