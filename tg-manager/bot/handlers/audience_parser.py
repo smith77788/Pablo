@@ -47,6 +47,7 @@ class ParserFSM(StatesGroup):
     waiting_limit = State()
     geo_coords = State()   # широта,долгота для гео-парсинга
     geo_radius = State()   # радиус в метрах
+    ops_select = State()   # выбор баз для операций (merge/exclude/dedup)
 
 
 def _back_kb() -> InlineKeyboardBuilder:
@@ -73,6 +74,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
         callback_data=ParserCb(action="start_geo"),
     )
     kb.button(text="📋 История запусков", callback_data=ParserCb(action="runs"))
+    kb.button(text="🧬 Операции с базами", callback_data=ParserCb(action="ops"))
     kb.button(text="📊 Моя аудитория", callback_data=ParserCb(action="audience"))
     kb.button(
         text="🗑 Очистить всю аудиторию", callback_data=ParserCb(action="clear_all")
@@ -423,6 +425,158 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ── Операции с базами (merge / exclude / dedup) ──────────────────────────
+
+
+async def _render_ops(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    """Экран выбора баз + доступные операции. Выбранные — отмечены ✅; порядок
+    выбора важен для исключения (первая = основная, остальные = минус-базы)."""
+    from services.parser import get_run_history
+
+    data = await state.get_data()
+    selected: list[int] = list(data.get("ops_selected") or [])
+
+    runs = [r for r in await get_run_history(pool, callback.from_user.id, limit=20)
+            if r["status"] == "done" and (r["total_found"] or 0) > 0]
+    if not runs:
+        await callback.message.edit_text(
+            "🧬 <b>Операции с базами</b>\n\nНет готовых баз. Сначала спарсите аудиторию.",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup())
+        return
+
+    lines = [
+        "🧬 <b>Операции с базами</b>\n",
+        "Отметьте базы и выберите операцию:",
+        "• <b>Объединить</b> — слить выбранные в одну (без дублей)",
+        "• <b>Исключить</b> — из 1-й выбранной убрать всех из остальных (минус-база)",
+        "• <b>Дедуп</b> — снять повторы в одной базе\n",
+    ]
+    kb = InlineKeyboardBuilder()
+    for pos, r in enumerate(runs):
+        mark = ""
+        if r["id"] in selected:
+            mark = f"✅{selected.index(r['id']) + 1} "
+        kb.button(
+            text=f"{mark}{r['source_ref'][:22]} ({r['total_found']:,})",
+            callback_data=ParserCb(action="ops_pick", run_id=r["id"]),
+        )
+    kb.adjust(1)
+    n = len(selected)
+    if n >= 2:
+        kb.row()
+        kb.button(text=f"🔗 Объединить ({n})", callback_data=ParserCb(action="ops_merge"))
+        kb.button(text=f"➖ Исключить (1−{n - 1})", callback_data=ParserCb(action="ops_exclude"))
+    if n == 1:
+        kb.row()
+        kb.button(text="🧹 Дедуп", callback_data=ParserCb(action="ops_dedup"))
+    if n:
+        kb.row()
+        kb.button(text="✖️ Сбросить выбор", callback_data=ParserCb(action="ops_reset"))
+    kb.row()
+    kb.button(text="◀️ Назад", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops"))
+async def cb_parser_ops(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await safe_answer(callback)
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer("Нужен тариф Pro", show_alert=True)
+        return
+    await state.set_state(ParserFSM.ops_select)
+    await state.update_data(ops_selected=[])
+    await _render_ops(callback, pool, state)
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops_pick"))
+async def cb_parser_ops_pick(
+    callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await safe_answer(callback)
+    data = await state.get_data()
+    selected: list[int] = list(data.get("ops_selected") or [])
+    rid = callback_data.run_id
+    if rid in selected:
+        selected.remove(rid)  # повторный тап — снять выбор
+    elif len(selected) < 20:
+        selected.append(rid)
+    await state.update_data(ops_selected=selected)
+    await _render_ops(callback, pool, state)
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops_reset"))
+async def cb_parser_ops_reset(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await safe_answer(callback)
+    await state.update_data(ops_selected=[])
+    await _render_ops(callback, pool, state)
+
+
+async def _run_ops_and_report(
+    callback: CallbackQuery, state: FSMContext, coro, verb: str
+) -> None:
+    from services.audience_ops import AudienceOpError
+    try:
+        res = await coro
+    except AudienceOpError as e:
+        await callback.answer(f"⚠️ {e}", show_alert=True)
+        return
+    except Exception:
+        log_exc_swallow(log, f"audience_ops {verb} failed")
+        await callback.answer("Ошибка операции", show_alert=True)
+        return
+    await state.update_data(ops_selected=[])
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Открыть базу", callback_data=ParserCb(action="audience", run_id=res["run_id"]))
+    kb.button(text="🧬 К операциям", callback_data=ParserCb(action="ops"))
+    kb.button(text="◀️ В меню", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"✅ <b>{verb}</b>\n\nСоздана база #{res['run_id']} — "
+        f"<b>{res['count']:,}</b> пользователей.",
+        parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops_merge"))
+async def cb_parser_ops_merge(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await safe_answer(callback)
+    from services import audience_ops
+    selected = list((await state.get_data()).get("ops_selected") or [])
+    await _run_ops_and_report(
+        callback, state,
+        audience_ops.merge_runs(pool, callback.from_user.id, selected),
+        "Объединение баз")
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops_exclude"))
+async def cb_parser_ops_exclude(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await safe_answer(callback)
+    from services import audience_ops
+    selected = list((await state.get_data()).get("ops_selected") or [])
+    if len(selected) < 2:
+        await callback.answer("Нужно ≥2 баз: 1-я основная, остальные — минус", show_alert=True)
+        return
+    await _run_ops_and_report(
+        callback, state,
+        audience_ops.exclude_runs(pool, callback.from_user.id, selected[0], selected[1:]),
+        "Исключение минус-баз")
+
+
+@router.callback_query(ParserCb.filter(F.action == "ops_dedup"))
+async def cb_parser_ops_dedup(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await safe_answer(callback)
+    from services import audience_ops
+    selected = list((await state.get_data()).get("ops_selected") or [])
+    if len(selected) != 1:
+        await callback.answer("Выберите ровно одну базу", show_alert=True)
+        return
+    await _run_ops_and_report(
+        callback, state,
+        audience_ops.dedup_run(pool, callback.from_user.id, selected[0]),
+        "Дедуп базы")
 
 
 # ── Просмотр аудитории ───────────────────────────────────────────────────
