@@ -76,6 +76,11 @@ class _Stand:
             return {"ok": False, "error": "ReportDeclined"}
         return {"ok": True}
 
+    async def _send_dm(self, session_str, user_id, text, _acc=None, username=None, **k):
+        if self.mode == "error":
+            return {"status": "blocked", "error": "UserPrivacyRestricted"}
+        return {"status": "sent"}
+
     async def seed(self, *, accounts=2):
         p = self.pool
         await p.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER)
@@ -91,6 +96,20 @@ class _Stand:
                 OWNER, f"+7995{i:07d}", f"sess{i}", f"Acc{i}"))
         self.acc_ids = ids
         return ids
+
+    async def seed_crm_campaign(self, *, contacts=5):
+        """Кампания по crm-источнику: аккаунты + crm_contacts + строка dm_campaigns."""
+        p = self.pool
+        await self.seed(accounts=2)
+        await p.execute("DELETE FROM crm_contacts WHERE owner_id=$1", OWNER)
+        await p.execute("DELETE FROM dm_campaigns WHERE owner_id=$1", OWNER)
+        for i in range(contacts):
+            await p.execute(
+                "INSERT INTO crm_contacts(owner_id,tg_user_id,username) VALUES($1,$2,$3)",
+                OWNER, 600000 + i, f"u{i}")
+        return await p.fetchval(
+            "INSERT INTO dm_campaigns(owner_id,name,text_template,target_type,status) "
+            "VALUES($1,'e2e','Привет','crm','pending') RETURNING id", OWNER)
 
     async def run(self, op_type, params, total=1):
         """Поставить операцию тем же SQL, что и хендлер, и провести воркером."""
@@ -147,24 +166,28 @@ def stand():
     # Подменяем ТОЛЬКО границу с Telegram; жизненный цикл исполняет реальный воркер.
     # Оригиналы восстанавливаем в teardown — иначе заглушки протекут в другие модули
     # (module-scoped фикстуру нельзя чинить function-scoped monkeypatch'ем).
-    from services import account_manager, reporter_engine, op_worker as w
+    from services import account_manager, reporter_engine, dm_engine, op_worker as w
     _orig = {
         "join_channel": account_manager.join_channel,
         "leave_channel": account_manager.leave_channel,
         "report_peer": reporter_engine.report_peer,
         "report_message": reporter_engine.report_message,
+        "send_dm": dm_engine.send_dm,
         "sleep": w.asyncio.sleep,
+        "dm_sleep": dm_engine.asyncio.sleep,
     }
     account_manager.join_channel = s._join
     account_manager.leave_channel = s._leave
     reporter_engine.report_peer = s._report_peer
     reporter_engine.report_message = s._report_message
+    dm_engine.send_dm = s._send_dm
 
     _sleep = asyncio.sleep
 
     async def _fast(x):
         return await _sleep(0)
     w.asyncio.sleep = _fast
+    dm_engine.asyncio.sleep = _fast  # DM-раннер спит между отправками — гасим
 
     yield s
 
@@ -172,7 +195,9 @@ def stand():
     account_manager.leave_channel = _orig["leave_channel"]
     reporter_engine.report_peer = _orig["report_peer"]
     reporter_engine.report_message = _orig["report_message"]
+    dm_engine.send_dm = _orig["send_dm"]
     w.asyncio.sleep = _orig["sleep"]
+    dm_engine.asyncio.sleep = _orig["dm_sleep"]
     _run(pool.close())
     global _LOOP
     if _LOOP is not None and not _LOOP.is_closed():
@@ -249,3 +274,43 @@ def test_report_peer_happy_path(stand):
     row = _run(stand.run("report_peer", params, total=len(ids)))
     assert row["status"] == "done", row["error_msg"]
     assert row["done_items"] == len(ids)
+
+
+# ── dm_campaign (самый богатый по биндингу: per-target dm_campaign_log,
+#    счётчики sent/fail в dm_campaigns, done_items в operation_queue) ──────────
+
+def test_dm_campaign_happy_path(stand):
+    stand.mode = "ok"
+    contacts = 5
+    cid = _run(stand.seed_crm_campaign(contacts=contacts))
+    row = _run(stand.run("dm_campaign", {"campaign_id": cid}, total=0))
+    assert row["status"] == "done", row["error_msg"]
+    # total_items выставляет сам раннер (из числа целей), done_items доходит до него
+    assert row["done_items"] == contacts
+    camp = _run(stand.pool.fetchrow(
+        "SELECT status, sent_count, fail_count, total_targets FROM dm_campaigns WHERE id=$1",
+        cid))
+    assert camp["status"] == "done"
+    assert camp["sent_count"] == contacts
+    assert camp["total_targets"] == contacts
+    sent_logs = _run(stand.pool.fetchval(
+        "SELECT COUNT(*) FROM dm_campaign_log WHERE campaign_id=$1 AND status='sent'", cid))
+    assert sent_logs == contacts
+
+
+def test_dm_campaign_blocked_targets_counted(stand):
+    stand.mode = "error"
+    contacts = 3
+    cid = _run(stand.seed_crm_campaign(contacts=contacts))
+    row = _run(stand.run("dm_campaign", {"campaign_id": cid}, total=0))
+    # Ни одна не доставлена (ok=0, failed>0) → _run_op_task нормализует op в 'failed'.
+    # Но кампания реально отработала все цели и учла их — не «зависла».
+    assert row["status"] == "failed", row["error_msg"]
+    camp = _run(stand.pool.fetchrow(
+        "SELECT sent_count, fail_count FROM dm_campaigns WHERE id=$1", cid))
+    assert camp["sent_count"] == 0
+    assert camp["fail_count"] == contacts
+    # 'blocked' пишется в dm_campaign_log — цели не потеряны, повторно не долбим
+    blocked = _run(stand.pool.fetchval(
+        "SELECT COUNT(*) FROM dm_campaign_log WHERE campaign_id=$1 AND status='blocked'", cid))
+    assert blocked == contacts
