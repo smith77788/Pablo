@@ -384,11 +384,25 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         ]
     elif target_type == "parsed_audience":
         # target_id = parse_run_id (0 = all runs for this owner)
+        # Фильтр по полу (services/gender_classifier): campaign.params.gender_filter
+        # ∈ {'m','f'} → шлём только размеченным этим полом (NULL/неизвестные
+        # отсекаются). Смыкает аудиторные модули с массовой рассылкой end-to-end.
+        import json as _json
+        _p = campaign.get("params") or {}
+        if isinstance(_p, str):
+            try:
+                _p = _json.loads(_p)
+            except Exception:
+                _p = {}
+        gender_filter = _p.get("gender_filter")
         conditions = "owner_id=$1 AND tg_user_id > 0"
         params_list: list = [campaign["owner_id"]]
         if target_id:
-            conditions += " AND parse_run_id=$2"
             params_list.append(target_id)
+            conditions += f" AND parse_run_id=${len(params_list)}"
+        if gender_filter in ("m", "f"):
+            params_list.append(gender_filter)
+            conditions += f" AND gender=${len(params_list)}"
         rows = await pool.fetch(
             f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
             f"FROM parsed_audiences WHERE {conditions}",

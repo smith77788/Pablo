@@ -57,7 +57,11 @@ def test_backend_send_filters_by_parse_run_id():
     # именно ветка резолва получателей (не pace-словарь с тем же ключом)
     i = eng.index('target_type == "parsed_audience"')
     seg = eng[i:i + 1500]
-    assert "parse_run_id=$2" in seg, "отправка должна фильтровать по parse_run_id"
+    # плейсхолдер стал динамическим (добавился опциональный фильтр по полу),
+    # но фильтрация по parse_run_id сохранена; сквозная проверка — в
+    # test_mass_ops_e2e_postgres (parse_run_id + gender_filter на живой БД).
+    assert "parse_run_id=$" in seg, "отправка должна фильтровать по parse_run_id"
+    assert 'params.get("gender_filter")' in seg or 'gender_filter' in seg
 
 
 def test_backend_count_matches_target_run():

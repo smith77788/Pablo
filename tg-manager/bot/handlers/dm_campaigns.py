@@ -516,10 +516,52 @@ async def cb_dm_target_parsed_pick(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    """Store parsed_audience target (run_id=0 means all) and go to preview."""
+    """Store parsed_audience target (run_id=0 means all), then offer gender filter."""
     await safe_answer(callback)
     run_id = callback_data.campaign_id  # 0 = all, >0 = specific run
     await state.update_data(dm_target_type="parsed_audience", dm_target_id=run_id)
+
+    # Есть ли в выбранной базе размеченный пол? Если да — предлагаем фильтр
+    # (смычка с модулем «Определение пола»). Нет разметки — сразу к превью.
+    where = "owner_id=$1" + (" AND parse_run_id=$2" if run_id else "")
+    args = [callback.from_user.id] + ([run_id] if run_id else [])
+    try:
+        m_cnt = await pool.fetchval(
+            f"SELECT COUNT(*) FROM parsed_audiences WHERE {where} AND gender='m'", *args) or 0
+        f_cnt = await pool.fetchval(
+            f"SELECT COUNT(*) FROM parsed_audiences WHERE {where} AND gender='f'", *args) or 0
+    except Exception:
+        m_cnt = f_cnt = 0
+    if not m_cnt and not f_cnt:
+        await state.update_data(dm_gender_filter=None)
+        await _show_dm_preview(callback, state, pool)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Все", callback_data=DmCb(action="target_gender_all"))
+    if m_cnt:
+        kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=DmCb(action="target_gender_m"))
+    if f_cnt:
+        kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=DmCb(action="target_gender_f"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        "🚻 <b>Фильтр по полу</b>\n\n"
+        "В базе есть разметка пола. Кому отправлять?\n"
+        "<i>(разметка приблизительная — по имени)</i>",
+        kb.as_markup())
+
+
+@router.callback_query(DmCb.filter(F.action.in_({"target_gender_all", "target_gender_m", "target_gender_f"})))
+async def cb_dm_target_gender(
+    callback: CallbackQuery,
+    callback_data: DmCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Сохранить выбранный фильтр по полу и перейти к превью."""
+    await safe_answer(callback)
+    g = {"target_gender_m": "m", "target_gender_f": "f"}.get(callback_data.action)
+    await state.update_data(dm_gender_filter=g)
     await _show_dm_preview(callback, state, pool)
 
 
@@ -754,13 +796,16 @@ async def _show_dm_preview(
         recipients_count = int(cnt)
         audience_str = f"{cohort_label} когорта @{bot_label}: <b>{cnt}</b>"
     elif target_type == "parsed_audience":
+        _gf = sd.get("dm_gender_filter")
+        _gwhere = " AND gender=$3" if _gf in ("m", "f") else ""
         try:
             if target_id:
+                _a = [callback.from_user.id, target_id] + ([_gf] if _gwhere else [])
                 cnt = (
                     await pool.fetchval(
-                        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2",
-                        callback.from_user.id,
-                        target_id,
+                        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences "
+                        "WHERE owner_id=$1 AND parse_run_id=$2" + _gwhere,
+                        *_a,
                     )
                     or 0
                 )
@@ -771,10 +816,13 @@ async def _show_dm_preview(
                 src = (run_row["source_ref"] if run_row else str(target_id))
                 parse_label = f"{html.escape(src[:30])}"
             else:
+                _gwhere2 = " AND gender=$2" if _gf in ("m", "f") else ""
+                _a = [callback.from_user.id] + ([_gf] if _gwhere2 else [])
                 cnt = (
                     await pool.fetchval(
-                        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1",
-                        callback.from_user.id,
+                        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences "
+                        "WHERE owner_id=$1" + _gwhere2,
+                        *_a,
                     )
                     or 0
                 )
@@ -784,7 +832,8 @@ async def _show_dm_preview(
             cnt = 0
             parse_label = "спарсенная"
         recipients_count = int(cnt)
-        audience_str = f"🔍 Спарсенная ({parse_label}): <b>{cnt}</b>"
+        _glabel = {"m": " · 👨 муж", "f": " · 👩 жен"}.get(_gf, "")
+        audience_str = f"🔍 Спарсенная ({parse_label}{_glabel}): <b>{cnt}</b>"
     elif target_type == "all_bots":
         try:
             cnt = (
@@ -911,20 +960,26 @@ async def cb_dm_launch_or_draft(
                     or 0
                 )
             elif target_type == "parsed_audience":
+                _gf = sd.get("dm_gender_filter")
                 if target_id:
+                    _gw = " AND gender=$3" if _gf in ("m", "f") else ""
+                    _ga = [callback.from_user.id, target_id] + ([_gf] if _gw else [])
                     audience_cnt = (
                         await pool.fetchval(
-                            "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2",
-                            callback.from_user.id,
-                            target_id,
+                            "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences "
+                            "WHERE owner_id=$1 AND parse_run_id=$2" + _gw,
+                            *_ga,
                         )
                         or 0
                     )
                 else:
+                    _gw = " AND gender=$2" if _gf in ("m", "f") else ""
+                    _ga = [callback.from_user.id] + ([_gf] if _gw else [])
                     audience_cnt = (
                         await pool.fetchval(
-                            "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1",
-                            callback.from_user.id,
+                            "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences "
+                            "WHERE owner_id=$1" + _gw,
+                            *_ga,
                         )
                         or 0
                     )
@@ -967,6 +1022,10 @@ async def cb_dm_launch_or_draft(
         params_dict["cohort_type"] = cohort_type
     if target_type == "import_list":
         params_dict["import_list"] = sd.get("dm_import_list") or []
+    # Фильтр по полу (только для parsed_audience) — читается dm_engine._get_targets
+    _gender_filter = sd.get("dm_gender_filter")
+    if target_type == "parsed_audience" and _gender_filter in ("m", "f"):
+        params_dict["gender_filter"] = _gender_filter
 
     initial_status = "draft"  # всегда создаём как draft, потом меняем
     try:

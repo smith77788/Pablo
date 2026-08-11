@@ -120,6 +120,40 @@ class _Stand:
             "INSERT INTO dm_campaigns(owner_id,name,text_template,target_type,status) "
             "VALUES($1,'e2e','Привет','crm','pending') RETURNING id", OWNER)
 
+    async def seed_parsed_gender_campaign(self, *, gender_filter=None):
+        """Кампания по parsed_audience с размеченным полом (смычка gender→рассылка).
+
+        Возвращает (campaign_id, female_ids, male_ids). params.gender_filter кладём
+        в dm_campaigns.params — его читает dm_engine._get_targets.
+        """
+        import json as _json
+        p = self.pool
+        await self.seed(accounts=2)
+        await p.execute("DELETE FROM parsed_audiences WHERE owner_id=$1", OWNER)
+        await p.execute("DELETE FROM parser_runs WHERE owner_id=$1", OWNER)
+        await p.execute("DELETE FROM dm_campaigns WHERE owner_id=$1", OWNER)
+        run_id = await p.fetchval(
+            "INSERT INTO parser_runs(owner_id,source_type,source_ref,parse_type,status) "
+            "VALUES($1,'channel','X','members','done') RETURNING id", OWNER)
+        female_ids = [700001, 700002, 700003]
+        male_ids = [700010, 700011]
+        for i, uid in enumerate(female_ids):
+            await p.execute(
+                "INSERT INTO parsed_audiences(owner_id,source_type,source_id,parse_run_id,"
+                "tg_user_id,username,gender) VALUES($1,'channel',$2,$2,$3,$4,'f')",
+                OWNER, run_id, uid, f"f{i}")
+        for i, uid in enumerate(male_ids):
+            await p.execute(
+                "INSERT INTO parsed_audiences(owner_id,source_type,source_id,parse_run_id,"
+                "tg_user_id,username,gender) VALUES($1,'channel',$2,$2,$3,$4,'m')",
+                OWNER, run_id, uid, f"m{i}")
+        params = {"gender_filter": gender_filter} if gender_filter else {}
+        cid = await p.fetchval(
+            "INSERT INTO dm_campaigns(owner_id,name,text_template,target_type,target_id,"
+            "status,params) VALUES($1,'e2e','Привет','parsed_audience',$2,'pending',$3::jsonb) "
+            "RETURNING id", OWNER, run_id, _json.dumps(params))
+        return cid, female_ids, male_ids
+
     async def seed_promo(self, *, subscribers=4):
         """managed_bot + подписчики + self_promo шаблон (owner_id — inline-колонка)."""
         p = self.pool
@@ -390,6 +424,31 @@ def test_dm_campaign_blocked_targets_counted(stand):
     blocked = _run(stand.pool.fetchval(
         "SELECT COUNT(*) FROM dm_campaign_log WHERE campaign_id=$1 AND status='blocked'", cid))
     assert blocked == contacts
+
+
+# ── смычка: gender-фильтр аудитории → таргетинг DM-рассылки (end-to-end) ──────
+
+def test_dm_gender_filter_targets_only_selected_gender(stand):
+    stand.mode = "ok"
+    cid, female_ids, male_ids = _run(stand.seed_parsed_gender_campaign(gender_filter="f"))
+    row = _run(stand.run("dm_campaign", {"campaign_id": cid}, total=0))
+    assert row["status"] == "done", row["error_msg"]
+    # доставлено РОВНО женщинам — мужчины отфильтрованы движком по params.gender_filter
+    sent_ids = _run(stand.pool.fetch(
+        "SELECT tg_user_id FROM dm_campaign_log WHERE campaign_id=$1 AND status='sent'", cid))
+    got = {r["tg_user_id"] for r in sent_ids}
+    assert got == set(female_ids)
+    assert not (got & set(male_ids))
+
+
+def test_dm_no_gender_filter_targets_everyone(stand):
+    stand.mode = "ok"
+    cid, female_ids, male_ids = _run(stand.seed_parsed_gender_campaign(gender_filter=None))
+    row = _run(stand.run("dm_campaign", {"campaign_id": cid}, total=0))
+    assert row["status"] == "done", row["error_msg"]
+    got = {r["tg_user_id"] for r in _run(stand.pool.fetch(
+        "SELECT tg_user_id FROM dm_campaign_log WHERE campaign_id=$1 AND status='sent'", cid))}
+    assert got == set(female_ids) | set(male_ids)
 
 
 # ── mass_publish (публикация во все каналы владельца + сигнал активности) ─────
