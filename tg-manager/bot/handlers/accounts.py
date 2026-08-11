@@ -250,6 +250,10 @@ def _acc_detail_markup(
         callback_data=AccCb(action="stories_manage", acc_id=acc_id),
     )
     kb.button(
+        text="📤 Экспорт JSON",
+        callback_data=AccCb(action="export_json", acc_id=acc_id),
+    )
+    kb.button(
         text="🆘 Апелляция спамблока",
         callback_data=AccCb(action="spamblock_appeal", acc_id=acc_id),
     )
@@ -1608,6 +1612,38 @@ async def cb_acc_stories_delall_yes(
     await callback.message.edit_text(
         f"📖 <b>Сторис</b>\n\n{txt}", parse_mode="HTML",
         reply_markup=_back_to_acc_markup(acc_id))
+
+
+@router.callback_query(AccCb.filter(F.action == "export_json"))
+async def cb_acc_export_json(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    """Экспорт аккаунта в Pyrogram JSON (обратное импорту)."""
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc or not acc.get("session_str"):
+        await callback.answer("Аккаунт не найден или без сессии.", show_alert=True)
+        return
+    await callback.answer("⏳ Генерирую JSON...")
+    from services import session_export
+    from config import TG_API_ID
+    try:
+        payload = session_export.session_to_pyrogram_json(
+            acc["session_str"], TG_API_ID,
+            user_id=int(acc.get("tg_user_id") or 0))
+    except session_export.SessionExportError as e:
+        await callback.answer(f"⚠️ {e}", show_alert=True)
+        return
+    except Exception:
+        log_exc_swallow(log, "export_json failed")
+        await callback.answer("Ошибка генерации JSON", show_alert=True)
+        return
+    import io
+    buf = io.BytesIO(payload.encode("utf-8"))
+    await callback.message.answer_document(
+        BufferedInputFile(buf.getvalue(), filename=f"account_{callback_data.acc_id}.json"),
+        caption="📤 <b>Pyrogram JSON</b>\nСессия аккаунта в формате Pyrogram. "
+                "⚠️ Содержит ключ доступа — храните безопасно.",
+        parse_mode="HTML")
 
 
 # ── Account operation history ─────────────────────────────────────────────────
