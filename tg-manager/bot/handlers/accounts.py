@@ -246,6 +246,10 @@ def _acc_detail_markup(
         callback_data=AccCb(action="post_story", acc_id=acc_id),
     )
     kb.button(
+        text="📖 Мои сторис",
+        callback_data=AccCb(action="stories_manage", acc_id=acc_id),
+    )
+    kb.button(
         text="🆘 Апелляция спамблока",
         callback_data=AccCb(action="spamblock_appeal", acc_id=acc_id),
     )
@@ -272,7 +276,7 @@ def _acc_detail_markup(
         callback_data=AccCb(action="op_history", acc_id=acc_id),
     )
     kb.button(text="◀️ Мои аккаунты", callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1, 2, 3, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 1)
     return kb.as_markup()
 
 
@@ -1501,6 +1505,109 @@ async def handle_story_caption(
         parse_mode="HTML",
         reply_markup=_back_to_acc_markup(acc_id or 0),
     )
+
+
+# ── Управление собственными сторис (список / экспорт / удаление) ──────────────
+
+
+async def _load_acc_or_alert(callback, callback_data, pool):
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc or not acc.get("session_str"):
+        await callback.answer("Аккаунт не найден или без сессии.", show_alert=True)
+        return None
+    return acc
+
+
+@router.callback_query(AccCb.filter(F.action == "stories_manage"))
+async def cb_acc_stories_manage(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    acc = await _load_acc_or_alert(callback, callback_data, pool)
+    if not acc:
+        return
+    await callback.answer("⏳ Читаю сторис...")
+    res = await story_manager.fetch_stories(acc["session_str"], _acc=dict(acc))
+    acc_id = callback_data.acc_id
+    if not res.get("ok"):
+        await callback.message.edit_text(
+            f"📖 <b>Сторис</b>\n\n❌ {escape(str(res.get('error') or 'ошибка'))}",
+            parse_mode="HTML", reply_markup=_back_to_acc_markup(acc_id))
+        return
+    stories = res["stories"]
+    kb = InlineKeyboardBuilder()
+    if stories:
+        kb.button(text=f"📥 Экспорт ({len(stories)})",
+                  callback_data=AccCb(action="stories_export", acc_id=acc_id))
+        kb.button(text="🗑 Удалить все",
+                  callback_data=AccCb(action="stories_delall", acc_id=acc_id))
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(2, 1)
+    if not stories:
+        body = "📖 <b>Сторис</b>\n\nАктивных историй нет."
+    else:
+        lines = [f"📖 <b>Активных сторис: {len(stories)}</b>\n"]
+        for s in stories[:15]:
+            cap = escape((s["caption"] or "")[:40]) or "<i>без подписи</i>"
+            pin = "📌 " if s["pinned"] else ""
+            lines.append(f"{pin}#{s['id']} · {s['media_type']} · {cap}")
+        body = "\n".join(lines)
+    await callback.message.edit_text(body, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(AccCb.filter(F.action == "stories_export"))
+async def cb_acc_stories_export(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    acc = await _load_acc_or_alert(callback, callback_data, pool)
+    if not acc:
+        return
+    await callback.answer("⏳ Готовлю экспорт...")
+    res = await story_manager.fetch_stories(acc["session_str"], _acc=dict(acc))
+    if not res.get("ok") or not res["stories"]:
+        await callback.answer("Нет сторис для экспорта.", show_alert=True)
+        return
+    import io
+    import json as _json
+    payload = _json.dumps(res["stories"], ensure_ascii=False, indent=2)
+    buf = io.BytesIO(payload.encode("utf-8"))
+    await callback.message.answer_document(
+        BufferedInputFile(buf.getvalue(), filename=f"stories_{callback_data.acc_id}.json"),
+        caption=f"📥 <b>Экспорт сторис</b>\n{len(res['stories'])} шт. (метаданные)",
+        parse_mode="HTML")
+
+
+@router.callback_query(AccCb.filter(F.action == "stories_delall"))
+async def cb_acc_stories_delall_confirm(
+    callback: CallbackQuery, callback_data: AccCb
+) -> None:
+    await safe_answer(callback)
+    acc_id = callback_data.acc_id
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Да, удалить все", callback_data=AccCb(action="stories_delall_yes", acc_id=acc_id))
+    kb.button(text="◀️ Отмена", callback_data=AccCb(action="stories_manage", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "⚠️ <b>Удалить ВСЕ активные сторис?</b>\n\nДействие необратимо.",
+        parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(AccCb.filter(F.action == "stories_delall_yes"))
+async def cb_acc_stories_delall_yes(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool
+) -> None:
+    acc = await _load_acc_or_alert(callback, callback_data, pool)
+    if not acc:
+        return
+    await callback.answer("⏳ Удаляю...")
+    res = await story_manager.delete_stories(acc["session_str"], ids=None, _acc=dict(acc))
+    acc_id = callback_data.acc_id
+    if res.get("ok"):
+        txt = f"✅ Удалено сторис: <b>{res.get('deleted', 0)}</b>"
+    else:
+        txt = f"❌ {escape(str(res.get('error') or 'ошибка'))}"
+    await callback.message.edit_text(
+        f"📖 <b>Сторис</b>\n\n{txt}", parse_mode="HTML",
+        reply_markup=_back_to_acc_markup(acc_id))
 
 
 # ── Account operation history ─────────────────────────────────────────────────

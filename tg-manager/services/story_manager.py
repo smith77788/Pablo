@@ -161,3 +161,98 @@ async def post_story(
             await client.disconnect()
         except Exception:
             pass
+
+
+# ── Экспорт / удаление собственных историй (паритет: экспорт/удаление сторис) ──
+
+def _parse_stories(peer_stories) -> list[dict]:
+    """Чистый парсер ответа stories.GetPeerStories → список метаданных.
+
+    Вынесен отдельно от сети, чтобы тестировать разбор без Telethon. Каждый
+    элемент: {id, caption, date, media_type, pinned}.
+    """
+    out: list[dict] = []
+    container = getattr(peer_stories, "stories", None)
+    # GetPeerStoriesRequest → PeerStories(stories=Stories(stories=[StoryItem...]))
+    items = getattr(container, "stories", None)
+    if items is None and isinstance(container, list):
+        items = container  # на случай, если уже передали список StoryItem
+    for st in items or []:
+        media = getattr(st, "media", None)
+        mtype = "video" if media.__class__.__name__.lower().find("video") >= 0 else "photo"
+        date = getattr(st, "date", None)
+        out.append({
+            "id": int(getattr(st, "id", 0) or 0),
+            "caption": (getattr(st, "caption", None) or "")[:2048],
+            "date": date.isoformat() if date is not None and hasattr(date, "isoformat") else None,
+            "media_type": mtype,
+            "pinned": bool(getattr(st, "pinned", False)),
+        })
+    return out
+
+
+async def fetch_stories(session_string: str, _acc: dict | None = None) -> dict:
+    """Список активных историй СВОЕГО аккаунта (метаданные для экспорта/удаления).
+
+    Возвращает {ok, stories: [...], error?}.
+    """
+    if not session_string or len(session_string.strip()) < 10:
+        return {"ok": False, "stories": [], "error": "нет сессии"}
+    import asyncio
+    from services.account_manager import _make_client
+    from telethon.tl.functions.stories import GetPeerStoriesRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        if not await client.is_user_authorized():
+            return {"ok": False, "stories": [], "error": "сессия истекла"}
+        res = await asyncio.wait_for(client(GetPeerStoriesRequest(peer="me")), timeout=30.0)
+        return {"ok": True, "stories": _parse_stories(res)}
+    except Exception as e:
+        log.warning("fetch_stories failed: %s", e)
+        return {"ok": False, "stories": [], "error": str(e)[:160]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def delete_stories(
+    session_string: str, ids: list[int] | None = None, _acc: dict | None = None
+) -> dict:
+    """Удалить истории СВОЕГО аккаунта. ids=None → удалить ВСЕ активные.
+
+    Возвращает {ok, deleted: int, error?}.
+    """
+    if not session_string or len(session_string.strip()) < 10:
+        return {"ok": False, "deleted": 0, "error": "нет сессии"}
+    import asyncio
+    from services.account_manager import _make_client
+    from telethon.tl.functions.stories import GetPeerStoriesRequest, DeleteStoriesRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        if not await client.is_user_authorized():
+            return {"ok": False, "deleted": 0, "error": "сессия истекла"}
+        target_ids = list(ids) if ids else [
+            s["id"] for s in _parse_stories(
+                await asyncio.wait_for(client(GetPeerStoriesRequest(peer="me")), timeout=30.0))]
+        if not target_ids:
+            return {"ok": True, "deleted": 0}
+        res = await asyncio.wait_for(
+            client(DeleteStoriesRequest(peer="me", id=[int(i) for i in target_ids])),
+            timeout=60.0)
+        # DeleteStoriesRequest возвращает список удалённых id
+        deleted = len(res) if isinstance(res, list) else len(target_ids)
+        return {"ok": True, "deleted": deleted}
+    except Exception as e:
+        log.warning("delete_stories failed: %s", e)
+        return {"ok": False, "deleted": 0, "error": str(e)[:160]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
