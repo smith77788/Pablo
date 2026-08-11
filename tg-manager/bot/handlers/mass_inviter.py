@@ -18,6 +18,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import InviterCb, BmCb
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -170,8 +171,16 @@ async def cb_pick_run(
         )
         await state.update_data(parse_run_id=int(run_id), total_users=count)
 
-    # Смычка с модулем «Определение пола»: если в выбранной базе есть разметка
-    # пола — предложить фильтр перед выбором аккаунтов. Нет разметки — как раньше.
+    # Смычка с модулем «Определение пола»: предложить фильтр/разметку перед
+    # выбором аккаунтов.
+    await _inv_offer_gender(callback, state, pool, count)
+
+
+async def _inv_offer_gender(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, count: int
+) -> None:
+    """Шаг пола для выбранной parsed-базы инвайта: фильтр / определить / без фильтра."""
+    owner_id = callback.from_user.id
     data = await state.get_data()
     _pr = data.get("parse_run_id")
     _where = "owner_id=$1" + (" AND parse_run_id=$2" if _pr else "")
@@ -181,8 +190,11 @@ async def cb_pick_run(
             f"SELECT COUNT(*) FROM parsed_audiences WHERE {_where} AND gender='m'", *_args) or 0
         f_cnt = await pool.fetchval(
             f"SELECT COUNT(*) FROM parsed_audiences WHERE {_where} AND gender='f'", *_args) or 0
+        total = await pool.fetchval(
+            f"SELECT COUNT(*) FROM parsed_audiences WHERE {_where}", *_args) or 0
     except Exception:
-        m_cnt = f_cnt = 0
+        m_cnt = f_cnt = total = 0
+
     if m_cnt or f_cnt:
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все", callback_data=InviterCb(action="gender", item="all"))
@@ -198,9 +210,39 @@ async def cb_pick_run(
             kb.as_markup())
         return
 
+    if total > 0:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🚻 Определить пол", callback_data=InviterCb(action="classify"))
+        kb.button(text="➡️ Без фильтра", callback_data=InviterCb(action="gender", item="all"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "🚻 <b>Пол в этой базе не размечен</b>\n\nМожно определить пол по именам "
+            "и приглашать только нужный пол — или продолжить без фильтра.",
+            kb.as_markup())
+        return
+
     await state.update_data(inv_gender=None)
     await state.set_state(InviterFSM.acc_count)
     await _ask_acc_count(callback, data, count, pool)
+
+
+@router.callback_query(InviterCb.filter(F.action == "classify"))
+async def cb_inviter_classify(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Определить пол в выбранной базе на месте, затем вернуть к шагу фильтра."""
+    await callback.answer("⏳ Определяю пол...")
+    from services import gender_classifier as gc
+    data = await state.get_data()
+    _pr = data.get("parse_run_id") or None
+    try:
+        await gc.classify_audience(pool, callback.from_user.id, _pr)
+    except Exception:
+        log_exc_swallow(log, "invite classify failed")
+        await callback.answer("Ошибка разметки пола", show_alert=True)
+        return
+    await _inv_offer_gender(callback, state, pool, data.get("total_users", 0))
 
 
 @router.callback_query(InviterCb.filter(F.action == "gender"))

@@ -520,9 +520,17 @@ async def cb_dm_target_parsed_pick(
     await safe_answer(callback)
     run_id = callback_data.campaign_id  # 0 = all, >0 = specific run
     await state.update_data(dm_target_type="parsed_audience", dm_target_id=run_id)
+    await _dm_offer_gender(callback, state, pool)
 
-    # Есть ли в выбранной базе размеченный пол? Если да — предлагаем фильтр
-    # (смычка с модулем «Определение пола»). Нет разметки — сразу к превью.
+
+async def _dm_offer_gender(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    """Показать шаг фильтра по полу для выбранной parsed-базы.
+
+    Есть разметка → фильтр (Все/👨/👩). Нет разметки, но база непустая →
+    предложить «Определить пол» прямо здесь (смычка). Пустая база → к превью.
+    """
+    sd = await state.get_data()
+    run_id = sd.get("dm_target_id")
     where = "owner_id=$1" + (" AND parse_run_id=$2" if run_id else "")
     args = [callback.from_user.id] + ([run_id] if run_id else [])
     try:
@@ -530,25 +538,59 @@ async def cb_dm_target_parsed_pick(
             f"SELECT COUNT(*) FROM parsed_audiences WHERE {where} AND gender='m'", *args) or 0
         f_cnt = await pool.fetchval(
             f"SELECT COUNT(*) FROM parsed_audiences WHERE {where} AND gender='f'", *args) or 0
+        total = await pool.fetchval(
+            f"SELECT COUNT(*) FROM parsed_audiences WHERE {where}", *args) or 0
     except Exception:
-        m_cnt = f_cnt = 0
-    if not m_cnt and not f_cnt:
-        await state.update_data(dm_gender_filter=None)
-        await _show_dm_preview(callback, state, pool)
+        m_cnt = f_cnt = total = 0
+
+    if m_cnt or f_cnt:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="👥 Все", callback_data=DmCb(action="target_gender_all"))
+        if m_cnt:
+            kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=DmCb(action="target_gender_m"))
+        if f_cnt:
+            kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=DmCb(action="target_gender_f"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "🚻 <b>Фильтр по полу</b>\n\nВ базе есть разметка пола. Кому отправлять?\n"
+            "<i>(разметка приблизительная — по имени)</i>",
+            kb.as_markup())
         return
-    kb = InlineKeyboardBuilder()
-    kb.button(text="👥 Все", callback_data=DmCb(action="target_gender_all"))
-    if m_cnt:
-        kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=DmCb(action="target_gender_m"))
-    if f_cnt:
-        kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=DmCb(action="target_gender_f"))
-    kb.adjust(1)
-    await _edit(
-        callback,
-        "🚻 <b>Фильтр по полу</b>\n\n"
-        "В базе есть разметка пола. Кому отправлять?\n"
-        "<i>(разметка приблизительная — по имени)</i>",
-        kb.as_markup())
+
+    if total > 0:
+        # База не размечена — предлагаем определить пол прямо в потоке.
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🚻 Определить пол", callback_data=DmCb(action="parsed_classify"))
+        kb.button(text="➡️ Без фильтра", callback_data=DmCb(action="target_gender_all"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "🚻 <b>Пол в этой базе не размечен</b>\n\nМожно определить пол по именам "
+            "(≈ по имени) и разослать только нужному полу — или продолжить без фильтра.",
+            kb.as_markup())
+        return
+
+    await state.update_data(dm_gender_filter=None)
+    await _show_dm_preview(callback, state, pool)
+
+
+@router.callback_query(DmCb.filter(F.action == "parsed_classify"))
+async def cb_dm_parsed_classify(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Определить пол в выбранной базе на месте, затем вернуть к шагу фильтра."""
+    await callback.answer("⏳ Определяю пол...")
+    from services import gender_classifier as gc
+    sd = await state.get_data()
+    run_id = sd.get("dm_target_id") or None
+    try:
+        await gc.classify_audience(pool, callback.from_user.id, run_id)
+    except Exception:
+        log_exc_swallow(log, "dm parsed_classify failed")
+        await callback.answer("Ошибка разметки пола", show_alert=True)
+        return
+    await _dm_offer_gender(callback, state, pool)
 
 
 @router.callback_query(DmCb.filter(F.action.in_({"target_gender_all", "target_gender_m", "target_gender_f"})))
