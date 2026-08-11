@@ -83,9 +83,13 @@ class _Stand:
         return {"status": "sent"}
 
     async def _post_to_channel(self, session, ref, text, **k):
+        # Формат успеха, годный обоим потребителям: mass_publish смотрит на
+        # отсутствие error/banned (+resolved_access_hash), bulk_post_to_channel —
+        # на наличие "msg_id".
         if self.mode == "error":
             return {"error": "ChatWriteForbidden"}
-        return {"resolved_access_hash": 0}
+        self._post_seq = getattr(self, "_post_seq", 0) + 1
+        return {"msg_id": 1000 + self._post_seq, "resolved_access_hash": 0}
 
     async def _get_dialogs(self, session, limit=None, _acc=None):
         return []  # пре-скан access_hash в mass_publish — пусто, безвредно
@@ -472,6 +476,29 @@ def test_mass_publish_happy_path_sets_activity_signal(stand):
         "SELECT COUNT(*) FROM managed_channels "
         "WHERE owner_id=$1 AND last_post_at IS NOT NULL", OWNER))
     assert posted == channels
+
+
+# ── bulk_post_to_channel (публикация в канал от нескольких аккаунтов) ────────
+
+def test_bulk_post_to_channel_happy_path(stand):
+    stand.mode = "ok"
+    ids = _run(stand.seed(accounts=3))
+    params = {"account_ids": ids, "channel_ref": "@chan", "text_to_post": "Привет"}
+    row = _run(stand.run("bulk_post_to_channel", params, total=len(ids)))
+    assert row["status"] == "done", row["error_msg"]
+    # done_items доходит до числа аккаунтов, все опубликовали (успех по msg_id)
+    assert row["done_items"] == len(ids)
+    assert "✅" in (row["summary"] or "") and "❌" not in (row["summary"] or "")
+
+
+def test_bulk_post_to_channel_all_fail_marks_failed(stand):
+    stand.mode = "error"
+    ids = _run(stand.seed(accounts=2))
+    params = {"account_ids": ids, "channel_ref": "@chan", "text_to_post": "Привет"}
+    row = _run(stand.run("bulk_post_to_channel", params, total=len(ids)))
+    # ни одна публикация не удалась → статус нормализуется в failed, прогресс дошёл
+    assert row["status"] == "failed", row["error_msg"]
+    assert row["done_items"] == len(ids)
 
 
 # ── self_promo_blast (рассылка подписчикам ботов через Bot API) ──────────────
