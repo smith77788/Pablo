@@ -33,4 +33,3 @@ when a task truly needs a different working directory.
 - Production deploys must be pushed and then deployed through Railway.
 - If GitHub Actions is the deploy trigger, keep `main` fast-forwarded to the
   same commit as the shared branch.
-- See `../AGENTS.md` for the full agent discipline used by Codex and Claude.
