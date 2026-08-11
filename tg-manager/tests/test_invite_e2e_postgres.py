@@ -248,6 +248,35 @@ def test_source_crm(stand):
     assert r["status"] == "done" and len(stand.sent) == 12
 
 
+def test_source_parsed_gender_filter(stand):
+    """Смычка «Определение пола» → инвайт: aud_filters.gender шлёт только выбранный
+    пол (op_worker mass_invite резолвит через parsed_audience_filters)."""
+    _run(stand.seed(accounts=2))  # чистит parsed + сеет аккаунты
+
+    async def _seed_gender():
+        run_id = await stand.pool.fetchval(
+            "INSERT INTO parser_runs(owner_id,source_type,source_ref,parse_type,status) "
+            "VALUES($1,'channel','X','members','done') RETURNING id", OWNER)
+        for uid in (811001, 811002, 811003):   # женщины
+            await stand.pool.execute(
+                "INSERT INTO parsed_audiences(owner_id,source_type,source_id,parse_run_id,"
+                "tg_user_id,username,gender) VALUES($1,'channel',$2,$2,$3,$4,'f')",
+                OWNER, run_id, uid, f"f{uid}")
+        for uid in (811010, 811011):            # мужчины
+            await stand.pool.execute(
+                "INSERT INTO parsed_audiences(owner_id,source_type,source_id,parse_run_id,"
+                "tg_user_id,username,gender) VALUES($1,'channel',$2,$2,$3,$4,'m')",
+                OWNER, run_id, uid, f"m{uid}")
+        return run_id
+
+    run_id = _run(_seed_gender())
+    r = _run(stand.run(
+        {"group": "@g", "source": "parsed", "parse_run_id": run_id,
+         "aud_filters": {"gender": "f"}}, total=3))
+    assert r["status"] == "done"
+    assert len(stand.sent) == 3   # приглашены только женщины, мужчины отфильтрованы
+
+
 def test_empty_source_fails_honestly(stand):
     _run(stand.seed())
     r = _run(stand.run({"group": "@g", "source": "bot_users"}))

@@ -169,8 +169,61 @@ async def cb_pick_run(
             owner_id, int(run_id),
         )
         await state.update_data(parse_run_id=int(run_id), total_users=count)
-    await state.set_state(InviterFSM.acc_count)
+
+    # Смычка с модулем «Определение пола»: если в выбранной базе есть разметка
+    # пола — предложить фильтр перед выбором аккаунтов. Нет разметки — как раньше.
     data = await state.get_data()
+    _pr = data.get("parse_run_id")
+    _where = "owner_id=$1" + (" AND parse_run_id=$2" if _pr else "")
+    _args = [owner_id] + ([_pr] if _pr else [])
+    try:
+        m_cnt = await pool.fetchval(
+            f"SELECT COUNT(*) FROM parsed_audiences WHERE {_where} AND gender='m'", *_args) or 0
+        f_cnt = await pool.fetchval(
+            f"SELECT COUNT(*) FROM parsed_audiences WHERE {_where} AND gender='f'", *_args) or 0
+    except Exception:
+        m_cnt = f_cnt = 0
+    if m_cnt or f_cnt:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="👥 Все", callback_data=InviterCb(action="gender", item="all"))
+        if m_cnt:
+            kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=InviterCb(action="gender", item="m"))
+        if f_cnt:
+            kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=InviterCb(action="gender", item="f"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "🚻 <b>Фильтр по полу</b>\n\nВ базе есть разметка пола. Кого приглашать?\n"
+            "<i>(разметка приблизительная — по имени)</i>",
+            kb.as_markup())
+        return
+
+    await state.update_data(inv_gender=None)
+    await state.set_state(InviterFSM.acc_count)
+    await _ask_acc_count(callback, data, count, pool)
+
+
+@router.callback_query(InviterCb.filter(F.action == "gender"))
+async def cb_inviter_gender(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    g = callback_data.item if callback_data.item in ("m", "f") else None
+    await state.update_data(inv_gender=g)
+    data = await state.get_data()
+    # Пересчитать под фильтр — честный total для выбора числа аккаунтов.
+    _pr = data.get("parse_run_id")
+    _where = "owner_id=$1" + (" AND parse_run_id=$2" if _pr else "")
+    _args = [callback.from_user.id] + ([_pr] if _pr else [])
+    if g:
+        _where += f" AND gender=${len(_args) + 1}"
+        _args.append(g)
+    try:
+        count = await pool.fetchval(
+            f"SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE {_where}", *_args) or 0
+    except Exception:
+        count = data.get("total_users", 0)
+    await state.update_data(total_users=count)
+    await state.set_state(InviterFSM.acc_count)
     await _ask_acc_count(callback, data, count, pool)
 
 
@@ -340,17 +393,26 @@ async def cb_inviter_confirm(
     # Собрать список пользователей для добавления
     if source_type == "parser":
         run_id = data.get("parse_run_id")
+        _g = data.get("inv_gender")
+        _gw = ""
+        _gargs: list = []
+        if _g in ("m", "f"):
+            _gargs.append(_g)
         if run_id:
+            if _gargs:
+                _gw = " AND gender=$3"
             prows = await pool.fetch(
                 "SELECT DISTINCT tg_user_id, username FROM parsed_audiences "
-                "WHERE owner_id=$1 AND parse_run_id=$2 LIMIT 5000",
-                owner_id, run_id,
+                "WHERE owner_id=$1 AND parse_run_id=$2" + _gw + " LIMIT 5000",
+                owner_id, run_id, *_gargs,
             )
         else:
+            if _gargs:
+                _gw = " AND gender=$2"
             prows = await pool.fetch(
                 "SELECT DISTINCT tg_user_id, username FROM parsed_audiences "
-                "WHERE owner_id=$1 LIMIT 5000",
-                owner_id,
+                "WHERE owner_id=$1" + _gw + " LIMIT 5000",
+                owner_id, *_gargs,
             )
         user_refs = [
             f"@{r['username']}" if r["username"] else str(r["tg_user_id"])

@@ -50,3 +50,26 @@ def test_starts_with_and_prefix():
     # ведущий ' AND ' обязателен, чтобы подклеиться к WHERE owner_id=$1
     sql, _ = parsed_audience_filters({"active": "1"})
     assert sql.startswith(" AND ")
+
+
+def test_gender_filter_adds_param():
+    sql, params = parsed_audience_filters({"gender": "f"}, base_params_count=1)
+    assert "gender=$2" in sql
+    assert params == ["f"]
+
+
+def test_gender_invalid_ignored():
+    for bad in ("", "x", "male", None):
+        sql, params = parsed_audience_filters({"gender": bad})
+        assert "gender=" not in sql
+        assert params == []
+
+
+def test_gender_placeholder_index_with_source_and_last_seen():
+    # порядок условий: source → $2, gender → $3, last_seen → $4 (индексы монотонны)
+    sql, params = parsed_audience_filters(
+        {"source": "x", "last_seen": "7", "gender": "m"}, base_params_count=1)
+    assert "source_username ILIKE $2" in sql
+    assert "gender=$3" in sql
+    assert "last_seen_days IS NOT NULL AND last_seen_days <= $4" in sql
+    assert params == ["%x%", "m", 7]

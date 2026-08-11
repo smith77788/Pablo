@@ -43,6 +43,13 @@ def parsed_audience_filters(q, base_params_count: int = 1):
         conds.append("is_active=TRUE")
     if _truthy(get("with_phone")):
         conds.append("phone IS NOT NULL AND phone<>''")
+    # Пол ('m'|'f') — таргетинг по полу (services/gender_classifier размечает
+    # parsed_audiences.gender). Любое иное значение фильтр не добавляет.
+    gender = str(get("gender") or "").strip().lower()
+    if gender in ("m", "f"):
+        idx += 1
+        conds.append(f"gender=${idx}")
+        params.append(gender)
     # Last Seen: оставить тех, кто был онлайн не позже N дней назад (0/мусор → без фильтра).
     ls_raw = str(get("last_seen") or "").strip()
     if ls_raw:
