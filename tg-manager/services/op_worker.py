@@ -7491,6 +7491,11 @@ async def _exec_check_accounts_health(
     deactivated = 0
     reactivated = 0
     errors = 0
+    # Разбивка спам-блока на временный/вечный (из spambot-ответа), чтобы
+    # результат проверки показывал их раздельно — как отдельные счётчики/папки
+    # «Временный/Вечный спамблок» в панели. Общий status остаётся 'spamblock'.
+    spamblock_temp = 0
+    spamblock_perm = 0
 
     # Читаемые подписи статусов — используются и для per-account лога (секция
     # «📋 Лог» в деталях операции), и для итоговой сводки ниже.
@@ -7529,6 +7534,11 @@ async def _exec_check_accounts_health(
 
         status = result.get("status", "unknown")
         status_counts[status] = status_counts.get(status, 0) + 1
+        if status == "spamblock":
+            if result.get("spamblock_kind") == "temp":
+                spamblock_temp += 1
+            else:
+                spamblock_perm += 1
 
         # Профильные факты (Premium, аватар) сохраняем, когда проверка их реально
         # добыла. Отдельно ради них аккаунт не дёргаем: это лишний коннект, то
@@ -7599,6 +7609,13 @@ async def _exec_check_accounts_health(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
     parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
+    # Уточняем строку спам-блока разбивкой врем./вечный, если она была.
+    if spamblock_temp or spamblock_perm:
+        parts = [
+            p + f" (врем.: {spamblock_temp}, вечн.: {spamblock_perm})"
+            if p.startswith(_STATUS_LABELS["spamblock"]) else p
+            for p in parts
+        ]
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
     react_note = f"\n🔄 Восстановлено: {reactivated}" if reactivated else ""
     summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note + react_note
@@ -7618,6 +7635,8 @@ async def _exec_check_accounts_health(
         "deactivated": deactivated,
         "reactivated": reactivated,
         "status_counts": status_counts,
+        "spamblock_temp": spamblock_temp,
+        "spamblock_perm": spamblock_perm,
         "summary": summary,
     }
 
