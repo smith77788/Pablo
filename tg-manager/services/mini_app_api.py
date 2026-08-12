@@ -3391,6 +3391,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return None, "Укажите username"
             params["username"] = un
             return params, "Смена username"
+        if op == "bio":
+            about = (body.get("about") or "").strip()
+            if not about:
+                return None, "Укажите текст bio"
+            params["about"] = about[:70]
+            return params, "Смена bio"
         if op == "close_sessions":
             return params, "Закрыть сторонние сессии"
         if op == "privacy":
@@ -3502,7 +3508,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         uid, _json.dumps({"account_id": aid}), f"Выход из всех чатов (акк. {aid})")
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
-            if op in ("name", "avatar", "2fa", "username", "close_sessions", "privacy",
+            if op in ("name", "avatar", "2fa", "username", "bio", "close_sessions", "privacy",
                       "clear_bio", "remove_username", "remove_avatar", "reset_2fa",
                       "set_online", "check_restriction"):
                 params, label = _build_profile_params(op, body, ids)

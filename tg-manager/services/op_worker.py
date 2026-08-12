@@ -9431,7 +9431,8 @@ async def _exec_bulk_set_profile(
             await asyncio.sleep(2.0)
 
     op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль",
-                 "username": "Username", "close_sessions": "Закрыть сессии", "privacy": "Приватность",
+                 "username": "Username", "bio": "Bio", "close_sessions": "Закрыть сессии",
+                 "privacy": "Приватность",
                  "clear_bio": "Очистить bio", "remove_username": "Снять username",
                  "remove_avatar": "Удалить фото", "reset_2fa": "Снять 2FA",
                  "set_online": "В сети", "check_restriction": "Проверка ограничений"}

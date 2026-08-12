@@ -316,6 +316,29 @@ async def clear_bio(session_string: str, _acc: dict | None) -> dict[str, Any]:
             log.warning('profile_setter: clear_bio disconnect failed: %s', e)
 
 
+async def set_bio(session_string: str, _acc: dict | None, about: str) -> dict[str, Any]:
+    """Установить ТОЛЬКО описание «О себе», не трогая имя и фамилию. Отдельная
+    функция (не общий сеттер имени): тот при пустой фамилии затирал бы её.
+    Описание обрезается до 70 символов (лимит Telegram)."""
+    from telethon.tl.functions.account import UpdateProfileRequest
+
+    client = await _connect(session_string, _acc)
+    try:
+        await asyncio.wait_for(
+            client(UpdateProfileRequest(about=(about or "")[:70])),
+            timeout=_ACTION_TIMEOUT,
+        )
+        return {"ok": True, "error": None}
+    except Exception as exc:
+        log.warning('profile_setter error: %s', exc)
+        return {"ok": False, "error": str(exc)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception as e:
+            log_exc_swallow(log, "set_bio: disconnect")
+
+
 async def remove_username(session_string: str, _acc: dict | None) -> dict[str, Any]:
     """Снять @username аккаунта (пустая строка). Аналог «Удалить username»."""
     return await set_username(session_string, _acc, "")
@@ -488,6 +511,8 @@ async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dic
             key=params.get("privacy_key", "phone"),
             allow=bool(params.get("privacy_allow", False)),
         )
+    if op == "bio":
+        return await set_bio(session_string, acc, expand_spintax(params.get("about", "")))
     if op == "clear_bio":
         return await clear_bio(session_string, acc)
     if op == "remove_username":
