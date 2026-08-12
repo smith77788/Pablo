@@ -1728,12 +1728,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             clauses = ["owner_id=$1"]
             args = [uid]
         if flt == "active":
-            clauses.append("is_active AND COALESCE(acc_status,'ok') <> 'banned' "
+            # Честный «активный» = рабочий и без ограничений: исключаем не только
+            # banned, но и spamblock — спамблокнутый аккаунт НЕ активен, иначе он
+            # протекал бы в папку «Активные» и в масс-операции по фильтру active.
+            clauses.append("is_active AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock') "
                            "AND (cooldown_until IS NULL OR cooldown_until <= now())")
         elif flt == "cooldown":
             clauses.append("cooldown_until IS NOT NULL AND cooldown_until > now()")
         elif flt == "banned":
             clauses.append("COALESCE(acc_status,'ok') = 'banned'")
+        elif flt == "spamblock":
+            clauses.append("COALESCE(acc_status,'ok') = 'spamblock'")
         if stage in ACCOUNT_STAGES:
             args.append(stage)
             clauses.append(f"stage = ${len(args)}")
@@ -1754,7 +1759,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Параметры серверной пагинации/фильтрации
         qs = request.rel_url.query
         flt = qs.get("filter", "all")
-        if flt not in ("all", "active", "cooldown", "banned"):
+        if flt not in ("all", "active", "cooldown", "banned", "spamblock"):
             flt = "all"
         stage = (qs.get("stage") or "").strip().lower()
         if stage and stage not in ACCOUNT_STAGES:
@@ -1814,10 +1819,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             st = await _safe_fetchrow(pool,
                 """SELECT COUNT(*) AS total,
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
+                          COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='spamblock') AS spamblock,
                           COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
                           COUNT(*) FILTER (
                               WHERE is_active
-                                AND COALESCE(acc_status,'ok') <> 'banned'
+                                AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
                                 AND (cooldown_until IS NULL OR cooldown_until <= now())
                           ) AS active
                    FROM tg_accounts""")
@@ -1825,14 +1831,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             st = await _safe_fetchrow(pool,
                 """SELECT COUNT(*) AS total,
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
+                          COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='spamblock') AS spamblock,
                           COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
                           COUNT(*) FILTER (
                               WHERE is_active
-                                AND COALESCE(acc_status,'ok') <> 'banned'
+                                AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
                                 AND (cooldown_until IS NULL OR cooldown_until <= now())
                           ) AS active
                    FROM tg_accounts WHERE owner_id=$1""", uid)
-        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "cooldown", "active")} if st else {}
+        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "spamblock", "cooldown", "active")} if st else {}
         # by_stage скоупим по owner_id для не-админа (иначе — межтенантная утечка
         # разбивки стадий по ВСЕЙ платформе). Админ видит всё, как в основной статистике.
         if admin:
@@ -3438,7 +3445,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
         if body.get("select_all_filtered"):
             flt = body.get("filter", "all")
-            if flt not in ("all", "active", "cooldown", "banned"):
+            if flt not in ("all", "active", "cooldown", "banned", "spamblock"):
                 flt = "all"
             stage = (body.get("stage") or "").strip().lower()
             if stage and stage not in ACCOUNT_STAGES:

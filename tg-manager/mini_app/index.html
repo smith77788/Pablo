@@ -785,6 +785,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="acc-kpi-card" onclick="filterAcc('cooldown',this)" data-filter="cooldown">
         <div class="acc-kpi-num" id="kpi-cd" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Кулдаун</div>
       </div>
+      <div class="acc-kpi-card" onclick="filterAcc('spamblock',this)" data-filter="spamblock">
+        <div class="acc-kpi-num" id="kpi-spam" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Спамблок</div>
+      </div>
       <div class="acc-kpi-card" onclick="filterAcc('banned',this)" data-filter="banned">
         <div class="acc-kpi-num" id="kpi-ban" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Заблокированы</div>
       </div>
@@ -7601,11 +7604,13 @@ function renderStageChips(byStage) {
 function updateAccKpi(list, stats) {
   // Предпочитаем серверную агрегацию (по всем аккаунтам); список ограничен LIMIT 100.
   const all    = (stats && stats.total!=null)    ? stats.total    : list.length;
-  const active = (stats && stats.active!=null)   ? stats.active   : list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned').length;
+  // Честный «активный» — без спамблока и бана (спамблок считаем отдельно).
+  const active = (stats && stats.active!=null)   ? stats.active   : list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned'&&a.acc_status!=='spamblock').length;
   const cd     = (stats && stats.cooldown!=null) ? stats.cooldown : list.filter(a=>isOnCooldown(a)).length;
+  const spam   = (stats && stats.spamblock!=null)? stats.spamblock: list.filter(a=>a.acc_status==='spamblock').length;
   const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
   const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-  el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-ban', banned);
+  el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-spam', spam); el('kpi-ban', banned);
 }
 
 function renderAccounts(list) {
