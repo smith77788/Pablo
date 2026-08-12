@@ -2270,12 +2270,15 @@ _SPAMBOT_LIMIT_PATTERNS = (
     "limited",
     "spam",
     "restricted",
+    "unavailable to you",   # «features may be unavailable to you until …» — врем. блок
+    "may be unavailable",
     "ограничен,",
     "ограничен.",
     "ограничен\n",
     "ограничен ",
     "спам",
     "ваш аккаунт ограничен",
+    "недоступны",           # «некоторые функции будут недоступны до …»
 )
 _VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"})
 
@@ -2287,6 +2290,62 @@ def classify_spambot_reply(reply_text: str) -> str | None:
     if any(pattern in reply_lower for pattern in _SPAMBOT_LIMIT_PATTERNS):
         return "spamblock"
     return None
+
+
+# Признаки ВРЕМЕННОГО спамблока в ответе @SpamBot: назван срок/дата снятия.
+_SPAMBOT_TEMP_PATTERNS = (
+    "will be automatically released",
+    "automatically released on",
+    "released on",
+    "will be able to use it again",
+    "unavailable to you until",
+    "limited until",
+    "restricted until",
+    "lifted on",
+    "expires on",
+    "until ",
+    "снято",          # «ограничение будет снято …»
+    "будет снят",
+    "снимется",
+    "истекает",
+    "ограничено до",
+)
+# Признаки ВЕЧНОГО/бессрочного спамблока — имеют приоритет над temp.
+_SPAMBOT_PERM_PATTERNS = (
+    "not going to be lifted",
+    "will not be lifted",
+    "won't be lifted",
+    "not be lifted automatically",
+    "not going to be released",
+    "no plans to",
+    "permanently",
+    "не будет снят",
+    "не планируется",
+    "навсегда",
+    "бессрочно",
+)
+_SPAMBOT_DATE_RE = re.compile(
+    r"\b(\d{1,2}\s+\w+\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{2,4})\b"
+)
+
+
+def classify_spambot_restriction(reply_text: str) -> str:
+    """Различить ВРЕМЕННЫЙ и ВЕЧНЫЙ спамблок по ответу @SpamBot (СВОЙ аккаунт).
+
+    Временный блок всегда называет срок/дату снятия; вечный/бессрочный — нет.
+    Возвращает 'temp' или 'perm'. Вызывать только когда уже известно, что это
+    спамблок (`classify_spambot_reply(...) == "spamblock"`). Признаки вечного
+    имеют приоритет: фраза «not going to be lifted automatically» содержит слово
+    об автоснятии, но по смыслу — вечный.
+    """
+    low = reply_text.lower()
+    if any(p in low for p in _SPAMBOT_PERM_PATTERNS):
+        return "perm"
+    if _SPAMBOT_DATE_RE.search(reply_text) or any(
+        p in low for p in _SPAMBOT_TEMP_PATTERNS
+    ):
+        return "temp"
+    return "perm"
 
 
 # Кнопки аппеляции @SpamBot, которые надо нажать для запроса снятия спамблока
@@ -2491,8 +2550,13 @@ async def check_account_status_full(
                         "profile": profile,
                     }
                 if spambot_status == "spamblock":
+                    # Доп. поле spamblock_kind ('temp'|'perm') — для раскладки по
+                    # папкам «Временный/Вечный спамблок». Старые потребители читают
+                    # status/reason и его не замечают (аддитивно, контракт цел).
+                    kind = classify_spambot_restriction(reply_text)
                     return {
                         "status": "spamblock",
+                        "spamblock_kind": kind,
                         "reason": f"SpamBot: {reply_text[:120]}",
                         "display_name": display_name,
                         "profile": profile,
