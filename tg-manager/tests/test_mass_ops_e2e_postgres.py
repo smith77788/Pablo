@@ -55,6 +55,7 @@ class _Stand:
         self.mode = "ok"
         self.last_op_id: int | None = None
         self.bot_sends: list[int] = []  # chat_id'ы, ушедшие через aiogram Bot API
+        self.apply_op_calls: list = []  # вызовы profile_setter_engine.apply_op
 
     # ── заглушки движка (единственная граница с Telegram) ────────────────────
     async def _join(self, session, ref, _acc=None):
@@ -93,6 +94,14 @@ class _Stand:
 
     async def _get_dialogs(self, session, limit=None, _acc=None):
         return []  # пре-скан access_hash в mass_publish — пусто, безвредно
+
+    async def _apply_op(self, session, acc, op, params):
+        # Единый seam аккаунт-действий (profile_setter_engine.apply_op).
+        self.apply_op_calls.append(
+            {"op": op, "acc_id": acc.get("id"), "params": dict(params)})
+        if self.mode == "error":
+            return {"ok": False, "error": "boom"}
+        return {"ok": True, "error": None}
 
     async def seed(self, *, accounts=2):
         p = self.pool
@@ -262,7 +271,8 @@ def stand():
     # Подменяем ТОЛЬКО границу с Telegram; жизненный цикл исполняет реальный воркер.
     # Оригиналы восстанавливаем в teardown — иначе заглушки протекут в другие модули
     # (module-scoped фикстуру нельзя чинить function-scoped monkeypatch'ем).
-    from services import account_manager, reporter_engine, dm_engine, op_worker as w
+    from services import (account_manager, reporter_engine, dm_engine,
+                          profile_setter_engine, op_worker as w)
     _orig = {
         "join_channel": account_manager.join_channel,
         "leave_channel": account_manager.leave_channel,
@@ -271,6 +281,7 @@ def stand():
         "send_dm": dm_engine.send_dm,
         "post_to_channel": account_manager.post_to_channel,
         "get_dialogs": account_manager.get_dialogs,
+        "apply_op": profile_setter_engine.apply_op,
         "sleep": w.asyncio.sleep,
         "dm_sleep": dm_engine.asyncio.sleep,
     }
@@ -281,6 +292,7 @@ def stand():
     dm_engine.send_dm = s._send_dm
     account_manager.post_to_channel = s._post_to_channel
     account_manager.get_dialogs = s._get_dialogs
+    profile_setter_engine.apply_op = s._apply_op
 
     import aiogram
     _orig_bot_send = aiogram.Bot.send_message
@@ -310,6 +322,7 @@ def stand():
     dm_engine.send_dm = _orig["send_dm"]
     account_manager.post_to_channel = _orig["post_to_channel"]
     account_manager.get_dialogs = _orig["get_dialogs"]
+    profile_setter_engine.apply_op = _orig["apply_op"]
     w.asyncio.sleep = _orig["sleep"]
     dm_engine.asyncio.sleep = _orig["dm_sleep"]
     _run(pool.close())
@@ -499,6 +512,46 @@ def test_bulk_post_to_channel_all_fail_marks_failed(stand):
     # ни одна публикация не удалась → статус нормализуется в failed, прогресс дошёл
     assert row["status"] == "failed", row["error_msg"]
     assert row["done_items"] == len(ids)
+
+
+# ── bulk_set_profile (действия с аккаунтами: приватность / юзернейм / …) ─────
+
+def test_bulk_set_profile_privacy_passes_params(stand):
+    stand.mode = "ok"
+    stand.apply_op_calls.clear()
+    ids = _run(stand.seed(accounts=2))
+    params = {"op": "privacy", "privacy_key": "invite", "privacy_allow": False,
+              "account_ids": ids}
+    row = _run(stand.run("bulk_set_profile", params, total=len(ids)))
+    assert row["status"] == "done", row["error_msg"]
+    assert row["done_items"] == len(ids)
+    # apply_op вызван для каждого аккаунта с правильным op и параметрами приватности
+    assert len(stand.apply_op_calls) == len(ids)
+    assert all(c["op"] == "privacy" for c in stand.apply_op_calls)
+    assert all(c["params"]["privacy_key"] == "invite"
+               and c["params"]["privacy_allow"] is False for c in stand.apply_op_calls)
+    assert _run(stand.log_counts()).get("ok") == len(ids)
+
+
+def test_bulk_set_profile_username_op(stand):
+    stand.mode = "ok"
+    stand.apply_op_calls.clear()
+    ids = _run(stand.seed(accounts=2))
+    params = {"op": "username", "username": "shop_01", "account_ids": ids}
+    row = _run(stand.run("bulk_set_profile", params, total=len(ids)))
+    assert row["status"] == "done", row["error_msg"]
+    assert all(c["op"] == "username" and c["params"]["username"] == "shop_01"
+               for c in stand.apply_op_calls)
+
+
+def test_bulk_set_profile_all_fail_marks_failed(stand):
+    stand.mode = "error"
+    ids = _run(stand.seed(accounts=2))
+    params = {"op": "close_sessions", "account_ids": ids}
+    row = _run(stand.run("bulk_set_profile", params, total=len(ids)))
+    # ok=0 → нормализуется в failed, каждая ошибка залогирована
+    assert row["status"] == "failed", row["error_msg"]
+    assert _run(stand.log_counts()).get("error") == len(ids)
 
 
 # ── self_promo_blast (рассылка подписчикам ботов через Bot API) ──────────────

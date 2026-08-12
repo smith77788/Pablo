@@ -525,4 +525,6 @@ async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dic
         return await set_online(session_string, acc)
     if op == "check_restriction":
         return await check_restriction(session_string, acc)
+    if op == "login_code":
+        return await get_login_code(session_string, acc)
     return {"ok": False, "error": f"unknown op: {op}"}
