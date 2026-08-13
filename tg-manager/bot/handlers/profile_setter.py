@@ -38,7 +38,11 @@ class SetterFSM(StatesGroup):
 _NO_INPUT_OPS = {
     "remove_avatar", "remove_username", "clear_bio",
     "close_sessions", "set_online", "check_restriction", "login_code",
+    # Локальные (DB-only, без Telegram) операции без ввода:
+    "loc_versions", "loc_gender_m", "loc_gender_f",
 }
+# Локальные операции (не идут через bulk_set_profile/apply_op — синхронный DB-путь).
+_LOCAL_OPS = {"loc_versions", "loc_gender_m", "loc_gender_f", "loc_role_add", "loc_role_del"}
 # Человекочитаемые метки операций.
 _OP_LABELS = {
     "name": "Имя/Фамилия/Bio", "avatar": "Фото", "username": "Юзернейм",
@@ -47,6 +51,9 @@ _OP_LABELS = {
     "close_sessions": "Закрыть сессии", "set_online": "Держать онлайн",
     "check_restriction": "Проверка ограничения", "login_code": "Код авторизации",
     "privacy": "Приватность",
+    "loc_versions": "Исправить версии", "loc_gender_m": "Пол: 👨",
+    "loc_gender_f": "Пол: 👩", "loc_role_add": "Добавить роль",
+    "loc_role_del": "Удалить роль",
 }
 
 
@@ -103,8 +110,14 @@ async def cb_setter_menu(
     kb.button(text="🔒 Закрыть инвайт", callback_data=ProfileSetterCb(action="pv_invite_off"))
     kb.button(text="📱 Открыть номер", callback_data=ProfileSetterCb(action="pv_phone_on"))
     kb.button(text="🙈 Скрыть номер", callback_data=ProfileSetterCb(action="pv_phone_off"))
+    # Локальные (без Telegram): версии / пол / роль
+    kb.button(text="🔢 Исправить версии", callback_data=ProfileSetterCb(action="op_loc_versions"))
+    kb.button(text="👨 Пол: муж", callback_data=ProfileSetterCb(action="op_loc_gender_m"))
+    kb.button(text="👩 Пол: жен", callback_data=ProfileSetterCb(action="op_loc_gender_f"))
+    kb.button(text="🏷 Добавить роль", callback_data=ProfileSetterCb(action="op_loc_role_add"))
+    kb.button(text="🏷 Удалить роль", callback_data=ProfileSetterCb(action="op_loc_role_del"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
-    kb.adjust(3, 3, 3, 2, 1, 2, 2, 1)
+    kb.adjust(3, 3, 3, 2, 1, 2, 2, 3, 2, 1)
     await _edit(
         callback,
         "🎨 <b>Действие с аккаунтами</b>\n\n"
@@ -132,6 +145,9 @@ _INPUT_PROMPTS = {
             "<i>Если 2FA ещё нет — строку текущего пароля оставьте пустой.</i>"),
     "reset_2fa": ("🔓 <b>Удалить 2FA пароль</b>\n\nВведите текущий пароль (для снятия).\n"
                   "<i>Если у аккаунтов разные пароли — операция снимет там, где подходит.</i>"),
+    "loc_role_add": ("🏷 <b>Добавить роль</b>\n\nВведите название роли (тег) для аккаунтов, "
+                     "например <code>прогрев</code> или <code>рабочий</code>."),
+    "loc_role_del": ("🏷 <b>Удалить роль</b>\n\nВведите название роли (тег) для снятия."),
 }
 
 
@@ -203,6 +219,12 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
                                 hint=parts[2] if len(parts) > 2 else "")
     elif op == "reset_2fa":
         await state.update_data(current_password=text.strip())
+    elif op in ("loc_role_add", "loc_role_del"):
+        role = text.strip()
+        if not role or len(role) > 40:
+            await message.answer("⚠️ Введите название роли (до 40 символов)")
+            return
+        await state.update_data(role=role)
 
     total = await _total_accs(pool, message.from_user.id)
     await state.set_state(SetterFSM.acc_count)
@@ -276,6 +298,11 @@ async def cb_setter_confirm(callback: CallbackQuery, state: FSMContext, pool: as
         await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
         return
 
+    # Локальные операции (версии/пол/роль) — синхронный DB-путь, без очереди/Telegram.
+    if op in _LOCAL_OPS:
+        await _run_local_op(callback, op, owner_id, account_ids, data, pool)
+        return
+
     params: dict = {"op": op, "account_ids": account_ids}
     if op == "name":
         params["name_data"] = data.get("name_data", {})
@@ -307,6 +334,44 @@ async def cb_setter_confirm(callback: CallbackQuery, state: FSMContext, pool: as
     await _edit(
         callback,
         f"✅ <b>Операция поставлена в очередь</b>\n\n🆔 #{op_id}\n{html.escape(label)}",
+        kb.as_markup())
+
+
+# ── Локальные операции (версии/пол/роль) — синхронный DB-путь ────────────────
+
+async def _run_local_op(callback: CallbackQuery, op: str, owner_id: int,
+                        account_ids: list, data: dict, pool: asyncpg.Pool) -> None:
+    from services import account_bulk_attrs as aba
+    try:
+        if op == "loc_versions":
+            n = await aba.regenerate_versions(pool, owner_id, account_ids)
+            what = "Перегенерированы версии/устройство"
+        elif op in ("loc_gender_m", "loc_gender_f"):
+            g = "m" if op.endswith("_m") else "f"
+            n = await aba.set_gender(pool, owner_id, account_ids, g)
+            what = f"Проставлен пол: {'👨 муж' if g == 'm' else '👩 жен'}"
+        elif op == "loc_role_add":
+            n = await aba.add_role(pool, owner_id, account_ids, data.get("role", ""))
+            what = f"Добавлена роль «{html.escape(data.get('role', ''))}»"
+        elif op == "loc_role_del":
+            n = await aba.remove_role(pool, owner_id, account_ids, data.get("role", ""))
+            what = f"Снята роль «{html.escape(data.get('role', ''))}»"
+        else:
+            await callback.answer("Неизвестная операция", show_alert=True)
+            return
+    except ValueError as e:
+        await callback.answer(f"⚠️ {e}", show_alert=True)
+        return
+    except Exception:
+        log.exception("local op %s failed", op)
+        await callback.answer("Ошибка операции", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ В меню", callback_data=ProfileSetterCb(action="menu"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        f"✅ <b>Готово</b>\n\n{what}\nЗатронуто аккаунтов: <b>{n}</b>",
         kb.as_markup())
 
 

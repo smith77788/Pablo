@@ -53,6 +53,8 @@ INLINE_MIGRATIONS: list[str] = [
     # Пол участника аудитории ('m'|'f'|NULL) — таргетинг рассылок по полу
     # (services/gender_classifier.py размечает по имени).
     "ALTER TABLE parsed_audiences ADD COLUMN IF NOT EXISTS gender TEXT",
+    # Пол аккаунта (локальная категоризация оператора; не поле Telegram-профиля).
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS gender TEXT",
     # tg_accounts — добавляем поля если отсутствуют
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",
