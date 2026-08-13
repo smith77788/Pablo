@@ -120,11 +120,22 @@ async def invite_batch(
         for ref in user_refs:
             try:
                 user = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
-                await asyncio.wait_for(
+                _res = await asyncio.wait_for(
                     client(InviteToChannelRequest(channel=group, users=[user])),
                     timeout=_ACTION_TIMEOUT,
                 )
-                ok += 1
+                # ЧЕСТНЫЙ УСПЕХ: в современных слоях Telegram НЕ бросает
+                # UserPrivacyRestricted, а тихо возвращает пользователя в
+                # missing_invitees (не добавлен: приватность/премиум/лимит). Считать
+                # такой ответ успехом = врать в отчёте И тратить дневной бюджет
+                # аккаунта на фантомы. Не добавлен → в privacy_failed (как и явную
+                # privacy-ошибку — уйдёт в промоут/контакт-фолбэк).
+                if getattr(_res, "missing_invitees", None):
+                    failed += 1
+                    privacy_failed.append(ref)
+                    errors.append(f"{ref}: not added (privacy/limit — missing_invitee)")
+                else:
+                    ok += 1
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             except UserAlreadyParticipantError:
                 ok += 1  # уже в группе = успех

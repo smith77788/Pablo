@@ -8511,6 +8511,45 @@ async def _exec_contacts_sync(
     return {"status": "done", "ok": synced, "failed": len(errs), "summary": summary}
 
 
+async def _filter_unready_for_invite(pool, op_id: int, accounts: list) -> list:
+    """Отсеять НЕготовые к инвайту аккаунты (readiness < порога). Fail-open.
+
+    _ACC_COLS не тянет trust_score/acc_status, поэтому берём сигналы готовности
+    одним запросом. Если готовых не осталось — возвращаем исходный список (лучше
+    рискнуть, чем обнулить операцию), как и карантин-фильтр."""
+    if not accounts:
+        return accounts
+    from services import account_readiness as _ar
+    ids = [int(a["id"]) for a in accounts]
+    try:
+        rows = await pool.fetch(
+            "SELECT id, trust_score, acc_status, cooldown_until, proxy_id "
+            "FROM tg_accounts WHERE id = ANY($1::bigint[])", ids)
+    except Exception:
+        return accounts  # нет сигналов → не режем
+    meta = {int(r["id"]): dict(r) for r in rows}
+    kept = []
+    for a in accounts:
+        m = meta.get(int(a["id"]), {})
+        acc_dict = {
+            "id": a["id"], "session_str": a.get("session_str"),
+            "trust_score": m.get("trust_score"), "acc_status": m.get("acc_status"),
+            "cooldown_until": m.get("cooldown_until"),
+            "proxy_id": m.get("proxy_id"), "proxy_url": a.get("proxy_url"),
+            "is_active": True,
+        }
+        try:
+            if _ar.is_ready_for_action(acc_dict, "invite"):
+                kept.append(a)
+        except Exception:
+            kept.append(a)  # ошибка расчёта → не режем этот аккаунт
+    if kept and len(kept) != len(accounts):
+        log.info("mass_invite op=%d: %d аккаунтов не готовы (readiness<порог), пропущены",
+                 op_id, len(accounts) - len(kept))
+        return kept
+    return accounts  # все не готовы → fail-open
+
+
 async def _exec_mass_invite(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -8725,6 +8764,12 @@ async def _exec_mass_invite(
             accounts = _kept
     except Exception:
         log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
+
+    # Гейт готовности (fail-open): не инвайтить с неготовых аккаунтов — низкий
+    # trust / нет прокси / spamblock / cooldown = инвайт с них = быстрый бан
+    # молодого/слабого аккаунта. Порог min_trust_for_action('invite')=0.50.
+    # Дополняет карантин (тот ловит недавние ОГРАНИЧЕНИЯ, этот — общую слабость).
+    accounts = await _filter_unready_for_invite(pool, op_id, accounts)
 
     # Клейм аккаунтов под эту операцию — защита от AUTH_KEY_DUPLICATED («сессия
     # использовалась с двух IP одновременно»): берём атомарно только СВОБОДНЫЕ (не
