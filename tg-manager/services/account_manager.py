@@ -13,7 +13,7 @@ Usage:
 from __future__ import annotations
 import asyncio
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 import random
 import re
@@ -3376,6 +3376,96 @@ async def get_channel_invite_link(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_invite_link")
+
+
+def _normalize_invite_opts(
+    title: str = "",
+    expire_seconds: int | None = None,
+    usage_limit: int | None = None,
+    request_needed: bool = False,
+    _now: datetime | None = None,
+) -> dict:
+    """Нормализовать параметры инвайт-ссылки (чистая логика, без сети).
+
+    - title обрезается до 32 символов (лимит Telegram), пустой → None;
+    - expire_seconds>0 → абсолютная дата истечения (UTC), иначе None;
+    - usage_limit и request_needed взаимоисключимы у Telegram: при заявке
+      числовой лимит гасится (eff_usage=None);
+    - отрицательные/нулевые значения трактуются как «не задано».
+    """
+    now = _now or datetime.now(timezone.utc)
+    expire_dt = None
+    if expire_seconds and int(expire_seconds) > 0:
+        expire_dt = now + timedelta(seconds=int(expire_seconds))
+    ul = int(usage_limit) if usage_limit and int(usage_limit) > 0 else None
+    eff_usage = None if request_needed else ul
+    return {
+        "title": (title or "").strip()[:32] or None,
+        "expire_dt": expire_dt,
+        "usage_limit": eff_usage,
+        "request_needed": bool(request_needed),
+    }
+
+
+async def create_channel_invite_link(
+    session_string: str,
+    channel_id: int | str,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    *,
+    title: str = "",
+    expire_seconds: int | None = None,
+    usage_limit: int | None = None,
+    request_needed: bool = False,
+) -> dict:
+    """Создать НОВУЮ инвайт-ссылку своего канала/чата с ограничениями.
+
+    Для роста своего сообщества: люди вступают по ссылке сами. Опции —
+    как в нативном Telegram:
+      - title: подпись ссылки (для учёта источника, видна только админам);
+      - expire_seconds: срок жизни ссылки в секундах (None — бессрочно);
+      - usage_limit: макс. число вступлений по ссылке (None — без лимита);
+      - request_needed: вступление по ЗАЯВКЕ (админ подтверждает вручную) —
+        взаимоисключимо с usage_limit на стороне Telegram.
+
+    Возвращает {ok, link, title, expire_date, usage_limit, request_needed, error}.
+    Не добавляет никого сам — только выпускает ссылку.
+    """
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+
+    opts = _normalize_invite_opts(title, expire_seconds, usage_limit, request_needed)
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await _resolve_channel_peer(client, channel_id, access_hash)
+        result = await client(ExportChatInviteRequest(
+            peer=entity,
+            title=opts["title"],
+            expire_date=opts["expire_dt"],
+            usage_limit=opts["usage_limit"],
+            request_needed=bool(opts["request_needed"]) or None,
+        ))
+        return {
+            "ok": True,
+            "link": getattr(result, "link", "") or "",
+            "title": getattr(result, "title", "") or (opts["title"] or ""),
+            "expire_date": opts["expire_dt"].isoformat() if opts["expire_dt"] else None,
+            "usage_limit": opts["usage_limit"],
+            "request_needed": bool(opts["request_needed"]),
+            "error": None,
+        }
+    except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            raise
+        log.warning("create_channel_invite_link error: %s", e)
+        return {"ok": False, "link": "", "error": str(e)[:150]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в create_channel_invite_link")
 
 
 async def delete_channel(
