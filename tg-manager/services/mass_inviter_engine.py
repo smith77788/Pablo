@@ -31,6 +31,11 @@ _BATCH_SIZE = 5  # Telegram разрешает добавлять до 5 за р
 # флуд пережидаем инлайн, длинный — прекращаем батч и сигналим наверх для cooldown.
 _MAX_FLOOD_INLINE = 60
 
+# Потолок размера списка на приём (защита от гигантских файлов/памяти). Раньше был
+# жёсткий 500 — оператор просил принимать больше. Реальный темп/суточные лимиты
+# инвайта всё равно ограничивает флот-логика; это лишь верхняя граница на приём.
+MAX_INVITE_LIST = 200_000
+
 
 async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
     """Resolve a group reference to an entity usable by InviteToChannelRequest.
@@ -591,7 +596,7 @@ def parse_group_ref(text: str) -> str:
     return formatted or text
 
 
-def parse_user_refs(text: str) -> list[str]:
+def parse_user_refs(text: str, limit: int = MAX_INVITE_LIST) -> list[str]:
     """Парсинг строки с @username или ID через запятую/пробел/перенос."""
     refs: list[str] = []
     for token in re.split(r"[,;\s\n]+", text.strip()):
@@ -602,19 +607,23 @@ def parse_user_refs(text: str) -> list[str]:
             refs.append(token)
         elif re.match(r"^[A-Za-z0-9_]{3,}$", token):
             refs.append(f"@{token}")
-    return list(dict.fromkeys(refs))[:500]
+    return list(dict.fromkeys(refs))[:limit]
 
 
-def parse_phones(text: str) -> list[str]:
-    """Парсинг номеров телефонов: +79991234567 через любой разделитель."""
+def parse_phones(text: str, limit: int = MAX_INVITE_LIST) -> list[str]:
+    """Парсинг номеров телефонов: один номер на строку (или через запятую/;).
+
+    Разделяем ТОЛЬКО по переносам/запятым/точке-с-запятой, а НЕ по пробелам —
+    иначе «+7 999 123 45 67» разбивается на куски и теряется. Пробелы/скобки/
+    дефисы внутри номера вычищаются."""
     phones: list[str] = []
-    for token in re.split(r"[,;\s\n]+", text.strip()):
+    for token in re.split(r"[,;\n\r]+", text.strip()):
         token = re.sub(r"[^\d+]", "", token)
         if len(token) >= 10:
             if not token.startswith("+"):
                 token = "+" + token
             phones.append(token)
-    return list(dict.fromkeys(phones))[:500]
+    return list(dict.fromkeys(phones))[:limit]
 
 
 # Telegram user-ID сейчас укладывается в 10 цифр (< 10^10); телефон в формате
@@ -689,8 +698,11 @@ def classify_invite_list(raw: str) -> dict[str, list[str]]:
             else:
                 unrec.append(tok)
     return {
-        "phones": parse_phones(" ".join(phones_src)),
-        "user_refs": parse_user_refs(" ".join(refs_src)),
+        # phones_src уже нормализованы ("+"+цифры). Склеиваем через ПЕРЕНОС, а не
+        # пробел: parse_phones теперь делит по переносам/запятым (не по пробелам),
+        # иначе все номера слиплись бы в одно гигантское число.
+        "phones": parse_phones("\n".join(phones_src)),
+        "user_refs": parse_user_refs("\n".join(refs_src)),
         "unrecognized": unrec[:50],
     }
 

@@ -279,24 +279,36 @@ async def cb_src_manual(callback: CallbackQuery, state: FSMContext) -> None:
         callback,
         "✏️ Введите @username или user_id через запятую или с новой строки:\n\n"
         "<code>@user1, @user2\n123456789\n@user3</code>\n\n"
-        "Максимум 500 пользователей за раз.",
+        "📎 Или пришлите <b>файлом</b>: .txt, .csv, .xlsx или база .db (SQLite). "
+        "Ограничение на объём снято — приму хоть десятки тысяч.",
         _cancel_kb(),
     )
 
 
-@router.message(InviterFSM.users_manual)
+@router.message(InviterFSM.users_manual, F.text)
 async def msg_inviter_manual(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     from services.mass_inviter_engine import parse_user_refs
     refs = parse_user_refs(message.text or "")
     if not refs:
-        await message.answer("⚠️ Не удалось распознать пользователей. Введите @username или числовые ID.")
+        await message.answer("⚠️ Не удалось распознать пользователей. Введите @username "
+                             "или числовые ID — либо пришлите файл .txt/.csv/.xlsx/.db.")
         return
-    await state.update_data(user_refs=refs, total_users=len(refs))
-    await state.set_state(InviterFSM.acc_count)
-    data = await state.get_data()
-    await _ask_acc_count_msg(message, data, len(refs), pool)
+    await _accept_refs(message, state, pool, refs, phones=False)
+
+
+@router.message(InviterFSM.users_manual, F.document)
+async def msg_inviter_manual_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    refs = await _refs_from_document(message, mode="refs")
+    if refs is None:
+        return
+    if not refs:
+        await message.answer("⚠️ В файле не нашлось ни одного @username / ID.")
+        return
+    await _accept_refs(message, state, pool, refs, phones=False)
 
 
 # ── Шаг 2c: По телефонам ─────────────────────────────────────────────────────
@@ -309,24 +321,79 @@ async def cb_src_phones(callback: CallbackQuery, state: FSMContext) -> None:
         callback,
         "📱 Введите номера телефонов через запятую или с новой строки:\n\n"
         "<code>+79991234567\n+7 999 123 45 67\n89991234567</code>\n\n"
-        "Максимум 500 номеров.",
+        "📎 Или пришлите <b>файлом</b>: .txt, .csv, .xlsx или база .db (SQLite). "
+        "Ограничение на объём снято.",
         _cancel_kb(),
     )
 
 
-@router.message(InviterFSM.phones)
+@router.message(InviterFSM.phones, F.text)
 async def msg_inviter_phones(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     from services.mass_inviter_engine import parse_phones
     phones = parse_phones(message.text or "")
     if not phones:
-        await message.answer("⚠️ Не удалось распознать номера телефонов. Введите в формате +79991234567.")
+        await message.answer("⚠️ Не удалось распознать номера. Формат +79991234567 — "
+                             "либо пришлите файл .txt/.csv/.xlsx/.db.")
         return
-    await state.update_data(phones=phones, total_users=len(phones))
+    await _accept_refs(message, state, pool, phones, phones=True)
+
+
+@router.message(InviterFSM.phones, F.document)
+async def msg_inviter_phones_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    phones = await _refs_from_document(message, mode="phones")
+    if phones is None:
+        return
+    if not phones:
+        await message.answer("⚠️ В файле не нашлось ни одного номера телефона.")
+        return
+    await _accept_refs(message, state, pool, phones, phones=True)
+
+
+# ── Общие помощники приёма списка (текст/файл) ───────────────────────────────
+
+async def _accept_refs(message: Message, state: FSMContext, pool: asyncpg.Pool,
+                       items: list, phones: bool) -> None:
+    """Сохранить распознанный список и перейти к выбору числа аккаунтов."""
+    if phones:
+        await state.update_data(phones=items, total_users=len(items))
+    else:
+        await state.update_data(user_refs=items, total_users=len(items))
     await state.set_state(InviterFSM.acc_count)
     data = await state.get_data()
-    await _ask_acc_count_msg(message, data, len(phones), pool)
+    await message.answer(f"✅ Принято: <b>{len(items)}</b> "
+                         f"{'номеров' if phones else 'пользователей'}.",
+                         parse_mode="HTML")
+    await _ask_acc_count_msg(message, data, len(items), pool)
+
+
+async def _refs_from_document(message: Message, mode: str):
+    """Скачать документ и разобрать в список. None при ошибке (уже ответили)."""
+    from services import invite_list_parser as ilp
+    doc = message.document
+    if not doc:
+        await message.answer("⚠️ Пришлите файл документом.")
+        return None
+    if doc.file_size and doc.file_size > ilp.MAX_FILE_BYTES:
+        await message.answer(f"⚠️ Файл слишком большой "
+                             f"(лимит {ilp.MAX_FILE_BYTES // (1024 * 1024)} МБ).")
+        return None
+    try:
+        f = await message.bot.get_file(doc.file_id)
+        buf = await message.bot.download_file(f.file_path)
+        data = buf.read() if hasattr(buf, "read") else bytes(buf)
+    except Exception as e:
+        log.warning("inviter: download file failed: %s", e)
+        await message.answer("⚠️ Не удалось скачать файл. Попробуйте ещё раз.")
+        return None
+    try:
+        return ilp.parse_invite_file(doc.file_name or "list.txt", data, mode=mode)
+    except ValueError as e:
+        await message.answer(f"⚠️ {html.escape(str(e))}")
+        return None
 
 
 # ── Шаг 3: Кол-во аккаунтов → подтверждение ─────────────────────────────────
@@ -499,7 +566,7 @@ async def cb_inviter_confirm(
                 _gw = " AND gender=$3"
             prows = await pool.fetch(
                 "SELECT DISTINCT tg_user_id, username FROM parsed_audiences "
-                "WHERE owner_id=$1 AND parse_run_id=$2" + _gw + " LIMIT 5000",
+                "WHERE owner_id=$1 AND parse_run_id=$2" + _gw + " LIMIT 100000",
                 owner_id, run_id, *_gargs,
             )
         else:
@@ -507,7 +574,7 @@ async def cb_inviter_confirm(
                 _gw = " AND gender=$2"
             prows = await pool.fetch(
                 "SELECT DISTINCT tg_user_id, username FROM parsed_audiences "
-                "WHERE owner_id=$1" + _gw + " LIMIT 5000",
+                "WHERE owner_id=$1" + _gw + " LIMIT 100000",
                 owner_id, *_gargs,
             )
         user_refs = [
