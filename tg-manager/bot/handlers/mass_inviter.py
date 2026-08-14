@@ -355,6 +355,24 @@ async def msg_inviter_phones_file(
 
 # ── Общие помощники приёма списка (текст/файл) ───────────────────────────────
 
+async def _count_already_invited(pool: asyncpg.Pool, owner_id: int, group_key: str,
+                                 items: list) -> int:
+    """Сколько из списка УЖЕ приглашались в эту группу (по invite_target_log).
+
+    Fail-open: любая ошибка/огромный список → 0 (превью необязательно, инвайт
+    всё равно дедупит на исполнении)."""
+    if not group_key or not items or len(items) > 50_000:
+        return 0
+    try:
+        n = await pool.fetchval(
+            "SELECT COUNT(*) FROM invite_target_log "
+            "WHERE owner_id=$1 AND group_key=$2 AND target = ANY($3::text[])",
+            owner_id, group_key, [str(x) for x in items])
+        return int(n or 0)
+    except Exception:
+        return 0
+
+
 async def _accept_refs(message: Message, state: FSMContext, pool: asyncpg.Pool,
                        items: list, phones: bool) -> None:
     """Сохранить распознанный список и перейти к выбору числа аккаунтов."""
@@ -364,9 +382,15 @@ async def _accept_refs(message: Message, state: FSMContext, pool: asyncpg.Pool,
         await state.update_data(user_refs=items, total_users=len(items))
     await state.set_state(InviterFSM.acc_count)
     data = await state.get_data()
-    await message.answer(f"✅ Принято: <b>{len(items)}</b> "
-                         f"{'номеров' if phones else 'пользователей'}.",
-                         parse_mode="HTML")
+    word = "номеров" if phones else "пользователей"
+    text = f"✅ Принято: <b>{len(items)}</b> {word}."
+    # Превью дедупа: сколько уже приглашались в эту группу (их пропустим).
+    already = await _count_already_invited(pool, message.from_user.id,
+                                           data.get("group", ""), items)
+    if already:
+        text += (f"\n♻️ Уже приглашались в эту группу: <b>{already}</b> — пропущу.\n"
+                 f"🆕 Новых к приглашению: <b>{len(items) - already}</b>.")
+    await message.answer(text, parse_mode="HTML")
     await _ask_acc_count_msg(message, data, len(items), pool)
 
 
