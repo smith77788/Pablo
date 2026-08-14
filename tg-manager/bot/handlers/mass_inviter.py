@@ -492,9 +492,9 @@ async def _inv_offer_pace(message: Message, data: dict) -> None:
     kb = InlineKeyboardBuilder()
     # Темп = пауза между батчами. Инвайт — самая баноопасная операция, поэтому
     # выбор скорости обязателен (медленный безопаснее для аккаунтов).
-    kb.button(text="🐢 Медленно (безопасно)", callback_data=InviterCb(action="confirm", item="slow"))
-    kb.button(text="🚶 Обычно", callback_data=InviterCb(action="confirm", item="normal"))
-    kb.button(text="🐇 Быстро (риск)", callback_data=InviterCb(action="confirm", item="fast"))
+    kb.button(text="🐢 Медленно (безопасно)", callback_data=InviterCb(action="setpace", item="slow"))
+    kb.button(text="🚶 Обычно", callback_data=InviterCb(action="setpace", item="normal"))
+    kb.button(text="🐇 Быстро (риск)", callback_data=InviterCb(action="setpace", item="fast"))
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
     kb.adjust(1, 2, 1)
     await message.answer(
@@ -508,6 +508,52 @@ async def _inv_offer_pace(message: Message, data: dict) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+async def _inv_offer_volume(message: Message, data: dict) -> None:
+    """Экран выбора объёма на аккаунт за прогон (после темпа)."""
+    use = data.get("acc_count", 1)
+    total_users = data.get("total_users", 0)
+    need = max(1, (total_users + use - 1) // use)  # сколько на аккаунт, чтобы закрыть базу
+    kb = InlineKeyboardBuilder()
+    # «Авто» — консервативный расчёт по истории аккаунта (безопасно, но у свежих
+    # аккаунтов даёт мало). Числа — осознанный фиксированный лимит на аккаунт за
+    # прогон (режим «один проход»: не клампим предсказанным дневным лимитом, но
+    # держим потолок безопасности 50 и живые сигналы флуда). 50 — верхняя граница.
+    kb.button(text="🤖 Авто (по истории, безопасно)", callback_data=InviterCb(action="confirm", item="auto"))
+    kb.button(text="📈 10 / аккаунт", callback_data=InviterCb(action="confirm", item="10"))
+    kb.button(text="📈 25 / аккаунт", callback_data=InviterCb(action="confirm", item="25"))
+    kb.button(text="🚀 50 / аккаунт (максимум)", callback_data=InviterCb(action="confirm", item="50"))
+    kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
+    kb.adjust(1, 2, 1, 1)
+    await message.answer(
+        "👥 <b>Инвайтер — объём на аккаунт</b>\n\n"
+        f"🔑 Аккаунтов: <b>{use}</b> · в базе <b>{total_users}</b>\n"
+        f"📊 Чтобы закрыть базу за один проход, нужно ~<b>{need}</b> на аккаунт.\n\n"
+        "• <b>Авто</b> — сколько безопасно по истории аккаунта (у свежих — мало, "
+        "≈2–15; растёт по мере чистой работы).\n"
+        "• <b>Число</b> — фиксированный лимит на аккаунт за прогон (режим «один "
+        "проход»). Потолок безопасности — 50: выше почти гарантированный бан.\n\n"
+        "⚠️ <i>Чем больше за раз, тем выше риск ограничений. Для свежих аккаунтов "
+        "лучше начинать с малого и растить.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(InviterCb.filter(F.action == "setpace"))
+async def cb_inviter_pace(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext
+) -> None:
+    pace = callback_data.item if callback_data.item in ("slow", "normal", "fast") else "normal"
+    await state.update_data(inv_pace=pace)
+    data = await state.get_data()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await _inv_offer_volume(callback.message, data)
+    await callback.answer()
 
 
 @router.callback_query(InviterCb.filter(F.action == "method"))
@@ -534,8 +580,17 @@ async def cb_inviter_confirm(
     data = await state.get_data()
     await state.clear()
     owner_id = callback.from_user.id
-    # Темп из выбранной кнопки (slow/normal/fast); дефолт — normal.
-    pace = callback_data.item if callback_data.item in ("slow", "normal", "fast") else "normal"
+    # Темп сохранён на прошлом шаге; здесь item — выбор ОБЪЁМА на аккаунт.
+    pace = data.get("inv_pace", "normal")
+    # Объём на аккаунт за прогон:
+    #   "auto" → лимит по истории аккаунта (per_account_limit=0, без «одного прохода»);
+    #   число  → фиксированный лимит N на аккаунт в режиме «один проход» (не клампим
+    #            консервативным дневным прогнозом, но держим потолок 50 + сигналы флуда).
+    _vol = callback_data.item if callback_data.item in ("auto", "10", "25", "50") else "auto"
+    if _vol == "auto":
+        _per_acc_limit, _one_pass = 0, False
+    else:
+        _per_acc_limit, _one_pass = int(_vol), True
     acc_count = data.get("acc_count", 1)
     group = data.get("group", "")
     source_type = data.get("source_type", "manual")
@@ -605,16 +660,18 @@ async def cb_inviter_confirm(
         "user_refs": user_refs,
         "phones": phones,
         "batch_size": 5,
-        # Ban-safety: темп из выбора пользователя (пауза между батчами) +
-        # консервативный потолок инвайтов на аккаунт за прогон (50 — широко
-        # принятый безопасный дневной предел; защищает аккаунты от овер-инвайта).
+        # Темп (пауза между батчами) + объём на аккаунт из выбора оператора.
+        # per_account_limit=0 + one_pass=False → авто по истории; N + one_pass=True →
+        # фиксированный лимит на аккаунт за прогон (потолок безопасности 50 держится).
         "pace": pace,
-        "per_account_limit": 50,
+        "per_account_limit": _per_acc_limit,
+        "one_pass": _one_pass,
         # Способ добавления: direct (InviteToChannel) или admin (промоут-трюк).
         "invite_method": method,
     }
     _pace_ru = {"slow": "🐢 медленно", "normal": "🚶 обычно", "fast": "🐇 быстро"}[pace]
     _method_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
+    _vol_ru = "🤖 авто (по истории)" if _vol == "auto" else f"{_vol}/аккаунт (один проход)"
     label = f"Инвайтер: {group} ← {total_users} пользователей × {len(account_ids)} акк."
     op_id = await pool.fetchval(
         "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
@@ -634,6 +691,7 @@ async def cb_inviter_confirm(
         f"👥 Пользователей: <b>{total_users}</b>\n"
         f"🔑 Аккаунтов: <b>{len(account_ids)}</b>\n"
         f"⚙️ Способ: <b>{_method_ru}</b>\n"
-        f"⏱ Темп: <b>{_pace_ru}</b> · лимит <b>50</b>/акк за прогон",
+        f"⏱ Темп: <b>{_pace_ru}</b>\n"
+        f"📊 Объём: <b>{_vol_ru}</b>",
         kb.as_markup(),
     )

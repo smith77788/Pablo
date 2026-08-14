@@ -175,10 +175,11 @@ def _seed(pool, *, n_acc=3, n_users=20, with_uid=True):
     return _run(_s())
 
 
-def _launch(pool, w, ids, run_id, n_users, auto_promote=True):
+def _launch(pool, w, ids, run_id, n_users, auto_promote=True, **extra):
     async def _go():
         params = {"group": "@target", "source": "parsed", "parse_run_id": run_id,
                   "account_ids": ids, "auto_promote": auto_promote, "promote_trick": True}
+        params.update(extra)
         op_id = await pool.fetchval(
             "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
             "VALUES($1,'mass_invite','pending',$2,$3,'e2e') RETURNING id",
@@ -253,6 +254,27 @@ def test_promoter_grants_rights_on_demand_whole_fleet_works(env):
     workers = {aid for aid, refs in state["invite_calls"] if aid in (ids[1], ids[2])}
     assert workers, "аккаунты, дополучившие права, должны были участвовать в инвайте"
     state["rights_only"] = None
+
+
+def test_per_account_volume_one_pass(env):
+    """Жалоба «берётся 2 юзера на аккаунт»: с явным объёмом (one_pass + лимит N)
+    каждый аккаунт делает до N инвайтов, а не консервативные ~2 по истории."""
+    pool, w, state = env
+    state["invite_calls"].clear()
+    state["promoted"].clear()
+    state["rights_only"] = None
+    ids, run_id = _seed(pool, n_acc=3, n_users=30)
+    state["admin_id"] = ids[0]           # админ есть → всё подключается и инвайтит
+    # объём 4 на аккаунт, один проход (без клампа предсказанным дневным лимитом)
+    row, _ = _launch(pool, w, ids, run_id, 30, per_account_limit=4, one_pass=True)
+    assert row["status"] == "done", row["summary"]
+    # каждый аккаунт добавил РОВНО по 4 (3×4=12), а не по 2
+    per_acc = {}
+    for aid, refs in state["invite_calls"]:
+        per_acc[aid] = per_acc.get(aid, 0) + len(refs)
+    assert row["done_items"] == 12, (row["done_items"], per_acc)
+    assert all(v <= 4 for v in per_acc.values()), per_acc
+    assert set(per_acc.values()) == {4}, per_acc   # у всех троих по 4
 
 
 def test_no_connect_does_not_claim_missing_admin(env):
