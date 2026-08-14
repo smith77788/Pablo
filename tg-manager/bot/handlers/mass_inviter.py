@@ -92,6 +92,47 @@ async def cb_inviter_menu(
     )
 
 
+@router.callback_query(InviterCb.filter(F.action == "joinall"))
+async def cb_inviter_joinall(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    data = await state.get_data()
+    group = data.get("pf_group", "")
+    if not group:
+        await callback.answer("Группа не задана — запустите проверку заново.", show_alert=True)
+        return
+    await callback.answer("⏳ Вступаю всеми аккаунтами…")
+    try:
+        await callback.message.edit_text(
+            f"⏳ Вступаю аккаунтами в <code>{html.escape(group)}</code>… "
+            "(может занять время)", parse_mode="HTML")
+    except Exception:
+        log_exc_swallow(log, "joinall: edit wait")
+    from services.invite_preflight import join_all
+    try:
+        r = await join_all(pool, callback.from_user.id, group)
+    except Exception:
+        log_exc_swallow(log, "joinall run failed")
+        await callback.message.answer("⚠️ Не удалось выполнить вступление. Попробуйте позже.")
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔁 Проверить готовность", callback_data=InviterCb(action="preflight"))
+    kb.button(text="➕ Запустить инвайт", callback_data=InviterCb(action="start"))
+    kb.button(text="◀️ В меню", callback_data=InviterCb(action="menu"))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(
+            f"🚪 <b>Вступление в</b> <code>{html.escape(group)}</code>\n\n"
+            f"✅ Вступили: <b>{r['joined']}</b>\n"
+            f"➖ Уже были в группе: <b>{r['already']}</b>\n"
+            f"❌ Не удалось: <b>{r['failed']}</b>\n"
+            f"Всего аккаунтов: <b>{r['total']}</b>\n\n"
+            "<i>Теперь можно запускать инвайт (прямой метод требует членства).</i>",
+            parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        log_exc_swallow(log, "joinall: edit result")
+
+
 @router.callback_query(InviterCb.filter(F.action == "preflight"))
 async def cb_inviter_preflight(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(InviterFSM.preflight_group)
@@ -114,7 +155,9 @@ async def msg_inviter_preflight(
     if not group:
         await message.answer("⚠️ Не удалось распознать группу. Введите @username или t.me/...")
         return
-    await state.clear()
+    # Не чистим data — сохраняем группу для возможного «Вступить всеми».
+    await state.set_state(None)
+    await state.update_data(pf_group=group)
     wait = await message.answer("⏳ Проверяю готовность флота… (подключаю аккаунты)")
     from services.invite_preflight import run_preflight
     try:
@@ -139,7 +182,13 @@ async def msg_inviter_preflight(
     lines.append(f"\n🎯 Итого готовы инвайтить: <b>{rep['ready']}</b>")
     lines.append(f"\n💡 {rep['verdict']}")
     kb = InlineKeyboardBuilder()
+    # Если есть не-участники — предложим вступить всеми (для прямого инвайта нужно
+    # членство). Группа уже сохранена в FSM (pf_group).
+    if c["not_member"]:
+        kb.button(text=f"🚪 Вступить всеми в группу ({c['not_member']} не в группе)",
+                  callback_data=InviterCb(action="joinall"))
     kb.button(text="➕ Запустить инвайт", callback_data=InviterCb(action="start"))
+    kb.button(text="🔁 Проверить снова", callback_data=InviterCb(action="preflight"))
     kb.button(text="◀️ В меню", callback_data=InviterCb(action="menu"))
     kb.adjust(1)
     try:

@@ -125,3 +125,36 @@ def test_selected_account_ids_subset(pool):
     rep = _run(run_preflight(pool, OWNER, "@g", account_ids=ids[:2],
                              checker=_mk_checker(states)))
     assert rep["total"] == 2          # только выбранные
+
+
+def _mk_joiner(result_by_id):
+    async def joiner(session, acc, group):
+        return result_by_id[int(acc["id"])]
+    return joiner
+
+
+def test_join_all_classifies(pool):
+    from services.invite_preflight import join_all
+    ids = _seed(pool, 4)
+    results = {
+        ids[0]: {"channel_id": 1, "title": "T"},              # вступил
+        ids[1]: {"error": "USER_ALREADY_PARTICIPANT"},         # уже был
+        ids[2]: {"error": "already a participant"},            # уже был
+        ids[3]: {"error": "FLOOD_WAIT 300"},                   # не удалось
+    }
+    r = _run(join_all(pool, OWNER, "@g", joiner=_mk_joiner(results)))
+    assert r["total"] == 4
+    assert r["joined"] == 1 and r["already"] == 2 and r["failed"] == 1
+
+
+def test_join_all_exception_is_failed(pool):
+    from services.invite_preflight import join_all
+    ids = _seed(pool, 2)
+
+    async def joiner(session, acc, group):
+        if int(acc["id"]) == ids[0]:
+            raise RuntimeError("net down")
+        return {"channel_id": 1}
+
+    r = _run(join_all(pool, OWNER, "@g", joiner=joiner))
+    assert r["failed"] == 1 and r["joined"] == 1

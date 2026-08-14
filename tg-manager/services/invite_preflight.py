@@ -82,6 +82,56 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
             "details": details, "verdict": verdict}
 
 
+async def _default_joiner(session_string, acc, group):
+    from services import account_manager as am
+    return await am.join_channel(session_string, group, _acc=acc)
+
+
+async def join_all(pool: asyncpg.Pool, owner_id: int, group: str,
+                   account_ids: list[int] | None = None, limit: int = 200,
+                   joiner=None) -> dict:
+    """Вступить всеми аккаунтами оператора в `group` (для прямого инвайта нужно
+    членство). Идемпотентно: уже-участник считается 'already'. Возвращает
+    {total, joined, already, failed}. joiner — seam (тестируется без Telegram).
+    """
+    joiner = joiner or _default_joiner
+    if account_ids:
+        rows = await pool.fetch(
+            "SELECT id, phone, session_str FROM tg_accounts "
+            "WHERE owner_id=$1 AND id=ANY($2::bigint[]) AND session_str IS NOT NULL",
+            owner_id, [int(i) for i in account_ids])
+    else:
+        rows = await pool.fetch(
+            "SELECT id, phone, session_str FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+            "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
+            owner_id, int(limit))
+    accounts = [dict(r) for r in rows]
+    # Вступление заметнее инвайта — меньше параллелизм.
+    sem = asyncio.Semaphore(3)
+
+    async def _one(acc):
+        async with sem:
+            try:
+                r = await asyncio.wait_for(
+                    joiner(acc["session_str"], acc, group), timeout=_PER_ACC_TIMEOUT)
+            except Exception:
+                return "failed"
+            err = str((r or {}).get("error", "")).lower()
+            if not err:
+                return "joined"
+            if "already" in err or "participant" in err:
+                return "already"
+            return "failed"
+
+    outs = await asyncio.gather(*[_one(a) for a in accounts])
+    joined = sum(1 for x in outs if x == "joined")
+    already = sum(1 for x in outs if x == "already")
+    failed = sum(1 for x in outs if x == "failed")
+    return {"total": len(accounts), "joined": joined,
+            "already": already, "failed": failed}
+
+
 def _verdict(total: int, c: dict) -> str:
     """Короткий совет оператору по итогам пре-флайта."""
     if total == 0:
