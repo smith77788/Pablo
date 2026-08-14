@@ -8893,6 +8893,8 @@ async def _exec_mass_invite(
     _promote_failed = 0          # инвайтеры, кому промоут вернул False/ошибку (не участник/нет прав)
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
+    _acc_uid: dict = {}          # id аккаунта → tg_user_id (для промоута; наполняется ниже)
+    _no_rights_on_demand: set = set()  # кому уже выдавали права по ходу (анти-цикл)
     _auto_promote = params.get("auto_promote", True)
     _promote_trick = params.get("promote_trick", True)
     if (_auto_promote or _promote_trick) and accounts:
@@ -9000,6 +9002,7 @@ async def _exec_mass_invite(
     q_users: deque = deque(all_users)
     q_phones: deque = deque(all_phones)
     retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
+    _no_rights_retired = 0        # аккаунтов выведено из-за отсутствия прав админа
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
     _group_reason = ""            # ЧЕМ именно недоступна (нет прав/закрыта/лимит)
@@ -9127,6 +9130,53 @@ async def _exec_mass_invite(
                 _give_back(queue, batch)
                 retired.add(acc_id)
                 _noconnect_errs.append(str(exc)[:160])
+                continue
+
+            # Нет прав админа у ЭТОГО аккаунта — проблема аккаунта, НЕ группы/целей.
+            # Правильное поведение: аккаунт С правами (промоутер) ВЫДАЁТ права
+            # безправному, чтобы работал весь флот, а не только создатель. При
+            # первом no_rights пробуем на лету: инвайтер join'ит чат, промоутер
+            # выдаёт ему invite_users — и аккаунт остаётся в круге (в следующем
+            # круге он уже с правами). Только если промоутера нет ИЛИ выдача уже
+            # была и не помогла — выводим из круга (анти-цикл), не роняя прогон.
+            if res.get("no_rights"):
+                _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
+                if _promoter is not None and acc_id not in _no_rights_on_demand:
+                    _no_rights_on_demand.add(acc_id)
+                    try:
+                        from services import account_manager as _am
+                        _u = _acc_uid.get(acc_id)
+                        if not _u:
+                            _u = await asyncio.wait_for(
+                                _am.resolve_self_user_id(acc["session_str"], dict(acc)), timeout=30)
+                            if _u:
+                                _acc_uid[acc_id] = int(_u)
+                        if _u:
+                            # инвайтер должен быть участником, затем выдаём права
+                            try:
+                                await asyncio.wait_for(
+                                    _am.join_channel(acc["session_str"], group, _acc=dict(acc)),
+                                    timeout=45)
+                            except Exception:
+                                pass
+                            _okp = await asyncio.wait_for(
+                                _am.promote_to_admin(
+                                    _promoter["session_str"], group, int(_u),
+                                    _acc=dict(_promoter), invite_users=True, post_messages=False),
+                                timeout=45)
+                            if _okp:
+                                _promoted_n += 1
+                                log.info("mass_invite op=%d acc=%s: права выданы на лету — "
+                                         "остаётся в круге", op_id, acc.get("id"))
+                                continue  # НЕ ретайрим — попробует снова уже с правами
+                    except Exception as _e:
+                        log.debug("mass_invite op=%d acc=%s: on-demand promote failed: %s",
+                                  op_id, acc.get("id"), _e)
+                # Промоутера нет / выдача не помогла → выводим из круга (не роняя прогон)
+                retired.add(acc_id)
+                _no_rights_retired += 1
+                log.info("mass_invite op=%d acc=%s: нет прав админа и выдать не удалось — "
+                         "выведен из круга, продолжаем аккаунтами с правами", op_id, acc.get("id"))
                 continue
 
             ok_n = int(res.get("ok") or 0)
@@ -9400,6 +9450,9 @@ async def _exec_mass_invite(
         + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
            "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
            if flood_storm else "")
+        + (f"\n🚫 {_no_rights_retired} аккаунтов без прав админа выведены из круга — их "
+           "цели переданы аккаунтам с правами (если инвайтит только создатель, проверьте, "
+           "что автовыдача админки прошла)." if _no_rights_retired else "")
         # Честная причина «вступили, но не инвайтят»: без прав приглашать инвайт в
         # чат/канал не стартует. Раньше это пряталось в лог шага promote — теперь в итоге.
         + ("\n🛡 Некому выдать право приглашать: ни один ваш аккаунт не админ этого чата "

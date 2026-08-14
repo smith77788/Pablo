@@ -109,6 +109,7 @@ async def invite_batch(
     errors: list[str] = []
     peer_flood = False
     flood_wait = 0
+    no_rights = False  # у ЭТОГО аккаунта нет прав админа (проблема аккаунта, не группы)
     # Цели, которые отклонены приватностью/не-взаимностью — их прямой инвайт не
     # берёт, но может взять «добавление через выдачу админки» (промоут-трюк).
     privacy_failed: list = []
@@ -162,14 +163,15 @@ async def invite_batch(
                     break
                 await asyncio.sleep(min(_fw, 60))
             except ChatAdminRequiredError:
-                # Не про пользователя, а про ПРАВА аккаунта в этом чате. Для канала
-                # добавлять участников может только админ с правом «Добавлять
-                # подписчиков»; без него так падает КАЖДАЯ попытка → 0 из тысяч.
-                # Останавливаем сразу (group error), чтобы не молотить вхолостую.
-                failed += 1
-                errors.append("group error: у аккаунта нет прав добавлять участников "
-                              "— для канала нужен админ с правом «Добавлять подписчиков», "
-                              "в группе — снять ограничение «Добавление участников: только админы»")
+                # Не про пользователя и НЕ про группу — про ПРАВА ЭТОГО аккаунта.
+                # Для канала добавлять участников может только админ с правом
+                # «Добавлять подписчиков». Раньше это метилось «group error» и
+                # ВАЛИЛО всю операцию, хотя у ДРУГИХ аккаунтов (создатель) права
+                # есть. Теперь помечаем no_rights → вызывающий выводит ЭТОТ аккаунт
+                # из круга и продолжает аккаунтами с правами, а не рушит прогон.
+                no_rights = True
+                errors.append("account error: у аккаунта нет прав добавлять участников "
+                              "(не админ / права ещё не применились)")
                 break
             except UsersTooMuchError:
                 failed += 1
@@ -195,7 +197,7 @@ async def invite_batch(
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors,
-            "privacy_failed": privacy_failed}
+            "privacy_failed": privacy_failed, "no_rights": no_rights}
 
 
 # ── Автовыдача прав админа инвайтерам + «промоут-трюк» ───────────────────────
@@ -362,6 +364,7 @@ async def invite_by_phones(
     peer_flood = False
     flood_wait = 0
     group_broken = False
+    no_rights = False  # у ЭТОГО аккаунта нет прав админа (проблема аккаунта, не группы)
     imported_users: list = []
     invited_phones: list[str] = []   # номера, реально добавленные (для дедупа впредь)
     _uid_to_phone: dict = {}          # user_id → исходный номер (по client_id)
@@ -391,7 +394,7 @@ async def invite_by_phones(
         log.info("invite_by_phones: imported %d/%d users", len(imported_users), len(phones))
 
         for user in imported_users:
-            if peer_flood or flood_wait or group_broken:
+            if peer_flood or flood_wait or group_broken or no_rights:
                 break
             _ph = _uid_to_phone.get(getattr(user, "id", None))
             try:
@@ -408,12 +411,12 @@ async def invite_by_phones(
                 if _ph:
                     invited_phones.append(_ph)
             except ChatAdminRequiredError:
-                # Права на добавление в чат отсутствуют — падает каждая попытка,
-                # стоп сразу (group error), как и в invite_batch.
-                group_broken = True
-                failed += 1
-                errors.append("group error: у аккаунта нет прав добавлять участников "
-                              "— для канала нужен админ с правом «Добавлять подписчиков»")
+                # Права — проблема ЭТОГО аккаунта, не группы. no_rights → вызывающий
+                # выводит аккаунт из круга и продолжает аккаунтами с правами (как в
+                # invite_batch), а не рушит всю операцию.
+                no_rights = True
+                errors.append("account error: у аккаунта нет прав добавлять участников "
+                              "(не админ / права ещё не применились)")
                 break
             except UserPrivacyRestrictedError:
                 failed += 1
@@ -463,7 +466,7 @@ async def invite_by_phones(
             log_exc_swallow(log, "invite_by_phones: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
-            "flood_wait": flood_wait, "errors": errors,
+            "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,
             # Для дедупа впредь и честного пер-номер отчёта:
             "invited_phones": list(dict.fromkeys(invited_phones)),
             "not_found_phones": not_found_phones}

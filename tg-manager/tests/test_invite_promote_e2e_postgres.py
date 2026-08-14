@@ -61,7 +61,8 @@ def env():
         "humanize": invite_behavior.humanize,
         "sleep": w.asyncio.sleep,
     }
-    state = {"invite_calls": [], "promoted": [], "joined": [], "admin_id": None}
+    state = {"invite_calls": [], "promoted": [], "joined": [], "admin_id": None,
+             "uid_to_id": {}}
 
     _sleep = asyncio.sleep
 
@@ -69,20 +70,34 @@ def env():
         return await _sleep(0)
 
     async def fake_batch(session, acc, group, refs):
-        state["invite_calls"].append((int(acc["id"]), list(refs)))
-        # Реализм: без админа прямой инвайт в канал падает «нет прав» (group error).
+        aid = int(acc["id"])
+        state["invite_calls"].append((aid, list(refs)))
+        # rights_only: у кого есть права; остальные → no_rights (проблема аккаунта).
+        ro = state.get("rights_only")
+        if ro is not None and aid not in ro:
+            return {"ok": 0, "failed": 1, "peer_flood": False, "flood_wait": 0,
+                    "errors": ["account error: нет прав"], "privacy_failed": [],
+                    "no_rights": True}
+        # Реализм: если вообще нет админа — прямой инвайт падает «нет прав» (group err).
         if state["admin_id"] == -1:
             return {"ok": 0, "failed": len(refs), "peer_flood": False, "flood_wait": 0,
                     "errors": ["group error: у аккаунта нет прав добавлять участников"],
-                    "privacy_failed": []}
+                    "privacy_failed": [], "no_rights": False}
         return {"ok": len(refs), "failed": 0, "peer_flood": False,
-                "flood_wait": 0, "errors": [], "privacy_failed": []}
+                "flood_wait": 0, "errors": [], "privacy_failed": [], "no_rights": False}
 
     async def fake_admin_status(session, acc, group):
         return {"ok": True, "can_promote": int(acc["id"]) == state["admin_id"]}
 
     async def fake_promote(psession, group, uid, _acc=None, invite_users=False, post_messages=False):
         state["promoted"].append(int(uid))
+        # РЕАЛИЗМ: выдача прав действительно даёт аккаунту права — добавляем его в
+        # rights_only, чтобы следующий invite_batch от него прошёл (проверка того,
+        # что промоутер выдаёт права безправным «на лету»).
+        ro = state.get("rights_only")
+        aid = state.get("uid_to_id", {}).get(int(uid))
+        if ro is not None and aid is not None:
+            ro.add(aid)
         return True
 
     async def fake_resolve(session, _acc=None):
@@ -150,10 +165,10 @@ def _seed(pool, *, n_acc=3, n_users=20, with_uid=True):
     return _run(_s())
 
 
-def _launch(pool, w, ids, run_id, n_users):
+def _launch(pool, w, ids, run_id, n_users, auto_promote=True):
     async def _go():
         params = {"group": "@target", "source": "parsed", "parse_run_id": run_id,
-                  "account_ids": ids, "auto_promote": True, "promote_trick": True}
+                  "account_ids": ids, "auto_promote": auto_promote, "promote_trick": True}
         op_id = await pool.fetchval(
             "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
             "VALUES($1,'mass_invite','pending',$2,$3,'e2e') RETURNING id",
@@ -173,6 +188,7 @@ def test_admins_assigned_and_audience_invited(env):
     state["invite_calls"].clear()
     state["promoted"].clear()
     state["joined"].clear()
+    state["rights_only"] = None
     ids, run_id = _seed(pool, n_acc=3, n_users=20)
     state["admin_id"] = ids[0]   # первый аккаунт — админ с правом промоута
     row, _ = _launch(pool, w, ids, run_id, 20)
@@ -192,6 +208,7 @@ def test_no_admin_surfaces_clear_reason(env):
     pool, w, state = env
     state["invite_calls"].clear()
     state["promoted"].clear()
+    state["rights_only"] = None
     ids, run_id = _seed(pool, n_acc=2, n_users=5)
     state["admin_id"] = -1   # НИ ОДИН аккаунт не админ → промоутеру неоткуда взяться
     row, _ = _launch(pool, w, ids, run_id, 5)
@@ -199,3 +216,30 @@ def test_no_admin_surfaces_clear_reason(env):
     assert state["promoted"] == []
     assert row["done_items"] == 0 or "0/" in (row["summary"] or "")
     assert "админ" in (row["summary"] or "").lower()
+
+
+def test_promoter_grants_rights_on_demand_whole_fleet_works(env):
+    """Ключевое: аккаунт С правами (промоутер) ВЫДАЁТ права безправным на лету,
+    чтобы работал ВЕСЬ флот, а не только создатель. Стартуем с правами только у
+    создателя; промоутер выдаёт права ids[1],ids[2] по ходу → они тоже инвайтят,
+    и операция не валится."""
+    pool, w, state = env
+    state["invite_calls"].clear()
+    state["promoted"].clear()
+    state["joined"].clear()
+    ids, run_id = _seed(pool, n_acc=3, n_users=12)
+    state["uid_to_id"] = {800000 + i: ids[i] for i in range(len(ids))}
+    state["admin_id"] = ids[0]        # создатель = промоутер
+    state["rights_only"] = {ids[0]}   # изначально права ТОЛЬКО у создателя
+    # auto_promote=False → пре-цикловой автовыдачи нет; проверяем именно ON-DEMAND
+    row, _ = _launch(pool, w, ids, run_id, 12, auto_promote=False)
+    assert row["status"] == "done", row["summary"]
+    assert row["done_items"] == 12
+    # безправным реально выдали права на лету (их uid промоутнуты)
+    assert {800001, 800002} & set(state["promoted"])
+    # и в итоге в rights_only попали все — весь флот получил права
+    assert ids[1] in state["rights_only"] and ids[2] in state["rights_only"]
+    # инвайтили не только создатель, но и дополученные права аккаунты
+    workers = {aid for aid, refs in state["invite_calls"] if aid in (ids[1], ids[2])}
+    assert workers, "аккаунты, дополучившие права, должны были участвовать в инвайте"
+    state["rights_only"] = None
