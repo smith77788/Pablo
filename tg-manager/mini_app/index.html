@@ -3953,6 +3953,36 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           Причина решения будет в итоге операции.
         </div>
       </div>
+      <div class="field">
+        <label>Способ инвайта</label>
+        <select id="massInviteMethod" class="sel">
+          <option value="direct" selected>➕ Обычный (нужны права приглашать)</option>
+          <option value="admin">👑 Через админку (обход приватности)</option>
+          <option value="link">🔗 Рассылка ссылки в ЛС</option>
+        </select>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px">
+          «Через админку»: цель делается админом (попадает в чат) и тут же лишается
+          прав → остаётся участником. «Ссылка в ЛС»: человек вступает сам.
+        </div>
+      </div>
+      <div class="field">
+        <label>Объём на аккаунт</label>
+        <select id="massInviteVolMode" class="sel">
+          <option value="" selected>🤖 Авто / ручной лимит (ниже)</option>
+          <option value="progressive">🎯 Прогрессивно (по возрасту аккаунта)</option>
+        </select>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px">
+          «Прогрессивно»: свежим мало (5), через 3 дня — 12, через неделю — 25,
+          дальше до 50. Не жжём молодые аккаунты.
+        </div>
+      </div>
+      <div class="field">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-s" style="flex:1" onclick="loadFleetReadiness()">🔍 Готовность флота</button>
+          <button class="btn btn-s" style="flex:1" onclick="joinAllToGroup()">🚪 Вступить всеми</button>
+        </div>
+        <div id="massInviteReadiness" style="font-size:12px;margin-top:6px;padding:0 2px"></div>
+      </div>
       <details style="margin-bottom:12px">
         <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:6px 0">⚙️ Лимиты (защита от бана)</summary>
         <div class="field" style="margin-top:8px">
@@ -13766,6 +13796,43 @@ function checkInviteRights() {
   }, 400);
 }
 
+// Пре-флайт готовности флота к группе (паритет с ботом): кто подключится, кто в
+// группе, кто админ. Живой вызов — только по кнопке.
+async function loadFleetReadiness() {
+  const g = document.getElementById('massInviteGroup');
+  const el = document.getElementById('massInviteReadiness');
+  if (!g || !el) return;
+  const group = g.value.trim();
+  if (!group) { toast('Укажите группу'); return; }
+  el.innerHTML = '<span style="color:var(--hint)">Проверяю готовность флота…</span>';
+  try {
+    const d = await api('/api/miniapp/invite/fleet_readiness?group=' + encodeURIComponent(group));
+    const c = d.counts || {};
+    el.innerHTML =
+      `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">`
+      + `👑 Админы: <b>${c.admin||0}</b> · ✅ В группе: <b>${c.member||0}</b> · 🚪 Не в группе: <b>${c.not_member||0}</b><br>`
+      + `❌ Не подключились: <b>${c.no_connect||0}</b>${c.group_bad?` · 🚫 Группа недоступна: <b>${c.group_bad}</b>`:''}<br>`
+      + `🎯 Готовы инвайтить: <b>${d.ready||0}</b> из <b>${d.total||0}</b>`
+      + `<div style="margin-top:6px;color:var(--hint)">💡 ${esc(d.verdict||'')}</div></div>`;
+  } catch(e) { el.innerHTML = '<span style="color:#ef4444">'+esc(e.message||'Ошибка проверки')+'</span>'; }
+}
+
+// Вступить всеми аккаунтами в группу (для прямого инвайта нужно членство).
+async function joinAllToGroup() {
+  const g = document.getElementById('massInviteGroup');
+  const el = document.getElementById('massInviteReadiness');
+  if (!g) return;
+  const group = g.value.trim();
+  if (!group) { toast('Укажите группу'); return; }
+  if (!(await askConfirm('Вступить всеми активными аккаунтами в «'+group+'»?\nНужно для прямого инвайта. Идемпотентно — уже вступившие не пострадают.'))) return;
+  if (el) el.innerHTML = '<span style="color:var(--hint)">Вступаю всеми аккаунтами…</span>';
+  try {
+    const r = await api('/api/miniapp/invite/join_all', {method:'POST', body:JSON.stringify({group})});
+    if (el) el.innerHTML = `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">🚪 Вступили: <b>${r.joined||0}</b> · Уже были: <b>${r.already||0}</b> · Не удалось: <b>${r.failed||0}</b> (из ${r.total||0})</div>`;
+    toast('Готово: вступили '+(r.joined||0));
+  } catch(e) { if (el) el.innerHTML = '<span style="color:#ef4444">'+esc(e.message||'Ошибка')+'</span>'; }
+}
+
 // Один тап: выдать всем аккаунтам право приглашать в этом чате (операция
 // promote_all_admins через найденного промоутера). Убирает ручной шаг в Telegram.
 async function massInviteGrantAdmin() {
@@ -13843,6 +13910,10 @@ async function submitMassInvite() {
   if (_pa) body.per_account_limit = parseInt(_pa);
   const _onePass = document.getElementById('massInviteOnePass')?.checked;
   if (_onePass) body.one_pass = true;
+  // Паритет с ботом: способ инвайта + режим объёма.
+  body.invite_method = document.getElementById('massInviteMethod')?.value || 'direct';
+  const _vm = document.getElementById('massInviteVolMode')?.value;
+  if (_vm === 'progressive') body.volume_mode = 'progressive';
   // Фильтры аудитории (только с username / не бот / premium / активные) —
   // применяются в исполнителе теми же условиями, что парсер-вью.
   const _af = {};

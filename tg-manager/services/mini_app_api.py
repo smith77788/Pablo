@@ -6236,6 +6236,56 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_rights_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def invite_fleet_readiness(request: web.Request) -> web.Response:
+        """Паритет с ботом (пре-флайт): по целевой группе показать готовность
+        флота — кто подключится, кто в группе, кто админ. Живой вызов (подключает
+        аккаунты), поэтому on-demand, не на горячем пути.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        group = (request.query.get("group") or "").strip()
+        if not group:
+            return _err("Укажите группу/канал", 400)
+        try:
+            from services.invite_preflight import run_preflight
+            _ids = request.query.get("account_ids") or ""
+            _acc = [int(x) for x in _ids.split(",") if x.strip().isdigit()] or None
+            rep = await run_preflight(pool, uid, group, account_ids=_acc)
+            return _json_resp(rep)
+        except Exception as exc:
+            log.exception("invite_fleet_readiness uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def invite_join_all(request: web.Request) -> web.Response:
+        """Паритет с ботом: вступить всеми аккаунтами в группу (для прямого
+        инвайта нужно членство). Идемпотентно."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        group = (body.get("group") or request.query.get("group") or "").strip()
+        if not group:
+            return _err("Укажите группу/канал", 400)
+        _acc = None
+        _ids = body.get("account_ids") or []
+        if _ids:
+            req_ids = [int(x) for x in _ids if str(x).isdigit()]
+            owned = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+                uid, req_ids)
+            _acc = [int(r["id"]) for r in (owned or [])] or None
+        try:
+            from services.invite_preflight import join_all
+            r = await join_all(pool, uid, group, account_ids=_acc)
+            return _json_resp({"ok": True, **r})
+        except Exception as exc:
+            log.exception("invite_join_all uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def invite_grant_admin(request: web.Request) -> web.Response:
         """В один тап: найти аккаунт-админа чата и через него выдать ОСТАЛЬНЫМ
         аккаунтам право приглашать (операция promote_all_admins).
@@ -7232,6 +7282,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Осознанно повышает риск — фронт подтверждает отдельно.
             if bool(body.get("one_pass")):
                 params["one_pass"] = True
+            # Паритет с ботом: способ инвайта (direct/admin/link) и режим объёма.
+            _im = str(body.get("invite_method") or "direct").strip().lower()
+            if _im not in ("direct", "admin", "link"):
+                _im = "direct"
+            params["invite_method"] = _im
+            if _im == "link" and body.get("link_message"):
+                params["link_message"] = str(body.get("link_message"))[:500]
+            # Режим объёма на аккаунт: "progressive" — по возрасту/доверию аккаунта.
+            if str(body.get("volume_mode") or "").strip().lower() == "progressive":
+                params["volume_mode"] = "progressive"
             if account_ids:
                 params["account_ids"] = account_ids
             op_id = await pool.fetchval(
@@ -13186,6 +13246,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
+    app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
+    app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
     app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
