@@ -9058,6 +9058,9 @@ async def _exec_mass_invite(
     flood_streak = 0
     invited_this_run: set = set()  # цели, реально отданные движку — для дедупа впредь
     _phones_not_found = 0          # номеров не в Telegram (для честного отчёта)
+    _ok_logged = 0                 # сколько успешных целей записано в лог (для CSV)
+    _ok_seen: set = set()          # уже залогированные 'ok' цели (без дублей в отчёте)
+    _OK_LOG_CAP = 20000            # потолок per-target 'ok' строк, чтобы не пух лог
     import os as _os_env
     try:
         _flood_stop_streak = max(0, int(_os_env.getenv("INVITE_FLOOD_STOP_STREAK", "5")))
@@ -9325,6 +9328,33 @@ async def _exec_mass_invite(
                 await _safe_execute(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'fail',$4)", op_id, step, _tgt[:120], _msg[:200])
+
+            # Успешно добавленные цели — тоже в лог (для полного CSV-отчёта: КОГО
+            # добавили, а не только кого нет). Успех = попробованные минус явные
+            # провалы (приватность + разобранные из errors). Батчем, с потолком.
+            if _ok_logged < _OK_LOG_CAP and attempted:
+                if by_phone:
+                    _succ = [str(x) for x in (res.get("invited_phones") or [])]
+                else:
+                    _failed_set = {str(x) for x in (res.get("privacy_failed") or [])}
+                    for _e in (res.get("errors") or []):
+                        _raw = str(_e)
+                        if ": " in _raw and not _raw.startswith("group error"):
+                            _failed_set.add(_raw.split(": ", 1)[0])
+                    _succ = [str(r) for r in batch[:attempted] if str(r) not in _failed_set]
+                # без дублей в отчёте (одну цель могли пробовать в двух батчах)
+                _succ = [s for s in _succ if s not in _ok_seen]
+                _ok_seen.update(_succ)
+                _succ = _succ[:max(0, _OK_LOG_CAP - _ok_logged)]
+                if _succ:
+                    try:
+                        await pool.executemany(
+                            "INSERT INTO operation_log(op_id, step_num, target, status) "
+                            "VALUES($1,$2,$3,'ok')",
+                            [(op_id, step, s[:120]) for s in _succ])
+                        _ok_logged += len(_succ)
+                    except Exception:
+                        log_exc_swallow(log, "invite: ok per-target log")
 
             # Группа закрыта/нет прав — это не про аккаунт, это про цель. Раньше
             # об неё по очереди разбивался весь флот; теперь останавливаемся сразу.

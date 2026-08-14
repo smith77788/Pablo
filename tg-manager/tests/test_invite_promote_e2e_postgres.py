@@ -297,6 +297,27 @@ def test_progressive_volume_fresh_accounts(env):
     assert set(per_acc.values()) == {5}, per_acc
 
 
+def test_success_targets_logged_for_csv(env):
+    """Полный CSV-отчёт: успешно добавленные цели тоже пишутся в operation_log
+    (status='ok'), а не только провалы — чтобы в выгрузке было видно, КОГО
+    добавили, а не только кого нет."""
+    pool, w, state = env
+    state["invite_calls"].clear()
+    state["promoted"].clear()
+    state["rights_only"] = None
+    ids, run_id = _seed(pool, n_acc=2, n_users=14)
+    state["admin_id"] = ids[0]
+    row, op_id = _launch(pool, w, ids, run_id, 14)
+    assert row["status"] == "done", row["summary"]
+    ok_targets = [r["target"] for r in _run(pool.fetch(
+        "SELECT target FROM operation_log WHERE op_id=$1 AND status='ok'", op_id))]
+    # приглашённые пользователи (мета-строки вроде 'promote' исключаем)
+    user_oks = [t for t in ok_targets if str(t).startswith("@")]
+    assert set(user_oks) == {f"@u{i}" for i in range(14)}, sorted(user_oks)
+    # без дублей: каждая цель ровно один раз
+    assert len(user_oks) == 14, sorted(user_oks)
+
+
 def test_no_connect_does_not_claim_missing_admin(env):
     """Жалоба «но ведь у одного аккаунта были права админа»: если весь флот не
     подключился, проверить права нельзя — и бот НЕ должен утверждать «админа нет».
