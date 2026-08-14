@@ -165,6 +165,14 @@ _OP_TIMEOUT = 45
 # (нулевое изменение поведения).
 _IPV6_SUBNET = _os.getenv("IPV6_SUBNET", "").strip()
 
+# Бесплатный пул публичных SOCKS5 для аккаунтов БЕЗ прокси. По умолчанию ВЫКЛ:
+# публичные прокси нестабильны и общие — сессия логинилась через один exit-IP, а
+# первая операция уходила через другой (прокси умер между циклами) → скачок IP →
+# AUTH_KEY_DUPLICATED / «не ответил». Правильное поведение для безпроксёвого
+# аккаунта — стабильный ПРЯМОЙ выход с реального host-IP (одинаковый на логине и в
+# операциях). Кому реально нужен пул — включает USE_FREE_POOL=1.
+_USE_FREE_POOL = _os.getenv("USE_FREE_POOL", "").strip().lower() in ("1", "true", "yes", "on")
+
 # Пер-владелец IPv6-подсеть, заданная в приложении (перекрывает env). Кэш в памяти
 # (обновляется при сохранении настроек), + читается из БД в get_account_for_telethon.
 _OWNER_IPV6_SUBNET: dict[int, str] = {}
@@ -904,12 +912,13 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     1. Аккаунт-bound прокси (proxy_url в device dict) — строгая изоляция,
        используется если у аккаунта назначен конкретный прокси.
     2. Глобальный TG_PROXY (socks5://...) — явно заданный оператором прокси.
-    3. CF_RELAY_URL env var — Cloudflare Worker WebSocket→TCP relay (бесплатный,
-       скрывает Railway IP за Cloudflare edge IP, контролируемый и стабильный).
-    4. Бесплатный пул прокси (proxy_scraper) — публичные SOCKS5-списки; ниже
-       CF relay по приоритету, т.к. заведомо менее надёжны, но лучше, чем ничего.
-    5. Прямое подключение через ConnectionTcpObfuscated — если ни один из выше
-       не задан/не сработал. Протокол обфускован, но Railway IP виден Telegram.
+    3. Пер-аккаунтный/глобальный CF_RELAY_URL — Cloudflare Worker relay (opt-in).
+    4. Уникальный IPv6 аккаунта (IPV6_SUBNET, opt-in) — стабильный per-account IP.
+    5. Бесплатный пул публичных SOCKS5 — ТОЛЬКО при USE_FREE_POOL=1 (по умолчанию
+       ВЫКЛ: публичные прокси нестабильны → скачок IP → AUTH_KEY_DUPLICATED).
+    6. Прямое подключение с реального host-IP (ConnectionTcpObfuscated) — ДЕФОЛТ
+       для аккаунта без прокси/релея/IPv6: стабильный один и тот же IP на логине и
+       в операциях (host-IP виден Telegram, но сессия не «прыгает» по адресам).
 
     Всегда используется обфускация (ConnectionTcpObfuscated или CF relay поверх неё),
     никогда ConnectionTcpFull — он легко детектится как Telethon/MTProto.
@@ -981,12 +990,13 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         if not has_bound_proxy and _no_pool:
             # Fallback-режим: пропускаем free-pool, идём напрямую (host IP).
             proxy = None
-        elif not has_bound_proxy:
-            # Нет аккаунт-прокси, TG_PROXY и CF relay не заданы — последний резерв:
-            # бесплатный пул публичных SOCKS5-прокси (populated by proxy_scraper).
-            # ЗАЛИПАЮЩИЙ по ТЕЛЕФОНУ (а не account_id): телефон известен и на логине,
-            # и в операциях, поэтому сессия авторизуется и работает с ОДНОГО exit IP.
-            # account_id — резерв (на логине его ещё нет). Иначе — AUTH_KEY_DUPLICATED.
+        elif not has_bound_proxy and _USE_FREE_POOL:
+            # Опционально (USE_FREE_POOL=1): бесплатный пул публичных SOCKS5-прокси
+            # (populated by proxy_scraper). ЗАЛИПАЮЩИЙ по ТЕЛЕФОНУ (а не account_id):
+            # телефон известен и на логине, и в операциях, поэтому сессия авторизуется
+            # и работает с ОДНОГО exit IP. По умолчанию ВЫКЛ: публичные прокси
+            # нестабильны, и их смерть между логином и операцией = скачок IP =
+            # AUTH_KEY_DUPLICATED. Без пула безпроксёвый аккаунт идёт ПРЯМО (host IP).
             _pool_key = (device.get("phone") if device else None) or _acc_id
             pool_url = _get_pool_proxy_url(_pool_key)
             proxy = _parse_proxy(pool_url) if pool_url else None
