@@ -75,6 +75,7 @@ from bot.callbacks import (
     NarrCb,
     ParserCb,
     KwCb,
+    GuardCb,
     PersonaCb,
     PromoCb,
     ProxyCb,
@@ -272,6 +273,7 @@ def _monitoring_kb():
     kb.button(text="🔥 Прогрев акк.", callback_data=WarmupCb(action="menu"))
     kb.button(text="👥 Парсер аудитории", callback_data=ParserCb(action="menu"))
     kb.button(text="🎯 Перехватчик лидов", callback_data=KwCb(action="menu"))
+    kb.button(text="🛡 Модератор чатов", callback_data=GuardCb(action="menu"))
     kb.button(text="🧹 Очиститель акк.", callback_data=CleanerCb(action="menu"))
     kb.button(text="🎨 Сеттер профилей", callback_data=ProfileSetterCb(action="menu"))
     kb.button(text="📱 Чекер номеров", callback_data=PhoneCheckerCb(action="menu"))

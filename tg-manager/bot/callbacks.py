@@ -749,3 +749,11 @@ class ContactsHubCb(CallbackData, prefix="chub"):
 
     action: str   # menu|stats|search|smart_tags|graph|fav
     cid: str = ""  # UUID контакта (для fav-toggle)
+
+
+class GuardCb(CallbackData, prefix="guard"):
+    """Модератор чатов — авто-чистка системных сообщений + модерация."""
+
+    action: str          # menu|how|list|view|toggle|welcome_clear
+    chat_id: int = 0     # id охраняемого чата (для view/toggle)
+    key: str = ""        # ключ настройки (для toggle)

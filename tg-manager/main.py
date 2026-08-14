@@ -78,6 +78,7 @@ from bot.handlers import proxy_manager as proxy_handler
 from bot.handlers import cluster_manager as cluster_handler
 from bot.handlers import audience_parser as audience_parser_handler
 from bot.handlers import keyword_interceptor as keyword_interceptor_handler
+from bot.handlers import chat_guard as chat_guard_handler
 from bot.handlers import account_warmup as account_warmup_handler
 from bot.handlers import infra_analytics as infra_analytics_handler
 from bot.handlers import boost as boost_handler
@@ -367,6 +368,10 @@ async def main() -> None:
     dp.include_router(cluster_handler.router)
     dp.include_router(audience_parser_handler.router)
     dp.include_router(keyword_interceptor_handler.router)
+    # Модератор чатов — раньше relay (ловит reply) и общих групповых хендлеров,
+    # чтобы системные сообщения/команды модерации обрабатывались первыми; когда
+    # чат не под охраной, хендлер поднимает SkipHandler и апдейт идёт дальше.
+    dp.include_router(chat_guard_handler.router)
     dp.include_router(account_warmup_handler.router)
     dp.include_router(infra_analytics_handler.router)
     dp.include_router(account_cleaner_handler.router)
@@ -621,6 +626,9 @@ async def main() -> None:
         # business-апдейты и архив останется пустым.
         "business_connection", "business_message",
         "edited_business_message", "deleted_business_messages",
+        # «Модератор чатов»: my_chat_member — чтобы поймать выдачу боту админки
+        # (авто-активация охраны); chat_member — трекинг входов/выходов участников.
+        "my_chat_member", "chat_member",
     ]
 
     try:
