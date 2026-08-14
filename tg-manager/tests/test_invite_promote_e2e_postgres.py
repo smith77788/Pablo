@@ -57,10 +57,11 @@ def env():
         "channel_admin_status": inv.channel_admin_status,
         "promote_to_admin": am.promote_to_admin,
         "resolve_self_user_id": am.resolve_self_user_id,
+        "join_channel": am.join_channel,
         "humanize": invite_behavior.humanize,
         "sleep": w.asyncio.sleep,
     }
-    state = {"invite_calls": [], "promoted": [], "admin_id": None}
+    state = {"invite_calls": [], "promoted": [], "joined": [], "admin_id": None}
 
     _sleep = asyncio.sleep
 
@@ -87,6 +88,10 @@ def env():
     async def fake_resolve(session, _acc=None):
         return 900000 + int(_acc["id"])
 
+    async def fake_join(session, ref, _acc=None):
+        state["joined"].append(int(_acc["id"]))
+        return {"title": "T", "channel_id": 1}
+
     async def fake_humanize(acc, *a, **k):
         return None
 
@@ -95,6 +100,7 @@ def env():
     inv.channel_admin_status = fake_admin_status
     am.promote_to_admin = fake_promote
     am.resolve_self_user_id = fake_resolve
+    am.join_channel = fake_join
     invite_behavior.humanize = fake_humanize
 
     yield pool, w, state
@@ -103,6 +109,7 @@ def env():
     inv.channel_admin_status = orig["channel_admin_status"]
     am.promote_to_admin = orig["promote_to_admin"]
     am.resolve_self_user_id = orig["resolve_self_user_id"]
+    am.join_channel = orig["join_channel"]
     invite_behavior.humanize = orig["humanize"]
     w.asyncio.sleep = orig["sleep"]
     _run(pool.close())
@@ -165,6 +172,7 @@ def test_admins_assigned_and_audience_invited(env):
     pool, w, state = env
     state["invite_calls"].clear()
     state["promoted"].clear()
+    state["joined"].clear()
     ids, run_id = _seed(pool, n_acc=3, n_users=20)
     state["admin_id"] = ids[0]   # первый аккаунт — админ с правом промоута
     row, _ = _launch(pool, w, ids, run_id, 20)
@@ -175,6 +183,9 @@ def test_admins_assigned_and_audience_invited(env):
     # админка РЕАЛЬНО выдана остальным инвайтерам (их tg_user_id = 800001, 800002)
     assert {800001, 800002}.issubset(set(state["promoted"]))
     assert "Выдана админка" in (row["summary"] or "")
+    # КЛЮЧЕВОЕ (баг «админка не выдавалась»): инвайтеры-не-промоутеры ВСТУПИЛИ в
+    # чат ДО выдачи прав (иначе promote_to_admin падает UserNotParticipant).
+    assert ids[1] in state["joined"] and ids[2] in state["joined"]
 
 
 def test_no_admin_surfaces_clear_reason(env):

@@ -8890,6 +8890,7 @@ async def _exec_mass_invite(
     _promoter = None            # (acc_dict) — аккаунт с правами выдавать админку
     _privacy_blocked: list = []  # цели, отклонённые приватностью (для промоут-трюка)
     _promoted_n = 0
+    _promote_failed = 0          # инвайтеры, кому промоут вернул False/ошибку (не участник/нет прав)
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
     _auto_promote = params.get("auto_promote", True)
@@ -8945,6 +8946,20 @@ async def _exec_mass_invite(
                 if not _u:
                     _promote_no_uid += 1
                     continue
+                # КЛЮЧЕВОЕ: promote_to_admin требует, чтобы инвайтер УЖЕ БЫЛ
+                # участником чата (иначе UserNotParticipantError → False). Для
+                # публичного @канала аккаунт сам не вступает (в отличие от
+                # приват-ссылки, где ImportChatInvite вступает). Без этого шага
+                # админка не выдавалась и инвайтил только создатель. Присоединяем
+                # инвайтера к цели ДО выдачи прав (best-effort; уже-участник = ok).
+                try:
+                    await asyncio.wait_for(
+                        account_manager.join_channel(a["session_str"], group, _acc=dict(a)),
+                        timeout=45)
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                except Exception:
+                    log.debug("mass_invite op=%d: pre-promote join acc=%s failed",
+                              op_id, a.get("id"))
                 try:
                     okp = await asyncio.wait_for(
                         account_manager.promote_to_admin(
@@ -8953,13 +8968,19 @@ async def _exec_mass_invite(
                         timeout=45)
                     if okp:
                         _promoted_n += 1
+                    else:
+                        _promote_failed += 1
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 except Exception as _pe:
+                    _promote_failed += 1
                     log.debug("mass_invite op=%d: promote acc=%s failed: %s", op_id, a.get("id"), _pe)
             _promote_msg = f"выдана админка (invite_users) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}"
             if _promote_no_uid:
                 _promote_msg += (f"; {_promote_no_uid} пропущено — не удалось получить их user_id "
                                  "(переавторизуйте эти аккаунты)")
+            if _promote_failed:
+                _promote_msg += (f"; {_promote_failed} не выдана — промоутер без права "
+                                 "«Назначать администраторов» или аккаунт не вступил в чат")
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','ok',$2)", op_id, _promote_msg)
