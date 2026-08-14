@@ -30,6 +30,7 @@ class InviterFSM(StatesGroup):
     users_manual = State() # @username/ID вручную
     phones = State()       # телефоны
     acc_count = State()    # кол-во аккаунтов
+    preflight_group = State()  # проверка готовности флота: ждём группу
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────
@@ -72,6 +73,7 @@ async def cb_inviter_menu(
     ) or 0
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить пользователей", callback_data=InviterCb(action="start"))
+    kb.button(text="🔍 Проверить готовность флота", callback_data=InviterCb(action="preflight"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     kb.adjust(1)
     await _edit(
@@ -83,9 +85,67 @@ async def cb_inviter_menu(
         "Поддерживает:\n"
         "• @username / user_id — вручную\n"
         "• Из базы парсера аудитории\n"
-        "• По номерам телефонов",
+        "• По номерам телефонов\n\n"
+        "🔍 <i>Перед запуском проверьте готовность флота к нужной группе — "
+        "кто подключится, кто в группе, есть ли админ.</i>",
         kb.as_markup(),
     )
+
+
+@router.callback_query(InviterCb.filter(F.action == "preflight"))
+async def cb_inviter_preflight(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(InviterFSM.preflight_group)
+    await _edit(
+        callback,
+        "🔍 <b>Проверка готовности флота</b>\n\n"
+        "Введите @username или ссылку группы — проверю ваши аккаунты: кто "
+        "подключится, кто уже в группе, кто админ (сможет раздать права).\n\n"
+        "<i>Ничего не меняю, только читаю. Может занять до минуты на большой флот.</i>",
+        _cancel_kb(),
+    )
+
+
+@router.message(InviterFSM.preflight_group)
+async def msg_inviter_preflight(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    from services.mass_inviter_engine import parse_group_ref
+    group = parse_group_ref(message.text or "")
+    if not group:
+        await message.answer("⚠️ Не удалось распознать группу. Введите @username или t.me/...")
+        return
+    await state.clear()
+    wait = await message.answer("⏳ Проверяю готовность флота… (подключаю аккаунты)")
+    from services.invite_preflight import run_preflight
+    try:
+        rep = await run_preflight(pool, message.from_user.id, group)
+    except Exception:
+        log_exc_swallow(log, "preflight run failed")
+        await wait.edit_text("⚠️ Не удалось выполнить проверку. Попробуйте позже.")
+        return
+    c = rep["counts"]
+    lines = [
+        f"🔍 <b>Готовность флота к</b> <code>{html.escape(group)}</code>\n",
+        f"Проверено аккаунтов: <b>{rep['total']}</b>\n",
+        f"👑 Админы (могут раздать права): <b>{c['admin']}</b>",
+        f"✅ В группе (участники): <b>{c['member']}</b>",
+        f"🚪 Не в группе: <b>{c['not_member']}</b>",
+        f"❌ Не подключились (сессия/сеть): <b>{c['no_connect']}</b>",
+    ]
+    if c["group_bad"]:
+        lines.append(f"🚫 Группа недоступна: <b>{c['group_bad']}</b>")
+    if c["error"]:
+        lines.append(f"⚠️ Прочие ошибки: <b>{c['error']}</b>")
+    lines.append(f"\n🎯 Итого готовы инвайтить: <b>{rep['ready']}</b>")
+    lines.append(f"\n💡 {rep['verdict']}")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Запустить инвайт", callback_data=InviterCb(action="start"))
+    kb.button(text="◀️ В меню", callback_data=InviterCb(action="menu"))
+    kb.adjust(1)
+    try:
+        await wait.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Шаг 1: Выбор группы ──────────────────────────────────────────────────────

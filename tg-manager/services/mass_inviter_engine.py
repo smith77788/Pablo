@@ -248,6 +248,58 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
             log_exc_swallow(log, "channel_admin_status: disconnect")
 
 
+async def check_membership_and_admin(session_string: str, _acc: dict | None,
+                                     group_ref: str) -> dict[str, Any]:
+    """Готовность ОДНОГО аккаунта к инвайту в группу (пре-флайт).
+
+    Различает состояния, которые раньше сливались в «не ответил»:
+      no_connect — сессия/сеть (аккаунт не подключился);
+      group_bad  — группа недоступна/не резолвится;
+      not_member — подключился, но НЕ участник группы (инвайтить не сможет);
+      member     — участник, но не админ (прямой инвайт зависит от прав группы);
+      admin      — админ; can_promote=есть право «Назначать админов» (промоутер).
+    Только чтение, аккаунт не меняется.
+    """
+    from services.account_manager import connect_client
+    from telethon.tl.functions.channels import GetParticipantRequest
+    from telethon.tl.types import ChannelParticipantCreator, ChannelParticipantAdmin
+    from telethon.errors import UserNotParticipantError
+
+    client = None
+    try:
+        client = await connect_client(session_string, _acc, "invite")
+    except Exception as exc:
+        return {"state": "no_connect", "error": str(exc)[:120]}
+    try:
+        try:
+            group = await _resolve_group_entity(client, group_ref)
+        except Exception as exc:
+            return {"state": "group_bad", "error": str(exc)[:120]}
+        try:
+            part = await asyncio.wait_for(
+                client(GetParticipantRequest(channel=group, participant="me")),
+                timeout=_ACTION_TIMEOUT)
+        except UserNotParticipantError:
+            return {"state": "not_member", "can_promote": False, "can_invite": False}
+        p = part.participant
+        if isinstance(p, ChannelParticipantCreator):
+            return {"state": "admin", "creator": True, "can_promote": True, "can_invite": True}
+        if isinstance(p, ChannelParticipantAdmin):
+            r = getattr(p, "admin_rights", None)
+            _add_admins = bool(getattr(r, "add_admins", False))
+            return {"state": "admin" if _add_admins else "member",
+                    "can_promote": _add_admins,
+                    "can_invite": bool(getattr(r, "invite_users", False))}
+        return {"state": "member", "can_promote": False, "can_invite": False}
+    except Exception as exc:
+        return {"state": "error", "error": str(exc)[:120]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "check_membership_and_admin: disconnect")
+
+
 async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str,
                           user_refs: list[str | int]) -> dict[str, Any]:
     """«Промоут-трюк»: добавить пользователя, выдав ему админку и тут же сняв.
