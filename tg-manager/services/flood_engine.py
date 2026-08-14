@@ -256,6 +256,63 @@ _INVITE_LIMIT_FLOOR = 5
 _INVITE_LIMIT_CEILING = 50
 
 
+def progressive_cap(age_hours: float | None, trust: float | None = 1.0,
+                    ceiling: int = _INVITE_LIMIT_CEILING) -> int:
+    """Объём инвайтов на аккаунт по его ВОЗРАСТУ (и доверию), режим «прогрессивно».
+
+    Чистая функция: свежему аккаунту — мало (чтобы не спалить), отстоявшемуся —
+    больше, вплоть до потолка. Доверие ниже нормы дополнительно срезает. Это
+    середина между сверх-осторожным «Авто» (у свежих ≈2) и ручным фиксом.
+    """
+    a = age_hours if age_hours is not None else 0.0
+    if a < 24:
+        base = 5
+    elif a < 72:
+        base = 12
+    elif a < 168:
+        base = 25
+    else:
+        base = ceiling
+    t = trust if trust is not None else 1.0
+    if t < 0.3:
+        base = base // 2
+    elif t < 0.5:
+        base = int(base * 0.75)
+    return max(1, min(base, ceiling))
+
+
+async def progressive_daily_cap(pool, account_id: int) -> dict:
+    """Прогрессивный лимит на аккаунт с вычетом уже сделанного сегодня.
+
+    Возвращает {cap, used_today, remaining}. Ошибка БД → холодный старт.
+    """
+    try:
+        row = await pool.fetchrow(
+            """SELECT a.added_at, a.trust_score,
+                   COALESCE((SELECT SUM(invites_ok) FROM account_daily_stats
+                             WHERE account_id=a.id AND stat_date=CURRENT_DATE), 0) AS today
+               FROM tg_accounts a WHERE a.id=$1""",
+            int(account_id))
+    except Exception:
+        return {"cap": _INVITE_LIMIT_COLD_START, "used_today": 0,
+                "remaining": _INVITE_LIMIT_COLD_START}
+    if not row:
+        return {"cap": _INVITE_LIMIT_COLD_START, "used_today": 0,
+                "remaining": _INVITE_LIMIT_COLD_START}
+    age_hours = None
+    if row["added_at"] is not None:
+        import datetime as _dt
+        try:
+            age_hours = (_dt.datetime.now(_dt.timezone.utc)
+                         - row["added_at"].replace(tzinfo=_dt.timezone.utc)
+                         ).total_seconds() / 3600.0
+        except (TypeError, ValueError, AttributeError):
+            age_hours = None
+    cap = progressive_cap(age_hours, row["trust_score"])
+    today = int(row["today"] or 0)
+    return {"cap": cap, "used_today": today, "remaining": max(0, cap - today)}
+
+
 def _phone_country(phone) -> str | None:
     """Страна по коду номера. Отдельная обёртка, чтобы сбой импорта
     account_manager (тяжёлый модуль с telethon) не ронял расчёт риска."""

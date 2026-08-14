@@ -277,6 +277,26 @@ def test_per_account_volume_one_pass(env):
     assert set(per_acc.values()) == {4}, per_acc   # у всех троих по 4
 
 
+def test_progressive_volume_fresh_accounts(env):
+    """Режим «прогрессивно»: свежие аккаунты (возраст ~0) получают лимит 5 каждый,
+    а не консервативные ~2 (авто) и не 50 (максимум). Аудитория больше суммы —
+    проверяем, что каждый упёрся ровно в свой прогрессивный лимит."""
+    pool, w, state = env
+    state["invite_calls"].clear()
+    state["promoted"].clear()
+    state["rights_only"] = None
+    ids, run_id = _seed(pool, n_acc=3, n_users=40)
+    state["admin_id"] = ids[0]
+    row, _ = _launch(pool, w, ids, run_id, 40, volume_mode="progressive")
+    assert row["status"] == "done", row["summary"]
+    per_acc = {}
+    for aid, refs in state["invite_calls"]:
+        per_acc[aid] = per_acc.get(aid, 0) + len(refs)
+    # свежие аккаунты → по 5 (3×5=15), не по 2 и не по 50
+    assert row["done_items"] == 15, (row["done_items"], per_acc)
+    assert set(per_acc.values()) == {5}, per_acc
+
+
 def test_no_connect_does_not_claim_missing_admin(env):
     """Жалоба «но ведь у одного аккаунта были права админа»: если весь флот не
     подключился, проверить права нельзя — и бот НЕ должен утверждать «админа нет».

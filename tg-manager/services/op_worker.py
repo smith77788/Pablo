@@ -8585,6 +8585,9 @@ async def _exec_mass_invite(
     # (FloodWait/PeerFlood → аккаунт в cooldown) и стоп-кран флота (flood_storm).
     # Т.е. меняем ГАДАНИЕ о безопасном числе на реакцию по ФАКТУ, как у конкурентов.
     _one_pass = bool(params.get("one_pass"))
+    # Режим объёма на аккаунт: "auto" (по истории) | "fixed" (one_pass+лимит) |
+    # "progressive" (по возрасту/доверию аккаунта). Влияет на _acc_budget ниже.
+    _volume_mode = str(params.get("volume_mode") or "").strip().lower()
     # Метод инвайта:
     #   "direct" — обычный InviteToChannelRequest (нужны права add_users);
     #   "admin"  — трюк через админку: цель промоутится в админы (это добавляет её
@@ -9081,6 +9084,17 @@ async def _exec_mass_invite(
         вчера; рекомендация это знает. Уже израсходованное за сегодня
         вычитается, поэтому повторный запуск не удваивает суточный объём.
         """
+        # Режим «прогрессивно»: лимит на аккаунт по его возрасту/доверию (свежим
+        # мало, отстоявшимся больше). Вычитаем сделанное сегодня — повторный запуск
+        # не удваивает объём. Живые сигналы флуда всё так же тормозят.
+        if _volume_mode == "progressive":
+            try:
+                from services.flood_engine import progressive_daily_cap
+                _pg = await progressive_daily_cap(pool, int(acc["id"]))
+                return max(0, int(_pg.get("remaining") or 0))
+            except Exception:
+                log.debug("mass_invite: progressive cap unavailable acc=%s", acc.get("id"))
+                return 5
         # Режим «один проход»: не клампим к предсказанному суточному лимиту —
         # берём потолок ёмкости (или явный лимит пользователя, но не выше потолка).
         # Реальную безопасность держат сигналы флуда + стоп-кран флота, а не гадание.

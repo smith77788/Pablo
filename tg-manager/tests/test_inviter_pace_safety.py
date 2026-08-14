@@ -19,22 +19,33 @@ def _read(rel: str) -> str:
 
 def test_pace_buttons_offered():
     h = _read("bot/handlers/mass_inviter.py")
-    assert 'InviterCb(action="confirm", item="slow")' in h
-    assert 'InviterCb(action="confirm", item="normal")' in h
-    assert 'InviterCb(action="confirm", item="fast")' in h
+    # темп выбирается кнопками setpace (после — шаг объёма), затем confirm
+    assert 'InviterCb(action="setpace", item="slow")' in h
+    assert 'InviterCb(action="setpace", item="normal")' in h
+    assert 'InviterCb(action="setpace", item="fast")' in h
 
 
-def test_confirm_reads_pace_from_callback():
+def test_confirm_reads_pace_from_state():
     h = _read("bot/handlers/mass_inviter.py")
-    # хендлер принимает callback_data и читает item как pace
     assert "callback_data: InviterCb" in h
-    assert 'callback_data.item if callback_data.item in ("slow", "normal", "fast")' in h
+    # темп сохраняется в FSM на шаге setpace и читается на confirm
+    assert "await state.update_data(inv_pace=pace)" in h
+    assert 'pace = data.get("inv_pace"' in h
 
 
 def test_params_include_pace_and_per_account_limit():
     h = _read("bot/handlers/mass_inviter.py")
     assert '"pace": pace' in h
-    assert '"per_account_limit": 50' in h
+    # лимит на аккаунт теперь из выбора объёма (не хардкод), а потолок
+    # безопасности 50 держит исполнитель (см. test ниже).
+    assert '"per_account_limit": _per_acc_limit' in h
+    assert '"one_pass": _one_pass' in h
+
+
+def test_safety_ceiling_enforced_in_executor():
+    ow = _read("services/op_worker.py")
+    # даже при ручном/прогрессивном объёме потолок 50 держится в _acc_budget
+    assert "_INVITE_LIMIT_CEILING" in ow
 
 
 def test_executor_honors_pace_and_per_account_limit():

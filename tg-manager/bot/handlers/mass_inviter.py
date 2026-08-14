@@ -521,17 +521,21 @@ async def _inv_offer_volume(message: Message, data: dict) -> None:
     # прогон (режим «один проход»: не клампим предсказанным дневным лимитом, но
     # держим потолок безопасности 50 и живые сигналы флуда). 50 — верхняя граница.
     kb.button(text="🤖 Авто (по истории, безопасно)", callback_data=InviterCb(action="confirm", item="auto"))
+    kb.button(text="🎯 Прогрессивно (по возрасту)", callback_data=InviterCb(action="confirm", item="prog"))
     kb.button(text="📈 10 / аккаунт", callback_data=InviterCb(action="confirm", item="10"))
     kb.button(text="📈 25 / аккаунт", callback_data=InviterCb(action="confirm", item="25"))
     kb.button(text="🚀 50 / аккаунт (максимум)", callback_data=InviterCb(action="confirm", item="50"))
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
-    kb.adjust(1, 2, 1, 1)
+    kb.adjust(1, 1, 2, 1, 1)
     await message.answer(
         "👥 <b>Инвайтер — объём на аккаунт</b>\n\n"
         f"🔑 Аккаунтов: <b>{use}</b> · в базе <b>{total_users}</b>\n"
         f"📊 Чтобы закрыть базу за один проход, нужно ~<b>{need}</b> на аккаунт.\n\n"
         "• <b>Авто</b> — сколько безопасно по истории аккаунта (у свежих — мало, "
         "≈2–15; растёт по мере чистой работы).\n"
+        "• <b>Прогрессивно</b> — бот сам ставит лимит по возрасту аккаунта: свежим "
+        "мало (5), через 3 дня — 12, через неделю — 25, дальше до 50. Не выбирать "
+        "вручную и не жечь молодые.\n"
         "• <b>Число</b> — фиксированный лимит на аккаунт за прогон (режим «один "
         "проход»). Потолок безопасности — 50: выше почти гарантированный бан.\n\n"
         "⚠️ <i>Чем больше за раз, тем выше риск ограничений. Для свежих аккаунтов "
@@ -584,11 +588,15 @@ async def cb_inviter_confirm(
     pace = data.get("inv_pace", "normal")
     # Объём на аккаунт за прогон:
     #   "auto" → лимит по истории аккаунта (per_account_limit=0, без «одного прохода»);
+    #   "prog" → прогрессивно по возрасту/доверию (volume_mode=progressive);
     #   число  → фиксированный лимит N на аккаунт в режиме «один проход» (не клампим
     #            консервативным дневным прогнозом, но держим потолок 50 + сигналы флуда).
-    _vol = callback_data.item if callback_data.item in ("auto", "10", "25", "50") else "auto"
+    _vol = callback_data.item if callback_data.item in ("auto", "prog", "10", "25", "50") else "auto"
+    _volume_mode = ""
     if _vol == "auto":
         _per_acc_limit, _one_pass = 0, False
+    elif _vol == "prog":
+        _per_acc_limit, _one_pass, _volume_mode = 0, False, "progressive"
     else:
         _per_acc_limit, _one_pass = int(_vol), True
     acc_count = data.get("acc_count", 1)
@@ -666,12 +674,14 @@ async def cb_inviter_confirm(
         "pace": pace,
         "per_account_limit": _per_acc_limit,
         "one_pass": _one_pass,
+        "volume_mode": _volume_mode,
         # Способ добавления: direct (InviteToChannel) или admin (промоут-трюк).
         "invite_method": method,
     }
     _pace_ru = {"slow": "🐢 медленно", "normal": "🚶 обычно", "fast": "🐇 быстро"}[pace]
     _method_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
-    _vol_ru = "🤖 авто (по истории)" if _vol == "auto" else f"{_vol}/аккаунт (один проход)"
+    _vol_ru = {"auto": "🤖 авто (по истории)",
+               "prog": "🎯 прогрессивно (по возрасту)"}.get(_vol, f"{_vol}/аккаунт (один проход)")
     label = f"Инвайтер: {group} ← {total_users} пользователей × {len(account_ids)} акк."
     op_id = await pool.fetchval(
         "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
