@@ -87,6 +87,8 @@ INLINE_MIGRATIONS: list[str] = [
         PRIMARY KEY (chat_id, user_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_guard_captcha_expires ON guard_captcha_pending(expires_at)",
+    # Manager Mode: происхождение подключённого бота (manual|managed).
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS created_via TEXT DEFAULT 'manual'",
     # tg_accounts — добавляем поля если отсутствуют
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",

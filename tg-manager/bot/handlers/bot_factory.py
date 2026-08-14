@@ -69,13 +69,15 @@ async def _validate_token(http: aiohttp.ClientSession, token: str) -> dict | Non
 
 def _factory_menu_kb() -> object:
     kb = InlineKeyboardBuilder()
+    from bot.callbacks import ManagedBotCb
+    kb.button(text="🪄 Создать бота в 1 тап", callback_data=ManagedBotCb(action="menu"))
     kb.button(text="➕ Создать бота", callback_data=BotFactCb(action="create"))
     kb.button(text="📥 Импорт токенов", callback_data=BotFactCb(action="import_tokens"))
     kb.button(text="✅ Валидация токенов", callback_data=BotFactCb(action="validate"))
     kb.button(text="🔄 Клонировать настройки", callback_data=BotFactCb(action="clone"))
     kb.button(text="📊 Статистика ботов", callback_data=BotFactCb(action="stats"))
     kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
-    kb.adjust(2, 2, 2)
+    kb.adjust(1, 2, 2, 2)
     return kb.as_markup()
 
 

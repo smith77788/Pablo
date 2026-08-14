@@ -79,6 +79,7 @@ from bot.handlers import cluster_manager as cluster_handler
 from bot.handlers import audience_parser as audience_parser_handler
 from bot.handlers import keyword_interceptor as keyword_interceptor_handler
 from bot.handlers import chat_guard as chat_guard_handler
+from bot.handlers import managed_bots as managed_bots_handler
 from bot.handlers import account_warmup as account_warmup_handler
 from bot.handlers import infra_analytics as infra_analytics_handler
 from bot.handlers import boost as boost_handler
@@ -373,6 +374,8 @@ async def main() -> None:
     # чтобы системные сообщения/команды модерации обрабатывались первыми; когда
     # чат не под охраной, хендлер поднимает SkipHandler и апдейт идёт дальше.
     dp.include_router(chat_guard_handler.router)
+    # Manager Mode — создание дочерних ботов в один тап (апдейт managed_bot).
+    dp.include_router(managed_bots_handler.router)
     dp.include_router(account_warmup_handler.router)
     dp.include_router(infra_analytics_handler.router)
     dp.include_router(account_cleaner_handler.router)
@@ -630,6 +633,9 @@ async def main() -> None:
         # «Модератор чатов»: my_chat_member — чтобы поймать выдачу боту админки
         # (авто-активация охраны); chat_member — трекинг входов/выходов участников.
         "my_chat_member", "chat_member",
+        # Manager Mode: managed_bot — Telegram сообщает о создании дочернего бота
+        # через нашу ссылку (иначе токен нового бота мы не получим).
+        "managed_bot",
     ]
 
     try:

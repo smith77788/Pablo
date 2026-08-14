@@ -757,3 +757,9 @@ class GuardCb(CallbackData, prefix="guard"):
     action: str          # menu|how|list|view|toggle|welcome_clear
     chat_id: int = 0     # id охраняемого чата (для view/toggle)
     key: str = ""        # ключ настройки (для toggle)
+
+
+class ManagedBotCb(CallbackData, prefix="mbot"):
+    """Manager Mode — создание дочерних ботов в один тап (Telegram Managed Bots)."""
+
+    action: str   # menu|new|cancel
