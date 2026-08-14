@@ -2707,7 +2707,9 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
     """Проверить все активные сессии и обновить статусы."""
     from database import db as _db
     
-    # Fetch full account record including proxy info to avoid AUTH_KEY collision
+    # Fetch full account record including proxy info to avoid AUTH_KEY collision.
+    # НЕ трогаем аккаунты, занятые активной операцией (in_operation): параллельный
+    # коннект той же сессии проверкой здоровья и операцией = AUTH_KEY_DUPLICATED.
     accounts = await pool.fetch(
         """SELECT a.id, a.owner_id, a.session_str, a.phone, a.acc_status,
                   a.device_model, a.system_version, a.app_version,
@@ -2715,7 +2717,8 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.is_active = TRUE AND a.session_str IS NOT NULL"""
+           WHERE a.is_active = TRUE AND a.session_str IS NOT NULL
+             AND COALESCE(a.in_operation, FALSE) = FALSE"""
     )
     if not accounts:
         return
@@ -2725,6 +2728,14 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
     for acc in accounts:
         if not acc["session_str"]:
             continue
+        # Аккаунт мог быть захвачен операцией уже ПОСЛЕ выборки (окно гонки) —
+        # проверяем ин-мемори реестр прямо перед коннектом и пропускаем занятых.
+        try:
+            from services import op_worker as _opw
+            if _opw.is_account_in_use(int(acc["id"])):
+                continue
+        except Exception:
+            pass
         try:
             result = await check_account_status_full(
                 acc["session_str"], _acc=dict(acc), check_spambot=False
