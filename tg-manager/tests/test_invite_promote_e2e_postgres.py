@@ -72,6 +72,12 @@ def env():
     async def fake_batch(session, acc, group, refs):
         aid = int(acc["id"])
         state["invite_calls"].append((aid, list(refs)))
+        # no_connect: имитируем полный отказ подключения флота (сессия/сеть) —
+        # батч не отработан (0 ok / 0 failed), ошибка «connect». attempted=0.
+        if state.get("no_connect"):
+            return {"ok": 0, "failed": 0, "peer_flood": False, "flood_wait": 0,
+                    "errors": ["connect: сеть недоступна"], "privacy_failed": [],
+                    "no_rights": False}
         # rights_only: у кого есть права; остальные → no_rights (проблема аккаунта).
         ro = state.get("rights_only")
         if ro is not None and aid not in ro:
@@ -87,6 +93,9 @@ def env():
                 "flood_wait": 0, "errors": [], "privacy_failed": [], "no_rights": False}
 
     async def fake_admin_status(session, acc, group):
+        # no_connect: проверка прав не выполняется (аккаунт не подключился).
+        if state.get("no_connect"):
+            return {"ok": False, "error": "connect: сеть недоступна"}
         return {"ok": True, "can_promote": int(acc["id"]) == state["admin_id"]}
 
     async def fake_promote(psession, group, uid, _acc=None, invite_users=False,
@@ -244,3 +253,28 @@ def test_promoter_grants_rights_on_demand_whole_fleet_works(env):
     workers = {aid for aid, refs in state["invite_calls"] if aid in (ids[1], ids[2])}
     assert workers, "аккаунты, дополучившие права, должны были участвовать в инвайте"
     state["rights_only"] = None
+
+
+def test_no_connect_does_not_claim_missing_admin(env):
+    """Жалоба «но ведь у одного аккаунта были права админа»: если весь флот не
+    подключился, проверить права нельзя — и бот НЕ должен утверждать «админа нет».
+    Раньше при полном отказе подключения показывалось ложное «ни один аккаунт не
+    админ», хотя админ был — просто не подключился."""
+    pool, w, state = env
+    state["invite_calls"].clear()
+    state["promoted"].clear()
+    state["rights_only"] = None
+    ids, run_id = _seed(pool, n_acc=3, n_users=8)
+    state["admin_id"] = ids[0]      # админ ЕСТЬ (но подключиться никто не смог)
+    state["no_connect"] = True      # весь флот не подключается (сессия/сеть)
+    try:
+        row, _ = _launch(pool, w, ids, run_id, 8)
+    finally:
+        state["no_connect"] = False
+    _sum = (row["summary"] or "").lower()
+    # никого не добавили
+    assert row["done_items"] == 0
+    # КЛЮЧЕВОЕ: НЕ утверждаем «ни один ваш аккаунт не админ» (это было бы ложью —
+    # админ был, но флот не подключился). Причина должна указывать на сессию/сеть.
+    assert "ни один ваш аккаунт не админ" not in _sum
+    assert "промоут" not in _sum or "не выполнена" in _sum or "не подключил" in _sum

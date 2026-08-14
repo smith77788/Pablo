@@ -8925,6 +8925,10 @@ async def _exec_mass_invite(
             owner_id, [int(a["id"]) for a in accounts])
         _acc_uid = {int(r["id"]): r["tg_user_id"] for r in (_uid_rows or []) if r.get("tg_user_id")}
         # Ищем промоутера: первый аккаунт-создатель или админ с add_admins.
+        # _admin_probe_ok: хоть один аккаунт РЕАЛЬНО подключился и ответил о правах.
+        # Без этого нельзя утверждать «админа нет» — возможно, флот просто не
+        # подключился (тогда причина в сессии/сети, а не в отсутствии прав).
+        _admin_probe_ok = False
         for a in accounts:
             try:
                 st = await asyncio.wait_for(
@@ -8932,16 +8936,29 @@ async def _exec_mass_invite(
                     timeout=45)
             except Exception:
                 continue
-            if st.get("ok") and st.get("can_promote"):
-                _promoter = a
-                break
-        if _promoter is None:
+            if st.get("ok"):
+                _admin_probe_ok = True
+                if st.get("can_promote"):
+                    _promoter = a
+                    break
+        if _promoter is None and _admin_probe_ok:
+            # Аккаунты подключились и ответили — но ни у кого нет права промоута.
             _promote_skipped_no_admin = bool(_auto_promote)
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','skip',$2)", op_id,
                 "автовыдача админки пропущена: ни один инвайтер не создатель/админ чата "
                 "с правом «Назначать админов». Сделайте один аккаунт админом чата.")
+        elif _promoter is None:
+            # Ни один аккаунт не подключился → проверить права было невозможно.
+            # НЕ утверждаем «админа нет» (это ввело бы в заблуждение — как в жалобе,
+            # где админ был, но флот не подключился). Причину покажет блок сессии/сети.
+            await _safe_execute(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'promote','skip',$2)", op_id,
+                "проверка прав админа не выполнена: ни один аккаунт не подключился "
+                "(см. причину «сессия/сеть»). Права admin могли быть — но проверить их "
+                "без подключения нельзя.")
         elif _auto_promote:
             for a in accounts:
                 if int(a["id"]) == int(_promoter["id"]):
