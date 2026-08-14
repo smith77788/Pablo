@@ -4016,6 +4016,7 @@ async def promote_to_admin(
     ban_users: bool = False,
     pin_messages: bool = False,
     manage_call: bool = False,
+    add_admins: bool = False,
 ) -> bool:
     """Promote a user to admin in a channel/group.
 
@@ -4055,7 +4056,7 @@ async def promote_to_admin(
             ban_users=ban_users,
             invite_users=invite_users,
             pin_messages=pin_messages,
-            add_admins=False,
+            add_admins=add_admins,
             manage_call=manage_call,
             other=False,
             change_info=change_info,

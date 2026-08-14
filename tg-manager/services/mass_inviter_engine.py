@@ -277,6 +277,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     errors: list[str] = []
     peer_flood = False
     flood_wait = 0
+    no_rights = False  # у вызывающего нет add_admins — проблема аккаунта, не группы
     try:
         client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref)
@@ -299,7 +300,11 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
             except UserAlreadyParticipantError:
                 ok += 1
             except ChatAdminRequiredError:
-                errors.append("group error: нет прав add_admins для промоут-трюка")
+                # У ЭТОГО аккаунта нет add_admins — проблема аккаунта, не группы.
+                # no_rights → вызывающий выдаёт ему add_admins и продолжает, а не
+                # рушит операцию (как в invite_batch).
+                no_rights = True
+                errors.append("account error: нет прав add_admins для промоут-трюка")
                 break
             except PeerFloodError:
                 peer_flood = True
@@ -331,7 +336,99 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
             log_exc_swallow(log, "add_via_promote: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
-            "flood_wait": flood_wait, "errors": errors}
+            "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights}
+
+
+async def export_group_invite_link(session_string: str, _acc: dict | None,
+                                   group_ref: str) -> str:
+    """Экспортировать ссылку-приглашение группы/канала. Возвращает '' при сбое.
+
+    Использует общий резолвер группы (публичный @/приват-ссылка), поэтому работает
+    и для @username, и для t.me/+HASH. Нужны права «Пригласительные ссылки» у
+    аккаунта (обычно есть у создателя/админа).
+    """
+    from services.account_manager import connect_client
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+
+    client = None
+    try:
+        client = await connect_client(session_string, _acc, "invite")
+        group = await _resolve_group_entity(client, group_ref)
+        result = await asyncio.wait_for(
+            client(ExportChatInviteRequest(peer=group)), timeout=_ACTION_TIMEOUT)
+        return getattr(result, "link", "") or ""
+    except Exception as e:
+        log.warning("export_group_invite_link error: %s", e)
+        return ""
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "export_group_invite_link: disconnect")
+
+
+# Шаблон сообщения со ссылкой-приглашением (по умолчанию). {link} обязателен.
+DEFAULT_LINK_INVITE_TEXT = "Привет! Приглашаю в наш чат: {link}"
+
+
+async def invite_via_link_batch(session_string: str, _acc: dict | None,
+                                invite_link: str, user_refs: list[str | int],
+                                message_text: str | None = None) -> dict[str, Any]:
+    """«Мягкий» инвайт: разослать пользователям ссылку-приглашение в ЛС.
+
+    Не добавляет насильно — отправляет каждому цель ссылку на вступление, человек
+    заходит сам. Полностью обходит приватность «кто может добавлять» (пользователь
+    вступает добровольно) и наименее опасен для аккаунтов из всех методов, но
+    зависит от готовности человека кликнуть. `ok` здесь = ссылка ДОСТАВЛЕНА (не
+    гарантирует вступление). Ограничитель — PeerFlood (лимит на рассылку в ЛС).
+    """
+    from services.account_manager import send_dm
+
+    tpl = (message_text or DEFAULT_LINK_INVITE_TEXT)
+    if "{link}" not in tpl:
+        tpl = tpl.rstrip() + "\n{link}"
+    text = tpl.replace("{link}", invite_link)
+
+    ok, failed = 0, 0
+    errors: list[str] = []
+    privacy_failed: list = []
+    peer_flood = False
+    flood_wait = 0
+    for ref in user_refs:
+        try:
+            res = await asyncio.wait_for(
+                send_dm(session_string, str(ref), text, _acc=_acc), timeout=45)
+        except Exception as e:
+            failed += 1
+            errors.append(f"{ref}: {str(e)[:80]}")
+            continue
+        if res.get("ok"):
+            ok += 1
+            await asyncio.sleep(random.uniform(2.5, 5.0))
+            continue
+        # Ошибки send_dm: privacy / peer_flood / flood_wait / прочее.
+        failed += 1
+        if res.get("peer_flood"):
+            peer_flood = True
+            errors.append(f"{ref}: peer flood")
+            break
+        _fw = int(res.get("flood_wait") or 0)
+        if _fw:
+            if _fw > _MAX_FLOOD_INLINE:
+                flood_wait = _fw
+                errors.append(f"{ref}: flood wait {_fw}s")
+                break
+            await asyncio.sleep(min(_fw, 60))
+            errors.append(f"{ref}: flood wait {_fw}s (переждали)")
+            continue
+        _err = str(res.get("error") or "")
+        if "приватн" in _err.lower() or "privacy" in _err.lower():
+            privacy_failed.append(ref)
+        errors.append(f"{ref}: {_err[:80]}")
+
+    return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
+            "flood_wait": flood_wait, "errors": errors,
+            "privacy_failed": privacy_failed, "no_rights": False}
 
 
 # ── Добавление по номерам телефонов ──────────────────────────────────────────

@@ -384,6 +384,45 @@ async def msg_inviter_acc_count(
     per_acc = max(1, (total_users + use - 1) // use)
 
     kb = InlineKeyboardBuilder()
+    # Способ инвайта. «Обычный» — прямое добавление (нужны права add_users).
+    # «Через админку» — трюк: цель делается админом (это добавляет её в чат),
+    # затем права тут же снимаются, и пользователь остаётся участником. Обходит
+    # приватность «кто может добавлять» и работает от любого админа с правом
+    # «Назначать администраторов». Именно так добавляют «упрямых» пользователей.
+    kb.button(text="➕ Обычный инвайт", callback_data=InviterCb(action="method", item="direct"))
+    kb.button(text="👑 Через админку (обход приватности)",
+              callback_data=InviterCb(action="method", item="admin"))
+    kb.button(text="🔗 Рассылка ссылки в ЛС",
+              callback_data=InviterCb(action="method", item="link"))
+    kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        "👥 <b>Инвайтер — способ добавления</b>\n\n"
+        f"🎯 Группа: <code>{html.escape(group)}</code>\n"
+        f"📋 Источник: {html.escape(source_label)}\n"
+        f"🔑 Аккаунтов: <b>{use}</b>\n"
+        f"📊 ~{per_acc} пользователей на аккаунт\n\n"
+        "• <b>Обычный</b> — прямое добавление (аккаунту нужны права приглашать).\n"
+        "• <b>Через админку</b> — пользователь делается админом (попадает в чат) "
+        "и тут же лишается прав → остаётся участником. Обходит приватность.\n"
+        "• <b>Ссылка в ЛС</b> — рассылаем каждому ссылку-приглашение, человек "
+        "вступает сам. Полностью обходит приватность, безопаснее всего, но "
+        "вступление не гарантировано.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _inv_offer_pace(message: Message, data: dict) -> None:
+    """Экран выбора темпа (после выбора способа инвайта)."""
+    group = data.get("group", "")
+    use = data.get("acc_count", 1)
+    total_users = data.get("total_users", 0)
+    method = data.get("inv_method", "direct")
+    per_acc = max(1, (total_users + use - 1) // use)
+    _m_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
+
+    kb = InlineKeyboardBuilder()
     # Темп = пауза между батчами. Инвайт — самая баноопасная операция, поэтому
     # выбор скорости обязателен (медленный безопаснее для аккаунтов).
     kb.button(text="🐢 Медленно (безопасно)", callback_data=InviterCb(action="confirm", item="slow"))
@@ -394,7 +433,7 @@ async def msg_inviter_acc_count(
     await message.answer(
         "👥 <b>Инвайтер — выбор темпа</b>\n\n"
         f"🎯 Группа: <code>{html.escape(group)}</code>\n"
-        f"📋 Источник: {html.escape(source_label)}\n"
+        f"⚙️ Способ: <b>{_m_ru}</b>\n"
         f"🔑 Аккаунтов: <b>{use}</b>\n"
         f"📊 ~{per_acc} пользователей на аккаунт\n\n"
         "⚠️ <i>Инвайт — самая баноопасная операция. «Медленно» "
@@ -402,6 +441,21 @@ async def msg_inviter_acc_count(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(InviterCb.filter(F.action == "method"))
+async def cb_inviter_method(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext
+) -> None:
+    method = callback_data.item if callback_data.item in ("direct", "admin", "link") else "direct"
+    await state.update_data(inv_method=method)
+    data = await state.get_data()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await _inv_offer_pace(callback.message, data)
+    await callback.answer()
 
 
 # ── Подтверждение и постановка в очередь ─────────────────────────────────────
@@ -473,6 +527,10 @@ async def cb_inviter_confirm(
         await callback.answer("⚠️ Список пользователей пуст", show_alert=True)
         return
 
+    method = data.get("inv_method", "direct")
+    if method not in ("direct", "admin", "link"):
+        method = "direct"
+
     import json
     params = {
         "group": group,
@@ -485,8 +543,11 @@ async def cb_inviter_confirm(
         # принятый безопасный дневной предел; защищает аккаунты от овер-инвайта).
         "pace": pace,
         "per_account_limit": 50,
+        # Способ добавления: direct (InviteToChannel) или admin (промоут-трюк).
+        "invite_method": method,
     }
     _pace_ru = {"slow": "🐢 медленно", "normal": "🚶 обычно", "fast": "🐇 быстро"}[pace]
+    _method_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
     label = f"Инвайтер: {group} ← {total_users} пользователей × {len(account_ids)} акк."
     op_id = await pool.fetchval(
         "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
@@ -505,6 +566,7 @@ async def cb_inviter_confirm(
         f"🎯 Группа: <code>{html.escape(group)}</code>\n"
         f"👥 Пользователей: <b>{total_users}</b>\n"
         f"🔑 Аккаунтов: <b>{len(account_ids)}</b>\n"
+        f"⚙️ Способ: <b>{_method_ru}</b>\n"
         f"⏱ Темп: <b>{_pace_ru}</b> · лимит <b>50</b>/акк за прогон",
         kb.as_markup(),
     )

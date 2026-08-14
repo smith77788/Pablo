@@ -8585,6 +8585,20 @@ async def _exec_mass_invite(
     # (FloodWait/PeerFlood → аккаунт в cooldown) и стоп-кран флота (flood_storm).
     # Т.е. меняем ГАДАНИЕ о безопасном числе на реакцию по ФАКТУ, как у конкурентов.
     _one_pass = bool(params.get("one_pass"))
+    # Метод инвайта:
+    #   "direct" — обычный InviteToChannelRequest (нужны права add_users);
+    #   "admin"  — трюк через админку: цель промоутится в админы (это добавляет её
+    #              в чат) → сразу снимаются все права → цель остаётся участником.
+    #              Обходит приватность «кто может добавлять» и не требует, чтобы
+    #              инвайтер имел право add_users — только право промоута (add_admins).
+    #   "link"   — мягкий инвайт: рассылка ссылки-приглашения в ЛС; человек сам
+    #              вступает. Полностью обходит приватность, наименее опасен, но не
+    #              гарантирует вступление (ok = ссылка доставлена).
+    _invite_method = str(params.get("invite_method") or "direct").strip().lower()
+    if _invite_method not in ("direct", "admin", "link"):
+        _invite_method = "direct"
+    # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер).
+    _link_msg = params.get("link_message") or None
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
@@ -8897,6 +8911,11 @@ async def _exec_mass_invite(
     _no_rights_on_demand: set = set()  # кому уже выдавали права по ходу (анти-цикл)
     _auto_promote = params.get("auto_promote", True)
     _promote_trick = params.get("promote_trick", True)
+    # Метод «ссылка в ЛС» вообще не требует прав админа — человек вступает сам.
+    # Поэтому вся возня с промоутером/автовыдачей админки для него пропускается.
+    if _invite_method == "link":
+        _auto_promote = False
+        _promote_trick = False
     if (_auto_promote or _promote_trick) and accounts:
         from services import mass_inviter_engine as _inv
         from services import account_manager
@@ -8966,7 +8985,11 @@ async def _exec_mass_invite(
                     okp = await asyncio.wait_for(
                         account_manager.promote_to_admin(
                             _promoter["session_str"], group, int(_u),
-                            _acc=dict(_promoter), invite_users=True, post_messages=False),
+                            _acc=dict(_promoter), invite_users=True, post_messages=False,
+                            # Метод «admin»: инвайтер сам добавляет цели промоут-трюком,
+                            # значит ему нужно право «Назначать админов» (add_admins),
+                            # а не только invite_users.
+                            add_admins=(_invite_method == "admin")),
                         timeout=45)
                     if okp:
                         _promoted_n += 1
@@ -8976,7 +8999,8 @@ async def _exec_mass_invite(
                 except Exception as _pe:
                     _promote_failed += 1
                     log.debug("mass_invite op=%d: promote acc=%s failed: %s", op_id, a.get("id"), _pe)
-            _promote_msg = f"выдана админка (invite_users) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}"
+            _rights_word = "invite_users+add_admins" if _invite_method == "admin" else "invite_users"
+            _promote_msg = f"выдана админка ({_rights_word}) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}"
             if _promote_no_uid:
                 _promote_msg += (f"; {_promote_no_uid} пропущено — не удалось получить их user_id "
                                  "(переавторизуйте эти аккаунты)")
@@ -9065,6 +9089,26 @@ async def _exec_mass_invite(
         # Ни ручного лимита, ни рекомендации — потолком служит сама очередь.
         return _acc_cap if _acc_cap else (len(all_users) + len(all_phones))
 
+    # Метод «ссылка в ЛС»: экспортируем ссылку-приглашение ОДИН раз (первым
+    # аккаунтом, у которого получилось) — её будут рассылать все инвайтеры.
+    _invite_link = ""
+    if _invite_method == "link":
+        from services import mass_inviter_engine as _lnk
+        for a in accounts:
+            try:
+                _invite_link = await asyncio.wait_for(
+                    _lnk.export_group_invite_link(a["session_str"], dict(a), group),
+                    timeout=45)
+            except Exception:
+                _invite_link = ""
+            if _invite_link:
+                break
+        if not _invite_link:
+            return {"status": "failed",
+                    "summary": "⚠️ Не удалось получить ссылку-приглашение группы. "
+                    "Нужен аккаунт с правом «Пригласительные ссылки» (админ/создатель) "
+                    "или откройте у группы публичную ссылку."}
+
     step = 0
     while (q_users or q_phones) and not group_broken and not flood_storm:
         if await _is_cancelled(pool, op_id):
@@ -9120,7 +9164,19 @@ async def _exec_mass_invite(
 
             try:
                 if by_phone:
+                    # Телефоны идут импортом контакта: промоут-трюк требует уже
+                    # резолвнутой сущности, поэтому номера всегда обычным путём.
                     res = await inv.invite_by_phones(acc["session_str"], dict(acc), group, batch)
+                elif _invite_method == "admin":
+                    # Метод «через админку»: цель промоутится в админы (добавляется
+                    # в чат) → права тут же снимаются → цель остаётся участником.
+                    # Обходит приватность и не требует права add_users у инвайтера.
+                    res = await inv.add_via_promote(acc["session_str"], dict(acc), group, batch)
+                elif _invite_method == "link":
+                    # Метод «ссылка в ЛС»: рассылаем цель ссылку-приглашение,
+                    # человек вступает сам. Обходит приватность добавления.
+                    res = await inv.invite_via_link_batch(
+                        acc["session_str"], dict(acc), _invite_link, batch, _link_msg)
                 else:
                     res = await inv.invite_batch(acc["session_str"], dict(acc), group, batch)
             except Exception as exc:
@@ -9162,7 +9218,8 @@ async def _exec_mass_invite(
                             _okp = await asyncio.wait_for(
                                 _am.promote_to_admin(
                                     _promoter["session_str"], group, int(_u),
-                                    _acc=dict(_promoter), invite_users=True, post_messages=False),
+                                    _acc=dict(_promoter), invite_users=True, post_messages=False,
+                                    add_admins=(_invite_method == "admin")),
                                 timeout=45)
                             if _okp:
                                 _promoted_n += 1
@@ -9424,9 +9481,16 @@ async def _exec_mass_invite(
             _sess_hint = ("\n⚠️ Сессии недействительны — переавторизуйте аккаунты "
                           "в разделе «Аккаунты».")
 
+    # Метод «ссылка в ЛС» не добавляет насильно — честно называем ok доставкой
+    # ссылки, а не вступлением (вступление зависит от согласия человека).
+    _method_hdr = {
+        "admin": "👥 Инвайтер (через админку): ",
+        "link": "🔗 Инвайтер (ссылка в ЛС): ",
+    }.get(_invite_method, "👥 Инвайтер: ")
+    _ok_word = "📨 Ссылка отправлена" if _invite_method == "link" else "✅ Добавлено"
     summary = (
-        f"👥 Инвайтер: {group}\n"
-        f"✅ Добавлено: {total_ok}/{total}"
+        f"{_method_hdr}{group}\n"
+        f"{_ok_word}: {total_ok}/{total}"
         + _acc_line
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")

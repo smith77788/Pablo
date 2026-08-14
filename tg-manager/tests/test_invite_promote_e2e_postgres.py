@@ -89,7 +89,8 @@ def env():
     async def fake_admin_status(session, acc, group):
         return {"ok": True, "can_promote": int(acc["id"]) == state["admin_id"]}
 
-    async def fake_promote(psession, group, uid, _acc=None, invite_users=False, post_messages=False):
+    async def fake_promote(psession, group, uid, _acc=None, invite_users=False,
+                           post_messages=False, add_admins=False):
         state["promoted"].append(int(uid))
         # РЕАЛИЗМ: выдача прав действительно даёт аккаунту права — добавляем его в
         # rights_only, чтобы следующий invite_batch от него прошёл (проверка того,
