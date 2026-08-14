@@ -76,6 +76,17 @@ INLINE_MIGRATIONS: list[str] = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (chat_id, user_id)
     )""",
+    # Антибот-капча: новички, ожидающие прохождения (persist для сметателя).
+    """CREATE TABLE IF NOT EXISTS guard_captcha_pending (
+        chat_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        captcha_msg_id BIGINT DEFAULT 0,
+        expires_at TIMESTAMPTZ NOT NULL,
+        action TEXT NOT NULL DEFAULT 'kick',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (chat_id, user_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_guard_captcha_expires ON guard_captcha_pending(expires_at)",
     # tg_accounts — добавляем поля если отсутствуют
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS trust_score REAL",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS acc_status TEXT DEFAULT 'active'",

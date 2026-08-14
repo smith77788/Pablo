@@ -56,6 +56,69 @@ async def _is_chat_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
         return False
 
 
+# Кэш админов чата — чтобы не дёргать getChatMember на КАЖДОЕ сообщение (это бы
+# упёрлось в лимиты Telegram на активных чатах). Обновляем не чаще раза в TTL.
+_ADMIN_CACHE: dict[int, tuple[set[int], float]] = {}
+_ADMIN_TTL = 300.0  # сек
+
+
+async def _admin_ids(bot: Bot, chat_id: int) -> set[int]:
+    """Множество id админов/создателя чата (кэш на 5 мин). Fail-open → пустой set."""
+    hit = _ADMIN_CACHE.get(chat_id)
+    now = time.time()
+    if hit and now - hit[1] < _ADMIN_TTL:
+        return hit[0]
+    try:
+        admins = await bot.get_chat_administrators(chat_id)
+        ids = {a.user.id for a in admins if getattr(a, "user", None)}
+    except Exception:
+        ids = hit[0] if hit else set()
+    _ADMIN_CACHE[chat_id] = (ids, now)
+    return ids
+
+
+def _invalidate_admins(chat_id: int) -> None:
+    _ADMIN_CACHE.pop(chat_id, None)
+
+
+def _full_perms() -> ChatPermissions:
+    """Полные права участника (снятие мьюта)."""
+    return ChatPermissions(
+        can_send_messages=True, can_send_audios=True, can_send_documents=True,
+        can_send_photos=True, can_send_videos=True, can_send_video_notes=True,
+        can_send_voice_notes=True, can_send_polls=True,
+        can_send_other_messages=True, can_add_web_page_previews=True)
+
+
+def _newbie_perms() -> ChatPermissions:
+    """Права новичка: текст можно, медиа/стикеры/ссылки-превью — нельзя."""
+    return ChatPermissions(
+        can_send_messages=True, can_send_audios=False, can_send_documents=False,
+        can_send_photos=False, can_send_videos=False, can_send_video_notes=False,
+        can_send_voice_notes=False, can_send_polls=False,
+        can_send_other_messages=False, can_add_web_page_previews=False)
+
+
+def _muted_perms() -> ChatPermissions:
+    """Полный мьют (для капчи и наказаний)."""
+    return ChatPermissions(can_send_messages=False)
+
+
+async def _punish(bot: Bot, chat_id: int, uid: int, action: str,
+                  mute_minutes: int = 60) -> None:
+    """Применить наказание action ∈ {mute,ban,kick,delete-only} к пользователю."""
+    if action == "ban":
+        await bot.ban_chat_member(chat_id, uid)
+    elif action == "kick":
+        await bot.ban_chat_member(chat_id, uid)
+        await asyncio.sleep(0.4)
+        await bot.unban_chat_member(chat_id, uid, only_if_banned=True)
+    elif action == "mute":
+        await bot.restrict_chat_member(
+            chat_id, uid, permissions=_muted_perms(),
+            until_date=int(time.time()) + int(mute_minutes) * 60)
+
+
 async def _safe_delete(msg: Message) -> bool:
     try:
         await msg.delete()
@@ -133,6 +196,9 @@ async def on_my_status(event: ChatMemberUpdated, bot: Bot, pool: asyncpg.Pool) -
             "• 👋 приветствую новичков (если задано приветствие);",
             "• 🔨 команды: /ban /mute /kick /warn /del (в ответ на сообщение).",
             "",
+            "Дополнительно можно включить: 🤖 капчу новичков, 🌊 антифлуд, "
+            "🤬 стоп-слова, 🌙 ночной режим, 🖼 ограничение медиа новичкам.",
+            "",
             "⚙️ Настройки: команда <code>/guard</code> (для админов чата).",
         ]
         if not can_delete:
@@ -172,17 +238,135 @@ async def on_my_status(event: ChatMemberUpdated, bot: Bot, pool: asyncpg.Pool) -
 
 @router.message(F.chat.type.in_(_GROUP), F.content_type.in_(cg.ALL_SERVICE_TYPES))
 async def on_service_message(message: Message, bot: Bot, pool: asyncpg.Pool) -> None:
-    """Системное сообщение в группе — удалить по настройкам + приветствовать."""
+    """Системное сообщение в группе — удалить по настройкам + обработать новичков."""
     guard = await cg.is_guarded(pool, message.chat.id)
     if not guard:
         return
     settings = guard["settings"]
     ct = message.content_type
-    # Приветствие новичков — до удаления «X присоединился».
-    if ct in cg.JOIN_TYPES and settings.get("welcome_text"):
-        await _greet_newcomers(message, bot, settings)
+    if ct in cg.JOIN_TYPES:
+        await _on_newcomers(message, bot, pool, settings)
     if cg.should_delete_service(ct, settings):
         await _safe_delete(message)
+
+
+async def _on_newcomers(message: Message, bot: Bot, pool: asyncpg.Pool,
+                        settings: dict) -> None:
+    """Новички: капча (мьют+кнопка) ИЛИ приветствие + ограничение медиа."""
+    captcha_on = bool(settings.get("captcha"))
+    for u in (message.new_chat_members or []):
+        if getattr(u, "is_bot", False):
+            continue
+        if captcha_on:
+            await _start_captcha(message, bot, pool, settings, u)
+        else:
+            if settings.get("welcome_text"):
+                await _greet_one(message, bot, settings, u)
+            if settings.get("newbie_restrict"):
+                await _restrict_newbie(bot, message.chat.id, u.id, settings)
+
+
+async def _start_captcha(message: Message, bot: Bot, pool: asyncpg.Pool,
+                         settings: dict, user) -> None:
+    """Замьютить новичка и прислать кнопку «Я не бот» с дедлайном."""
+    chat_id = message.chat.id
+    try:
+        await bot.restrict_chat_member(chat_id, user.id, permissions=_muted_perms())
+    except Exception:
+        # Нет прав ограничивать → капча бессмысленна, просто приветствуем.
+        log_exc_swallow(log, "guard: captcha mute")
+        if settings.get("welcome_text"):
+            await _greet_one(message, bot, settings, user)
+        return
+    name = html.escape(user.full_name or (f"@{user.username}" if user.username else "друг"))
+    timeout = int(settings.get("captcha_timeout") or 120)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Я не бот", callback_data=GuardCb(action="captcha", chat_id=chat_id))
+    try:
+        sent = await bot.send_message(
+            chat_id,
+            f"👋 {name}, подтвердите, что вы не бот — нажмите кнопку в течение "
+            f"{timeout} сек, иначе будете удалены из чата.",
+            parse_mode="HTML", reply_markup=kb.as_markup())
+        msg_id = sent.message_id
+    except Exception:
+        log_exc_swallow(log, "guard: captcha message")
+        msg_id = 0
+    action = settings.get("captcha_action") or "kick"
+    await cg.captcha_add(pool, chat_id, user.id, msg_id, timeout, action)
+
+
+async def _restrict_newbie(bot: Bot, chat_id: int, uid: int, settings: dict) -> None:
+    """Ограничить новичку медиа/ссылки на первые newbie_minutes минут."""
+    minutes = int(settings.get("newbie_minutes") or 10)
+    try:
+        await bot.restrict_chat_member(
+            chat_id, uid, permissions=_newbie_perms(),
+            until_date=int(time.time()) + minutes * 60)
+    except Exception:
+        log_exc_swallow(log, "guard: newbie restrict")
+
+
+async def _greet_one(message: Message, bot: Bot, settings: dict, user) -> None:
+    """Отправить приветствие одному новичку (плейсхолдеры {name}/{chat})."""
+    tpl = str(settings.get("welcome_text") or "")
+    if not tpl:
+        return
+    name = html.escape(user.full_name or (f"@{user.username}" if user.username else "друг"))
+    text = tpl.replace("{name}", name).replace(
+        "{chat}", html.escape(message.chat.title or "чат"))
+    try:
+        sent = await bot.send_message(message.chat.id, text, parse_mode="HTML")
+    except Exception:
+        log_exc_swallow(log, "guard: welcome send")
+        return
+    ttl = int(settings.get("welcome_ttl") or 0)
+    if ttl > 0:
+        asyncio.create_task(_delete_later(bot, message.chat.id, sent.message_id, ttl))
+
+
+@router.callback_query(GuardCb.filter(F.action == "captcha"))
+async def cb_captcha(callback: CallbackQuery, callback_data: GuardCb, bot: Bot,
+                     pool: asyncpg.Pool) -> None:
+    """Новичок нажал «Я не бот» — снять мьют, удалить капчу, приветствовать."""
+    chat_id = callback_data.chat_id
+    uid = callback.from_user.id
+    pending = await cg.captcha_get(pool, chat_id, uid)
+    if not pending:
+        # Кнопку жмёт не тот, для кого капча (или она уже пройдена/истекла).
+        await callback.answer("Эта проверка не для вас.", show_alert=True)
+        return
+    await cg.captcha_resolve(pool, chat_id, uid)
+    guard = await cg.is_guarded(pool, chat_id)
+    settings = guard["settings"] if guard else cg.DEFAULT_SETTINGS
+    # Снять мьют (или сразу выдать ограничение новичка, если оно включено).
+    try:
+        if settings.get("newbie_restrict"):
+            await _restrict_newbie(bot, chat_id, uid, settings)
+        else:
+            await bot.restrict_chat_member(chat_id, uid, permissions=_full_perms())
+    except Exception:
+        log_exc_swallow(log, "guard: captcha unmute")
+    # Удалить сообщение с капчей.
+    try:
+        if pending.get("captcha_msg_id"):
+            await bot.delete_message(chat_id, int(pending["captcha_msg_id"]))
+    except Exception:
+        log_exc_swallow(log, "guard: captcha cleanup")
+    await callback.answer("Спасибо! Доступ открыт.")
+    # Приветствие — после успешной капчи.
+    if settings.get("welcome_text"):
+        name = html.escape(callback.from_user.full_name or "друг")
+        text = str(settings["welcome_text"]).replace("{name}", name).replace(
+            "{chat}", html.escape((callback.message.chat.title
+                                   if callback.message else "") or "чат"))
+        try:
+            sent = await bot.send_message(chat_id, text, parse_mode="HTML")
+            ttl = int(settings.get("welcome_ttl") or 0)
+            if ttl > 0:
+                asyncio.create_task(_delete_later(bot, chat_id, sent.message_id, ttl))
+        except Exception:
+            log_exc_swallow(log, "guard: post-captcha welcome")
 
 
 async def _greet_newcomers(message: Message, bot: Bot, settings: dict) -> None:
@@ -207,39 +391,102 @@ async def _greet_newcomers(message: Message, bot: Bot, settings: dict) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  3. Антиспам обычных сообщений (ссылки/пересылки от не-админов)
+#  3. Модерация живых сообщений: ночь, стоп-слова, антифлуд, антиспам
 # ══════════════════════════════════════════════════════════════════════════════
+
+_ANY_MSG_FEATURE = ("antispam_links", "antispam_forward", "antiflood",
+                    "night_mode")
+
 
 @router.message(F.chat.type.in_(_GROUP), F.from_user, ~F.from_user.is_bot)
 async def on_group_message(message: Message, bot: Bot, pool: asyncpg.Pool) -> None:
-    """Антиспам живых сообщений. Если модерации нет/не сработала — SkipHandler,
-    чтобы апдейт продолжил идти по другим роутерам."""
+    """Модерация обычных сообщений. Порядок: ночь → стоп-слова → антифлуд →
+    антиспам. Если ничего из модерации не включено/не сработало — SkipHandler,
+    чтобы апдейт продолжил идти по другим роутерам (relay и т.п.)."""
     from aiogram.dispatcher.event.bases import SkipHandler
     guard = await cg.is_guarded(pool, message.chat.id)
     if not guard:
         raise SkipHandler
     settings = guard["settings"]
-    if not (settings.get("antispam_links") or settings.get("antispam_forward")):
+    stop_on = bool(settings.get("stopwords"))
+    if not (stop_on or any(settings.get(k) for k in _ANY_MSG_FEATURE)):
         raise SkipHandler
+    chat_id = message.chat.id
     uid = message.from_user.id
-    # Админов чата не трогаем.
-    if await _is_chat_admin(bot, message.chat.id, uid):
+    # Админов чата не модерируем (одна закэшированная выборка на чат).
+    if uid in await _admin_ids(bot, chat_id):
         raise SkipHandler
 
+    text = message.text or message.caption or ""
+
+    # 1) Ночной режим — чат «закрыт» для не-админов: удаляем всё.
+    from datetime import datetime, timezone
+    if settings.get("night_mode") and cg.is_night(settings, datetime.now(timezone.utc)):
+        await _safe_delete(message)
+        return
+
+    # 2) Стоп-слова / антимат.
+    if stop_on:
+        hitw = cg.find_stopword(text, settings.get("stopwords") or [])
+        if hitw:
+            await _safe_delete(message)
+            act = settings.get("stopwords_action") or "delete"
+            if act in ("warn", "mute"):
+                await _apply_soft_action(bot, pool, chat_id, uid, act, settings,
+                                         reason="стоп-слово")
+            log.info("chat_guard: стоп-слово '%s' chat=%s user=%s", hitw, chat_id, uid)
+            return
+
+    # 3) Антифлуд.
+    if settings.get("antiflood"):
+        if cg.flood_hit(chat_id, uid, time.time(),
+                        int(settings.get("flood_count") or 7),
+                        float(settings.get("flood_window") or 10)):
+            cg.flood_reset(chat_id, uid)
+            await _safe_delete(message)
+            act = settings.get("flood_action") or "mute"
+            if act in ("warn", "mute"):
+                await _apply_soft_action(bot, pool, chat_id, uid, act, settings,
+                                         reason="флуд")
+            log.info("chat_guard: антифлуд chat=%s user=%s", chat_id, uid)
+            return
+
+    # 4) Антиспам ссылок/пересылок.
     is_fwd = bool(message.forward_origin or message.forward_from
                   or message.forward_from_chat)
-    text = message.text or message.caption or ""
     has_link = bool(_LINK_RE.search(text)) or bool(message.entities and any(
         e.type in ("url", "text_link", "mention") for e in message.entities))
+    if ((settings.get("antispam_forward") and is_fwd)
+            or (settings.get("antispam_links") and has_link)):
+        await _safe_delete(message)
+        log.info("chat_guard: антиспам chat=%s user=%s (fwd=%s link=%s)",
+                 chat_id, uid, is_fwd, has_link)
+        return
 
-    hit = ((settings.get("antispam_forward") and is_fwd)
-           or (settings.get("antispam_links") and has_link))
-    if not hit:
-        raise SkipHandler
-    if await _safe_delete(message):
-        log.info("chat_guard: антиспам удалил сообщение chat=%s user=%s (fwd=%s link=%s)",
-                 message.chat.id, uid, is_fwd, has_link)
-    # сообщение обработано (удалено или попытались) — не пропускаем дальше
+    # Ничего не сработало — отдаём апдейт дальше по роутерам.
+    raise SkipHandler
+
+
+async def _apply_soft_action(bot: Bot, pool: asyncpg.Pool, chat_id: int, uid: int,
+                             action: str, settings: dict, reason: str) -> None:
+    """Наказание warn/mute для авто-триггеров (стоп-слово/флуд), с эскалацией варнов."""
+    if action == "mute":
+        try:
+            await _punish(bot, chat_id, uid, "mute",
+                          int(settings.get("mute_minutes") or 60))
+        except Exception:
+            log_exc_swallow(log, "guard: soft mute")
+        return
+    # warn → инкремент + эскалация по достижении порога
+    try:
+        warns = await cg.add_warning(pool, chat_id, uid)
+        max_warns = int(settings.get("max_warns") or 3)
+        if warns >= max_warns:
+            await cg.reset_warnings(pool, chat_id, uid)
+            await _punish(bot, chat_id, uid, settings.get("warn_action") or "mute",
+                          int(settings.get("mute_minutes") or 60))
+    except Exception:
+        log_exc_swallow(log, "guard: soft warn")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -443,22 +690,41 @@ def _panel_kb(chat_id: int, s: dict):
               callback_data=GuardCb(action="toggle", chat_id=chat_id, key="antispam_links"))
     kb.button(text=f"{_t(s['antispam_forward'])} Антиспам: пересылки",
               callback_data=GuardCb(action="toggle", chat_id=chat_id, key="antispam_forward"))
-    kb.adjust(1)
+    kb.button(text=f"{_t(s['captcha'])} 🤖 Капча новичков",
+              callback_data=GuardCb(action="toggle", chat_id=chat_id, key="captcha"))
+    kb.button(text=f"{_t(s['antiflood'])} 🌊 Антифлуд",
+              callback_data=GuardCb(action="toggle", chat_id=chat_id, key="antiflood"))
+    kb.button(text=f"{_t(s['night_mode'])} 🌙 Ночной режим",
+              callback_data=GuardCb(action="toggle", chat_id=chat_id, key="night_mode"))
+    kb.button(text=f"{_t(s['newbie_restrict'])} 🖼 Ограничить новичков",
+              callback_data=GuardCb(action="toggle", chat_id=chat_id, key="newbie_restrict"))
+    kb.adjust(1, 1, 1, 1, 2, 2, 2)
     return kb.as_markup()
 
 
 def _panel_text(s: dict) -> str:
     wa = {"mute": "мьют", "ban": "бан", "kick": "кик"}.get(s.get("warn_action"), "мьют")
-    return (
-        "🛡 <b>Модератор чатов — настройки</b>\n\n"
-        "Тумблеры чистки и антиспама ниже. Порог предупреждений: "
-        f"<b>{s.get('max_warns', 3)}</b> → <b>{wa}</b>"
+    sw = s.get("stopwords") or []
+    lines = [
+        "🛡 <b>Модератор чатов — настройки</b>\n",
+        f"⚖️ Порог предупреждений: <b>{s.get('max_warns', 3)}</b> → <b>{wa}</b>"
         + (f" {s.get('mute_minutes', 60)} мин" if s.get("warn_action") != "ban" else "")
-        + ".\n"
-        + ("👋 Приветствие: <b>задано</b>" if s.get("welcome_text") else
-           "👋 Приветствие: <i>не задано</i> — команда <code>/welcome текст</code> "
-           "(плейсхолдеры {name}, {chat})")
-    )
+        + ".",
+    ]
+    if s.get("antiflood"):
+        lines.append(f"🌊 Антифлуд: {s.get('flood_count', 7)} сообщ./"
+                     f"{s.get('flood_window', 10)} сек → {s.get('flood_action', 'mute')}.")
+    if s.get("captcha"):
+        lines.append(f"🤖 Капча: {s.get('captcha_timeout', 120)} сек, "
+                     f"иначе {s.get('captcha_action', 'kick')}.")
+    if s.get("night_mode"):
+        lines.append(f"🌙 Ночь: {s.get('night_from', 23)}:00–{s.get('night_to', 7)}:00 "
+                     f"(UTC{s.get('night_tz', 3):+d}) — чат закрыт для не-админов.")
+    lines.append(f"🤬 Стоп-слов: <b>{len(sw)}</b> — команда "
+                 "<code>/stopword добавить|удалить|список слово</code>.")
+    lines.append("👋 Приветствие: " + ("<b>задано</b>" if s.get("welcome_text") else
+                 "<i>нет</i> — <code>/welcome текст</code> ({name}, {chat})"))
+    return "\n".join(lines)
 
 
 @router.message(Command("guard"), F.chat.type.in_(_GROUP))
@@ -487,6 +753,64 @@ async def cmd_welcome(message: Message, command: CommandObject, bot: Bot,
         "✅ Приветствие сохранено. Плейсхолдеры: <code>{name}</code>, "
         "<code>{chat}</code>. Оно само удалится через "
         f"{guard['settings'].get('welcome_ttl', 60)} сек.", parse_mode="HTML")
+
+
+@router.message(Command("stopword", "stopwords"), F.chat.type.in_(_GROUP))
+async def cmd_stopword(message: Message, command: CommandObject, bot: Bot,
+                       pool: asyncpg.Pool) -> None:
+    """Управление стоп-словами: /stopword добавить|удалить|список <слово/фраза>."""
+    guard = await _guard_precheck(message, bot, pool)
+    if not guard:
+        return
+    words = list(guard["settings"].get("stopwords") or [])
+    args = (command.args or "").strip()
+    parts = args.split(maxsplit=1)
+    sub = (parts[0].lower() if parts else "")
+    rest = (parts[1].strip().lower() if len(parts) > 1 else "")
+
+    if sub in ("add", "добавить", "+") and rest:
+        if rest not in words:
+            words.append(rest)
+            await cg.set_setting(pool, message.chat.id, "stopwords", words)
+        await message.reply(f"✅ Добавлено стоп-слово: <code>{html.escape(rest)}</code>. "
+                            f"Всего: {len(words)}.", parse_mode="HTML")
+    elif sub in ("del", "удалить", "remove", "-") and rest:
+        if rest in words:
+            words.remove(rest)
+            await cg.set_setting(pool, message.chat.id, "stopwords", words)
+            await message.reply(f"🗑 Удалено: <code>{html.escape(rest)}</code>. "
+                                f"Осталось: {len(words)}.", parse_mode="HTML")
+        else:
+            await message.reply("Такого стоп-слова нет.")
+    elif sub in ("list", "список", "ls"):
+        if words:
+            await message.reply("🤬 <b>Стоп-слова</b> ({}):\n{}".format(
+                len(words), "\n".join(f"• <code>{html.escape(w)}</code>" for w in words[:100])),
+                parse_mode="HTML")
+        else:
+            await message.reply("Список стоп-слов пуст.")
+    elif sub in ("clear", "очистить"):
+        await cg.set_setting(pool, message.chat.id, "stopwords", [])
+        await message.reply("🗑 Все стоп-слова удалены.")
+    else:
+        await message.reply(
+            "🤬 <b>Стоп-слова</b>\n"
+            "• <code>/stopword добавить слово</code>\n"
+            "• <code>/stopword удалить слово</code>\n"
+            "• <code>/stopword список</code>\n"
+            "• <code>/stopword очистить</code>\n\n"
+            "Одиночные слова ловятся по границам (не заденут часть другого слова); "
+            "фразы — как подстрока.", parse_mode="HTML")
+
+
+@router.chat_member()
+async def on_chat_member(event: ChatMemberUpdated, pool: asyncpg.Pool) -> None:
+    """Изменился статус ЛЮБОГО участника — сбрасываем кэш админов, если это
+    затронуло админку (промоут/демоут), чтобы модерация видела актуальный список."""
+    old = getattr(getattr(event, "old_chat_member", None), "status", "")
+    new = getattr(getattr(event, "new_chat_member", None), "status", "")
+    if old in _ADMIN_STATUSES or new in _ADMIN_STATUSES:
+        _invalidate_admins(event.chat.id)
 
 
 @router.callback_query(GuardCb.filter(F.action == "toggle"))

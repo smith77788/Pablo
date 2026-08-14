@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import asyncpg
@@ -35,6 +36,31 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "max_warns": 3,            # число предупреждений до наказания
     "warn_action": "mute",     # что делать при достижении лимита: mute|ban|kick
     "mute_minutes": 60,        # длительность мьюта (для warn_action=mute и /mute без аргумента)
+
+    # ── Антибот-капча ────────────────────────────────────────────────────────
+    "captcha": False,          # спрашивать новичка «Я не бот» (мьют до прохождения)
+    "captcha_timeout": 120,    # сек на прохождение; истёк → наказание
+    "captcha_action": "kick",  # что делать не прошедшему: kick|ban
+
+    # ── Антифлуд ─────────────────────────────────────────────────────────────
+    "antiflood": False,        # ограничение частоты сообщений
+    "flood_count": 7,          # порог сообщений…
+    "flood_window": 10,        # …за столько секунд
+    "flood_action": "mute",    # наказание флудеру: mute|warn|delete
+
+    # ── Стоп-слова / антимат ─────────────────────────────────────────────────
+    "stopwords": [],           # список запрещённых слов/фраз (в нижнем регистре)
+    "stopwords_action": "delete",  # delete|warn|mute при совпадении
+
+    # ── Ночной режим ─────────────────────────────────────────────────────────
+    "night_mode": False,       # «закрыть» чат для не-админов в заданные часы
+    "night_from": 23,          # час начала (0–23) в поясе night_tz
+    "night_to": 7,             # час конца (0–23)
+    "night_tz": 3,             # смещение пояса от UTC (по умолчанию МСК = +3)
+
+    # ── Ограничение новичков ─────────────────────────────────────────────────
+    "newbie_restrict": False,  # первые минуты новичку нельзя медиа/ссылки
+    "newbie_minutes": 10,      # длительность ограничения
 }
 
 # Content-type'ы системных сообщений Telegram (значения aiogram ContentType).
@@ -86,6 +112,87 @@ def should_delete_service(content_type: str, settings: dict[str, Any]) -> bool:
     if content_type in OTHER_SERVICE_TYPES:
         return bool(settings.get("clean_other", True))
     return False
+
+
+# ── Антифлуд (in-memory скользящее окно на процесс) ───────────────────────────
+# Бот — единый процесс (polling), поэтому окна держим в памяти: без БД-раунда на
+# каждое сообщение. Ключ — (chat_id, user_id) → список меток времени.
+_FLOOD: dict[tuple[int, int], list[float]] = {}
+_FLOOD_MAX_KEYS = 20000  # страховка от неограниченного роста памяти
+
+
+def flood_hit(chat_id: int, user_id: int, now: float, count: int,
+              window: float) -> bool:
+    """Зарегистрировать сообщение и сказать, флудит ли пользователь.
+
+    True, если в последнем окне `window` сек набралось ≥ `count` сообщений.
+    Старые метки вне окна выбрасываются на каждом вызове (окно самоочищается).
+    """
+    if count <= 0 or window <= 0:
+        return False
+    if len(_FLOOD) > _FLOOD_MAX_KEYS:
+        _FLOOD.clear()  # аварийный сброс — лучше забыть счётчики, чем течь по памяти
+    key = (int(chat_id), int(user_id))
+    buf = _FLOOD.setdefault(key, [])
+    cutoff = now - window
+    buf[:] = [t for t in buf if t >= cutoff]
+    buf.append(now)
+    return len(buf) >= count
+
+
+def flood_reset(chat_id: int, user_id: int) -> None:
+    """Сбросить окно (после наказания — чтобы не наказывать повторно тем же залпом)."""
+    _FLOOD.pop((int(chat_id), int(user_id)), None)
+
+
+# ── Стоп-слова / антимат ──────────────────────────────────────────────────────
+
+def find_stopword(text: str, stopwords: Any) -> str | None:
+    """Найти первое сработавшее стоп-слово в тексте (или None).
+
+    Одиночные слова матчатся по границам слова (юникод), поэтому «привет» НЕ ловит
+    на слове «приветствие»; фразы (со пробелом) — как подстрока. Регистронезависимо.
+    """
+    if not text or not stopwords:
+        return None
+    low = text.lower()
+    for raw in stopwords:
+        w = str(raw).strip().lower()
+        if not w:
+            continue
+        if " " in w:
+            if w in low:
+                return w
+        else:
+            # \b не работает с кириллицей одинаково во всех случаях — используем
+            # границы «не буква/цифра» вручную через lookaround по \w (re.UNICODE).
+            if re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", low, re.UNICODE):
+                return w
+    return None
+
+
+# ── Ночной режим ──────────────────────────────────────────────────────────────
+
+def is_night(settings: dict[str, Any], dt_utc) -> bool:
+    """Активен ли сейчас ночной режим (чат «закрыт» для не-админов).
+
+    Часы заданы в поясе night_tz (смещение от UTC). Поддерживает переход через
+    полночь (например 23→7). from == to трактуется как «выключено» (0 часов).
+    """
+    if not settings.get("night_mode"):
+        return False
+    try:
+        offset = int(settings.get("night_tz", 3))
+        frm = int(settings.get("night_from", 23)) % 24
+        to = int(settings.get("night_to", 7)) % 24
+    except (TypeError, ValueError):
+        return False
+    if frm == to:
+        return False
+    h = (dt_utc.hour + offset) % 24
+    if frm < to:
+        return frm <= h < to
+    return h >= frm or h < to  # окно через полночь
 
 
 # ── Хранилище чатов под охраной ──────────────────────────────────────────────
@@ -202,3 +309,48 @@ async def reset_warnings(pool: asyncpg.Pool, chat_id: int, user_id: int) -> None
     await pool.execute(
         "DELETE FROM guard_warnings WHERE chat_id=$1 AND user_id=$2",
         chat_id, user_id)
+
+
+# ── Ожидающие капчу новички ──────────────────────────────────────────────────
+# Персистентно (переживает рестарт), чтобы фоновый сметатель докинул кик тем,
+# кто не прошёл капчу, даже если бот перезапускался.
+
+async def captcha_add(pool: asyncpg.Pool, chat_id: int, user_id: int,
+                      captcha_msg_id: int, timeout: int, action: str = "kick") -> None:
+    """Записать новичка как «ожидает капчу» с дедлайном now()+timeout."""
+    await pool.execute(
+        """INSERT INTO guard_captcha_pending
+             (chat_id, user_id, captcha_msg_id, expires_at, action)
+           VALUES($1,$2,$3, now() + ($4 || ' seconds')::interval, $5)
+           ON CONFLICT (chat_id, user_id) DO UPDATE SET
+             captcha_msg_id=EXCLUDED.captcha_msg_id,
+             expires_at=EXCLUDED.expires_at, action=EXCLUDED.action""",
+        chat_id, user_id, captcha_msg_id, str(int(timeout)), action)
+
+
+async def captcha_get(pool: asyncpg.Pool, chat_id: int, user_id: int) -> dict[str, Any] | None:
+    """Вернуть запись ожидания капчи (или None)."""
+    row = await pool.fetchrow(
+        "SELECT chat_id, user_id, captcha_msg_id, action FROM guard_captcha_pending "
+        "WHERE chat_id=$1 AND user_id=$2", chat_id, user_id)
+    return dict(row) if row else None
+
+
+async def captcha_resolve(pool: asyncpg.Pool, chat_id: int, user_id: int) -> dict[str, Any] | None:
+    """Снять новичка с ожидания (прошёл капчу). Возвращает удалённую запись."""
+    row = await pool.fetchrow(
+        "DELETE FROM guard_captcha_pending WHERE chat_id=$1 AND user_id=$2 "
+        "RETURNING chat_id, user_id, captcha_msg_id, action", chat_id, user_id)
+    return dict(row) if row else None
+
+
+async def captcha_pop_expired(pool: asyncpg.Pool, limit: int = 50) -> list[dict[str, Any]]:
+    """Забрать и удалить просроченные записи (для фонового наказания)."""
+    rows = await pool.fetch(
+        """DELETE FROM guard_captcha_pending
+           WHERE ctid IN (
+             SELECT ctid FROM guard_captcha_pending
+             WHERE expires_at <= now() ORDER BY expires_at LIMIT $1)
+           RETURNING chat_id, user_id, captcha_msg_id, action""",
+        limit)
+    return [dict(r) for r in rows]
