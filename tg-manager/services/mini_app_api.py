@@ -5988,12 +5988,69 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         raw = str(body.get("import_list") or "")
         from services.mass_inviter_engine import classify_invite_list
         r = classify_invite_list(raw)
+        total = len(r["phones"]) + len(r["user_refs"])
+        # Превью дедупа (паритет с ботом): сколько из списка уже приглашались в
+        # эту группу. Группа опциональна — без неё дедуп не считаем.
+        already = 0
+        _grp = str(body.get("group") or "").strip()
+        if _grp:
+            from services.invite_preflight import count_already_invited
+            already = await count_already_invited(
+                pool, uid, _grp, list(r["phones"]) + list(r["user_refs"]))
         return _json_resp({
             "phones": len(r["phones"]),
             "user_refs": len(r["user_refs"]),
-            "total": len(r["phones"]) + len(r["user_refs"]),
+            "total": total,
+            "already_invited": already,
+            "new": max(0, total - already),
             "unrecognized": r["unrecognized"],
             "unrecognized_count": len(r["unrecognized"]),
+        })
+
+    async def invite_parse_file(request: web.Request) -> web.Response:
+        """Загрузка списка ФАЙЛОМ (паритет с ботом): .txt/.csv/.xlsx/.db → разбор
+        в user_refs/phones. Опционально group → превью дедупа. Multipart upload.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services.invite_list_parser import extract_text, MAX_FILE_BYTES
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return _err("Ожидался файл (multipart/form-data)", 400)
+        filename = "list.txt"
+        data = b""
+        group = ""
+        try:
+            async for field in reader:
+                if field.name == "file":
+                    filename = field.filename or "list.txt"
+                    data = await field.read(decode=False)
+                elif field.name == "group":
+                    group = (await field.text()).strip()
+        except Exception:
+            return _err("Не удалось прочитать загрузку", 400)
+        if not data:
+            return _err("Файл пуст", 400)
+        if len(data) > MAX_FILE_BYTES:
+            return _err(f"Файл слишком большой (>{MAX_FILE_BYTES // (1024 * 1024)} МБ)", 400)
+        try:
+            text = extract_text(filename, data)
+        except Exception:
+            return _err("Не удалось прочитать файл (формат не поддержан или повреждён)", 400)
+        from services.mass_inviter_engine import split_invite_targets
+        user_refs, phones = split_invite_targets(text)
+        total = len(user_refs) + len(phones)
+        if total == 0:
+            return _err("В файле не распознано ни одной цели", 400)
+        already = 0
+        if group:
+            from services.invite_preflight import count_already_invited
+            already = await count_already_invited(pool, uid, group, list(phones) + list(user_refs))
+        return _json_resp({
+            "ok": True, "user_refs": user_refs, "phones": phones, "total": total,
+            "already_invited": already, "new": max(0, total - already),
         })
 
     async def invite_audience_size(request: web.Request) -> web.Response:
@@ -7227,13 +7284,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         user_refs: list = []
         phones: list = []
         if source == "import_list":
-            from services.mass_inviter_engine import split_invite_targets
-            raw = body.get("import_list") or ""
-            # Взаимоисключающий разбор: «+» ИЛИ 11+ цифр → телефон, иначе @username/ID.
-            # Раньше делили строго по префиксу «+», и вставленный список номеров без
-            # «+» (79991234567) целиком уходил в refs как Telegram ID → «Добавлено 0/0».
-            # split_invite_targets — единый источник правды для этой классификации.
-            user_refs, phones = split_invite_targets(str(raw))
+            from services.mass_inviter_engine import (split_invite_targets,
+                                                      parse_user_refs, parse_phones)
+            # Список файлом (Mini App) присылает уже разобранные массивы — берём их
+            # напрямую; иначе разбираем вставленный текст import_list.
+            _ur_in = body.get("user_refs")
+            _ph_in = body.get("phones")
+            if isinstance(_ur_in, list) or isinstance(_ph_in, list):
+                user_refs = parse_user_refs("\n".join(str(x) for x in (_ur_in or [])))
+                phones = parse_phones("\n".join(str(x) for x in (_ph_in or [])))
+            else:
+                raw = body.get("import_list") or ""
+                # Взаимоисключающий разбор: «+» ИЛИ 11+ цифр → телефон, иначе @username/ID.
+                # split_invite_targets — единый источник правды для классификации.
+                user_refs, phones = split_invite_targets(str(raw))
             if not user_refs and not phones:
                 return _err("Список пуст или невалиден", 400)
         # Настройки безопасности/темпа.
@@ -13244,6 +13308,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
     app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
+    app.router.add_post("/api/miniapp/invite/parse_file", invite_parse_file)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)

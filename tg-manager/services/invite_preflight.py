@@ -82,6 +82,26 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
             "details": details, "verdict": verdict}
 
 
+async def count_already_invited(pool: asyncpg.Pool, owner_id: int, group: str,
+                                items: list, cap: int = 50000) -> int:
+    """Сколько из `items` уже приглашались в `group` (по invite_target_log).
+
+    Fail-open: нет группы/пусто/список > cap/ошибка → 0. group нормализуется тем
+    же parse_group_ref, что и ключ дедупа в op_worker."""
+    if not group or not items or len(items) > cap:
+        return 0
+    try:
+        from services.mass_inviter_engine import parse_group_ref
+        gk = parse_group_ref(group) or group
+        n = await pool.fetchval(
+            "SELECT COUNT(*) FROM invite_target_log "
+            "WHERE owner_id=$1 AND group_key=$2 AND target = ANY($3::text[])",
+            owner_id, gk, [str(x) for x in items])
+        return int(n or 0)
+    except Exception:
+        return 0
+
+
 async def _default_joiner(session_string, acc, group):
     from services import account_manager as am
     return await am.join_channel(session_string, group, _acc=acc)

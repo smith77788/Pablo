@@ -3927,6 +3927,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <label>Список для инвайта</label>
         <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567" oninput="massInviteListPreview()"></textarea>
         <div class="field-note">По одному на строку. Телефон — с «+» или 11+ цифр (напр. 79991234567); иначе @username или ID</div>
+        <div style="margin-top:6px">
+          <input type="file" id="massInviteFile" accept=".txt,.csv,.xlsx,.db,.sqlite,.sqlite3" style="display:none" onchange="uploadInviteFile()">
+          <button class="btn btn-s" style="width:100%" onclick="document.getElementById('massInviteFile').click()">📎 Загрузить файлом (.txt / .csv / .xlsx / .db)</button>
+        </div>
         <div id="massInviteListPreview" style="font-size:12px;margin-top:4px;padding:0 2px"></div>
       </div>
       <div class="field">
@@ -5807,11 +5811,14 @@ async function _reAuth() {
 }
 async function api(path, opts={}) {
   let r;
+  // FormData (загрузка файла) — НЕ ставим Content-Type: браузер сам выставит
+  // multipart с boundary. JSON — как раньше.
+  const _isForm = (typeof FormData !== 'undefined' && opts.body instanceof FormData);
+  const _hdr = () => _isForm
+    ? {'Authorization':'Bearer '+TK, ...(opts.headers||{})}
+    : {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})};
   try {
-    r = await fetch(path, {
-      ...opts,
-      headers: {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})},
-    });
+    r = await fetch(path, { ...opts, headers: _hdr() });
   } catch(_) {
     throw new Error('Нет соединения с сервером');
   }
@@ -5820,10 +5827,7 @@ async function api(path, opts={}) {
     await _reAuth();
     // Retry once with new token
     try {
-      r = await fetch(path, {
-        ...opts,
-        headers: {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})},
-      });
+      r = await fetch(path, { ...opts, headers: _hdr() });
     } catch(_) { throw new Error('Нет соединения с сервером'); }
     if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
   }
@@ -13637,8 +13641,9 @@ async function openMassInvite() {
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
-  ['massInviteRights','massInviteListPreview'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
+  ['massInviteRights','massInviteListPreview','massInviteReadiness'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
   INV_IMPORT_OK = 0;
+  INV_FILE_REFS = null; INV_FILE_PHONES = null;
   massInviteSrcToggle();
   document.getElementById('massInviteAccsLoad').textContent = 'Загрузка аккаунтов…';
   const [opsD, accsD] = await Promise.allSettled([
@@ -13704,16 +13709,25 @@ function massInviteSrcToggle() {
 // какие строки не поняты. Раньше это выяснялось только по факту («Добавлено 0/0»).
 let _invPreviewT = null;
 let INV_IMPORT_OK = 0;     // распознанных целей в текущем списке (для подтверждения)
+let INV_FILE_REFS = null;  // предразобранный список из файла (user_refs)
+let INV_FILE_PHONES = null;// предразобранный список из файла (phones)
+function _invGroup(){ return (document.getElementById('massInviteGroup')?.value||'').trim(); }
+function _invDedupLine(d){
+  if (d && d.already_invited) return `<div style="color:var(--hint);margin-top:2px">♻️ уже приглашались: <b>${num(d.already_invited)}</b> · 🆕 новых: <b>${num(d.new)}</b> (уже приглашённых пропущу)</div>`;
+  return '';
+}
 function massInviteListPreview() {
   const ta = document.getElementById('massInviteImport');
   const el = document.getElementById('massInviteListPreview');
   if (!ta || !el) return;
+  // Ручной ввод отменяет ранее загруженный файл.
+  INV_FILE_REFS = null; INV_FILE_PHONES = null;
   const raw = ta.value.trim();
   if (!raw) { el.textContent=''; INV_IMPORT_OK = 0; return; }
   clearTimeout(_invPreviewT);
   _invPreviewT = setTimeout(async () => {
     try {
-      const d = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: raw})});
+      const d = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: raw, group: _invGroup()})});
       INV_IMPORT_OK = d.total || 0;
       const parts = [];
       if (d.phones) parts.push(`📞 номеров: <b>${num(d.phones)}</b>`);
@@ -13721,6 +13735,7 @@ function massInviteListPreview() {
       let html = parts.length
         ? `<span style="color:var(--green)">✓ распознано ${d.total}</span> · ${parts.join(' · ')}`
         : `<span style="color:var(--red)">Ничего не распознано</span>`;
+      html += _invDedupLine(d);
       if (d.unrecognized_count) {
         const sample = (d.unrecognized||[]).slice(0,5).map(esc).join(', ');
         html += `<div style="color:var(--orange,#e6a100);margin-top:2px">⚠️ не распознано строк: ${d.unrecognized_count}${sample?` (${sample}${d.unrecognized_count>5?'…':''})`:''}</div>`;
@@ -13728,6 +13743,36 @@ function massInviteListPreview() {
       el.innerHTML = html;
     } catch(e) { el.textContent=''; }
   }, 350);
+}
+
+// Загрузка списка ФАЙЛОМ (.txt/.csv/.xlsx/.db) — паритет с ботом.
+async function uploadInviteFile() {
+  const inp = document.getElementById('massInviteFile');
+  const el = document.getElementById('massInviteListPreview');
+  if (!inp || !inp.files || !inp.files[0]) return;
+  const f = inp.files[0];
+  if (el) el.innerHTML = '<span style="color:var(--hint)">Читаю файл…</span>';
+  try {
+    const fd = new FormData();
+    fd.append('file', f);
+    fd.append('group', _invGroup());
+    const d = await api('/api/miniapp/invite/parse_file', {method:'POST', body: fd});
+    INV_FILE_REFS = d.user_refs || [];
+    INV_FILE_PHONES = d.phones || [];
+    INV_IMPORT_OK = d.total || 0;
+    const parts = [];
+    if (INV_FILE_PHONES.length) parts.push(`📞 номеров: <b>${num(INV_FILE_PHONES.length)}</b>`);
+    if (INV_FILE_REFS.length) parts.push(`👤 @username/ID: <b>${num(INV_FILE_REFS.length)}</b>`);
+    let html = `<span style="color:var(--green)">📎 из файла «${esc(f.name)}»: ${d.total}</span>${parts.length?' · '+parts.join(' · '):''}`;
+    html += _invDedupLine(d);
+    if (el) el.innerHTML = html;
+    const ta = document.getElementById('massInviteImport');
+    if (ta) ta.value = '';   // файл заменяет ручной ввод
+    toast('Файл загружен: '+d.total);
+  } catch(e) {
+    INV_FILE_REFS = null; INV_FILE_PHONES = null;
+    if (el) el.innerHTML = '<span style="color:var(--red)">'+esc(e.message||'Ошибка чтения файла')+'</span>';
+  } finally { inp.value=''; }
 }
 
 // Сколько целей даст выбранный источник — ДО запуска. Без этого сценарий
@@ -13889,15 +13934,22 @@ async function submitMassInvite() {
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;
   if (source==='import_list') {
-    const imp = document.getElementById('massInviteImport').value.trim();
-    if (!imp) { errEl.textContent='Вставьте список для инвайта'; return; }
-    body.import_list = imp;
-    // Свежий разбор перед запуском: не даём стартовать по нераспознанному списку.
-    try {
-      const chk = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: imp})});
-      if (!chk.total) { errEl.textContent='В списке не распознано ни одной цели — проверьте формат (номер с «+» или 11+ цифр, @username или ID).'; return; }
-      INV_IMPORT_OK = chk.total;
-    } catch(e) {}
+    // Список из файла (уже разобран) имеет приоритет над текстом.
+    if ((INV_FILE_REFS && INV_FILE_REFS.length) || (INV_FILE_PHONES && INV_FILE_PHONES.length)) {
+      if (INV_FILE_REFS && INV_FILE_REFS.length) body.user_refs = INV_FILE_REFS;
+      if (INV_FILE_PHONES && INV_FILE_PHONES.length) body.phones = INV_FILE_PHONES;
+      INV_IMPORT_OK = (INV_FILE_REFS?.length||0) + (INV_FILE_PHONES?.length||0);
+    } else {
+      const imp = document.getElementById('massInviteImport').value.trim();
+      if (!imp) { errEl.textContent='Вставьте список или загрузите файл для инвайта'; return; }
+      body.import_list = imp;
+      // Свежий разбор перед запуском: не даём стартовать по нераспознанному списку.
+      try {
+        const chk = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: imp})});
+        if (!chk.total) { errEl.textContent='В списке не распознано ни одной цели — проверьте формат (номер с «+» или 11+ цифр, @username или ID).'; return; }
+        INV_IMPORT_OK = chk.total;
+      } catch(e) {}
+    }
   }
   const checked = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')].map(c=>parseInt(c.value));
   if (checked.length) body.account_ids = checked;

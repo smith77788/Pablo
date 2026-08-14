@@ -53,3 +53,35 @@ def test_frontend_has_readiness_and_joinall():
     assert "function joinAllToGroup" in html
     assert "/api/miniapp/invite/fleet_readiness" in html
     assert "/api/miniapp/invite/join_all" in html
+
+
+def test_backend_file_upload_and_dedup():
+    api = _read("services/mini_app_api.py")
+    # эндпоинт загрузки файла + маршрут
+    assert "async def invite_parse_file" in api
+    assert 'add_post("/api/miniapp/invite/parse_file"' in api
+    # multipart-разбор и общий парсер файла
+    assert "await request.multipart()" in api
+    assert "from services.invite_list_parser import extract_text" in api
+    # превью дедупа в parse_list + submit принимает массивы из файла
+    assert "already_invited" in api
+    assert "count_already_invited" in api
+    assert 'isinstance(_ur_in, list)' in api
+
+
+def test_frontend_file_upload_and_dedup():
+    html = _read("mini_app/index.html")
+    assert 'id="massInviteFile"' in html
+    assert "function uploadInviteFile" in html
+    assert "/api/miniapp/invite/parse_file" in html
+    assert "INV_FILE_REFS" in html and "INV_FILE_PHONES" in html
+    # api() умеет FormData (не форсит JSON Content-Type)
+    assert "instanceof FormData" in html
+    # дедуп-строка в превью
+    assert "already_invited" in html
+
+
+def test_count_already_invited_service():
+    # общий сервисный хелпер дедупа (используется и ботом, и Mini App)
+    from services import invite_preflight
+    assert hasattr(invite_preflight, "count_already_invited")
