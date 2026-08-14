@@ -2119,6 +2119,9 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                    FROM account_warmup_plans wp
                    JOIN tg_accounts a ON a.id = wp.account_id
                    WHERE wp.status = 'active'
+                     -- НЕ берём аккаунты, занятые активной операцией: параллельный
+                     -- коннект одной сессии прогревом и операцией = AUTH_KEY_DUPLICATED.
+                     AND COALESCE(a.in_operation, FALSE) = FALSE
                      AND (wp.last_action_at IS NULL
                           OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
             )

@@ -141,6 +141,11 @@ _pending_qr: dict[int, tuple] = {}
 
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
+# Бэк-офф авто-ретраев при AUTH_KEY_DUPLICATED (сессия видится с двух IP): конфликт
+# временный (лишний коннект логина/фонового цикла ещё закрывается), поэтому короткая
+# пауза + переподключение снимают его сами, без ручного «повторите инвайт». Число
+# элементов = число ретраев (итоговых попыток на 1 больше).
+_AUTH_DUP_BACKOFF = (3.0, 7.0)
 # Прогрев кэша участников для резолва инвайтера при автовыдаче админки. Недавно
 # вступившие идут первыми в ChannelParticipantsRecent, поэтому потолок умеренный —
 # он ограничивает и время, и нагрузку на больших каналах (fail-open при промахе).
@@ -1069,30 +1074,65 @@ async def connect_client(session_string: str = "", device: dict | None = None,
     упал сетевой ошибкой — один раз переподключаемся НАПРЯМУЮ (стабильный host IP).
 
     Прямой fallback НЕ трогает аккаунты с назначенным прокси (там смена IP ломает
-    auth key) и strict-политику (там прямой выход запрещён осознанно). Возвращает
-    подключённого клиента или пробрасывает исходную ошибку."""
-    client = _make_client(session_string, device, low_risk=low_risk)
-    try:
-        await _connect_and_track(client, device, action_type)
-        return client
-    except (OSError, ConnectionError, asyncio.TimeoutError) as e:
-        if isinstance(e, ProxyIsolationError):
-            raise  # изоляция bound-прокси — прямой выход недопустим
-        transport = getattr(client, "_infragram_transport", None)
-        policy = _effective_proxy_policy(device or {})
-        if not _direct_fallback_ok(transport, policy):
-            raise
+    auth key) и strict-политику (там прямой выход запрещён осознанно).
+
+    AUTH_KEY_DUPLICATED (сессия видится Telegram с двух IP одновременно) —
+    ВРЕМЕННЫЙ конфликт: у свежеавторизованного аккаунта первый коннект операции
+    может идти с другого IP, чем логин (на логине ещё нет account_id → IPv6/пул
+    выбираются иначе), и «лишний» коннект логина/фонового цикла ещё не закрылся.
+    Раньше это сразу списывало аккаунт, и оператору приходилось вручную «повторять
+    инвайт». Теперь мы делаем это АВТОМАТИЧЕСКИ: короткий бэк-офф + переподключение
+    — за 1–2 попытки конфликт снимается сам, и флот стартует без ручного повтора.
+
+    Возвращает подключённого клиента или пробрасывает исходную ошибку."""
+    from telethon.errors import AuthKeyDuplicatedError
+
+    last_dup: Exception | None = None
+    for _attempt in range(len(_AUTH_DUP_BACKOFF) + 1):
+        client = _make_client(session_string, device, low_risk=low_risk)
         try:
-            await client.disconnect()
-        except Exception:
-            pass
-        log.warning(
-            "acc=%s: free-pool прокси недоступен (%s) — fallback на прямое подключение (allow_direct)",
-            (device or {}).get("id"), str(e)[:80],
-        )
-        client = _make_client(session_string, device, low_risk=low_risk, _no_pool=True)
-        await _connect_and_track(client, device, action_type)
-        return client
+            await _connect_and_track(client, device, action_type)
+            return client
+        except AuthKeyDuplicatedError as e:
+            last_dup = e
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            if _attempt < len(_AUTH_DUP_BACKOFF):
+                _delay = _AUTH_DUP_BACKOFF[_attempt]
+                log.warning(
+                    "acc=%s: AUTH_KEY_DUPLICATED (сессия с двух IP) — авто-ретрай "
+                    "через %.0fс (попытка %d/%d)",
+                    (device or {}).get("id"), _delay, _attempt + 1,
+                    len(_AUTH_DUP_BACKOFF) + 1,
+                )
+                await asyncio.sleep(_delay)
+                continue
+            # Исчерпали ретраи — пробрасываем (слой операции покажет подсказку).
+            raise
+        except (OSError, ConnectionError, asyncio.TimeoutError) as e:
+            if isinstance(e, ProxyIsolationError):
+                raise  # изоляция bound-прокси — прямой выход недопустим
+            transport = getattr(client, "_infragram_transport", None)
+            policy = _effective_proxy_policy(device or {})
+            if not _direct_fallback_ok(transport, policy):
+                raise
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            log.warning(
+                "acc=%s: free-pool прокси недоступен (%s) — fallback на прямое подключение (allow_direct)",
+                (device or {}).get("id"), str(e)[:80],
+            )
+            client = _make_client(session_string, device, low_risk=low_risk, _no_pool=True)
+            await _connect_and_track(client, device, action_type)
+            return client
+    # Теоретически недостижимо (цикл либо возвращает, либо пробрасывает).
+    if last_dup:
+        raise last_dup
+    raise RuntimeError("connect_client: не удалось подключиться")
 
 
 async def start_login(
