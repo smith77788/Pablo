@@ -8511,43 +8511,39 @@ async def _exec_contacts_sync(
     return {"status": "done", "ok": synced, "failed": len(errs), "summary": summary}
 
 
-async def _filter_unready_for_invite(pool, op_id: int, accounts: list) -> list:
-    """Отсеять НЕготовые к инвайту аккаунты (readiness < порога). Fail-open.
+# Явно небезопасные статусы аккаунта: инвайт с них = мгновенный бан или холостой
+# ход. НЕ включаем 'active'/'cooldown'/'warming' и т.п. — свежие рабочие аккаунты
+# отсевом НЕ трогаем (их бережёт cold-start дневного бюджета, а не блок).
+_INVITE_UNSAFE_STATUS = {
+    "spamblock", "banned", "deactivated", "archived", "session_expired", "no_session",
+}
 
-    _ACC_COLS не тянет trust_score/acc_status, поэтому берём сигналы готовности
-    одним запросом. Если готовых не осталось — возвращаем исходный список (лучше
-    рискнуть, чем обнулить операцию), как и карантин-фильтр."""
+
+async def _filter_unready_for_invite(pool, op_id: int, accounts: list) -> list:
+    """Отсеять аккаунты в ЯВНО небезопасном статусе. Fail-open.
+
+    Раньше здесь стоял порог по trust (readiness>=0.50), но свежие аккаунты имеют
+    trust_score=NULL→0.0 и отсекались даже с прокси (35+0+10=45<50) — для смешанного
+    флота это вырезало свежее большинство и «флот не стартовал». Свежие аккаунты —
+    ядро продукта; их безопасность держит cold-start бюджета, а не этот отсев.
+    Здесь режем ТОЛЬКО заведомо мёртвые/забаненные/спамблок-аккаунты (по acc_status).
+    _ACC_COLS не тянет acc_status → берём одним запросом. Пусто останется → fail-open."""
     if not accounts:
         return accounts
-    from services import account_readiness as _ar
     ids = [int(a["id"]) for a in accounts]
     try:
         rows = await pool.fetch(
-            "SELECT id, trust_score, acc_status, cooldown_until, proxy_id "
-            "FROM tg_accounts WHERE id = ANY($1::bigint[])", ids)
+            "SELECT id, acc_status FROM tg_accounts WHERE id = ANY($1::bigint[])", ids)
     except Exception:
         return accounts  # нет сигналов → не режем
-    meta = {int(r["id"]): dict(r) for r in rows}
-    kept = []
-    for a in accounts:
-        m = meta.get(int(a["id"]), {})
-        acc_dict = {
-            "id": a["id"], "session_str": a.get("session_str"),
-            "trust_score": m.get("trust_score"), "acc_status": m.get("acc_status"),
-            "cooldown_until": m.get("cooldown_until"),
-            "proxy_id": m.get("proxy_id"), "proxy_url": a.get("proxy_url"),
-            "is_active": True,
-        }
-        try:
-            if _ar.is_ready_for_action(acc_dict, "invite"):
-                kept.append(a)
-        except Exception:
-            kept.append(a)  # ошибка расчёта → не режем этот аккаунт
+    meta = {int(r["id"]): (r["acc_status"] or "") for r in rows}
+    kept = [a for a in accounts
+            if str(meta.get(int(a["id"]), "")).strip().lower() not in _INVITE_UNSAFE_STATUS]
     if kept and len(kept) != len(accounts):
-        log.info("mass_invite op=%d: %d аккаунтов не готовы (readiness<порог), пропущены",
-                 op_id, len(accounts) - len(kept))
+        log.info("mass_invite op=%d: %d аккаунтов в небезопасном статусе "
+                 "(spamblock/banned/…) — пропущены", op_id, len(accounts) - len(kept))
         return kept
-    return accounts  # все не готовы → fail-open
+    return accounts  # все небезопасны → fail-open (не обнуляем операцию)
 
 
 async def _exec_mass_invite(

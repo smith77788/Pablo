@@ -63,6 +63,12 @@ def _mk(pool, trust, status="active"):
     seq = _SEQ[0]
 
     async def _s():
+        if trust is None:
+            # свежий аккаунт: trust_score берёт дефолт (1.0, NOT NULL)
+            return await pool.fetchval(
+                "INSERT INTO tg_accounts(owner_id,phone,session_str,is_active,acc_status,"
+                "first_name) VALUES($1,$2,'sess',TRUE,$3,'A') RETURNING id",
+                OWNER, f"+799{seq:08d}", status)
         return await pool.fetchval(
             "INSERT INTO tg_accounts(owner_id,phone,session_str,is_active,acc_status,"
             "trust_score,first_name) VALUES($1,$2,'sess',TRUE,$3,$4,'A') RETURNING id",
@@ -74,31 +80,30 @@ def _clean(pool):
     _run(pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER))
 
 
-def test_unready_accounts_filtered(pool):
+def test_only_unsafe_status_filtered_fresh_kept(pool):
     from services.op_worker import _filter_unready_for_invite
     _clean(pool)
-    ready = _mk(pool, 0.9)          # высокий trust → готов
-    weak = _mk(pool, 0.1)           # низкий trust → не готов
-    spam = _mk(pool, 0.9, "spamblock")  # spamblock → каппится → не готов
-    accounts = [{"id": ready, "session_str": "s", "proxy_url": None},
-                {"id": weak, "session_str": "s", "proxy_url": None},
-                {"id": spam, "session_str": "s", "proxy_url": None}]
-    kept = _run(_filter_unready_for_invite(pool, 1, accounts))
-    kept_ids = {a["id"] for a in kept}
-    assert ready in kept_ids
-    assert weak not in kept_ids
-    assert spam not in kept_ids
+    fresh = _mk(pool, None)             # свежий (trust NULL) active → ОСТАЁТСЯ
+    weak = _mk(pool, 0.1)              # низкий trust, но active → ОСТАЁТСЯ
+    spam = _mk(pool, 0.9, "spamblock")  # spamblock → режется
+    banned = _mk(pool, 0.9, "banned")   # banned → режется
+    accounts = [{"id": i, "session_str": "s", "proxy_url": None}
+                for i in (fresh, weak, spam, banned)]
+    kept = {a["id"] for a in _run(_filter_unready_for_invite(pool, 1, accounts))}
+    # ключевое: свежий и низко-trust активные аккаунты НЕ вырезаны (не ломаем флот)
+    assert fresh in kept and weak in kept
+    assert spam not in kept and banned not in kept
 
 
-def test_all_unready_fail_open(pool):
+def test_all_unsafe_fail_open(pool):
     from services.op_worker import _filter_unready_for_invite
     _clean(pool)
-    a = _mk(pool, 0.05)
-    b = _mk(pool, 0.05)
+    a = _mk(pool, 0.9, "spamblock")
+    b = _mk(pool, 0.9, "banned")
     accounts = [{"id": a, "session_str": "s", "proxy_url": None},
                 {"id": b, "session_str": "s", "proxy_url": None}]
     kept = _run(_filter_unready_for_invite(pool, 1, accounts))
-    # все не готовы → возвращаем всех (не обнуляем операцию)
+    # все небезопасны → возвращаем всех (не обнуляем операцию)
     assert {x["id"] for x in kept} == {a, b}
 
 
