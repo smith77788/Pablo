@@ -12168,19 +12168,49 @@ async function openVault() {
   try {
     const st = await api('/api/miniapp/vault/status');
     VAULT_CAN_REPLY = !!st.can_reply;
-    if (!st.connected) { renderVaultConnect(st.bot_username); }
+    const diag = st.diagnostics || {};
+    // Диагностика «зависания»: если давно нет свежих сообщений или подключение
+    // отвалилось — показываем понятный баннер с причиной и как переподключить.
+    if (!st.connected || diag.health === 'disabled' || diag.health === 'never') {
+      renderVaultConnect(st.bot_username, diag);
+    } else if (diag.health === 'stale') {
+      renderVaultStale(st.bot_username, diag);
+    }
     const d = await api('/api/miniapp/vault/chats');
     renderVaultChats(d.chats || []);
   } catch(e) { txt('vaultList', errHtml(e.message,'openVault()')); }
 }
 
-function renderVaultConnect(botUsername) {
+// Хранилище включено, но давно ничего не приходит — тихо отвалилось.
+function renderVaultStale(botUsername, diag) {
+  const bu = botUsername ? ('@'+esc(botUsername)) : 'бота';
+  const days = diag && diag.stale_days!=null ? diag.stale_days : null;
+  const when = days!=null ? (days===0 ? 'меньше суток' : days+' дн.') : 'давно';
+  const el = document.getElementById('vaultConnect');
+  el.style.display = 'block';
+  el.innerHTML =
+    `<div style="padding:12px;background:rgba(245,158,11,.12);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+      <b>⚠️ Хранилище не получает новые сообщения (${when})</b><br>
+      Подключение числится активным, но свежих диалогов нет — обычно бизнес-бот
+      тихо отвалился. Частые причины:
+      <div style="margin-top:6px;color:var(--hint)">
+      • истёк <b>Telegram Premium</b> (Business работает только с Premium);<br>
+      • бота убрали/переустановили в настройках бизнес-аккаунта;<br>
+      • Telegram сбросил подключение.</div>
+      <div style="margin-top:8px"><b>Как починить:</b> Настройки Telegram →
+      <b>Telegram для бизнеса</b> → <b>Чат-боты</b> → переподключите <b>${bu}</b>
+      (снимите и снова добавьте), разрешите доступ к чатам.</div>
+    </div>`;
+}
+
+function renderVaultConnect(botUsername, diag) {
   const bu = botUsername ? ('@'+esc(botUsername)) : 'этого бота';
+  const disabled = diag && diag.health === 'disabled';
   document.getElementById('vaultConnect').style.display = 'block';
   document.getElementById('vaultConnect').innerHTML =
-    `<div style="padding:12px;background:rgba(59,130,246,.1);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
-      <b>🔌 Подключите хранилище</b><br>
-      Бот сохранит все сообщения в ваших личных чатах — даже если диалог удалён.
+    `<div style="padding:12px;background:${disabled?'rgba(245,158,11,.12)':'rgba(59,130,246,.1)'};border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+      <b>${disabled?'⏸ Хранилище отключено — переподключите':'🔌 Подключите хранилище'}</b><br>
+      ${disabled?'Подключение было, но сейчас выключено (бот убран из бизнес-аккаунта или истёк Telegram Premium). Новые сообщения не сохраняются.':'Бот сохранит все сообщения в ваших личных чатах — даже если диалог удалён.'}
       <div style="margin-top:8px;color:var(--hint)">
       1. Настройки Telegram → <b>Telegram для бизнеса</b><br>
       2. <b>Чат-боты</b> → введите <b>${bu}</b><br>

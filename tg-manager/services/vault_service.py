@@ -123,6 +123,60 @@ async def active_connection_for_owner(pool, owner_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+async def diagnostics(pool, owner_id: int) -> dict:
+    """Почему хранилище «зависло»: есть ли подключение, включено ли, когда
+    последний раз что-то приходило. Отвечает на «неделю назад перестало писать».
+
+    health:
+      never       — подключения не было вовсе (нужно подключить бота в Business);
+      disabled    — подключение есть, но выключено (бот отключён / истёк Premium);
+      stale       — включено, но давно (>2 дней) ничего не приходит (тихо отвалилось);
+      ok          — включено и есть свежая активность.
+    """
+    conn = await pool.fetchrow(
+        "SELECT is_enabled, updated_at FROM business_connections "
+        "WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 1", owner_id)
+    row = await pool.fetchrow(
+        "SELECT MAX(msg_date) AS last_at, COUNT(*) AS total "
+        "FROM vault_messages WHERE owner_id=$1", owner_id)
+    last_at = row["last_at"] if row else None
+    total = int(row["total"]) if row and row["total"] is not None else 0
+
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+
+    def _age_days(ts):
+        if not ts:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_dt.timezone.utc)
+        return max(0, int((now - ts).total_seconds() // 86400))
+
+    stale_days = _age_days(last_at)
+    if conn is None:
+        health = "never"
+    elif not conn["is_enabled"]:
+        health = "disabled"
+    elif stale_days is not None and stale_days >= 2:
+        health = "stale"
+    elif stale_days is None and total == 0:
+        # включено, но НИ ОДНОГО сообщения не пришло — считаем несвежим (свежее
+        # подключение без трафика тоже сюда, это ок как сигнал «проверь»).
+        health = "stale"
+    else:
+        health = "ok"
+
+    return {
+        "health": health,
+        "is_enabled": bool(conn["is_enabled"]) if conn else False,
+        "connection_updated_at": conn["updated_at"].isoformat()
+            if conn and conn["updated_at"] else None,
+        "last_archived_at": last_at.isoformat() if last_at else None,
+        "stale_days": stale_days,
+        "total_messages": total,
+    }
+
+
 # ── Архивация сообщения ──────────────────────────────────────────────────────
 
 async def archive_message(pool, message: Any, owner_id: int,

@@ -4431,12 +4431,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         conn = await _v.active_connection_for_owner(pool, uid)
         botname = await _resolve_bot_username()
         prefs = await _v.get_notify_prefs(pool, uid)
+        # Диагностика «зависания»: почему нет свежих диалогов (отключено / тихо
+        # отвалилось / нет Premium). Fail-open — статус не должен падать из-за неё.
+        try:
+            diag = await _v.diagnostics(pool, uid)
+        except Exception:
+            log.exception("vault diagnostics uid=%s", uid)
+            diag = {}
         return _json_resp({
             "connected": bool(conn),
             "can_reply": bool(conn.get("can_reply")) if conn else False,
             "bot_username": botname,
             "notify_deleted": prefs["notify_deleted"],
             "notify_edited": prefs["notify_edited"],
+            "diagnostics": diag,
         })
 
     async def vault_chats(request: web.Request) -> web.Response:
