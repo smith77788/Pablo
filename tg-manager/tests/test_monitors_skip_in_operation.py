@@ -45,6 +45,23 @@ def test_connecting_monitors_guard_before_connect():
             f"{rel}: нет проверки op_worker.is_account_in_use перед коннектом"
 
 
+# Прочие фоновые циклы (main.py _resilient), которые тоже коннектят аккаунты по
+# своей выборке — обязаны сверять занятость перед коннектом (не по фиксированной
+# SQL-колонке, а по ин-мемори реестру, т.к. выбирают конкретные аккаунты).
+_OTHER_BG_CONNECTORS = [
+    "services/activity_engine.py",
+    "services/content_mesh.py",
+    "services/keyword_watcher.py",
+]
+
+
+def test_other_background_connectors_guard():
+    for rel in _OTHER_BG_CONNECTORS:
+        src = _read(rel)
+        assert "is_account_in_use" in src, \
+            f"{rel}: фоновый коннект аккаунта без проверки is_account_in_use"
+
+
 def test_shadowban_monitor_does_not_connect():
     # Контроль: shadowban_monitor только читает БД (flood_count), НЕ коннектит —
     # значит правило in_operation к нему не применяется (и не требуется).

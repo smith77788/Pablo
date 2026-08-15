@@ -355,6 +355,14 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
     total_fail = 0
 
     for acc_id in acc_ids:
+        # Не трогаем аккаунт, занятый операцией: параллельный коннект одной сессии
+        # активити-циклом и операцией = AUTH_KEY_DUPLICATED.
+        try:
+            from services import op_worker as _opw
+            if _opw.is_account_in_use(int(acc_id)):
+                continue
+        except Exception:
+            pass
         acc_row = await db.get_account_for_telethon(pool, acc_id)
         if not acc_row or not acc_row["session_str"]:
             continue

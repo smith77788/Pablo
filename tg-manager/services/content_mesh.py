@@ -57,6 +57,14 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
     session = acc["session_str"]
     if not session:
         return
+    # Не трогаем аккаунт, занятый операцией (одна сессия с двух коннектов =
+    # AUTH_KEY_DUPLICATED).
+    try:
+        from services import op_worker as _opw
+        if _opw.is_account_in_use(int(account_id)):
+            return
+    except Exception:
+        pass
 
     targets = await pool.fetch(
         "SELECT * FROM mesh_targets WHERE mesh_id=$1 AND enabled=TRUE",
@@ -159,6 +167,17 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
     if not session:
         await pool.execute("UPDATE mesh_queue SET status='error', error_msg='no_session' WHERE id=$1", item["id"])
         return
+    # Аккаунт занят операцией → откладываем доставку (не error: восстановится).
+    # Параллельный коннект одной сессии = AUTH_KEY_DUPLICATED.
+    try:
+        from services import op_worker as _opw
+        if _opw.is_account_in_use(int(account_id)):
+            await pool.execute(
+                "UPDATE mesh_queue SET scheduled_at = NOW() + INTERVAL '5 minutes' WHERE id=$1",
+                item["id"])
+            return
+    except Exception:
+        pass
 
     # Anti-detection (#7): не репостим через аккаунт в карантине (недавний
     # флуд/блок/ограничение). acc_status выше ловит только banned/deactivated —

@@ -150,6 +150,14 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
 
     owner_id = watcher["owner_id"]
     wid = watcher["id"]
+    # Аккаунт-читатель занят операцией → пропускаем цикл: параллельный коннект
+    # одной сессии watcher'ом и операцией = AUTH_KEY_DUPLICATED.
+    try:
+        from services import op_worker as _opw
+        if _opw.is_account_in_use(int(watcher["account_id"])):
+            return {"messages": 0, "hits": 0, "skipped": True}
+    except Exception:
+        pass
     # Карантин аккаунта-читателя — не трогаем (fail-open внутри is_account_quarantined).
     if await _infra_mem.is_account_quarantined(pool, watcher["account_id"]):
         await pool.execute(
