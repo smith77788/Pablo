@@ -791,7 +791,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="acc-kpi-card" onclick="filterAcc('banned',this)" data-filter="banned">
         <div class="acc-kpi-num" id="kpi-ban" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Заблокированы</div>
       </div>
+      <div class="acc-kpi-card" onclick="filterAcc('dead',this)" data-filter="dead">
+        <div class="acc-kpi-num" id="kpi-dead" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Мёртвые</div>
+      </div>
     </div>
+    <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
+    <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(239,68,68,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
     <!-- Массовые действия по аккаунтам -->
     <div style="display:flex;gap:8px;padding:4px 0 8px">
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
@@ -827,6 +832,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
         <button class="mini-btn" onclick="runAccMass('detach_proxy')" title="Снять прокси — работать напрямую">🔌 Снять прокси</button>
         <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
+        <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.18)" onclick="runAccMass('delete')" title="Удалить выбранные аккаунты безвозвратно">🗑 Удалить</button>
       </div>
     </div>
   </div>
@@ -7644,8 +7650,11 @@ function updateAccKpi(list, stats) {
   const cd     = (stats && stats.cooldown!=null) ? stats.cooldown : list.filter(a=>isOnCooldown(a)).length;
   const spam   = (stats && stats.spamblock!=null)? stats.spamblock: list.filter(a=>a.acc_status==='spamblock').length;
   const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
+  const dead   = (stats && stats.dead!=null)     ? stats.dead     : list.filter(a=>['banned','deactivated','session_expired'].includes(a.acc_status)).length;
   const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-  el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-spam', spam); el('kpi-ban', banned);
+  el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-spam', spam); el('kpi-ban', banned); el('kpi-dead', dead);
+  const pb = document.getElementById('purgeDeadBtn');
+  if (pb) { pb.style.display = dead>0 ? 'block' : 'none'; el('purgeDeadN', dead); }
 }
 
 function renderAccounts(list) {
@@ -7762,17 +7771,35 @@ async function runAccMass(op) {
     ? `Выйти из всех чатов на ${n} аккаунтах? Действие необратимо.`
     : op==='scan' ? `Сканировать ресурсы на ${n} аккаунтах?`
     : op==='check' ? `Проверить ${n} аккаунтов?`
+    : op==='delete' ? `🗑 УДАЛИТЬ ${n} аккаунтов безвозвратно? Сессии и все связанные данные будут стёрты. Отменить нельзя.`
     : op==='detach_proxy' ? `Снять прокси с ${n} аккаунтов? Они будут работать напрямую (без прокси). Внимание: сессию, созданную через прокси, нельзя было использовать с двух IP одновременно.` : null;
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
     const cnt = r.count||n;
-    // detach_proxy / set_stage — мгновенные DB-действия, не очередь
-    if (op==='detach_proxy') toast(`✅ Снят прокси с ${cnt} аккаунтов — работают напрямую`);
+    // delete / detach_proxy / set_stage — мгновенные DB-действия, не очередь
+    if (op==='delete') toast(`🗑 Удалено аккаунтов: ${cnt}`);
+    else if (op==='detach_proxy') toast(`✅ Снят прокси с ${cnt} аккаунтов — работают напрямую`);
     else toast(`✅ Поставлено в очередь для ${cnt} аккаунтов. Результат — в боте.`);
     toggleAccSelMode();
-    if (op==='detach_proxy') loadAccounts();
+    if (op==='delete' || op==='detach_proxy') loadAccounts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+// Один тап: удалить ВСЕ невоскрешаемые аккаунты (бан/деактивация/отозванная сессия).
+async function purgeDeadAccounts() {
+  let cnt = 0;
+  try {
+    const st = await api('/api/miniapp/accounts?filter=dead&limit=1');
+    cnt = (st.stats && st.stats.dead!=null) ? st.stats.dead : (st.filtered_total||0);
+  } catch(e) {}
+  if (!cnt) { toast('Мёртвых аккаунтов нет 👍'); return; }
+  if (!await askConfirm(`🗑 Удалить ${cnt} невоскрешаемых аккаунтов (бан / деактивация / отозванная сессия)?\n\nБезвозвратно. Конфликтные (два IP, «Кулдаун») НЕ входят — их лечит перезалив.`)) return;
+  try {
+    const r = await api('/api/miniapp/accounts/mass', {method:'POST',
+      body: JSON.stringify({op:'delete', select_all_filtered:true, filter:'dead'})});
+    toast(`🗑 Удалено мёртвых аккаунтов: ${r.count||0}`);
+    loadAccounts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка удаления')); }
 }
 function openMassProfile() {
   if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }

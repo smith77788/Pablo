@@ -31,8 +31,9 @@ def test_backend_has_spamblock_filter_and_active_excludes_it():
 
 def test_filter_whitelists_include_spamblock():
     api = _read("services/mini_app_api.py")
-    # оба места валидации фильтра (список + select_all_filtered)
-    assert api.count('("all", "active", "cooldown", "banned", "spamblock")') == 2
+    # оба места валидации фильтра (список + select_all_filtered); "dead" добавлен
+    # для массового удаления невоскрешаемых.
+    assert api.count('("all", "active", "cooldown", "banned", "spamblock", "dead")') == 2
 
 
 def test_stats_counts_spamblock_separately():
@@ -40,7 +41,7 @@ def test_stats_counts_spamblock_separately():
     assert "COALESCE(acc_status,'ok')='spamblock') AS spamblock" in api
     assert "NOT IN ('banned','spamblock')\n" in api or "NOT IN ('banned','spamblock')" in api
     # ключ выведен наружу в stats-словарь
-    assert '"total", "banned", "spamblock", "cooldown", "active"' in api
+    assert '"total", "banned", "spamblock", "cooldown", "dead", "active"' in api
 
 
 def test_frontend_has_spamblock_kpi_and_honest_active():

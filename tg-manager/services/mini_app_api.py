@@ -1775,6 +1775,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             clauses.append("COALESCE(acc_status,'ok') = 'banned'")
         elif flt == "spamblock":
             clauses.append("COALESCE(acc_status,'ok') = 'spamblock'")
+        elif flt == "dead":
+            # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
+            # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)
+            # СЮДА не входит — он лечится перезаливом, а не удалением.
+            clauses.append("COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')")
         if stage in ACCOUNT_STAGES:
             args.append(stage)
             clauses.append(f"stage = ${len(args)}")
@@ -1795,7 +1800,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Параметры серверной пагинации/фильтрации
         qs = request.rel_url.query
         flt = qs.get("filter", "all")
-        if flt not in ("all", "active", "cooldown", "banned", "spamblock"):
+        if flt not in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
             flt = "all"
         stage = (qs.get("stage") or "").strip().lower()
         if stage and stage not in ACCOUNT_STAGES:
@@ -1857,6 +1862,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='spamblock') AS spamblock,
                           COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
+                          COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')) AS dead,
                           COUNT(*) FILTER (
                               WHERE is_active
                                 AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
@@ -1869,13 +1875,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='banned') AS banned,
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='spamblock') AS spamblock,
                           COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
+                          COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')) AS dead,
                           COUNT(*) FILTER (
                               WHERE is_active
                                 AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
                                 AND (cooldown_until IS NULL OR cooldown_until <= now())
                           ) AS active
                    FROM tg_accounts WHERE owner_id=$1""", uid)
-        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "spamblock", "cooldown", "active")} if st else {}
+        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "spamblock", "cooldown", "dead", "active")} if st else {}
         # by_stage скоупим по owner_id для не-админа (иначе — межтенантная утечка
         # разбивки стадий по ВСЕЙ платформе). Админ видит всё, как в основной статистике.
         if admin:
@@ -3481,7 +3488,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
         if body.get("select_all_filtered"):
             flt = body.get("filter", "all")
-            if flt not in ("all", "active", "cooldown", "banned", "spamblock"):
+            if flt not in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
                 flt = "all"
             stage = (body.get("stage") or "").strip().lower()
             if stage and stage not in ACCOUNT_STAGES:
@@ -3541,6 +3548,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "UPDATE tg_accounts SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])",
                     uid, ids)
                 return _json_resp({"ok": True, "count": n})
+            if op == "delete":
+                # Жёсткое удаление аккаунтов (напр. массово — невоскрешаемые:
+                # фильтр 'dead'). Необратимо. Связанные строки чистит FK-каскад,
+                # как и в одиночном account_delete. Скоуп уже применён при
+                # резолве ids (owner/admin), поэтому чужие не заденем.
+                res = await pool.execute(
+                    "DELETE FROM tg_accounts WHERE id=ANY($1::bigint[])"
+                    + ("" if admin else " AND owner_id=$2"),
+                    ids, *([] if admin else [uid]))
+                deleted = int(str(res).rsplit(" ", 1)[-1]) if str(res).startswith("DELETE") else n
+                return _json_resp({"ok": True, "count": deleted})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []

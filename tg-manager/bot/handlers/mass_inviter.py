@@ -444,7 +444,8 @@ async def msg_inviter_phones(
     phones = parse_phones(message.text or "")
     if not phones:
         await message.answer("⚠️ Не удалось распознать номера. Формат +79991234567 — "
-                             "либо пришлите файл .txt/.csv/.xlsx/.db.")
+                             "либо пришлите файл .txt/.csv/.xlsx/.db.",
+                             reply_markup=_cancel_kb())
         return
     await _accept_refs(message, state, pool, phones, phones=True)
 
@@ -512,7 +513,8 @@ async def _refs_from_document(message: Message, mode: str):
         return None
     if doc.file_size and doc.file_size > ilp.MAX_FILE_BYTES:
         await message.answer(f"⚠️ Файл слишком большой "
-                             f"(лимит {ilp.MAX_FILE_BYTES // (1024 * 1024)} МБ).")
+                             f"(лимит {ilp.MAX_FILE_BYTES // (1024 * 1024)} МБ).",
+                             reply_markup=_cancel_kb())
         return None
     try:
         f = await message.bot.get_file(doc.file_id)
