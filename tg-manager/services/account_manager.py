@@ -2637,6 +2637,7 @@ async def check_account_status_full(
     except Exception as e:
         from telethon.errors import (
             AuthKeyUnregisteredError,
+            AuthKeyDuplicatedError,
             SessionRevokedError,
             UserDeactivatedBanError,
             UserDeactivatedError,
@@ -2646,6 +2647,28 @@ async def check_account_status_full(
 
         err = str(e)
         err_low = err.lower()
+        # AUTH_KEY_DUPLICATED: сессию использовали с ДВУХ IP одновременно.
+        # ВАЖНО: НЕ деактивируем аккаунт (осознанное прежнее решение — разовый
+        # флап/мультидевайс не должен выключать флот; op_worker трактует dup как
+        # 'retry', а не 'fatal'). Но и НЕ лжём «✅ активен»: раньше dup падал в
+        # общий фолбэк ниже и помечался active — оператор не видел, что аккаунт
+        # в конфликте и потому ничего не делает. Честный НЕ-деактивирующий
+        # статус — 'cooldown' с понятной причиной. Если конфликт устойчив
+        # (виден на каждой проверке) — сессию надо перезалить.
+        if isinstance(e, AuthKeyDuplicatedError) or "AUTH_KEY_DUPLICATED" in err or (
+            "two different ip" in err_low
+        ):
+            log.warning(
+                "check_account_status_full: AUTH_KEY_DUPLICATED (конфликт двух IP, "
+                "НЕ деактивируем) — acc=%s", (_acc or {}).get("id"))
+            return {
+                "status": "cooldown",
+                "reason": "Конфликт: сессия зашла с двух IP одновременно "
+                          "(AUTH_KEY_DUPLICATED). Аккаунт не деактивирован. Если "
+                          "повторяется на каждой проверке — сессию нужно перезалить.",
+                "display_name": "",
+                "session_conflict": True,
+            }
         if isinstance(e, (AuthKeyUnregisteredError, SessionRevokedError)) or (
             "AUTH_KEY_UNREGISTERED" in err
             or "key is not registered" in err_low

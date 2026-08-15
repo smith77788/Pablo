@@ -35,7 +35,8 @@ def classify_conn_error(err: str) -> str:
         return "неизвестно"
     flat = e.replace("_", "").replace(" ", "")
     if "authkeyduplicated" in flat or "twodifferentip" in flat:
-        return "конфликт IP (AUTH_KEY_DUPLICATED) — сессия видится с двух IP"
+        return ("конфликт: сессия зашла с двух IP (AUTH_KEY_DUPLICATED) — "
+                "если повторяется, сессию нужно перезалить")
     if "authkeyunregistered" in flat or "unregistered" in flat or "revoked" in flat:
         return "сессия отозвана/недействительна — нужно перезалить аккаунт"
     if "deactivated" in flat or "banned" in flat:
@@ -59,11 +60,18 @@ async def _default_checker(session_string, acc, group):
 
 async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
                         account_ids: list[int] | None = None, limit: int = 200,
-                        checker=None) -> dict:
+                        checker=None, claim: bool = True) -> dict:
     """Проверить готовность аккаунтов оператора к инвайту в `group`.
 
     account_ids=None → берём активные аккаунты владельца (до limit). Возвращает
     сводку по состояниям + короткий список деталей + вердикт-совет.
+
+    claim=True: на время пре-чека помечаем аккаунты in_operation (mark_in_use),
+    чтобы фоновые циклы (монитор/здоровье/прогрев) НЕ подключили ту же сессию
+    параллельно. Иначе один auth-key коннектится из двух мест → Telegram видит
+    вход с двух IP и УНИЧТОЖАЕТ ключ (AUTH_KEY_DUPLICATED, безвозвратно). Именно
+    это сжигало свежий флот. Занятых реальной операцией не трогаем и НЕ
+    отпускаем (release только своих). claim=False — для юнит-тестов без op_worker.
     """
     checker = checker or _default_checker
     if account_ids:
@@ -78,8 +86,29 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
             "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
             owner_id, int(limit))
     accounts = [dict(r) for r in rows]
+
+    # Захватываем СВОБОДНЫЕ аккаунты на время пре-чека (предотвращаем гонку с
+    # фоновыми коннектами). Занятые реальной операцией — пропускаем из живой
+    # проверки (их и так нельзя трогать), помечаем busy.
+    _opw = None
+    claimed_ids: list[int] = []
+    busy_ids: set[int] = set()
+    if claim:
+        try:
+            from services import op_worker as _opw_mod
+            _opw = _opw_mod
+            busy_ids = {int(a["id"]) for a in accounts
+                        if _opw.is_account_in_use(int(a["id"]))}
+            claimed_ids = [int(a["id"]) for a in accounts
+                           if int(a["id"]) not in busy_ids]
+            if claimed_ids:
+                await _opw.mark_accounts_in_use(claimed_ids)
+        except Exception:
+            _opw = None  # op_worker недоступен — работаем без захвата (best-effort)
+
+    check_accounts = [a for a in accounts if int(a["id"]) not in busy_ids]
     counts = {"admin": 0, "member": 0, "not_member": 0,
-              "no_connect": 0, "group_bad": 0, "error": 0}
+              "no_connect": 0, "group_bad": 0, "error": 0, "busy": len(busy_ids)}
     reasons: dict[str, int] = {}   # причина неудачи → сколько аккаунтов
     details: list[dict] = []
     can_invite = 0
@@ -96,7 +125,14 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
                 res = {"state": "error", "error": str(e)[:120]}
             return acc, res
 
-    results = await asyncio.gather(*[_one(a) for a in accounts])
+    try:
+        results = await asyncio.gather(*[_one(a) for a in check_accounts])
+    finally:
+        if _opw and claimed_ids:
+            try:
+                await _opw.release_accounts(claimed_ids)
+            except Exception:
+                log.warning("run_preflight: release_accounts failed", exc_info=True)
     for acc, res in results:
         st = res.get("state", "error")
         counts[st] = counts.get(st, 0) + 1
@@ -110,14 +146,14 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
                         "can_promote": bool(res.get("can_promote")),
                         "error": (err or "")[:120]})
 
-    total = len(accounts)
+    total = len(check_accounts)   # реально проверенные (без занятых операцией)
     ready = counts["admin"] + counts["member"]  # в группе (могут инвайтить/промоутиться)
     # Топ-причины неудач — оператор сразу видит корень (а не «просто не вышло»).
     top_reasons = [{"reason": k, "count": v}
                    for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])]
     verdict = _verdict(total, counts)
     return {"total": total, "counts": counts, "ready": ready,
-            "can_invite": can_invite, "admins": counts["admin"],
+            "can_invite": can_invite, "admins": counts["admin"], "busy": len(busy_ids),
             "details": details, "reasons": top_reasons, "verdict": verdict}
 
 
