@@ -941,7 +941,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить (по умолчанию — те, где контакт найден). Отправка идёт с защитой от бана.</div>
     <div style="font-size:12px;font-weight:600;margin:6px 0 4px">С каких аккаунтов:</div>
     <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
-    <textarea id="ccwText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <label style="display:block;font-size:12px;color:var(--hint);margin:8px 0 2px">📎 Медиа (необязательно, до 50 МБ):</label>
+    <input type="file" id="ccwFile" style="width:100%;box-sizing:border-box;font-size:12px">
     <div id="ccwErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactWrite()">🚀 Отправить</button>
   </div>
@@ -12574,6 +12576,7 @@ async function openContactDetail(id) {
     html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="openContactWrite()" style="flex:0">✍️ Написать</button>
       <button class="btn btn-s" onclick="openContactInvite()" style="flex:0">➕ Пригласить</button>
+      ${c.telegram_user_id?`<button class="btn btn-s" onclick="openContactHistory()" style="flex:0">🕓 История</button>`:''}
       ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0;text-decoration:none">↗ В Telegram</a>`:''}
       ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0;text-decoration:none">👤 Профиль</a>`:''}
     </div>`;
@@ -12627,16 +12630,37 @@ function openContactWrite() {
 async function submitContactWrite() {
   const text = (document.getElementById('ccwText').value||'').trim();
   const err = document.getElementById('ccwErr');
-  if (!text) { err.textContent = 'Введите текст'; return; }
+  const fileEl = document.getElementById('ccwFile');
+  const file = fileEl && fileEl.files && fileEl.files[0];
+  if (!text && !file) { err.textContent = 'Введите текст или прикрепите файл'; return; }
   const accIds = _contactPickedAccs();
   if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
-  if (!await askConfirm(`Отправить сообщение контакту с ${accIds.length} аккаунт(ов)?\nСообщение уйдёт реальному человеку — отменить нельзя.`)) return;
+  if (!await askConfirm(`Отправить ${file?'медиа':'сообщение'} контакту с ${accIds.length} аккаунт(ов)?\nУйдёт реальному человеку — отменить нельзя.`)) return;
   try {
-    const r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/message',
-      {method:'POST', body:JSON.stringify({text, account_ids: accIds})});
+    let r;
+    if (file) {
+      // Медиа — multipart; api() сам не форсит JSON для FormData.
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('text', text);
+      fd.append('account_ids', accIds.join(','));
+      r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/media', {method:'POST', body: fd});
+    } else {
+      r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/message',
+        {method:'POST', body:JSON.stringify({text, account_ids: accIds})});
+    }
     closeModal('mo-contact-write');
+    if (fileEl) fileEl.value = '';
     toast(`✉️ Отправка запущена (операция #${r.op_id}) — ${r.accounts} акк.`);
   } catch(e) { err.textContent = e.message || 'Ошибка'; }
+}
+// История переписки контакта — из «Хранилища» (диалог = telegram_user_id).
+function openContactHistory() {
+  const c = window._cdContact || {};
+  if (!c.telegram_user_id) { toast('У контакта нет Telegram ID — история недоступна'); return; }
+  const name = [c.first_name,c.last_name].filter(Boolean).join(' ') || c.username || ('#'+c.telegram_user_id);
+  VAULT_NAMES[c.telegram_user_id] = name;   // VAULT_NAMES — глобальная (let), инициализирована {}
+  openVaultChat(c.telegram_user_id);
 }
 function openContactInvite() {
   const c = window._cdContact || {};

@@ -14917,6 +14917,79 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("uch_contact_message uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def uch_contact_media(request: web.Request) -> web.Response:
+        """Отправить контакту МЕДИА (фото/видео/док) с подписью выбранными
+        аккаунтами. Файл грузится multipart, сохраняется во временный файл, а
+        отправку делает тот же DM-движок (op bulk_dm_adhoc, media-ветка): темп,
+        уникализация под получателя, round-robin."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        contact_id = request.match_info['contact_id']
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return _err("Ожидался файл (multipart/form-data)", 400)
+        filename = "media"
+        data = b""
+        caption = ""
+        acc_raw = ""
+        try:
+            async for field in reader:
+                if field.name == "file":
+                    filename = field.filename or "media"
+                    data = await field.read(decode=False)
+                elif field.name == "text":
+                    caption = (await field.text())[:1024]
+                elif field.name == "account_ids":
+                    acc_raw = (await field.text()).strip()
+        except Exception:
+            return _err("Не удалось прочитать загрузку", 400)
+        if not data:
+            return _err("Файл пуст", 400)
+        _MAX = 50 * 1024 * 1024
+        if len(data) > _MAX:
+            return _err("Файл слишком большой (лимит 50 МБ)", 400)
+        from services.contacts_hub.repository import get_contact
+        res = await get_contact(pool, contact_id, uid)
+        if not res:
+            return _err("Контакт не найден", 404)
+        ref = _uch_msg_ref(res["contact"])
+        if not ref:
+            return _err("У контакта нет @username или Telegram ID — писать некуда", 400)
+        acc_list = [int(x) for x in re.split(r"[,\s]+", acc_raw) if x.strip().isdigit()]
+        acc_ids = await _alive_accounts(uid, acc_list)
+        if not acc_ids:
+            return _err("Выберите хотя бы один активный аккаунт", 400)
+        import os as _os
+        import tempfile as _tf
+        ext = _os.path.splitext(filename)[1][:12]
+        try:
+            fd, path = _tf.mkstemp(prefix="cdm_", suffix=ext or ".bin")
+            with _os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except Exception:
+            log.exception("uch_contact_media save uid=%s", uid)
+            return _err("Не удалось сохранить файл", 500)
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "bulk_dm_adhoc",
+                {"account_ids": acc_ids, "usernames": [ref], "text": caption,
+                 "media_path": path, "media_filename": filename, "delay": 30},
+                total_items=1,
+                label=f"Медиа контакту @{ref} × {len(acc_ids)} акк.")
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            try: _os.unlink(path)
+            except Exception: pass
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            try: _os.unlink(path)
+            except Exception: pass
+            log.exception("uch_contact_media uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def uch_contact_invite(request: web.Request) -> web.Response:
         """Пригласить контакт в канал/чат выбранными аккаунтами.
 
@@ -15613,6 +15686,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", uch_contact_message)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/media", uch_contact_media)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
     app.router.add_get("/api/miniapp/uch/search", uch_search)

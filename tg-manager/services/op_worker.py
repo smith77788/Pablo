@@ -6531,8 +6531,22 @@ async def _exec_bulk_dm_adhoc(
     text: str = params.get("text") or ""
     delay: float = float(params.get("delay") or 2.5)
 
-    if not account_ids or not usernames or not text:
-        return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст"}
+    # Медиа (опц.): файл лежит на диске контейнера, читаем один раз. С медиа
+    # текст становится ПОДПИСЬЮ и может быть пустым.
+    media_path = params.get("media_path")
+    media_filename = params.get("media_filename") or "media"
+    media_bytes: bytes | None = None
+    if media_path:
+        try:
+            import os as _os
+            if _os.path.exists(media_path):
+                with open(media_path, "rb") as _f:
+                    media_bytes = _f.read()
+        except Exception:
+            log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: media read failed")
+
+    if not account_ids or not usernames or (not text and media_bytes is None):
+        return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст/медиа"}
 
     rows = await _safe_fetch(
             pool,
@@ -6592,9 +6606,17 @@ async def _exec_bulk_dm_adhoc(
         _msg = _expand_spintax(text)  # свой вариант текста этому получателю
 
         try:
-            result = await account_manager.send_dm(
-                acc["session_str"], username, _msg, _acc=acc
-            )
+            if media_bytes is not None:
+                # Медиа с подписью — уникализируем под каждого (анти-детект).
+                _sent = await account_manager.send_media_via_account(
+                    acc["session_str"], username, caption=_msg, _acc=acc,
+                    media_bytes=media_bytes, media_filename=media_filename,
+                    uniquify=True)
+                result = {"ok": True} if _sent else {"error": "media send failed"}
+            else:
+                result = await account_manager.send_dm(
+                    acc["session_str"], username, _msg, _acc=acc
+                )
 
             if result.get("banned"):
                 await _db.deactivate_account(pool, acc["id"], "banned detected in bulk_dm_adhoc")
@@ -6629,6 +6651,15 @@ async def _exec_bulk_dm_adhoc(
         flood_wait_total = max(0.0, flood_wait_total - delay)
         if i < total - 1:
             await asyncio.sleep(wait)
+
+    # Медиа-файл больше не нужен — удаляем (диск контейнера эфемерный, но не
+    # копим мусор при многих отправках).
+    if media_path:
+        try:
+            import os as _os
+            _os.unlink(media_path)
+        except Exception:
+            pass
 
     _quar_note = f" · 🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс)" if _skipped_quar else ""
     return {
