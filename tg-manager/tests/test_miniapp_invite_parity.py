@@ -28,9 +28,12 @@ def test_backend_readiness_and_joinall_endpoints():
     assert "async def invite_join_all" in api
     assert 'add_get("/api/miniapp/invite/fleet_readiness"' in api
     assert 'add_post("/api/miniapp/invite/join_all"' in api
-    # используют общий сервис (тот же, что бот)
+    # пре-флайт использует общий сервис (тот же, что бот)
     assert "from services.invite_preflight import run_preflight" in api
-    assert "from services.invite_preflight import join_all" in api
+    # «вступить всеми» — фоновая операция bulk_join (не инлайн: живой join
+    # флотом дольше таймаута шлюза), ставится через общий operation_bus
+    assert '"bulk_join"' in api
+    assert "from services import operation_bus" in api
 
 
 def test_frontend_has_controls_and_sends_params():

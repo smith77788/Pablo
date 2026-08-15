@@ -18,8 +18,8 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
-_CONCURRENCY = 5          # столько аккаунтов проверяем одновременно
-_PER_ACC_TIMEOUT = 60.0   # потолок на один аккаунт
+_CONCURRENCY = 8          # столько аккаунтов проверяем одновременно
+_PER_ACC_TIMEOUT = 25.0   # потолок на один аккаунт (быстрый пре-чек, без ретраев)
 
 
 async def _default_checker(session_string, acc, group):

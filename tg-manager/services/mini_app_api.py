@@ -6308,7 +6308,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.invite_preflight import run_preflight
             _ids = request.query.get("account_ids") or ""
             _acc = [int(x) for x in _ids.split(",") if x.strip().isdigit()] or None
-            rep = await run_preflight(pool, uid, group, account_ids=_acc)
+            # Выборка: проверяем до 16 аккаунтов вживую, чтобы уложиться в таймаут
+            # шлюза (полный флот проверяется по факту при самой операции).
+            rep = await run_preflight(pool, uid, group, account_ids=_acc, limit=16)
             return _json_resp(rep)
         except Exception as exc:
             log.exception("invite_fleet_readiness uid=%s", uid)
@@ -6316,7 +6318,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def invite_join_all(request: web.Request) -> web.Response:
         """Паритет с ботом: вступить всеми аккаунтами в группу (для прямого
-        инвайта нужно членство). Идемпотентно."""
+        инвайта нужно членство).
+
+        Живое вступление флотом — долгая операция (коннект+join на каждый
+        аккаунт), поэтому НЕ выполняем инлайн в запросе (шлюз рвёт по таймауту),
+        а ставим фоновую операцию bulk_join (один чат × N аккаунтов) и сразу
+        отдаём op_id. Прогресс/отмена — через общий трекер операций.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -6327,18 +6335,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         group = (body.get("group") or request.query.get("group") or "").strip()
         if not group:
             return _err("Укажите группу/канал", 400)
-        _acc = None
-        _ids = body.get("account_ids") or []
+        # Аккаунты — только свои и живые (иначе операция провалится в воркере).
+        _ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
         if _ids:
-            req_ids = [int(x) for x in _ids if str(x).isdigit()]
-            owned = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[])",
-                uid, req_ids)
-            _acc = [int(r["id"]) for r in (owned or [])] or None
+            rows = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+                "AND is_active AND session_str IS NOT NULL", uid, _ids)
+        else:
+            rows = await _safe_fetch(pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                "AND session_str IS NOT NULL ORDER BY trust_score DESC NULLS LAST LIMIT 200", uid)
+        acc_ids = [int(r["id"]) for r in (rows or [])]
+        if not acc_ids:
+            return _err("Нет доступных активных аккаунтов", 400)
+        # Ban-safety: массовый join — рисковая операция; бот проверяет давление
+        # инфраструктуры ПЕРЕД постановкой, мини-апп обязан так же.
         try:
-            from services.invite_preflight import join_all
-            r = await join_all(pool, uid, group, account_ids=_acc)
-            return _json_resp({"ok": True, **r})
+            from services import infra_orchestrator
+            ready, reason = await infra_orchestrator.is_ready_for_op(pool, uid, "bulk_join")
+            if not ready:
+                return _err(f"Инфраструктура перегружена: {reason}", 429)
+        except Exception:
+            log.warning("invite_join_all: pressure check failed", exc_info=True)
+        params = {"links": [group], "account_ids": acc_ids, "delay_mode": "smart"}
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "bulk_join", params,
+                total_items=len(acc_ids),
+                label=f"Вступление в {group} × {len(acc_ids)} акк.",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("invite_join_all uid=%s", uid)
             return _err(str(exc), 500)

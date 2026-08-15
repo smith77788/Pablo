@@ -267,7 +267,9 @@ async def check_membership_and_admin(session_string: str, _acc: dict | None,
 
     client = None
     try:
-        client = await connect_client(session_string, _acc, "invite")
+        # Пре-проверка: подключаемся быстро, без 29с-ретрая AUTH_KEY_DUPLICATED
+        # (иначе readiness-эндпоинт висит до таймаута шлюза).
+        client = await connect_client(session_string, _acc, "invite", retry_auth_dup=False)
     except Exception as exc:
         return {"state": "no_connect", "error": str(exc)[:120]}
     try:

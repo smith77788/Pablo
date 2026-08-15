@@ -13870,11 +13870,11 @@ async function joinAllToGroup() {
   const group = g.value.trim();
   if (!group) { toast('Укажите группу'); return; }
   if (!(await askConfirm('Вступить всеми активными аккаунтами в «'+group+'»?\nНужно для прямого инвайта. Идемпотентно — уже вступившие не пострадают.'))) return;
-  if (el) el.innerHTML = '<span style="color:var(--hint)">Вступаю всеми аккаунтами…</span>';
+  if (el) el.innerHTML = '<span style="color:var(--hint)">Ставлю операцию вступления…</span>';
   try {
     const r = await api('/api/miniapp/invite/join_all', {method:'POST', body:JSON.stringify({group})});
-    if (el) el.innerHTML = `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">🚪 Вступили: <b>${r.joined||0}</b> · Уже были: <b>${r.already||0}</b> · Не удалось: <b>${r.failed||0}</b> (из ${r.total||0})</div>`;
-    toast('Готово: вступили '+(r.joined||0));
+    if (el) el.innerHTML = `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">🚪 Вступление запущено фоном (операция #${r.op_id}) — ${r.accounts||0} акк. вступают в «${esc(group)}». Прогресс — в разделе «Операции».</div>`;
+    toast('Вступление запущено (операция #'+r.op_id+')');
   } catch(e) { if (el) el.innerHTML = '<span style="color:#ef4444">'+esc(e.message||'Ошибка')+'</span>'; }
 }
 

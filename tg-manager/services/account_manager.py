@@ -1076,7 +1076,8 @@ def _direct_fallback_ok(transport: str | None, policy: str) -> bool:
 
 
 async def connect_client(session_string: str = "", device: dict | None = None,
-                         action_type: str = "op", low_risk: bool = False):
+                         action_type: str = "op", low_risk: bool = False,
+                         retry_auth_dup: bool = True):
     """Построить и подключить клиента с ФОЛБЭКОМ на прямое подключение.
 
     Корень жалобы «аккаунты без прокси не стартуют»: у безпроксёвого аккаунта
@@ -1100,8 +1101,13 @@ async def connect_client(session_string: str = "", device: dict | None = None,
     Возвращает подключённого клиента или пробрасывает исходную ошибку."""
     from telethon.errors import AuthKeyDuplicatedError
 
+    # Пре-проверки/диагностика (readiness, membership) вызывают с
+    # retry_auth_dup=False: они НЕ захватывают аккаунт, поэтому ретраить конфликт
+    # бессмысленно (фоновый коннект никуда не денется), а 29с-ожидание вешает
+    # HTTP-запрос до таймаута шлюза. Такие вызовы падают быстро.
+    _backoff = _AUTH_DUP_BACKOFF if retry_auth_dup else ()
     last_dup: Exception | None = None
-    for _attempt in range(len(_AUTH_DUP_BACKOFF) + 1):
+    for _attempt in range(len(_backoff) + 1):
         client = _make_client(session_string, device, low_risk=low_risk)
         try:
             await _connect_and_track(client, device, action_type)
@@ -1112,13 +1118,13 @@ async def connect_client(session_string: str = "", device: dict | None = None,
                 await client.disconnect()
             except Exception:
                 pass
-            if _attempt < len(_AUTH_DUP_BACKOFF):
-                _delay = _AUTH_DUP_BACKOFF[_attempt]
+            if _attempt < len(_backoff):
+                _delay = _backoff[_attempt]
                 log.warning(
                     "acc=%s: AUTH_KEY_DUPLICATED (сессия с двух IP) — авто-ретрай "
                     "через %.0fс (попытка %d/%d)",
                     (device or {}).get("id"), _delay, _attempt + 1,
-                    len(_AUTH_DUP_BACKOFF) + 1,
+                    len(_backoff) + 1,
                 )
                 await asyncio.sleep(_delay)
                 continue
