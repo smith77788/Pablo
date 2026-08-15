@@ -3173,6 +3173,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec" style="margin-top:8px">🌐 Способ получения IP на аккаунт</div>
     <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div id="transportStatus" style="font-size:13px;margin-bottom:8px;opacity:.9">—</div>
+      <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px;margin-bottom:8px" onclick="detachAllProxies()">🔌 Работать без прокси — отвязать прокси у всех аккаунтов</button>
       <div style="font-size:12px;opacity:.72;line-height:1.5">
         Приоритет для аккаунта <b>без своего прокси</b>: <b>1)</b> свой прокси (если назначен) → <b>2)</b> свой IPv6 → <b>3)</b> CF-релей → <b>4)</b> прямое.<br>
         • <b>Прокси</b> — уникальный IP 1:1, работает где угодно (платно/бесплатные ненадёжны). Раздел «Мои прокси».<br>
@@ -10036,6 +10037,15 @@ async function loadTransport() {
     if (inp && r.ipv6_subnet && !inp.value) inp.value = r.ipv6_subnet;
   } catch(e) { el.textContent = '—'; }
 }
+async function detachAllProxies() {
+  if (!await askConfirm('Отвязать прокси у ВСЕХ аккаунтов и работать напрямую (без прокси)?\n\nАккаунты будут подключаться с реального IP сервера. Приоритет: свой IPv6 → CF-релей → прямое. Внимание: сессию, созданную через прокси, нельзя использовать с двух IP одновременно.')) return;
+  try {
+    const r = await api('/api/miniapp/accounts/mass', {method:'POST',
+      body: JSON.stringify({op:'detach_proxy', select_all_filtered:true, filter:'all'})});
+    toast(`✅ Прокси отвязан у ${r.count||0} аккаунтов — работают напрямую`);
+    loadTransport();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
+}
 async function saveIpv6Subnet() {
   const subnet = (document.getElementById('ipv6Subnet').value||'').trim();
   if (subnet && !await askConfirm(`Включить свой IPv6 (${subnet}) для аккаунтов без прокси? Работает только если у сервера routed IPv6-подсеть + AnyIP (см. docs/UNIQUE_IP_IPV6.md).`)) return;
@@ -13853,11 +13863,19 @@ async function loadFleetReadiness() {
   try {
     const d = await api('/api/miniapp/invite/fleet_readiness?group=' + encodeURIComponent(group));
     const c = d.counts || {};
+    let reasonsHtml = '';
+    if (Array.isArray(d.reasons) && d.reasons.length) {
+      reasonsHtml = '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line,#2a2a2a)">'
+        + '<div style="color:var(--hint);margin-bottom:2px">Почему не подключились:</div>'
+        + d.reasons.map(r => `• <b>${r.count}</b> — ${esc(r.reason)}`).join('<br>')
+        + '</div>';
+    }
     el.innerHTML =
       `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">`
       + `👑 Админы: <b>${c.admin||0}</b> · ✅ В группе: <b>${c.member||0}</b> · 🚪 Не в группе: <b>${c.not_member||0}</b><br>`
       + `❌ Не подключились: <b>${c.no_connect||0}</b>${c.group_bad?` · 🚫 Группа недоступна: <b>${c.group_bad}</b>`:''}<br>`
       + `🎯 Готовы инвайтить: <b>${d.ready||0}</b> из <b>${d.total||0}</b>`
+      + reasonsHtml
       + `<div style="margin-top:6px;color:var(--hint)">💡 ${esc(d.verdict||'')}</div></div>`;
   } catch(e) { el.innerHTML = '<span style="color:#ef4444">'+esc(e.message||'Ошибка проверки')+'</span>'; }
 }

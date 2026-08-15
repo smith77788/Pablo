@@ -22,6 +22,36 @@ _CONCURRENCY = 8          # столько аккаунтов проверяем
 _PER_ACC_TIMEOUT = 25.0   # потолок на один аккаунт (быстрый пре-чек, без ретраев)
 
 
+def classify_conn_error(err: str) -> str:
+    """Сырую ошибку коннекта → человеко-понятную причину (для сводки пре-флайта).
+
+    Чтобы «14 не подключились» перестало быть чёрным ящиком: оператор видит
+    ИМЕННО почему (сессия отозвана / забанен / конфликт IP / таймаут / сеть) и
+    понимает, что делать (перезалить сессию, сменить IP, подождать)."""
+    # Сравниваем без разделителей: и «auth_key_duplicated», и класс
+    # «AuthKeyDuplicatedError» дают одну форму.
+    e = (err or "").lower()
+    if not e:
+        return "неизвестно"
+    flat = e.replace("_", "").replace(" ", "")
+    if "authkeyduplicated" in flat or "twodifferentip" in flat:
+        return "конфликт IP (AUTH_KEY_DUPLICATED) — сессия видится с двух IP"
+    if "authkeyunregistered" in flat or "unregistered" in flat or "revoked" in flat:
+        return "сессия отозвана/недействительна — нужно перезалить аккаунт"
+    if "deactivated" in flat or "banned" in flat:
+        return "аккаунт удалён/забанен Telegram"
+    if "flood" in e:
+        return "флуд-контроль Telegram — подождать"
+    if "timeout" in e or "timed out" in e:
+        return "таймаут подключения — сеть/прокси медленные"
+    if ("proxy" in e or "socks" in e or "connect" in e or "network" in e
+            or "unreachable" in e or "refused" in e or "reset" in e):
+        return "сеть/транспорт — прокси мёртв или прямой выход заблокирован"
+    if "phone" in e and "migrate" in e:
+        return "миграция дата-центра — повторить"
+    return err[:70]
+
+
 async def _default_checker(session_string, acc, group):
     from services import mass_inviter_engine as inv
     return await inv.check_membership_and_admin(session_string, acc, group)
@@ -50,6 +80,7 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
     accounts = [dict(r) for r in rows]
     counts = {"admin": 0, "member": 0, "not_member": 0,
               "no_connect": 0, "group_bad": 0, "error": 0}
+    reasons: dict[str, int] = {}   # причина неудачи → сколько аккаунтов
     details: list[dict] = []
     can_invite = 0
     sem = asyncio.Semaphore(_CONCURRENCY)
@@ -71,15 +102,23 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
         counts[st] = counts.get(st, 0) + 1
         if res.get("can_invite") or st == "admin":
             can_invite += 1
+        err = res.get("error")
+        if st in ("no_connect", "error") and err:
+            why = classify_conn_error(err)
+            reasons[why] = reasons.get(why, 0) + 1
         details.append({"id": acc["id"], "phone": acc.get("phone"), "state": st,
-                        "can_promote": bool(res.get("can_promote"))})
+                        "can_promote": bool(res.get("can_promote")),
+                        "error": (err or "")[:120]})
 
     total = len(accounts)
     ready = counts["admin"] + counts["member"]  # в группе (могут инвайтить/промоутиться)
+    # Топ-причины неудач — оператор сразу видит корень (а не «просто не вышло»).
+    top_reasons = [{"reason": k, "count": v}
+                   for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])]
     verdict = _verdict(total, counts)
     return {"total": total, "counts": counts, "ready": ready,
             "can_invite": can_invite, "admins": counts["admin"],
-            "details": details, "verdict": verdict}
+            "details": details, "reasons": top_reasons, "verdict": verdict}
 
 
 async def count_already_invited(pool: asyncpg.Pool, owner_id: int, group: str,
