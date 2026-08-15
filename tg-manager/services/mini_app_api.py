@@ -14840,6 +14840,126 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    def _uch_msg_ref(c: dict) -> str | None:
+        """Куда писать в ЛС: @username надёжнее всего, иначе числовой ID (send_dm
+        сам резолвит цифры в user_id). Телефон для ЛС ненадёжен (нужно, чтобы
+        номер уже был контактом аккаунта) — его для сообщений не используем."""
+        u = (c.get("username") or "").lstrip("@")
+        if u:
+            return u
+        if c.get("telegram_user_id"):
+            return str(c["telegram_user_id"])
+        return None
+
+    def _uch_invite_target(c: dict) -> tuple[str | None, str | None]:
+        """Кого приглашать: ('user', @username|id) или ('phone', номер). Для инвайта
+        телефон годится (движок добавляет по номеру через импорт контакта)."""
+        u = (c.get("username") or "").lstrip("@")
+        if u:
+            return "user", u
+        if c.get("telegram_user_id"):
+            return "user", str(c["telegram_user_id"])
+        phones = c.get("phones") or []
+        if isinstance(phones, list) and phones:
+            return "phone", str(phones[0])
+        return None, None
+
+    async def uch_contact_message(request: web.Request) -> web.Response:
+        """Написать контакту в ЛС с выбранных аккаунтов (одного/нескольких).
+
+        Реюзает безопасный DM-движок (op bulk_dm_adhoc): темп/флуд-контроль,
+        spintax-вариативность, round-robin по аккаунтам — как массовая рассылка,
+        но на одного получателя. Возвращает op_id (прогресс — в «Операциях»)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            contact_id = request.match_info['contact_id']
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        from services.contacts_hub.repository import get_contact
+        res = await get_contact(pool, contact_id, uid)
+        if not res:
+            return _err("Контакт не найден", 404)
+        ref = _uch_msg_ref(res["contact"])
+        if not ref:
+            return _err("У контакта нет @username или Telegram ID — писать некуда", 400)
+        text = validate_string(body.get("text"), max_len=4096)
+        if not text:
+            return _err("Введите текст сообщения", 400)
+        if check_sql_suspicious(text):
+            return _err("Недопустимые символы в тексте", 400)
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
+        if not acc_ids:
+            return _err("Выберите хотя бы один активный аккаунт", 400)
+        delay = min(max(validate_integer(body.get("delay", 30), min_val=5, max_val=600) or 30, 5), 600)
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "bulk_dm_adhoc",
+                {"account_ids": acc_ids, "usernames": [ref], "text": text, "delay": delay},
+                total_items=1,
+                label=f"ЛС контакту @{ref} × {len(acc_ids)} акк.")
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("uch_contact_message uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_contact_invite(request: web.Request) -> web.Response:
+        """Пригласить контакт в канал/чат выбранными аккаунтами.
+
+        Реюзает движок инвайта (op mass_invite, source=import_list) на списке из
+        одного получателя — способ инвайта direct/admin/link на выбор, тот же
+        путь и защита от бана, что у массового инвайта."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            contact_id = request.match_info['contact_id']
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        group = (body.get("group") or "").strip()
+        if not group:
+            return _err("Укажите канал/чат (@username или ссылку)", 400)
+        from services.contacts_hub.repository import get_contact
+        res = await get_contact(pool, contact_id, uid)
+        if not res:
+            return _err("Контакт не найден", 404)
+        kind, ref = _uch_invite_target(res["contact"])
+        if not ref:
+            return _err("У контакта нет @username, ID или телефона — некого приглашать", 400)
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
+        if not acc_ids:
+            return _err("Выберите хотя бы один активный аккаунт", 400)
+        method = str(body.get("invite_method") or "direct").strip().lower()
+        if method not in ("direct", "admin", "link"):
+            method = "direct"
+        params = {"group": group, "source": "import_list", "pace": "normal",
+                  "batch_size": 1, "invite_method": method, "account_ids": acc_ids}
+        if kind == "phone":
+            params["phones"] = [ref]
+        else:
+            params["user_refs"] = [ref]
+        if method == "link" and body.get("link_message"):
+            params["link_message"] = str(body.get("link_message"))[:500]
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "mass_invite", params, total_items=1,
+                label=f"Инвайт контакта {ref} → {group}")
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("uch_contact_invite uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def uch_contact_update(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -15484,6 +15604,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", uch_contact_message)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
     app.router.add_get("/api/miniapp/uch/search", uch_search)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)

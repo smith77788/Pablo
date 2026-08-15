@@ -933,6 +933,38 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- Написать контакту в ЛС с выбранных аккаунтов (безопасный DM-движок) -->
+<div class="mbg" id="mo-contact-write" onclick="if(event.target===this)closeModal('mo-contact-write')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-contact-write')">✕</div>
+    <div class="modal-title">✍️ Написать контакту</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить (по умолчанию — те, где контакт найден). Отправка идёт с защитой от бана.</div>
+    <div style="font-size:12px;font-weight:600;margin:6px 0 4px">С каких аккаунтов:</div>
+    <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
+    <textarea id="ccwText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <div id="ccwErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactWrite()">🚀 Отправить</button>
+  </div>
+</div>
+
+<!-- Пригласить контакт в канал/чат выбранными аккаунтами -->
+<div class="mbg" id="mo-contact-invite" onclick="if(event.target===this)closeModal('mo-contact-invite')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-contact-invite')">✕</div>
+    <div class="modal-title">➕ Пригласить контакт</div>
+    <input type="text" id="cciGroup" placeholder="@канал_или_чат или ссылка t.me/..." class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+    <select id="cciMethod" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+      <option value="direct">Обычный инвайт</option>
+      <option value="admin">Через админку (обход приватности)</option>
+      <option value="link">Ссылка в ЛС (человек вступает сам)</option>
+    </select>
+    <div style="font-size:12px;font-weight:600;margin:6px 0 4px">Каким аккаунтами приглашать:</div>
+    <div id="cciAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
+    <div id="cciErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactInvite()">🚀 Пригласить</button>
+  </div>
+</div>
+
 <!-- ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════ -->
 <style>
 .vfilter{flex:0 0 auto;font-size:12px;padding:5px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
@@ -12481,6 +12513,7 @@ async function openContactDetail(id) {
     const c = d.contact;
     const sources = d.sources||[];
     const groups = d.groups||[];
+    window._cdContact = c; window._cdSources = sources;  // для «Написать»/«Пригласить»
     const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'';
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
@@ -12509,7 +12542,9 @@ async function openContactDetail(id) {
       ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0">📋 Email</button>`:''}
     </div>`;
     html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
-      ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0;text-decoration:none">💬 Написать</a>`:''}
+      <button class="btn btn-p" onclick="openContactWrite()" style="flex:0">✍️ Написать</button>
+      <button class="btn btn-s" onclick="openContactInvite()" style="flex:0">➕ Пригласить</button>
+      ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0;text-decoration:none">↗ В Telegram</a>`:''}
       ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0;text-decoration:none">👤 Профиль</a>`:''}
     </div>`;
     if (sources.length) {
@@ -12531,6 +12566,70 @@ async function openContactDetail(id) {
     </div>`;
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(e.message)); }
+}
+
+// ── Действия по контакту: написать в ЛС / пригласить в чат ──────────────────
+async function _renderContactAccPicker(containerId, preselectIds) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const accs = await api('/api/miniapp/accounts?filter=active&limit=200');
+    const live = (accs.accounts||[]).filter(a=>a.is_active);
+    if (!live.length) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>'; return; }
+    const pre = new Set((preselectIds||[]).map(Number));
+    el.innerHTML = live.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
+      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${pre.has(+a.id)?'checked':''} style="width:16px;height:16px">
+      ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('');
+  } catch(e) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'; }
+}
+function _contactPickedAccs() {
+  return [...document.querySelectorAll('.ca-acc-cb:checked')].map(cb=>+cb.value);
+}
+function openContactWrite() {
+  const c = window._cdContact || {};
+  if (!c.username && !c.telegram_user_id) { toast('У контакта нет @username или Telegram ID — писать некуда'); return; }
+  const t = document.getElementById('ccwText'); if (t) t.value = '';
+  const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
+  _renderContactAccPicker('ccwAccts', (window._cdSources||[]).map(s=>s.account_id));
+  showModal('mo-contact-write');
+}
+async function submitContactWrite() {
+  const text = (document.getElementById('ccwText').value||'').trim();
+  const err = document.getElementById('ccwErr');
+  if (!text) { err.textContent = 'Введите текст'; return; }
+  const accIds = _contactPickedAccs();
+  if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
+  if (!await askConfirm(`Отправить сообщение контакту с ${accIds.length} аккаунт(ов)?\nСообщение уйдёт реальному человеку — отменить нельзя.`)) return;
+  try {
+    const r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/message',
+      {method:'POST', body:JSON.stringify({text, account_ids: accIds})});
+    closeModal('mo-contact-write');
+    toast(`✉️ Отправка запущена (операция #${r.op_id}) — ${r.accounts} акк.`);
+  } catch(e) { err.textContent = e.message || 'Ошибка'; }
+}
+function openContactInvite() {
+  const c = window._cdContact || {};
+  if (!c.username && !c.telegram_user_id && !(Array.isArray(c.phones)&&c.phones.length)) {
+    toast('У контакта нет @username, ID или телефона — некого приглашать'); return; }
+  const g = document.getElementById('cciGroup'); if (g) g.value = '';
+  const e = document.getElementById('cciErr'); if (e) e.textContent = '';
+  _renderContactAccPicker('cciAccts', (window._cdSources||[]).map(s=>s.account_id));
+  showModal('mo-contact-invite');
+}
+async function submitContactInvite() {
+  const group = (document.getElementById('cciGroup').value||'').trim();
+  const method = document.getElementById('cciMethod').value || 'direct';
+  const err = document.getElementById('cciErr');
+  if (!group) { err.textContent = 'Укажите канал/чат'; return; }
+  const accIds = _contactPickedAccs();
+  if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
+  try {
+    const r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/invite',
+      {method:'POST', body:JSON.stringify({group, invite_method: method, account_ids: accIds})});
+    closeModal('mo-contact-invite');
+    toast(`➕ Инвайт запущен (операция #${r.op_id}) — ${r.accounts} акк.`);
+  } catch(e) { err.textContent = e.message || 'Ошибка'; }
 }
 
 function editContact() {
