@@ -268,6 +268,11 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
                FROM tg_accounts
                WHERE is_active = TRUE
                  AND session_str IS NOT NULL AND session_str != ''
+                 -- НЕ трогаем аккаунты, занятые операцией: параллельный коннект
+                 -- одной сессии монитором и операцией = AUTH_KEY_DUPLICATED.
+                 -- Особенно важно для СВЕЖЕГО флота (last_real_check_at IS NULL
+                 -- → монитор берёт его первым, ровно когда оператор запускает op).
+                 AND COALESCE(in_operation, FALSE) = FALSE
                  AND (last_real_check_at IS NULL
                       OR last_real_check_at < NOW() - INTERVAL '3 hours')
                ORDER BY COALESCE(last_real_check_at, '2000-01-01') ASC
@@ -284,6 +289,14 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
     now = time.time()
 
     for acc in accounts:
+        # Аккаунт мог быть захвачен операцией уже после выборки (окно гонки) —
+        # проверяем ин-мемори реестр op_worker прямо перед коннектом.
+        try:
+            from services import op_worker as _opw
+            if _opw.is_account_in_use(int(acc["id"])):
+                continue
+        except Exception:
+            pass
         try:
             result = await asyncio.wait_for(
                 check_account_status_full(

@@ -413,6 +413,10 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
            WHERE a.is_active=TRUE
              AND a.session_str IS NOT NULL AND a.session_str != ''
+             -- НЕ трогаем занятые операцией: параллельный коннект одной сессии
+             -- проверкой и операцией = AUTH_KEY_DUPLICATED (свежий флот с
+             -- last_real_check_at IS NULL монитор берёт первым).
+             AND COALESCE(a.in_operation, FALSE) = FALSE
              AND (a.last_real_check_at IS NULL
                   OR a.last_real_check_at < NOW() - INTERVAL '6 hours')
            ORDER BY COALESCE(a.last_real_check_at, '2000-01-01') ASC
@@ -426,6 +430,13 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
     )
 
     for acc in accounts:
+        # Аккаунт мог быть захвачен операцией после выборки (гонка) — проверяем.
+        try:
+            from services import op_worker as _opw
+            if _opw.is_account_in_use(int(acc["id"])):
+                continue
+        except Exception:
+            pass
         try:
             result = await asyncio.wait_for(
                 check_account_status_full(
