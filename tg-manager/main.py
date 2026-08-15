@@ -662,6 +662,10 @@ async def main() -> None:
         # Сметатель капчи «Модератора чатов»: кикает новичков, не прошедших
         # проверку «Я не бот» к дедлайну.
         asyncio.create_task(_resilient("chat_guard_runner", chat_guard_runner.run, pool, bot))
+        # Сторож «Хранилища»: замечает, что бизнес-подключение тихо отвалилось,
+        # и один раз предупреждает владельца в ЛС (иначе узнаёт, только зайдя в архив).
+        from services import vault_watchdog
+        asyncio.create_task(_resilient("vault_watchdog", vault_watchdog.run, pool, bot))
         asyncio.create_task(
             _resilient("payment_checker", payment_checker.run, pool, http, bot)
         )
