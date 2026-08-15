@@ -15046,6 +15046,248 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("uch_contact_invite uid=%s", uid)
             return _err(str(exc), 500)
 
+    # ── Сегмент → действие флотом ────────────────────────────────────────────
+    _SEG_DM_CHUNK = 1000       # кап получателей на одну bulk_dm_adhoc; больше — авто-разбивка
+    _SEG_MAX = 20000           # потолок размера сегмента (защита от случайного «всё»)
+
+    def _segment_filters(src: dict) -> dict:
+        """Фильтры среза из тела запроса — те же оси, что у списка контактов."""
+        def _b(k):
+            return str(src.get(k)).lower() in ("1", "true", "yes", "on")
+        g = src.get("gender")
+        if g not in ("m", "f", "unknown"):
+            g = None
+        def _int(k):
+            v = src.get(k)
+            return int(v) if str(v).isdigit() else None
+        return {
+            "search": (src.get("search") or "").strip() or None,
+            "tag": (src.get("tag") or "").strip() or None,
+            "group_id": _int("group_id"),
+            "favorite_only": _b("favorite"), "premium_only": _b("premium"),
+            "multi_only": _b("multi"), "mutual_only": _b("mutual"),
+            "gender": g, "crm_stage": (src.get("crm_stage") or "").strip()[:40] or None,
+            "account_id": _int("account_id"),
+        }
+
+    async def _segment_contacts(uid: int, body: dict) -> list:
+        """Контакты сегмента: явный список contact_ids ИЛИ весь срез по фильтру.
+        Возвращает строки с полями адресации (username/telegram_user_id/phones)."""
+        cids = body.get("contact_ids")
+        if isinstance(cids, list) and cids:
+            rows = await _safe_fetch(pool,
+                "SELECT id, username, telegram_user_id, first_name, last_name, phones "
+                "FROM unified_contacts WHERE owner_id=$1 AND id = ANY($2::uuid[]) LIMIT $3",
+                uid, [str(x) for x in cids], _SEG_MAX)
+            out = []
+            for r in (rows or []):
+                d = dict(r)
+                if isinstance(d.get("phones"), str):
+                    try: d["phones"] = _json.loads(d["phones"])
+                    except Exception: d["phones"] = []
+                out.append(d)
+            return out
+        from services.contacts_hub.repository import resolve_segment
+        return await resolve_segment(pool, uid, _segment_filters(body), limit=_SEG_MAX)
+
+    async def _segment_pressure_ok(uid: int, op_name: str) -> tuple[bool, str]:
+        """Гейт давления инфраструктуры (ban-safety) — как у остальных масс-опер."""
+        try:
+            from services import infra_orchestrator
+            return await infra_orchestrator.is_ready_for_op(pool, uid, op_name)
+        except Exception:
+            log.warning("segment: pressure check failed", exc_info=True)
+            return True, ""
+
+    async def uch_segment_preview(request: web.Request) -> web.Response:
+        """Превью до действия: размер среза, сколько адресуемо в ЛС/инвайт,
+        сколько активных аккаунтов. Живого Telegram не трогает."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        contacts = await _segment_contacts(uid, body)
+        dm = sum(1 for c in contacts if _uch_msg_ref(c))
+        inv = sum(1 for c in contacts if _uch_invite_target(c)[1])
+        acc_ids = await _alive_accounts(uid, None)
+        return _json_resp({
+            "total": len(contacts), "addressable_dm": dm, "addressable_invite": inv,
+            "skipped_dm": len(contacts) - dm, "accounts_active": len(acc_ids),
+            "dm_chunks": (dm + _SEG_DM_CHUNK - 1) // _SEG_DM_CHUNK if dm else 0,
+        })
+
+    async def uch_segment_message(request: web.Request) -> web.Response:
+        """Написать в ЛС всему сегменту выбранными аккаунтами. Авто-разбивка на
+        операции по ≤1000 получателей (bulk_dm_adhoc): темп/флуд/spintax."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        text = validate_string(body.get("text"), max_len=4096)
+        if not text:
+            return _err("Введите текст сообщения", 400)
+        if check_sql_suspicious(text):
+            return _err("Недопустимые символы в тексте", 400)
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
+        if not acc_ids:
+            return _err("Выберите хотя бы один активный аккаунт", 400)
+        contacts = await _segment_contacts(uid, body)
+        refs = [r for r in (_uch_msg_ref(c) for c in contacts) if r]
+        if not refs:
+            return _err("В сегменте нет адресуемых контактов (нужен @username или ID)", 400)
+        ready, reason = await _segment_pressure_ok(uid, "bulk_dm_adhoc")
+        if not ready:
+            return _err(f"Инфраструктура перегружена: {reason}", 429)
+        # Консервативный темп по умолчанию (реже — безопаснее).
+        delay = min(max(validate_integer(body.get("delay", 45), min_val=5, max_val=600) or 45, 5), 600)
+        try:
+            from services import operation_bus
+            op_ids = []
+            for i in range(0, len(refs), _SEG_DM_CHUNK):
+                chunk = refs[i:i + _SEG_DM_CHUNK]
+                oid = await operation_bus.submit(
+                    pool, uid, "bulk_dm_adhoc",
+                    {"account_ids": acc_ids, "usernames": chunk, "text": text, "delay": delay},
+                    total_items=len(chunk),
+                    label=f"Сегмент ЛС ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)} × {len(acc_ids)} акк.")
+                op_ids.append(oid)
+            return _json_resp({"ok": True, "op_ids": op_ids, "chunks": len(op_ids),
+                               "recipients": len(refs), "skipped": len(contacts) - len(refs),
+                               "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("uch_segment_message uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_segment_media(request: web.Request) -> web.Response:
+        """Медиа всему сегменту. Multipart: file + text + account_ids + фильтры.
+        Авто-разбивка: КАЖДЫЙ чанк получает свою копию файла (op удаляет свою)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return _err("Ожидался файл (multipart/form-data)", 400)
+        filename = "media"; data = b""; caption = ""; acc_raw = ""; body: dict = {}
+        try:
+            async for field in reader:
+                if field.name == "file":
+                    filename = field.filename or "media"
+                    data = await field.read(decode=False)
+                elif field.name == "text":
+                    caption = (await field.text())[:1024]
+                elif field.name == "account_ids":
+                    acc_raw = (await field.text()).strip()
+                elif field.name == "filters":
+                    try: body = _json.loads(await field.text())
+                    except Exception: body = {}
+                elif field.name == "contact_ids":
+                    try: body["contact_ids"] = _json.loads(await field.text())
+                    except Exception: pass
+        except Exception:
+            return _err("Не удалось прочитать загрузку", 400)
+        if not data:
+            return _err("Файл пуст", 400)
+        if len(data) > 50 * 1024 * 1024:
+            return _err("Файл слишком большой (лимит 50 МБ)", 400)
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in re.split(r"[,\s]+", acc_raw) if x.strip().isdigit()])
+        if not acc_ids:
+            return _err("Выберите хотя бы один активный аккаунт", 400)
+        contacts = await _segment_contacts(uid, body)
+        refs = [r for r in (_uch_msg_ref(c) for c in contacts) if r]
+        if not refs:
+            return _err("В сегменте нет адресуемых контактов (нужен @username или ID)", 400)
+        ready, reason = await _segment_pressure_ok(uid, "bulk_dm_adhoc")
+        if not ready:
+            return _err(f"Инфраструктура перегружена: {reason}", 429)
+        import os as _os, tempfile as _tf
+        ext = _os.path.splitext(filename)[1][:12] or ".bin"
+        try:
+            from services import operation_bus
+            op_ids = []
+            for i in range(0, len(refs), _SEG_DM_CHUNK):
+                chunk = refs[i:i + _SEG_DM_CHUNK]
+                fd, path = _tf.mkstemp(prefix="cseg_", suffix=ext)  # своя копия на чанк
+                with _os.fdopen(fd, "wb") as f:
+                    f.write(data)
+                oid = await operation_bus.submit(
+                    pool, uid, "bulk_dm_adhoc",
+                    {"account_ids": acc_ids, "usernames": chunk, "text": caption,
+                     "media_path": path, "media_filename": filename, "delay": 45},
+                    total_items=len(chunk),
+                    label=f"Сегмент медиа ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)} × {len(acc_ids)} акк.")
+                op_ids.append(oid)
+            return _json_resp({"ok": True, "op_ids": op_ids, "chunks": len(op_ids),
+                               "recipients": len(refs), "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("uch_segment_media uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_segment_invite(request: web.Request) -> web.Response:
+        """Пригласить весь сегмент в канал/чат. mass_invite (source=import_list)
+        принимает списки нативно — авто-разбивка не нужна."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        group = (body.get("group") or "").strip()
+        if not group:
+            return _err("Укажите канал/чат (@username или ссылку)", 400)
+        acc_ids = await _alive_accounts(
+            uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
+        if not acc_ids:
+            return _err("Выберите хотя бы один активный аккаунт", 400)
+        contacts = await _segment_contacts(uid, body)
+        user_refs, phones = [], []
+        for c in contacts:
+            kind, ref = _uch_invite_target(c)
+            if kind == "user":
+                user_refs.append(ref)
+            elif kind == "phone":
+                phones.append(ref)
+        if not user_refs and not phones:
+            return _err("В сегменте некого приглашать (нет @username/ID/телефона)", 400)
+        method = str(body.get("invite_method") or "direct").strip().lower()
+        if method not in ("direct", "admin", "link"):
+            method = "direct"
+        ready, reason = await _segment_pressure_ok(uid, "mass_invite")
+        if not ready:
+            return _err(f"Инфраструктура перегружена: {reason}", 429)
+        params = {"group": group, "source": "import_list", "pace": "normal",
+                  "batch_size": 5, "invite_method": method, "account_ids": acc_ids}
+        if user_refs:
+            params["user_refs"] = user_refs
+        if phones:
+            params["phones"] = phones
+        if method == "link" and body.get("link_message"):
+            params["link_message"] = str(body.get("link_message"))[:500]
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'mass_invite','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps(params), len(user_refs) + len(phones),
+                f"Сегмент-инвайт → {group}: {len(user_refs) + len(phones)} × {len(acc_ids)} акк.")
+            return _json_resp({"ok": True, "op_id": int(op_id),
+                               "targets": len(user_refs) + len(phones), "accounts": len(acc_ids)})
+        except Exception as exc:
+            log.exception("uch_segment_invite uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def uch_contact_update(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -15693,6 +15935,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", uch_contact_message)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/media", uch_contact_media)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
+    app.router.add_post("/api/miniapp/uch/segment/preview", uch_segment_preview)
+    app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
+    app.router.add_post("/api/miniapp/uch/segment/media", uch_segment_media)
+    app.router.add_post("/api/miniapp/uch/segment/invite", uch_segment_invite)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
     app.router.add_get("/api/miniapp/uch/search", uch_search)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
