@@ -35,45 +35,63 @@ def _parse_json_fields(d: dict) -> dict:
     return d
 
 
-async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
-                       favorite_only=False, premium_only=False, multi_only=False,
-                       mutual_only=False,
-                       account_id=None,
-                       sort_by='first_name', limit=100, offset=0) -> dict:
-    conditions = ['owner_id = $1']
+def _segment_where(owner_id, f: dict):
+    """Единый конструктор WHERE для среза контактов — общий для списка
+    (get_contacts) и резолвера сегмента (resolve_segment/count_segment), чтобы
+    фильтр «что вижу в списке» и «на что применяю действие» ГАРАНТИРОВАННО
+    совпадали. Возвращает (where_sql, params, next_idx). Колонки неквалифицированы
+    (одна таблица unified_contacts); коррелированные подзапросы — по .id.
+    """
+    conds = ['owner_id = $1']
     params = [owner_id]
     idx = 2
-    if search:
-        search_condition = (
+    if f.get('search'):
+        conds.append(
             f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
             f'username ILIKE ${idx} OR display_name ILIKE ${idx} OR '
             f'CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR '
-            f'notes ILIKE ${idx} OR company ILIKE ${idx})'
-        )
-        conditions.append(search_condition)
-        params.append(f'%{search}%')
-        idx += 1
-    if favorite_only:
-        conditions.append('is_favorite = TRUE')
-    if premium_only:
-        conditions.append('is_premium = TRUE')
-    if mutual_only:
-        conditions.append('is_mutual = TRUE')
-    if multi_only:
-        conditions.append(f'(SELECT COUNT(*) FROM contact_sources WHERE contact_id = unified_contacts.id) > 1')
-    if account_id:
-        conditions.append(f'EXISTS (SELECT 1 FROM contact_sources WHERE contact_id = unified_contacts.id AND account_id = ${idx})')
-        params.append(account_id)
-        idx += 1
-    if tag:
-        conditions.append(f'${idx} = ANY(tags)')
-        params.append(tag)
-        idx += 1
-    if group_id:
-        conditions.append(f'EXISTS (SELECT 1 FROM contact_group_members WHERE contact_id = unified_contacts.id AND group_id = ${idx})')
-        params.append(group_id)
-        idx += 1
-    where = ' AND '.join(conditions)
+            f'notes ILIKE ${idx} OR company ILIKE ${idx})')
+        params.append(f"%{f['search']}%"); idx += 1
+    if f.get('favorite_only'):
+        conds.append('is_favorite = TRUE')
+    if f.get('premium_only'):
+        conds.append('is_premium = TRUE')
+    if f.get('mutual_only'):
+        conds.append('is_mutual = TRUE')
+    if f.get('multi_only'):
+        conds.append('(SELECT COUNT(*) FROM contact_sources WHERE contact_id = unified_contacts.id) > 1')
+    if f.get('account_id'):
+        conds.append(f'EXISTS (SELECT 1 FROM contact_sources WHERE contact_id = unified_contacts.id AND account_id = ${idx})')
+        params.append(f['account_id']); idx += 1
+    if f.get('tag'):
+        conds.append(f'${idx} = ANY(tags)')
+        params.append(f['tag']); idx += 1
+    if f.get('group_id'):
+        conds.append(f'EXISTS (SELECT 1 FROM contact_group_members WHERE contact_id = unified_contacts.id AND group_id = ${idx})')
+        params.append(f['group_id']); idx += 1
+    # Пол: 'm'/'f' — точное совпадение; 'unknown' — не определён (NULL).
+    g = f.get('gender')
+    if g in ('m', 'f'):
+        conds.append(f'gender = ${idx}'); params.append(g); idx += 1
+    elif g == 'unknown':
+        conds.append('gender IS NULL')
+    # CRM-стадия — из отдельной таблицы contact_crm.
+    if f.get('crm_stage'):
+        conds.append(f'EXISTS (SELECT 1 FROM contact_crm cc WHERE cc.contact_id = unified_contacts.id AND cc.stage = ${idx})')
+        params.append(f['crm_stage']); idx += 1
+    return ' AND '.join(conds), params, idx
+
+
+async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
+                       favorite_only=False, premium_only=False, multi_only=False,
+                       mutual_only=False, gender=None, crm_stage=None,
+                       account_id=None,
+                       sort_by='first_name', limit=100, offset=0) -> dict:
+    filters = {'search': search, 'tag': tag, 'group_id': group_id,
+               'favorite_only': favorite_only, 'premium_only': premium_only,
+               'multi_only': multi_only, 'mutual_only': mutual_only,
+               'gender': gender, 'crm_stage': crm_stage, 'account_id': account_id}
+    where, params, idx = _segment_where(owner_id, filters)
     sort_map = {
         'name': 'first_name, last_name',
         'username': 'username',
@@ -87,6 +105,24 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
     rows = await pool.fetch(f'SELECT * FROM unified_contacts WHERE {where} ORDER BY {order} LIMIT ${idx} OFFSET ${idx+1}', *params)
     total = await pool.fetchval(f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params[:-2])
     return {'contacts': [_parse_json_fields(dict(r)) for r in rows], 'total': total}
+
+
+async def count_segment(pool, owner_id, filters: dict) -> int:
+    """Сколько контактов в срезе по фильтру (для превью до действия)."""
+    where, params, _ = _segment_where(owner_id, filters)
+    return int(await pool.fetchval(
+        f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params) or 0)
+
+
+async def resolve_segment(pool, owner_id, filters: dict, limit: int = 5000) -> list:
+    """Срез контактов для массового действия: только поля, нужные для адресации
+    (username / telegram_user_id / phones). Тот же WHERE, что и у списка."""
+    where, params, idx = _segment_where(owner_id, filters)
+    params.append(limit)
+    rows = await pool.fetch(
+        'SELECT id, username, telegram_user_id, first_name, last_name, phones '
+        f'FROM unified_contacts WHERE {where} ORDER BY id LIMIT ${idx}', *params)
+    return [_parse_json_fields(dict(r)) for r in rows]
 
 
 async def get_contact(pool, contact_id, owner_id):

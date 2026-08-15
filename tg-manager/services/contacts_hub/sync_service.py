@@ -165,6 +165,13 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
 
         duration_ms = int((time.monotonic() - started) * 1000)
         await log_sync(pool, owner_id, account_id, 'auto', len(contacts), created, updated, 0, duration_ms)
+        # Разметка пола новых контактов по имени (для сегментации). Дёшево:
+        # only_missing — только у кого gender ещё NULL. Fail-open: не роняем синк.
+        try:
+            from services import gender_classifier
+            await gender_classifier.classify_contacts(pool, owner_id, only_missing=True)
+        except Exception:
+            log.debug('sync_account: classify_contacts gender failed owner=%s', owner_id)
         return {'synced': len(contacts), 'created': created, 'updated': updated}
     except Exception as e:
         duration_ms = int((time.monotonic() - started) * 1000)

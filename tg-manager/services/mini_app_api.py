@@ -14814,6 +14814,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         premium = request.query.get('premium') == '1'
         multi = request.query.get('multi') == '1'
         mutual = request.query.get('mutual') == '1'
+        gender = request.query.get('gender') or None       # 'm' | 'f' | 'unknown'
+        if gender not in ('m', 'f', 'unknown'):
+            gender = None
+        crm_stage = (request.query.get('crm_stage') or '').strip()[:40] or None
         # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
         # контактов пользователь видел «лишь десятки» и не мог долистать до
         # остальных. limit зажат, offset — для «Показать ещё».
@@ -14829,7 +14833,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.repository import get_contacts
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
                                         tag=tag, premium_only=premium, multi_only=multi,
-                                        mutual_only=mutual, limit=limit, offset=offset)
+                                        mutual_only=mutual, gender=gender, crm_stage=crm_stage,
+                                        limit=limit, offset=offset)
             result['offset'] = offset
             result['limit'] = limit
             return _json_resp(result)

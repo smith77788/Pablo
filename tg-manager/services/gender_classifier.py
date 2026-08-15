@@ -164,3 +164,37 @@ async def classify_audience(
     return {"m": counts["m"], "f": counts["f"],
             "unknown": counts["unknown"], "total": len(ids)}
 
+
+async def classify_contacts(
+    pool: asyncpg.Pool, owner_id: int, only_missing: bool = True
+) -> dict:
+    """Разметить пол у контактов Хаба (unified_contacts) по имени. Аналог
+    classify_audience, но по UUID-контактам. only_missing=True — только те, у кого
+    gender ещё NULL (дёшево на большом хабе); False — переразметить всё.
+
+    Чистая БД+CPU, без Telegram. Один UPDATE через unnest. Идемпотентна.
+    """
+    where = "owner_id=$1" + (" AND gender IS NULL" if only_missing else "")
+    rows = await pool.fetch(
+        f"SELECT id, first_name, last_name FROM unified_contacts WHERE {where}",
+        owner_id)
+    ids: list = []
+    genders: list[str | None] = []
+    counts = {"m": 0, "f": 0, "unknown": 0}
+    for r in rows:
+        g = classify(r["first_name"], r["last_name"])
+        ids.append(r["id"])
+        genders.append(g)
+        counts["unknown" if g is None else g] += 1
+    if ids:
+        await pool.execute(
+            "UPDATE unified_contacts AS u SET gender = v.g "
+            "FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::text[]) AS g) v "
+            "WHERE u.id = v.id AND u.owner_id = $3",
+            ids, genders, owner_id,
+        )
+    log.info("gender.classify_contacts owner=%s → m=%d f=%d unk=%d (of %d)",
+             owner_id, counts["m"], counts["f"], counts["unknown"], len(ids))
+    return {"m": counts["m"], "f": counts["f"],
+            "unknown": counts["unknown"], "total": len(ids)}
+
