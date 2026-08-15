@@ -62,7 +62,8 @@ def test_retries_then_succeeds(monkeypatch):
     assert isinstance(client, _FakeClient)
     assert state["connect"] == 3                  # 2 провала + успех
     assert state["make"] == 3                      # новый клиент на каждую попытку
-    assert sleeps == list(am._AUTH_DUP_BACKOFF)    # ждали оба бэк-оффа
+    # 2 провала → 2 паузы = первые два значения бэк-оффа (успех до исчерпания).
+    assert sleeps == list(am._AUTH_DUP_BACKOFF[:2])
 
 
 def test_succeeds_first_try_no_sleep(monkeypatch):
