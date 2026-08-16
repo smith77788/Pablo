@@ -2917,6 +2917,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="chip" style="flex:0 0 auto" onclick="detectDuplicates()">🔍 Дубликаты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchConflicts()">⚠️ Конфликты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchSmartTags()">🏷 Умные теги</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openIntentSensor()">🎯 Намерения</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchReminders()">⏰ Напоминания</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
     </div>
@@ -2957,6 +2958,41 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
     </div>
     <div class="lst" id="contactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════ СЕНСОР НАМЕРЕНИЙ (Vault → CRM) ══════════ -->
+<div class="screen" id="s-intent">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🎯 Сенсор намерений</div></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
+      Ключевая фраза во <b>входящем ЛС</b> (из Хранилища) → авто-стадия CRM + тег + алерт.
+      Хранилище перестаёт быть архивом и становится триггером на граф контактов.
+      Работает при подключённом Хранилище.
+    </div>
+    <div id="intentSeedBox" style="display:none;margin-bottom:8px">
+      <button class="btn btn-s" style="width:100%;font-size:13px" onclick="seedIntentDefaults()">✨ Включить рекомендованные правила</button>
+    </div>
+    <div class="sec" style="margin-top:4px">➕ Новое правило</div>
+    <div style="background:var(--bg2);border-radius:12px;padding:12px;margin-bottom:10px">
+      <input type="text" id="intPhrase" placeholder="Фраза (напр. «цена», «купить»)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <select id="intStage" class="inp" style="flex:1;box-sizing:border-box">
+          <option value="">— стадия не менять —</option>
+          <option value="lead">Лид</option><option value="contact">Контакт</option>
+          <option value="proposal">Предложение</option><option value="negotiation">Переговоры</option>
+          <option value="won">Выиграно</option><option value="lost">Проиграно</option>
+        </select>
+        <input type="text" id="intTag" placeholder="тег" class="inp" style="flex:1;box-sizing:border-box">
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
+        <input type="checkbox" id="intNotify" checked style="width:16px;height:16px"> Уведомлять в ЛС при срабатывании
+      </label>
+      <div id="intErr" style="color:var(--red);font-size:13px;min-height:16px"></div>
+      <button class="btn btn-p" style="width:100%" onclick="addIntentRule()">Добавить правило</button>
+    </div>
+    <div class="sec">Правила</div>
+    <div class="lst" id="intentRules"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -12773,6 +12809,67 @@ async function submitContactWrite() {
     toast(`✉️ Отправка запущена (операция #${r.op_id}) — ${r.accounts} акк.`);
   } catch(e) { err.textContent = e.message || 'Ошибка'; }
 }
+// ── Сенсор намерений (Vault → CRM) ──────────────────────────────────────────
+const INTENT_STAGE_LABELS = {lead:'Лид',contact:'Контакт',proposal:'Предложение',negotiation:'Переговоры',won:'Выиграно',lost:'Проиграно'};
+async function openIntentSensor() {
+  push('s-intent');
+  loadIntentRules();
+}
+async function loadIntentRules() {
+  const box = document.getElementById('intentRules');
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/uch/intent/rules');
+    const rules = d.rules || [];
+    document.getElementById('intentSeedBox').style.display = rules.length ? 'none' : 'block';
+    if (!rules.length) { box.innerHTML = empty('🎯','Правил пока нет','Добавьте своё или включите рекомендованные'); return; }
+    box.innerHTML = rules.map(r=>{
+      const act = [r.stage?('→ '+(INTENT_STAGE_LABELS[r.stage]||r.stage)):'', r.tag?('🏷 '+esc(r.tag)):''].filter(Boolean).join(' · ');
+      return `<div class="li" style="opacity:${r.is_active?'1':'.5'}">
+        <div class="li-body">
+          <div class="li-name">«${esc(r.phrase)}» ${r.notify?'🔔':''}</div>
+          <div class="li-sub">${act||'— без действия —'} · сработ.: ${r.hits||0}</div>
+        </div>
+        <div class="li-right" style="display:flex;gap:8px;align-items:center">
+          <span style="cursor:pointer;font-size:15px" onclick="toggleIntentRule(${r.id})" title="Вкл/выкл">${r.is_active?'⏸':'▶️'}</span>
+          <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id})" title="Удалить">🗑</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){ box.innerHTML = errHtml(e.message,'loadIntentRules()'); }
+}
+async function addIntentRule() {
+  const phrase = (document.getElementById('intPhrase').value||'').trim();
+  const stage = document.getElementById('intStage').value || null;
+  const tag = (document.getElementById('intTag').value||'').trim() || null;
+  const notify = document.getElementById('intNotify').checked;
+  const err = document.getElementById('intErr');
+  if (!phrase) { err.textContent = 'Введите фразу'; return; }
+  if (!stage && !tag) { err.textContent = 'Укажите стадию или тег — иначе правило ничего не делает'; return; }
+  try {
+    await api('/api/miniapp/uch/intent/rule', {method:'POST', body:JSON.stringify({phrase, stage, tag, notify})});
+    document.getElementById('intPhrase').value = ''; document.getElementById('intTag').value = '';
+    err.textContent = '';
+    loadIntentRules();
+  } catch(e){ err.textContent = e.message || 'Ошибка'; }
+}
+async function toggleIntentRule(id) {
+  try { await api('/api/miniapp/uch/intent/rule/'+id+'/toggle', {method:'POST'}); loadIntentRules(); }
+  catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function deleteIntentRule(id) {
+  if (!await askConfirm('Удалить правило?')) return;
+  try { await api('/api/miniapp/uch/intent/rule/'+id, {method:'DELETE'}); loadIntentRules(); }
+  catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function seedIntentDefaults() {
+  try {
+    const r = await api('/api/miniapp/uch/intent/seed', {method:'POST'});
+    toast(`✨ Добавлено правил: ${r.added||0}`);
+    loadIntentRules();
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
 // История переписки контакта — из «Хранилища» (диалог = telegram_user_id).
 function openContactHistory() {
   const c = window._cdContact || {};

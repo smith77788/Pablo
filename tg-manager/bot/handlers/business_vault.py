@@ -142,8 +142,8 @@ async def _owner_for(pool: asyncpg.Pool, conn_id: str | None) -> int | None:
 
 
 @router.business_message()
-async def on_business_message(message: Message, pool: asyncpg.Pool) -> None:
-    """Новое сообщение в бизнес-чате пользователя — архивируем."""
+async def on_business_message(message: Message, bot: Bot, pool: asyncpg.Pool) -> None:
+    """Новое сообщение в бизнес-чате пользователя — архивируем + сенсор намерений."""
     conn_id = getattr(message, "business_connection_id", None)
     owner_id = await _owner_for(pool, conn_id)
     if owner_id is None:
@@ -153,6 +153,15 @@ async def on_business_message(message: Message, pool: asyncpg.Pool) -> None:
         await vault.archive_message(pool, message, owner_id, conn_id)
     except Exception:
         log.exception("vault: archive_message failed owner=%s", owner_id)
+    # Сенсор намерений: только ВХОДЯЩИЕ (что написал собеседник). Fail-open —
+    # сбой сенсора не должен ломать архивацию.
+    try:
+        if vault.direction_of(message, owner_id) == "in":
+            from services import intent_sensor
+            await intent_sensor.scan_incoming(
+                pool, bot, owner_id, vault.peer_of(message), vault.text_of(message))
+    except Exception:
+        log.debug("vault: intent_sensor failed owner=%s", owner_id)
 
 
 @router.edited_business_message()

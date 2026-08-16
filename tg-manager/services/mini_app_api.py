@@ -15290,6 +15290,72 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("uch_segment_invite uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def uch_intent_rules(request: web.Request) -> web.Response:
+        """Правила сенсора намерений (Vault → CRM) владельца."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import intent_sensor
+        try:
+            rules = await intent_sensor.list_rules(pool, uid)
+            return _json_resp({"rules": rules, "stages": list(intent_sensor.VALID_STAGES)})
+        except Exception as exc:
+            log.exception("uch_intent_rules uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_intent_rule_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        from services import intent_sensor
+        try:
+            rid = await intent_sensor.add_rule(
+                pool, uid, body.get("phrase"), body.get("stage") or None,
+                body.get("tag") or None, bool(body.get("notify", True)))
+            return _json_resp({"ok": True, "id": rid})
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        except Exception as exc:
+            log.exception("uch_intent_rule_create uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_intent_rule_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info["rule_id"])
+        except (KeyError, ValueError):
+            return _err("bad rule_id", 400)
+        from services import intent_sensor
+        ok = await intent_sensor.delete_rule(pool, uid, rid)
+        return _json_resp({"ok": ok})
+
+    async def uch_intent_rule_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info["rule_id"])
+        except (KeyError, ValueError):
+            return _err("bad rule_id", 400)
+        from services import intent_sensor
+        await intent_sensor.toggle_rule(pool, uid, rid)
+        return _json_resp({"ok": True})
+
+    async def uch_intent_seed(request: web.Request) -> web.Response:
+        """Включить рекомендованный набор правил в один тап."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import intent_sensor
+        added = await intent_sensor.seed_default_rules(pool, uid)
+        return _json_resp({"ok": True, "added": added})
+
     async def uch_contact_update(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -15941,6 +16007,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
     app.router.add_post("/api/miniapp/uch/segment/media", uch_segment_media)
     app.router.add_post("/api/miniapp/uch/segment/invite", uch_segment_invite)
+    app.router.add_get("/api/miniapp/uch/intent/rules", uch_intent_rules)
+    app.router.add_post("/api/miniapp/uch/intent/rule", uch_intent_rule_create)
+    app.router.add_delete("/api/miniapp/uch/intent/rule/{rule_id}", uch_intent_rule_delete)
+    app.router.add_post("/api/miniapp/uch/intent/rule/{rule_id}/toggle", uch_intent_rule_toggle)
+    app.router.add_post("/api/miniapp/uch/intent/seed", uch_intent_seed)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
     app.router.add_get("/api/miniapp/uch/search", uch_search)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
