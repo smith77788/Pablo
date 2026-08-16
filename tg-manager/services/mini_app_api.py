@@ -6319,6 +6319,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_rights_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def campaign_plan(request: web.Request) -> web.Response:
+        """Планировщик кампании: цель (+N участников к сроку) → ёмкостная раскладка."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        goal = validate_integer(body.get("goal_count"), min_val=1, max_val=1000000)
+        if not goal:
+            return _err("Укажите цель (+N участников)", 400)
+        deadline = validate_integer(body.get("deadline_days"), min_val=1, max_val=365) or 7
+        method = str(body.get("method") or "direct").strip().lower()
+        if method not in ("direct", "admin", "link"):
+            method = "direct"
+        try:
+            from services import campaign_planner
+            rep = await campaign_planner.plan(pool, uid, goal, deadline, method)
+            return _json_resp(rep)
+        except Exception as exc:
+            log.exception("campaign_plan uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def fleet_governor_status(request: web.Request) -> web.Response:
         """Состояние глобального губернатора темпа: уровень, множитель, причина."""
         uid = _get_uid(request)
@@ -7425,6 +7449,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 params["volume_mode"] = "progressive"
             if account_ids:
                 params["account_ids"] = account_ids
+            # Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.
+            _wt = validate_string(body.get("welcome_message"), max_len=2048)
+            if _wt and not check_sql_suspicious(_wt):
+                params["welcome"] = {"text": _wt,
+                                     "delay": _clamp(body.get("welcome_delay"), 5, 600, 45)}
             op_id = await pool.fetchval(
                 "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
                 "VALUES($1,'mass_invite','pending',$2,1,$3) RETURNING id",
@@ -13379,6 +13408,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
     app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
+    app.router.add_post("/api/miniapp/campaign/plan", campaign_plan)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
     app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)

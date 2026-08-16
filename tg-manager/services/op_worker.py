@@ -383,6 +383,52 @@ async def _governed_sleep(pool, owner_id: int, base: float) -> None:
     await asyncio.sleep(await _governed_delay(pool, owner_id, base))
 
 
+async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
+    """Шов «Инвайт → Welcome»: после успешного инвайта разослать приветствие тем,
+    кто РЕАЛЬНО добавлен (operation_log.status='ok'). Только методы, где ok = член
+    группы (direct/admin) — при 'link' само приглашение и есть DM. Fail-open."""
+    w = params.get("welcome")
+    if not isinstance(w, dict):
+        return
+    method = str(params.get("invite_method") or "direct").lower()
+    if method not in ("direct", "admin"):
+        return
+    text = (w.get("text") or "").strip()
+    if not text:
+        return
+    try:
+        rows = await _safe_fetch(
+            pool,
+            "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='ok' "
+            "AND target IS NOT NULL AND target <> 'promote'", op_id)
+        # 'promote' — мета-цель промоут-трюка, не получатель (фильтруем и в Python).
+        targets = [r["target"] for r in (rows or []) if r["target"] and r["target"] != "promote"]
+        if not targets:
+            return
+        acc_ids = [int(x) for x in (params.get("account_ids") or []) if str(x).isdigit()]
+        if not acc_ids:
+            arows = await _safe_fetch(
+                pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                "AND session_str IS NOT NULL", owner_id)
+            acc_ids = [int(r["id"]) for r in (arows or [])]
+        if not acc_ids:
+            return
+        delay = int(w.get("delay") or 45)
+        from services import operation_bus
+        _CH = 1000
+        for i in range(0, len(targets), _CH):
+            chunk = targets[i:i + _CH]
+            await operation_bus.submit(
+                pool, owner_id, "bulk_dm_adhoc",
+                {"account_ids": acc_ids, "usernames": chunk, "text": text, "delay": delay},
+                total_items=len(chunk),
+                label=f"Welcome вступившим ч.{i // _CH + 1}: {len(chunk)}")
+        log.info("chain_welcome op=%d owner=%s → %d получателей", op_id, owner_id, len(targets))
+    except Exception:
+        log_exc_swallow(log, f"_chain_welcome op={op_id}")
+
+
 # ── Retry Intelligence ─────────────────────────────────────────────────────────
 
 _RETRYABLE_ERRORS = {
@@ -9654,6 +9700,8 @@ async def _exec_mass_invite(
            if _left and not _next_op and not group_broken and not flood_storm
            and not _all_failed_connect else "")
     )
+    # Шов «Инвайт → Welcome»: приветствие реально добавленным (если настроено).
+    await _chain_welcome(pool, owner_id, op_id, params)
     return {"status": "done", "ok": total_ok, "failed": total_fail,
             "left": _left, "next_op_id": _next_op,
             "worked_accounts": _engaged_n, "noconnect": _idle_other,

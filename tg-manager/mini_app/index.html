@@ -3980,12 +3980,42 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ SCREEN: MASS INVITER ══════════════════════ -->
+<!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
+<div class="screen" id="s-campaign">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🎯 Планировщик кампании</div></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
+      Задай исход — планировщик посчитает по <b>реальной ёмкости флота</b>: реально
+      ли к сроку, сколько в день и на аккаунт, чего не хватает. Без «магии ИИ» —
+      чистая арифметика ёмкости под ограничением ban-rate.
+    </div>
+    <div style="padding:4px 0 8px;display:flex;flex-direction:column;gap:10px">
+      <div class="field"><label>Цель: +N участников</label><input type="number" id="cpGoal" placeholder="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div class="field"><label>Срок, дней</label><input type="number" id="cpDeadline" placeholder="7" min="1" value="7" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div class="field"><label>Канал / чат (для запуска)</label><input type="text" id="cpGroup" placeholder="@group или t.me/... (необязательно для расчёта)" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div class="field"><label>Способ инвайта</label>
+        <select id="cpMethod" class="inp" style="width:100%;box-sizing:border-box">
+          <option value="direct">➕ Обычный</option>
+          <option value="admin">👑 Через админку</option>
+          <option value="link">🔗 Ссылка в ЛС</option>
+        </select>
+      </div>
+      <div class="field"><label>✉️ Welcome вступившим (необязательно)</label>
+        <textarea id="cpWelcome" rows="2" placeholder="Приветствие тем, кто вступит" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
+      </div>
+      <button class="btn btn-p" style="width:100%" onclick="computeCampaignPlan()">📐 Рассчитать план</button>
+    </div>
+    <div id="cpResult" style="padding:4px 0"></div>
+  </div>
+</div>
+
 <div class="screen" id="s-massinvite">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📨 Массовый инвайт</div>
   </div>
   <div class="sub-sb">
+    <button class="btn btn-s" style="width:100%;margin:6px 0 4px;font-size:13px" onclick="openCampaignPlanner()">🎯 Планировщик: цель → план по ёмкости флота</button>
     <div id="governorBar" style="display:none;margin:6px 0 8px;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.4"></div>
     <details style="margin:2px 0 8px">
       <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 16px">📊 Аналитика флота и рекомендации</summary>
@@ -4074,6 +4104,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div style="font-size:12px;color:var(--hint);margin-top:4px">
           «Прогрессивно»: свежим мало (5), через 3 дня — 12, через неделю — 25,
           дальше до 50. Не жжём молодые аккаунты.
+        </div>
+      </div>
+      <div class="field">
+        <label>✉️ Welcome вступившим (необязательно)</label>
+        <textarea id="massInviteWelcome" rows="2" placeholder="Автосообщение тем, кто реально вступил (для «Обычный»/«Через админку»). Пусто — не слать." style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px">
+          Инвайт → вступление → приветствие одной транзакцией. Уйдёт только
+          реально добавленным, с защитой темпа (губернатор). Не для метода «ссылка».
         </div>
       </div>
       <div class="field">
@@ -14063,7 +14101,7 @@ async function openMassInvite() {
   loadInviteAdvice();
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
-  ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc','massInviteWelcome'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
   ['massInviteRights','massInviteListPreview','massInviteReadiness'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
   INV_IMPORT_OK = 0;
   INV_FILE_REFS = null; INV_FILE_PHONES = null;
@@ -14134,6 +14172,51 @@ let _invPreviewT = null;
 let INV_IMPORT_OK = 0;     // распознанных целей в текущем списке (для подтверждения)
 let INV_FILE_REFS = null;  // предразобранный список из файла (user_refs)
 let INV_FILE_PHONES = null;// предразобранный список из файла (phones)
+// ── Планировщик кампании (цель → план по ёмкости) ───────────────────────────
+let CAMPAIGN_PLAN = null;
+function openCampaignPlanner() { push('s-campaign'); }
+async function computeCampaignPlan() {
+  const goal = parseInt(document.getElementById('cpGoal').value) || 0;
+  const deadline = parseInt(document.getElementById('cpDeadline').value) || 7;
+  const method = document.getElementById('cpMethod').value || 'direct';
+  const el = document.getElementById('cpResult');
+  if (goal < 1) { el.innerHTML = '<div style="color:var(--red);font-size:13px">Укажите цель (+N участников)</div>'; return; }
+  el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const p = await api('/api/miniapp/campaign/plan', {method:'POST', body:JSON.stringify({goal_count:goal, deadline_days:deadline, method})});
+    CAMPAIGN_PLAN = p;
+    const okColor = p.feasible ? 'var(--green)' : 'var(--orange)';
+    const row = (k,v)=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--sep)"><span style="color:var(--hint)">${k}</span><b>${v}</b></div>`;
+    el.innerHTML =
+      `<div style="padding:12px;background:var(--bg2);border-radius:12px;margin-top:4px">
+        <div style="font-size:14px;font-weight:600;color:${okColor};margin-bottom:8px">${esc(p.verdict||'')}</div>
+        ${row('Флот (активных)', p.fleet_accounts)}
+        ${row('Дневная ёмкость', p.daily_capacity+' инв./сут')}
+        ${row('Доля вступивших', Math.round(p.join_yield*100)+'%')}
+        ${row('Нужно пригласить', p.invites_needed)}
+        ${row('Нужно в день (к сроку)', p.needed_daily)}
+        ${row('При текущей ёмкости', (p.days_at_capacity!=null?('~'+p.days_at_capacity+' дн.'):'—'))}
+        ${row('Рекоменд. лимит/аккаунт', p.recommended_per_account)}
+        ${p.extra_accounts?row('Не хватает аккаунтов', '+'+p.extra_accounts):''}
+      </div>
+      <button class="btn btn-p" style="width:100%;margin-top:10px" onclick="launchFromPlan()">🚀 Открыть инвайт с этими настройками</button>`;
+  } catch(e){ el.innerHTML = '<div style="color:var(--red);font-size:13px">'+esc(e.message||'Ошибка')+'</div>'; }
+}
+async function launchFromPlan() {
+  if (!CAMPAIGN_PLAN) return;
+  const group = (document.getElementById('cpGroup').value||'').trim();
+  const method = document.getElementById('cpMethod').value || 'direct';
+  const welcome = (document.getElementById('cpWelcome').value||'').trim();
+  const perAcc = CAMPAIGN_PLAN.recommended_per_account || '';
+  await openMassInvite();  // сбрасывает поля — заполняем ПОСЛЕ
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e&&v!=null&&v!=='') e.value=v; };
+  set('massInviteGroup', group);
+  const mEl = document.getElementById('massInviteMethod'); if (mEl) mEl.value = method;
+  set('massInvitePerAcc', perAcc);
+  set('massInviteWelcome', welcome);
+  toast('⚙️ Настройки из плана подставлены — выберите источник аудитории и запустите');
+}
+
 // Глобальный губернатор темпа: показывает, замедляет ли давление флот прямо сейчас.
 async function loadGovernorBar() {
   const el = document.getElementById('governorBar');
@@ -14411,6 +14494,9 @@ async function submitMassInvite() {
   body.invite_method = document.getElementById('massInviteMethod')?.value || 'direct';
   const _vm = document.getElementById('massInviteVolMode')?.value;
   if (_vm === 'progressive') body.volume_mode = 'progressive';
+  // Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.
+  const _wm = (document.getElementById('massInviteWelcome')?.value||'').trim();
+  if (_wm) body.welcome_message = _wm;
   // Фильтры аудитории (только с username / не бот / premium / активные) —
   // применяются в исполнителе теми же условиями, что парсер-вью.
   const _af = {};
