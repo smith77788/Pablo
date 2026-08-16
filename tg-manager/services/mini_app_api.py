@@ -6319,6 +6319,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_rights_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def organism_pulse(request: web.Request) -> web.Response:
+        """Живой пульс организма: единый контекст + цепочки следующих действий."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.organism import brain
+            return _json_resp(await brain.pulse(pool, uid))
+        except Exception as exc:
+            log.exception("organism_pulse uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def organism_dismiss(request: web.Request) -> web.Response:
+        """Отклонить подсказку — организм её больше не показывает."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        sid = str(body.get("id") or "").strip()[:64]
+        if not sid:
+            return _err("Нет id подсказки", 400)
+        from services.organism import spine
+        cur = await spine.state_get(pool, uid, "dismissed", []) or []
+        if sid not in cur:
+            cur.append(sid)
+            await spine.state_set(pool, uid, "dismissed", cur[-100:])
+        return _json_resp({"ok": True})
+
     async def campaign_plan(request: web.Request) -> web.Response:
         """Планировщик кампании: цель (+N участников к сроку) → ёмкостная раскладка."""
         uid = _get_uid(request)
@@ -6338,6 +6369,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import campaign_planner
             rep = await campaign_planner.plan(pool, uid, goal, deadline, method)
+            # Цель становится общим состоянием организма (мозг о ней знает).
+            try:
+                from services.organism import spine
+                await spine.state_set(pool, uid, "goal", {
+                    "goal": goal, "deadline_days": deadline, "method": method,
+                    "label": f"+{goal} за {deadline} дн."})
+            except Exception:
+                pass
             return _json_resp(rep)
         except Exception as exc:
             log.exception("campaign_plan uid=%s", uid)
@@ -13409,6 +13448,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
     app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_post("/api/miniapp/campaign/plan", campaign_plan)
+    app.router.add_get("/api/miniapp/organism/pulse", organism_pulse)
+    app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
     app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)
