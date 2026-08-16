@@ -15276,14 +15276,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["phones"] = phones
         if method == "link" and body.get("link_message"):
             params["link_message"] = str(body.get("link_message"))[:500]
+        n_targets = len(user_refs) + len(phones)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'mass_invite','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps(params), len(user_refs) + len(phones),
-                f"Сегмент-инвайт → {group}: {len(user_refs) + len(phones)} × {len(acc_ids)} акк.")
-            return _json_resp({"ok": True, "op_id": int(op_id),
-                               "targets": len(user_refs) + len(phones), "accounts": len(acc_ids)})
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "mass_invite", params, total_items=n_targets,
+                label=f"Сегмент-инвайт → {group}: {n_targets} × {len(acc_ids)} акк.")
+            return _json_resp({"ok": True, "op_id": op_id,
+                               "targets": n_targets, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("uch_segment_invite uid=%s", uid)
             return _err(str(exc), 500)

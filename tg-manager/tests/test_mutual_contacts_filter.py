@@ -16,7 +16,8 @@ from services import mini_app_api
 def test_repository_supports_mutual_only():
     sig = inspect.signature(repository.get_contacts)
     assert "mutual_only" in sig.parameters
-    src = inspect.getsource(repository.get_contacts)
+    # Условие вынесено в единый конструктор WHERE (общий для списка и сегмента).
+    src = inspect.getsource(repository._segment_where)
     assert "is_mutual = TRUE" in src
 
 

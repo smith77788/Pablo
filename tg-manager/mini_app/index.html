@@ -937,8 +937,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="mbg" id="mo-contact-write" onclick="if(event.target===this)closeModal('mo-contact-write')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-contact-write')">✕</div>
-    <div class="modal-title">✍️ Написать контакту</div>
-    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить (по умолчанию — те, где контакт найден). Отправка идёт с защитой от бана.</div>
+    <div class="modal-title" id="ccwTitle">✍️ Написать контакту</div>
+    <div id="ccwPreview" style="display:none;font-size:12px;background:var(--bg2);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.4"></div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить. Отправка идёт с защитой от бана (темп/флуд-контроль).</div>
     <div style="font-size:12px;font-weight:600;margin:6px 0 4px">С каких аккаунтов:</div>
     <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
     <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
@@ -953,7 +954,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="mbg" id="mo-contact-invite" onclick="if(event.target===this)closeModal('mo-contact-invite')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-contact-invite')">✕</div>
-    <div class="modal-title">➕ Пригласить контакт</div>
+    <div class="modal-title" id="cciTitle">➕ Пригласить контакт</div>
+    <div id="cciPreview" style="display:none;font-size:12px;background:var(--bg2);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.4"></div>
     <input type="text" id="cciGroup" placeholder="@канал_или_чат или ссылка t.me/..." class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     <select id="cciMethod" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
       <option value="direct">Обычный инвайт</option>
@@ -2928,11 +2930,27 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
       <div class="seg-opt" onclick="filterContacts('mutual',this)">↔ Взаимные</div>
     </div>
+    <!-- Доп. оси сегмента: пол и CRM-стадия (комбинируются с фильтром выше) -->
+    <div style="display:flex;gap:6px;padding:4px 0 2px;overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <span class="chip contact-gender" data-g="m" style="flex:0 0 auto" onclick="toggleGenderFilter('m',this)">♂ М</span>
+      <span class="chip contact-gender" data-g="f" style="flex:0 0 auto" onclick="toggleGenderFilter('f',this)">♀ Ж</span>
+      <span class="chip contact-gender" data-g="unknown" style="flex:0 0 auto" onclick="toggleGenderFilter('unknown',this)">? не опр.</span>
+      <span style="flex:0 0 auto;width:1px;background:var(--sep);margin:3px 2px"></span>
+      <span class="chip contact-stage" data-s="lead" style="flex:0 0 auto" onclick="toggleStageFilter('lead',this)">Лид</span>
+      <span class="chip contact-stage" data-s="contact" style="flex:0 0 auto" onclick="toggleStageFilter('contact',this)">Контакт</span>
+      <span class="chip contact-stage" data-s="proposal" style="flex:0 0 auto" onclick="toggleStageFilter('proposal',this)">Предложение</span>
+      <span class="chip contact-stage" data-s="negotiation" style="flex:0 0 auto" onclick="toggleStageFilter('negotiation',this)">Переговоры</span>
+      <span class="chip contact-stage" data-s="won" style="flex:0 0 auto" onclick="toggleStageFilter('won',this)">Выиграно</span>
+      <span class="chip contact-stage" data-s="lost" style="flex:0 0 auto" onclick="toggleStageFilter('lost',this)">Проиграно</span>
+    </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
     <div id="contactFilterHint" style="display:none;font-size:12px;color:var(--hint);padding:2px 2px 6px;line-height:1.35"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
-      <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span></div>
+      <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span>
+        <span id="contactWholeToggle" onclick="toggleSegmentWhole()" style="margin-left:8px;cursor:pointer;font-size:12px;color:var(--accent)">весь срез</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-p" style="font-size:11px" onclick="openSegmentWrite()">✍️ Написать</button>
+        <button class="btn btn-s" style="font-size:11px" onclick="openSegmentInvite()">➕ Пригласить</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkTagSelected()">🏷 Тег</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkFavSelected()">⭐ Избранное</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkDeleteSelected()">🗑 Удалить</button>
@@ -12155,6 +12173,39 @@ async function applySeoAll() {
 
 // ── Unified Contacts Hub ──────────────────────────────────
 let CONTACT_FILTER = null;
+let CONTACT_GENDER = null;     // 'm' | 'f' | 'unknown' | null — доп. ось сегмента
+let CONTACT_STAGE = null;      // CRM-стадия | null
+let SEGMENT_WHOLE = false;     // действие по всему срезу (а не по галочкам)
+let SEGMENT_TARGET = null;     // {mode:'whole',filters} | {mode:'ids',ids} — для модалок
+
+function toggleGenderFilter(g, el) {
+  CONTACT_GENDER = (CONTACT_GENDER === g) ? null : g;
+  document.querySelectorAll('.contact-gender').forEach(x=>x.classList.toggle('on', x.dataset.g===CONTACT_GENDER));
+  loadContacts();
+}
+function toggleStageFilter(s, el) {
+  CONTACT_STAGE = (CONTACT_STAGE === s) ? null : s;
+  document.querySelectorAll('.contact-stage').forEach(x=>x.classList.toggle('on', x.dataset.s===CONTACT_STAGE));
+  loadContacts();
+}
+function toggleSegmentWhole() {
+  SEGMENT_WHOLE = !SEGMENT_WHOLE;
+  const el = document.getElementById('contactWholeToggle');
+  if (el) { el.textContent = SEGMENT_WHOLE ? '✓ весь срез' : 'весь срез'; el.style.fontWeight = SEGMENT_WHOLE?'700':'400'; }
+}
+// Фильтры текущего среза — ОДИН источник правды для списка и действия по срезу.
+function _currentSegmentFilters() {
+  const q = (document.getElementById('contactSearch')?.value||'').trim();
+  const f = {};
+  if (q) f.search = q;
+  if (CONTACT_FILTER === 'favorite') f.favorite = 1;
+  if (CONTACT_FILTER === 'premium') f.premium = 1;
+  if (CONTACT_FILTER === 'multi') f.multi = 1;
+  if (CONTACT_FILTER === 'mutual') f.mutual = 1;
+  if (CONTACT_GENDER) f.gender = CONTACT_GENDER;
+  if (CONTACT_STAGE) f.crm_stage = CONTACT_STAGE;
+  return f;
+}
 function openContacts() { push('s-contacts'); txt('contactsList','<div class="spin-wrap"><div class="spin"></div></div>'); loadContacts(); loadContactStats(); }
 
 // ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════
@@ -12402,6 +12453,8 @@ async function loadContacts(append=false) {
     if (CONTACT_FILTER === 'premium') params.set('premium', '1');
     if (CONTACT_FILTER === 'multi') params.set('multi', '1');
     if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
+    if (CONTACT_GENDER) params.set('gender', CONTACT_GENDER);
+    if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
     params.set('limit', CONTACT_PAGE);
     params.set('offset', CONTACT_OFFSET);
     url = '/api/miniapp/uch/contacts?' + params.toString();
@@ -12610,9 +12663,10 @@ async function _renderContactAccPicker(containerId, preselectIds) {
     const accs = await api('/api/miniapp/accounts?filter=active&limit=200');
     const live = (accs.accounts||[]).filter(a=>a.is_active);
     if (!live.length) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>'; return; }
-    const pre = new Set((preselectIds||[]).map(Number));
+    const all = preselectIds === 'all';
+    const pre = new Set((all ? [] : (preselectIds||[])).map(Number));
     el.innerHTML = live.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
-      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${pre.has(+a.id)?'checked':''} style="width:16px;height:16px">
+      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${all||pre.has(+a.id)?'checked':''} style="width:16px;height:16px">
       ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('');
   } catch(e) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'; }
 }
@@ -12620,12 +12674,57 @@ function _contactPickedAccs() {
   return [...document.querySelectorAll('.ca-acc-cb:checked')].map(cb=>+cb.value);
 }
 function openContactWrite() {
+  SEGMENT_TARGET = null;
   const c = window._cdContact || {};
   if (!c.username && !c.telegram_user_id) { toast('У контакта нет @username или Telegram ID — писать некуда'); return; }
   const t = document.getElementById('ccwText'); if (t) t.value = '';
   const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
+  const ttl = document.getElementById('ccwTitle'); if (ttl) ttl.textContent = '✍️ Написать контакту';
+  const pv = document.getElementById('ccwPreview'); if (pv) pv.style.display = 'none';
   _renderContactAccPicker('ccwAccts', (window._cdSources||[]).map(s=>s.account_id));
   showModal('mo-contact-write');
+}
+
+// Что за цель у сегментного действия: весь срез (фильтры) или отмеченные id.
+function _segmentTargetInit() {
+  if (SEGMENT_WHOLE) return {mode:'whole', filters:_currentSegmentFilters()};
+  const ids = [...CONTACT_SELECTED];
+  return ids.length ? {mode:'ids', ids} : null;
+}
+async function _loadSegmentPreview(previewElId) {
+  const el = document.getElementById(previewElId);
+  if (!el || !SEGMENT_TARGET) return;
+  el.style.display = 'block';
+  el.innerHTML = '<span style="color:var(--hint)">Считаю сегмент…</span>';
+  try {
+    const body = SEGMENT_TARGET.mode==='whole' ? SEGMENT_TARGET.filters : {contact_ids:SEGMENT_TARGET.ids};
+    const p = await api('/api/miniapp/uch/segment/preview', {method:'POST', body:JSON.stringify(body)});
+    el.innerHTML = `🎯 В сегменте: <b>${p.total}</b> · адресуемых в ЛС: <b>${p.addressable_dm}</b>`
+      + (p.skipped_dm?` · без @username/ID: ${p.skipped_dm}`:'')
+      + `<br>активных аккаунтов: <b>${p.accounts_active}</b>`
+      + (p.dm_chunks>1?` · разобью на ${p.dm_chunks} операц.`:'');
+  } catch(e){ el.innerHTML = '<span style="color:#ef4444">Не удалось посчитать сегмент</span>'; }
+}
+function openSegmentWrite() {
+  SEGMENT_TARGET = _segmentTargetInit();
+  if (!SEGMENT_TARGET) { toast('Выберите контакты или включите «весь срез»'); return; }
+  const t = document.getElementById('ccwText'); if (t) t.value = '';
+  const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
+  const f = document.getElementById('ccwFile'); if (f) f.value = '';
+  const ttl = document.getElementById('ccwTitle'); if (ttl) ttl.textContent = '✍️ Написать сегменту';
+  _renderContactAccPicker('ccwAccts', 'all');   // консервативно: со всех активных (round-robin)
+  showModal('mo-contact-write');
+  _loadSegmentPreview('ccwPreview');
+}
+function openSegmentInvite() {
+  SEGMENT_TARGET = _segmentTargetInit();
+  if (!SEGMENT_TARGET) { toast('Выберите контакты или включите «весь срез»'); return; }
+  const g = document.getElementById('cciGroup'); if (g) g.value = '';
+  const e = document.getElementById('cciErr'); if (e) e.textContent = '';
+  const ttl = document.getElementById('cciTitle'); if (ttl) ttl.textContent = '➕ Пригласить сегмент';
+  _renderContactAccPicker('cciAccts', 'all');
+  showModal('mo-contact-invite');
+  _loadSegmentPreview('cciPreview');
 }
 async function submitContactWrite() {
   const text = (document.getElementById('ccwText').value||'').trim();
@@ -12635,11 +12734,31 @@ async function submitContactWrite() {
   if (!text && !file) { err.textContent = 'Введите текст или прикрепите файл'; return; }
   const accIds = _contactPickedAccs();
   if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
-  if (!await askConfirm(`Отправить ${file?'медиа':'сообщение'} контакту с ${accIds.length} аккаунт(ов)?\nУйдёт реальному человеку — отменить нельзя.`)) return;
+  const seg = SEGMENT_TARGET;
+  const who = seg ? 'СЕГМЕНТУ' : 'контакту';
+  if (!await askConfirm(`Отправить ${file?'медиа':'сообщение'} ${who} с ${accIds.length} аккаунт(ов)?\nУйдёт реальным людям — отменить нельзя.`)) return;
   try {
     let r;
+    if (seg) {
+      // Сегментное действие: весь срез (filters) или отмеченные (contact_ids).
+      if (file) {
+        const fd = new FormData();
+        fd.append('file', file); fd.append('text', text); fd.append('account_ids', accIds.join(','));
+        if (seg.mode==='whole') fd.append('filters', JSON.stringify(seg.filters));
+        else fd.append('contact_ids', JSON.stringify(seg.ids));
+        r = await api('/api/miniapp/uch/segment/media', {method:'POST', body: fd});
+      } else {
+        const body = Object.assign({text, account_ids: accIds},
+          seg.mode==='whole' ? seg.filters : {contact_ids: seg.ids});
+        r = await api('/api/miniapp/uch/segment/message', {method:'POST', body: JSON.stringify(body)});
+      }
+      closeModal('mo-contact-write');
+      if (fileEl) fileEl.value = '';
+      SEGMENT_TARGET = null;
+      toast(`✉️ Запущено: ${r.recipients} получателей${r.chunks>1?` · ${r.chunks} операц.`:` · #${r.op_ids&&r.op_ids[0]}`}`);
+      return;
+    }
     if (file) {
-      // Медиа — multipart; api() сам не форсит JSON для FormData.
       const fd = new FormData();
       fd.append('file', file);
       fd.append('text', text);
@@ -12663,11 +12782,14 @@ function openContactHistory() {
   openVaultChat(c.telegram_user_id);
 }
 function openContactInvite() {
+  SEGMENT_TARGET = null;
   const c = window._cdContact || {};
   if (!c.username && !c.telegram_user_id && !(Array.isArray(c.phones)&&c.phones.length)) {
     toast('У контакта нет @username, ID или телефона — некого приглашать'); return; }
   const g = document.getElementById('cciGroup'); if (g) g.value = '';
   const e = document.getElementById('cciErr'); if (e) e.textContent = '';
+  const ttl = document.getElementById('cciTitle'); if (ttl) ttl.textContent = '➕ Пригласить контакт';
+  const pv = document.getElementById('cciPreview'); if (pv) pv.style.display = 'none';
   _renderContactAccPicker('cciAccts', (window._cdSources||[]).map(s=>s.account_id));
   showModal('mo-contact-invite');
 }
@@ -12678,8 +12800,20 @@ async function submitContactInvite() {
   if (!group) { err.textContent = 'Укажите канал/чат'; return; }
   const accIds = _contactPickedAccs();
   if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
+  const seg = SEGMENT_TARGET;
+  if (seg && !await askConfirm(`Пригласить весь сегмент в «${group}» с ${accIds.length} аккаунт(ов)?`)) return;
   try {
-    const r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/invite',
+    let r;
+    if (seg) {
+      const body = Object.assign({group, invite_method: method, account_ids: accIds},
+        seg.mode==='whole' ? seg.filters : {contact_ids: seg.ids});
+      r = await api('/api/miniapp/uch/segment/invite', {method:'POST', body: JSON.stringify(body)});
+      closeModal('mo-contact-invite');
+      SEGMENT_TARGET = null;
+      toast(`➕ Инвайт сегмента запущен (операция #${r.op_id}) — ${r.targets} целей × ${r.accounts} акк.`);
+      return;
+    }
+    r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/invite',
       {method:'POST', body:JSON.stringify({group, invite_method: method, account_ids: accIds})});
     closeModal('mo-contact-invite');
     toast(`➕ Инвайт запущен (операция #${r.op_id}) — ${r.accounts} акк.`);
