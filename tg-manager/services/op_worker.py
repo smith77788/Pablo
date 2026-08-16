@@ -364,6 +364,25 @@ def is_account_in_use(acc_id: int) -> bool:
     return acc_id in _accounts_in_use
 
 
+# ── Глобальный губернатор темпа ─────────────────────────────────────────────
+async def _governor_mult(pool, owner_id: int) -> float:
+    """Живой множитель темпа от губернатора (≥1.0). Fail-open → 1.0."""
+    try:
+        from services import fleet_governor
+        return await fleet_governor.tempo_multiplier(pool, owner_id)
+    except Exception:
+        return 1.0
+
+
+async def _governed_delay(pool, owner_id: int, base: float) -> float:
+    """Базовая пауза, растянутая по давлению флота (НЕ трогает flood-паузы)."""
+    return float(base) * await _governor_mult(pool, owner_id)
+
+
+async def _governed_sleep(pool, owner_id: int, base: float) -> None:
+    await asyncio.sleep(await _governed_delay(pool, owner_id, base))
+
+
 # ── Retry Intelligence ─────────────────────────────────────────────────────────
 
 _RETRYABLE_ERRORS = {
@@ -2762,8 +2781,12 @@ async def _exec_mass_publish(
             "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
         )
         if delay > 0 and idx < total:
-            effective_delay = max(delay, float(flood_wait) + 5) if flood_wait else delay
-            await asyncio.sleep(effective_delay)
+            if flood_wait:
+                # Flood-пауза мандатная (Telegram) — не масштабируем губернатором.
+                await asyncio.sleep(max(delay, float(flood_wait) + 5))
+            else:
+                # Базовый темп — под глобальным губернатором (давление флота).
+                await _governed_sleep(pool, owner_id, delay)
 
     await release_accounts(mp_used_acc_ids)
 
@@ -6646,8 +6669,9 @@ async def _exec_bulk_dm_adhoc(
             "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
         )
 
-        # adaptive delay: base + any accumulated flood wait (capped at 30s)
-        wait = delay + min(flood_wait_total, 30.0)
+        # adaptive delay: базовый темп под губернатором + накопленный flood-wait
+        # (flood мандатный — не масштабируем).
+        wait = await _governed_delay(pool, owner_id, delay) + min(flood_wait_total, 30.0)
         flood_wait_total = max(0.0, flood_wait_total - delay)
         if i < total - 1:
             await asyncio.sleep(wait)

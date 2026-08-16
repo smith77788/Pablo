@@ -3986,6 +3986,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">📨 Массовый инвайт</div>
   </div>
   <div class="sub-sb">
+    <div id="governorBar" style="display:none;margin:6px 0 8px;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.4"></div>
     <details style="margin:2px 0 8px">
       <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 16px">📊 Аналитика флота и рекомендации</summary>
       <div class="sec">Сегодня по флоту</div>
@@ -14057,6 +14058,7 @@ async function openInviteAccount(accId) {
 async function openMassInvite() {
   push('s-massinvite');
   INV_PARSE_RUN = null;
+  loadGovernorBar();
   loadInviteAnalytics();
   loadInviteAdvice();
   buildInvitePresets();
@@ -14132,6 +14134,20 @@ let _invPreviewT = null;
 let INV_IMPORT_OK = 0;     // распознанных целей в текущем списке (для подтверждения)
 let INV_FILE_REFS = null;  // предразобранный список из файла (user_refs)
 let INV_FILE_PHONES = null;// предразобранный список из файла (phones)
+// Глобальный губернатор темпа: показывает, замедляет ли давление флот прямо сейчас.
+async function loadGovernorBar() {
+  const el = document.getElementById('governorBar');
+  if (!el) return;
+  try {
+    const g = await api('/api/miniapp/fleet/governor');
+    if (g.level === 'green') { el.style.display = 'none'; return; }  // спокойно — не отвлекаем
+    const c = g.level === 'red' ? 'var(--red)' : 'var(--orange)';
+    el.style.display = 'block';
+    el.style.background = g.level === 'red' ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)';
+    el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${g.multiplier}</b> · давление ${g.score}/100<br>`
+      + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
+  } catch(e) { el.style.display = 'none'; }
+}
 function _invGroup(){ return (document.getElementById('massInviteGroup')?.value||'').trim(); }
 function _invDedupLine(d){
   if (d && d.already_invited) return `<div style="color:var(--hint);margin-top:2px">♻️ уже приглашались: <b>${num(d.already_invited)}</b> · 🆕 новых: <b>${num(d.new)}</b> (уже приглашённых пропущу)</div>`;

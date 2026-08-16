@@ -6319,6 +6319,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_rights_check uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def fleet_governor_status(request: web.Request) -> web.Response:
+        """Состояние глобального губернатора темпа: уровень, множитель, причина."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import fleet_governor
+            return _json_resp(await fleet_governor.status(pool, uid))
+        except Exception as exc:
+            log.exception("fleet_governor_status uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def invite_fleet_readiness(request: web.Request) -> web.Response:
         """Паритет с ботом (пре-флайт): по целевой группе показать готовность
         флота — кто подключится, кто в группе, кто админ. Живой вызов (подключает
@@ -13366,6 +13378,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/invite/parse_file", invite_parse_file)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
+    app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
     app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)
