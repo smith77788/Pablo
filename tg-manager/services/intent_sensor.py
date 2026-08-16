@@ -187,6 +187,17 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
         except Exception:
             log.debug("intent_sensor: notify failed owner=%s", owner_id)
 
+    # Событие в общую шину организма (память + реакция мозга).
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "intent", {
+            "contact_id": str(contact_id),
+            "peer": peer.get("peer_name") or peer.get("peer_username"),
+            "stage": target_stage if stage_changed else None,
+            "tags": added_tags, "text": (text or "")[:160]})
+    except Exception:
+        pass
+
     return {"matched": len(matched), "stage": target_stage if stage_changed else None,
             "tags": added_tags, "notified": notified, "contact_id": contact_id}
 

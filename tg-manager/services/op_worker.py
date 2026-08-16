@@ -1793,6 +1793,15 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _err_text,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
+            # Событие в шину организма: операция завершена (память + реакция мозга).
+            try:
+                from services.organism import spine
+                await spine.emit(pool, owner_id, "op_done", {
+                    "op_id": op_id, "op_type": op_type, "status": _final_status,
+                    "ok": result.get("ok"), "failed": result.get("failed"),
+                    "summary": (result.get("summary") or "")[:300]})
+            except Exception:
+                pass
             # Autopost v2: рекуррентная переочередь постинг-операций в СВОИ каналы.
             # repeat_interval_min>0 → после успешного прогона ставим следующий с
             # scheduled_for=now()+interval. Только постинг-op'ы (allowlist) — чтобы
