@@ -43,3 +43,12 @@ def test_frontend_segment_source_ui():
     assert "function loadInviteSegments" in html
     assert "body.saved_segment_id" in html
     assert "/api/miniapp/uch/segments" in html
+
+
+def test_frontend_parse_run_picker_unifies_sources():
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    # прошлые запуски парсера (конкуренты/поиск) выбираются в шаге источника
+    assert "massInviteParseRunField" in html
+    assert "function loadInviteParseRuns" in html
+    assert "function selectInviteParseRun" in html
+    assert "/api/miniapp/parser/runs" in html

@@ -4149,6 +4149,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <label>Сохранённый сегмент</label>
         <select id="massInviteSegment" onchange="loadInviteAudienceSize()" class="sel"><option value="">— весь список контактов —</option></select>
       </div>
+      <div class="field" id="massInviteParseRunField" style="display:none">
+        <label>Источник парсера (конкурент/поиск)</label>
+        <select id="massInviteParseRun" onchange="selectInviteParseRun()" class="sel"><option value="">— вся аудитория парсера —</option></select>
+      </div>
       <div id="massInviteAudience" style="font-size:12px;color:var(--hint);margin:-6px 0 10px;padding:0 2px"></div>
       <div id="massInvitePreflight" style="font-size:12px;margin:-4px 0 10px;padding:0 2px"></div>
       <div class="field" id="massInviteFilters">
@@ -14588,8 +14592,28 @@ function massInviteSrcToggle() {
   const sf = document.getElementById('massInviteSegmentField');
   if (sf) sf.style.display = (src==='segment') ? 'block' : 'none';
   if (src==='segment') loadInviteSegments();
+  const pf = document.getElementById('massInviteParseRunField');
+  if (pf) pf.style.display = (src==='parsed') ? 'block' : 'none';
+  if (src==='parsed') loadInviteParseRuns();
   loadInviteAudienceSize();
   if (src==='import_list') massInviteListPreview();
+}
+// Прошлые запуски парсера (конкуренты/поиск) как выбор источника инвайта.
+async function loadInviteParseRuns() {
+  const sel = document.getElementById('massInviteParseRun');
+  if (!sel) return;
+  try {
+    const d = await api('/api/miniapp/parser/runs');
+    const runs = (d.runs||[]).filter(r=>(r.total_saved||0) > 0);
+    const cur = INV_PARSE_RUN ? String(INV_PARSE_RUN) : '';
+    sel.innerHTML = '<option value="">— вся аудитория парсера —</option>' +
+      runs.map(r=>`<option value="${r.id}"${String(r.id)===cur?' selected':''}>${esc(r.source||('запуск #'+r.id))} (${num(r.total_saved)})</option>`).join('');
+  } catch(e) {}
+}
+function selectInviteParseRun() {
+  const v = document.getElementById('massInviteParseRun')?.value;
+  INV_PARSE_RUN = v ? parseInt(v) : null;
+  loadInviteAudienceSize();
 }
 // Подтянуть сохранённые сегменты в источник инвайта (единый движок сегментов).
 async function loadInviteSegments() {
