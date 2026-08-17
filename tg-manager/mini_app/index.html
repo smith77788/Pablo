@@ -945,6 +945,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:12px;font-weight:600;margin:6px 0 4px">С каких аккаунтов:</div>
     <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
     <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <div id="ccwAbWrap" style="display:none;margin-top:8px">
+      <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block"><input type="checkbox" id="ccwAbOn" onchange="toggleAb(this)" style="vertical-align:middle"> 🧪 A/B-тест: разложить варианты по аудитории поровну</label>
+      <div id="ccwAbBox" style="display:none;margin-top:6px">
+        <textarea id="ccwVarB" rows="2" placeholder="Вариант B..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
+        <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical"></textarea>
+        <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Основной текст — вариант A. Каждый вариант уйдёт своей равной доле; сравните доставку в «Операциях» (метки A/B#1, A/B#2…).</div>
+      </div>
+    </div>
     <label style="display:block;font-size:12px;color:var(--hint);margin:8px 0 2px">📎 Медиа (необязательно, до 50 МБ):</label>
     <input type="file" id="ccwFile" style="width:100%;box-sizing:border-box;font-size:12px">
     <div id="ccwErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
@@ -12902,8 +12910,21 @@ function openContactWrite() {
   const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
   const ttl = document.getElementById('ccwTitle'); if (ttl) ttl.textContent = '✍️ Написать контакту';
   const pv = document.getElementById('ccwPreview'); if (pv) pv.style.display = 'none';
+  _resetAb(false);   // A/B — только для сегмента, не для одного контакта
   _renderContactAccPicker('ccwAccts', (window._cdSources||[]).map(s=>s.account_id));
   showModal('mo-contact-write');
+}
+// Показать/сбросить блок A/B (виден только при рассылке сегменту).
+function _resetAb(visible) {
+  const wrap = document.getElementById('ccwAbWrap');
+  if (wrap) wrap.style.display = visible ? 'block' : 'none';
+  const on = document.getElementById('ccwAbOn'); if (on) on.checked = false;
+  const box = document.getElementById('ccwAbBox'); if (box) box.style.display = 'none';
+  ['ccwVarB','ccwVarC'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+}
+function toggleAb(el) {
+  const box = document.getElementById('ccwAbBox');
+  if (box) box.style.display = el.checked ? 'block' : 'none';
 }
 
 // Что за цель у сегментного действия: весь срез (фильтры) или отмеченные id.
@@ -12995,6 +13016,7 @@ function openSegmentWrite() {
   const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
   const f = document.getElementById('ccwFile'); if (f) f.value = '';
   const ttl = document.getElementById('ccwTitle'); if (ttl) ttl.textContent = '✍️ Написать сегменту';
+  _resetAb(true);   // сегмент — A/B доступен
   _renderContactAccPicker('ccwAccts', 'all');   // консервативно: со всех активных (round-robin)
   showModal('mo-contact-write');
   _loadSegmentPreview('ccwPreview');
@@ -13033,6 +13055,13 @@ async function submitContactWrite() {
         r = await api('/api/miniapp/uch/segment/media', {method:'POST', body: fd});
       } else {
         const body = Object.assign({text, account_ids: accIds}, _segmentBody(seg));
+        const abOn = document.getElementById('ccwAbOn');
+        if (abOn && abOn.checked) {
+          const vars = [text,
+            (document.getElementById('ccwVarB').value||'').trim(),
+            (document.getElementById('ccwVarC').value||'').trim()].filter(Boolean);
+          if (vars.length >= 2) body.variants = vars;
+        }
         r = await api('/api/miniapp/uch/segment/message', {method:'POST', body: JSON.stringify(body)});
       }
       closeModal('mo-contact-write');

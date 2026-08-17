@@ -15272,11 +15272,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("bad json", 400)
+        # A/B: если передан список variants (2–4 текста) — раскладка по вариантам.
+        from services import ab_engine
+        variants = ab_engine.clean_variants(body.get("variants"))
         text = validate_string(body.get("text"), max_len=4096)
-        if not text:
+        if not variants and not text:
             return _err("Введите текст сообщения", 400)
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте", 400)
+        for _t in (variants or [text]):
+            if check_sql_suspicious(_t):
+                return _err("Недопустимые символы в тексте", 400)
         acc_ids = await _alive_accounts(
             uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
         if not acc_ids:
@@ -15290,20 +15294,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(f"Инфраструктура перегружена: {reason}", 429)
         # Консервативный темп по умолчанию (реже — безопаснее).
         delay = min(max(validate_integer(body.get("delay", 45), min_val=5, max_val=600) or 45, 5), 600)
+        # Список (вариант_текст, метка_варианта, его_получатели). Без A/B — один
+        # «вариант» со всей аудиторией. С A/B — аудитория делится поровну.
+        if variants:
+            groups = ab_engine.split_audience(refs, len(variants))
+            plan = [(variants[i], f"A/B#{i + 1}", groups[i]) for i in range(len(variants))]
+        else:
+            plan = [(text, "", refs)]
         try:
             from services import operation_bus
             op_ids = []
-            for i in range(0, len(refs), _SEG_DM_CHUNK):
-                chunk = refs[i:i + _SEG_DM_CHUNK]
-                oid = await operation_bus.submit(
-                    pool, uid, "bulk_dm_adhoc",
-                    {"account_ids": acc_ids, "usernames": chunk, "text": text, "delay": delay},
-                    total_items=len(chunk),
-                    label=f"Сегмент ЛС ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)} × {len(acc_ids)} акк.")
-                op_ids.append(oid)
+            for vtext, vlabel, vrefs in plan:
+                for i in range(0, len(vrefs), _SEG_DM_CHUNK):
+                    chunk = vrefs[i:i + _SEG_DM_CHUNK]
+                    if not chunk:
+                        continue
+                    tag = (vlabel + " ") if vlabel else ""
+                    oid = await operation_bus.submit(
+                        pool, uid, "bulk_dm_adhoc",
+                        {"account_ids": acc_ids, "usernames": chunk, "text": vtext,
+                         "delay": delay, "ab_variant": vlabel or None},
+                        total_items=len(chunk),
+                        label=f"{tag}Сегмент ЛС ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)} × {len(acc_ids)} акк.")
+                    op_ids.append(oid)
             return _json_resp({"ok": True, "op_ids": op_ids, "chunks": len(op_ids),
                                "recipients": len(refs), "skipped": len(contacts) - len(refs),
-                               "accounts": len(acc_ids)})
+                               "accounts": len(acc_ids), "variants": len(variants) or 1})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
