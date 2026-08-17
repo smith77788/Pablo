@@ -17,15 +17,24 @@ def test_forward_helper_exists():
     am = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
     assert "async def forward_new_posts" in am
     i = am.index("async def forward_new_posts")
-    fn = am[i:i + 1600]
+    fn = am[i:i + 2000]
     assert "iter_messages" in fn and "forward_messages" in fn
-    assert "min_id=int(since_msg_id" in fn and "reverse=True" in fn
+    assert "min_id=since" in fn and "reverse=True" in fn
+
+
+def test_forward_new_link_seeds_cursor_no_backlog_dump():
+    # Новая связка (курсор=0) НЕ форвардит старый бэклог — только ставит курсор.
+    am = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
+    i = am.index("async def forward_new_posts")
+    fn = am[i:i + 2000]
+    assert "if since <= 0:" in fn
+    assert '"seeded": True' in fn
 
 
 def test_deploy_creates_crosspost_rule():
     ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
     i = ow.index("async def _exec_deploy_network")
-    fn = ow[i:i + 7000]
+    fn = ow[i:i + 9500]
     assert 'etype == "crosspost"' in fn
     assert "INSERT INTO crosspost_links" in fn
 

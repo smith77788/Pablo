@@ -8071,7 +8071,13 @@ async def _exec_deploy_network(
                 manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
                 continue
             from services import nodes_engine as _ne
-            await _ne.register_community_node(pool, owner_id, int(ch_id), label)
+            cnode = await _ne.register_community_node(pool, owner_id, int(ch_id), label)
+            # Аккаунт-создатель = владелец супергруппы → пишем его админом ноды,
+            # чтобы назначение стаффа (community_set_staff) было кому промоутить.
+            try:
+                await _ne.add_node_member(pool, int(cnode["id"]), int(acc["id"]), "admin")
+            except Exception:
+                pass
             await _nb.update_node_status(pool, n["id"], "created", ref_id=int(ch_id))
             node_ref[n["id"]] = int(ch_id)
             created += 1
@@ -8189,18 +8195,29 @@ async def _exec_community_liven(
         "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
         "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
         "ORDER BY random() LIMIT $2", owner_id, count)
-    joined = 0
     chat_id = int(node["tg_chat_id"])
+    # Пригласительная ссылка через бота (он админ ноды) — так вступают и в
+    # приватную только что созданную супергруппу (по id без access_hash нельзя).
+    invite_link = None
+    try:
+        inv = await bot.create_chat_invite_link(chat_id=chat_id)
+        invite_link = getattr(inv, "invite_link", None)
+    except Exception as e:
+        log.warning("_exec_community_liven invite link op=%d chat=%s: %s", op_id, chat_id, e)
+    if not invite_link:
+        return {"status": "failed",
+                "summary": "⚠️ Оживление: бот не смог создать ссылку (нужен админ с правом приглашать)"}
+    joined = 0
     for acc in (accs or []):
         if await _is_cancelled(pool, op_id):
             break
         try:
-            res = await account_manager.join_channel_by_id(
-                acc["session_str"], chat_id, _acc=dict(acc))
+            res = await account_manager.join_channel(
+                acc["session_str"], invite_link, _acc=dict(acc))
         except Exception as e:
             log.debug("_exec_community_liven join op=%d acc=%s: %s", op_id, acc["id"], e)
             continue
-        if isinstance(res, dict) and res.get("ok"):
+        if isinstance(res, dict) and not res.get("error"):
             await nodes_engine.add_node_member(pool, node_id, int(acc["id"]), "member")
             joined += 1
             await _governed_sleep(pool, owner_id, random.uniform(20, 45))
@@ -8228,13 +8245,21 @@ async def _exec_community_set_staff(
     acc_ids = [int(x) for x in (params.get("account_ids") or []) if str(x).isdigit()]
     if not acc_ids:
         return {"status": "failed", "summary": "⚠️ Роли: не выбраны аккаунты"}
-    # Владелец ноды (создатель супергруппы) промоутит. Берём аккаунт-члена с ролью
-    # admin, иначе любой активный владельца (должен быть админом группы).
+    # Промоутить может только владелец/админ супергруппы (с правом add_admins).
+    # Берём аккаунт-члена ноды с ролью admin (это создатель супергруппы); только
+    # если такого нет — откатываемся на любой активный (может не иметь прав).
     owner_acc = await _safe_fetchrow(
-        pool, "SELECT id, session_str, device_model, system_version, app_version, "
-        "lang_code, system_lang_code, proxy_id FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL ORDER BY id LIMIT 1",
-        owner_id)
+        pool, "SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version, "
+        "a.lang_code, a.system_lang_code, a.proxy_id FROM community_node_members m "
+        "JOIN tg_accounts a ON a.id=m.account_id "
+        "WHERE m.node_id=$1 AND m.role='admin' AND a.is_active AND a.session_str IS NOT NULL "
+        "ORDER BY m.joined_at LIMIT 1", node_id)
+    if not owner_acc:
+        owner_acc = await _safe_fetchrow(
+            pool, "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, proxy_id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL ORDER BY id LIMIT 1",
+            owner_id)
     if not owner_acc:
         return {"status": "failed", "summary": "⚠️ Роли: нет аккаунта-промоутера"}
     chat_id = int(node["tg_chat_id"])

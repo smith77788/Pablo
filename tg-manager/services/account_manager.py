@@ -4272,14 +4272,21 @@ async def forward_new_posts(
     Аккаунт должен видеть источник и уметь постить в цель."""
     client = _make_client(session_string, _acc)
     forwarded = 0
-    last_id = int(since_msg_id or 0)
+    since = int(since_msg_id or 0)
+    last_id = since
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         source = await _resolve_channel_peer(client, source_channel_id, 0)
         target = await _resolve_channel_peer(client, target_channel_id, 0)
-        # min_id=since_msg_id → только новее курсора; reverse=True → хронологически.
+        # Новая связка (курсор=0): не сваливаем старый бэклог в цель — просто
+        # ставим курсор на текущий последний пост и стартуем отслеживание с «сейчас».
+        if since <= 0:
+            latest = await client.get_messages(source, limit=1)
+            seed = int(getattr(latest[0], "id", 0)) if latest else 0
+            return {"forwarded": 0, "last_msg_id": seed, "seeded": True}
+        # min_id=since → только новее курсора; reverse=True → хронологически.
         msgs = []
-        async for m in client.iter_messages(source, min_id=int(since_msg_id or 0),
+        async for m in client.iter_messages(source, min_id=since,
                                              limit=limit, reverse=True):
             if getattr(m, "service", False):
                 continue

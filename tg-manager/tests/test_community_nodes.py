@@ -117,11 +117,16 @@ def test_liven_and_staff_ops_and_schema():
         assert op in ow
     assert "async def _exec_community_liven" in ow
     assert "async def _exec_community_set_staff" in ow
-    # оживление = вступление флота + запись участником; роли = промоут
+    # оживление = вступление флота по инвайт-ссылке (работает и для приватных
+    # нод) + запись участником; роли = промоут владельцем/админом ноды
     li = ow.index("async def _exec_community_liven")
-    assert "join_channel_by_id" in ow[li:li + 2200] and "add_node_member" in ow[li:li + 2200]
+    liven = ow[li:li + 2600]
+    assert "create_chat_invite_link" in liven and "join_channel(" in liven
+    assert "add_node_member" in liven
     si = ow.index("async def _exec_community_set_staff")
-    assert "promote_to_admin" in ow[si:si + 2600]
+    staff = ow[si:si + 2800]
+    assert "promote_to_admin" in staff
+    assert "role='admin'" in staff   # промоутер — админ-член ноды (владелец)
 
 
 def test_members_endpoints_and_ui():
