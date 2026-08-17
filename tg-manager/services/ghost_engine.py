@@ -40,6 +40,43 @@ PERSONALITY_CAPS: dict[str, int] = {
 _SAFE_REACTIONS = ["👍", "❤️", "🔥", "👏", "🎉", "💯", "😮"]
 
 
+def _ghost_skip_probability(governor_level: str, local_night: bool) -> float:
+    """Вероятность ПРОПУСТИТЬ фоновое ghost-действие. Чистая, тестируемая.
+
+    Ghost — расходуемый «шум», не операция: под давлением флота гасим его
+    первым, а в локальную ночь аккаунт в основном «спит».
+    """
+    p = 0.0
+    if governor_level == "red":
+        p = 0.8
+    elif governor_level == "amber":
+        p = 0.4
+    if local_night:
+        p = max(p, 0.7)
+    return p
+
+
+async def _ghost_allowed(pool, owner_id, geo_country, now) -> bool:
+    """Разрешить фоновое ghost-действие сейчас? Fail-open → True (не глушим зря).
+
+    Только skip-гейт: НЕ создаёт новых подключений сессий. Уважает губернатор
+    (кэш 45с, без нагрузки) и локальную ночь аккаунта (гео прокси)."""
+    try:
+        level = "green"
+        if owner_id:
+            from services import fleet_governor
+            mult = await fleet_governor.tempo_multiplier(pool, owner_id)
+            level = fleet_governor.level_for_multiplier(mult)
+        try:
+            from services import geo_tempo
+            night = geo_tempo.is_local_night(geo_country, now)
+        except Exception:
+            night = False
+        return random.random() >= _ghost_skip_probability(level, night)
+    except Exception:
+        return True
+
+
 # ─── DB helpers ───────────────────────────────────────────────────────────────
 
 
@@ -216,10 +253,10 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
 
     acc = await pool.fetchrow(
         """
-        SELECT a.id, a.session_str, a.cooldown_until,
+        SELECT a.id, a.owner_id, a.session_str, a.cooldown_until,
                a.device_model, a.system_version, a.app_version,
                a.lang_code, a.system_lang_code,
-               p.proxy_url
+               p.proxy_url, p.geo_country
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
         WHERE a.id = $1 AND a.in_operation = FALSE AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
@@ -230,6 +267,13 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
         return
 
     if acc["cooldown_until"] and acc["cooldown_until"].replace(tzinfo=timezone.utc) > now:
+        return
+
+    # Ghost — фоновый шум, а не операция: под давлением флота его гасим первым
+    # (лишняя активность при рисках банов — плохой размен). И уважаем ЛОКАЛЬНУЮ
+    # ночь аккаунта: глубокой ночью «человек» спит. Оба — additive skip-гейты,
+    # новых подключений сессий не создают.
+    if not await _ghost_allowed(pool, acc["owner_id"], acc["geo_country"], now):
         return
 
     session = acc["session_str"]
