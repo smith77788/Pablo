@@ -40,6 +40,23 @@ def test_executor_creates_persists_and_wires():
     assert "BotFather" in fn
 
 
+def test_executor_handles_attach_discussion_group():
+    src = _ow()
+    i = src.index("async def _exec_deploy_network")
+    fn = src[i:i + 7000]
+    # attach/link рёбра прикрепляют группу как чат обсуждений
+    assert "set_discussion_group" in fn
+    assert '"attach", "link"' in fn
+    # crosspost — ручной шаг (нативного API нет)
+    assert '== "crosspost"' in fn
+
+
+def test_set_discussion_group_helper_exists():
+    am = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
+    assert "async def set_discussion_group" in am
+    assert "SetDiscussionGroupRequest" in am
+
+
 def test_deploy_endpoint_goes_through_bus():
     src = _api()
     i = src.index("async def network_deploy(")

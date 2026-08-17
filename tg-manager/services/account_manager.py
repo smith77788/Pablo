@@ -4190,6 +4190,40 @@ async def promote_to_admin(
             log_exc_swallow(log, "Сбой в promote_to_admin")
 
 
+async def set_discussion_group(
+    session_string: str,
+    channel_id: int | str,
+    group_id: int | str,
+    _acc: dict | None = None,
+    channel_hash: int = 0,
+    group_hash: int = 0,
+) -> bool:
+    """Привязать группу как чат обсуждений (комментарии) к каналу.
+
+    Вызывающий аккаунт должен быть админом обоих объектов. Группа должна быть
+    супергруппой. Возвращает True при успехе. Используется связками (ребро
+    'attach': чат прикреплён к каналу)."""
+    from telethon.tl.functions.channels import SetDiscussionGroupRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        channel = await _resolve_channel_peer(client, channel_id, channel_hash)
+        group = await _resolve_channel_peer(client, group_id, group_hash)
+        await client(SetDiscussionGroupRequest(broadcast=channel, group=group))
+        log.info("set_discussion_group: group %s linked to channel %s", group_id, channel_id)
+        return True
+    except Exception as e:
+        log.warning("set_discussion_group error chan=%s group=%s: %s",
+                    channel_id, group_id, e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в set_discussion_group")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTENT OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════

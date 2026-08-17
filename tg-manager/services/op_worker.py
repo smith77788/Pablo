@@ -8015,6 +8015,7 @@ async def _exec_deploy_network(
     acc = dict(arow)
 
     node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
+    node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
     created = wired = 0
     manual: list[str] = []
     for n in nodes:
@@ -8052,25 +8053,43 @@ async def _exec_deploy_network(
         elif ntype == "bot":
             manual.append(f"{label}: бота создайте через @BotFather (Manager Mode)")
 
-    # Рёбра «admin»: назначить узел-источник (бот/аккаунт с известным user_id)
-    # админом узла-канала. Промоутит аккаунт-создатель (он владелец созданных).
+    # Рёбра: admin — назначить узел-источник администратором узла-канала;
+    # attach/link — прикрепить группу как чат обсуждений к каналу. Всё делает
+    # аккаунт-создатель (владелец созданных объектов). crosspost — нативного API
+    # нет, помечаем как ручной шаг.
     for e in edges:
-        if (e.get("edge_type") or "").lower() != "admin":
-            continue
+        etype = (e.get("edge_type") or "").lower()
         if await _is_cancelled(pool, op_id):
             break
-        target_ch = node_ref.get(e.get("target_node_id"))
-        promote_uid = node_ref.get(e.get("source_node_id"))
-        if not target_ch or not promote_uid:
-            continue
-        try:
-            ok = await account_manager.promote_to_admin(
-                acc["session_str"], target_ch, int(promote_uid), _acc=acc)
-            if ok:
-                wired += 1
-                await _governed_sleep(pool, owner_id, random.uniform(10, 25))
-        except Exception as e:
-            log.debug("_exec_deploy_network wire op=%d: %s", op_id, e)
+        s_id, t_id = e.get("source_node_id"), e.get("target_node_id")
+        src_ref, dst_ref = node_ref.get(s_id), node_ref.get(t_id)
+        if etype == "admin":
+            if not dst_ref or not src_ref:
+                continue
+            try:
+                if await account_manager.promote_to_admin(
+                        acc["session_str"], dst_ref, int(src_ref), _acc=acc):
+                    wired += 1
+                    await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+            except Exception as ex:
+                log.debug("_exec_deploy_network admin op=%d: %s", op_id, ex)
+        elif etype in ("attach", "link"):
+            if not src_ref or not dst_ref:
+                continue
+            # Канал = broadcast-узел, группа = megagroup-узел. Определяем по типу.
+            if node_type.get(s_id) in ("group", "chat") and node_type.get(t_id) == "channel":
+                channel_ref, group_ref = dst_ref, src_ref
+            else:
+                channel_ref, group_ref = src_ref, dst_ref
+            try:
+                if await account_manager.set_discussion_group(
+                        acc["session_str"], channel_ref, group_ref, _acc=acc):
+                    wired += 1
+                    await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+            except Exception as ex:
+                log.debug("_exec_deploy_network attach op=%d: %s", op_id, ex)
+        elif etype == "crosspost":
+            manual.append("Кросспостинг настройте контент-автоматизацией (нативного API нет)")
 
     try:
         from services.organism import spine
@@ -8950,6 +8969,27 @@ async def _exec_mass_invite(
                     user_refs.append(r["tg_user_id"])
                 elif r["phone"]:
                     phones.append(r["phone"])
+        elif source == "segment":
+            # Единый движок сегментов (unified_contacts): сохранённый срез или
+            # фильтры — тот же таргетинг, что у рассылки.
+            from services.contacts_hub import repository as _crepo
+            _filters = None
+            _ssid = params.get("saved_segment_id")
+            if _ssid:
+                _filters = await _crepo.get_segment_filters(pool, owner_id, int(_ssid))
+            if _filters is None:
+                _filters = params.get("segment_filters") or {}
+            seg_rows = await _crepo.resolve_segment(pool, owner_id, _filters, limit=2000)
+            for c in seg_rows:
+                u = (c.get("username") or "").lstrip("@")
+                if u:
+                    user_refs.append("@" + u)
+                elif c.get("telegram_user_id"):
+                    user_refs.append(c["telegram_user_id"])
+                else:
+                    _ph = c.get("phones")
+                    if isinstance(_ph, list) and _ph:
+                        phones.append(str(_ph[0]))
         elif source == "bot_users":
             rows = await _safe_fetch(
                     pool,

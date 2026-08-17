@@ -6215,7 +6215,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         source = (request.query.get("source") or "parsed").strip()
-        if source not in ("parsed", "crm", "bot_users"):
+        if source not in ("parsed", "crm", "bot_users", "segment"):
             return _err("Неизвестный источник аудитории", 400)
 
         total, hint = 0, ""
@@ -6247,6 +6247,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "AND (username IS NOT NULL OR tg_user_id IS NOT NULL OR phone IS NOT NULL)",
                     uid)
                 hint = "Добавьте контакты в CRM или импортируйте их."
+            elif source == "segment":
+                from services.contacts_hub import repository as _crepo
+                _ssid = request.query.get("saved_segment_id")
+                _filters = None
+                if _ssid and str(_ssid).isdigit():
+                    _filters = await _crepo.get_segment_filters(pool, uid, int(_ssid))
+                total = await _crepo.count_segment(pool, uid, _filters or {})
+                hint = "Сохраните срез контактов («Сегменты») — приглашайте его напрямую."
             else:
                 total = await _safe_count(
                     pool,
@@ -7533,7 +7541,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not group:
             return _err("Укажите группу/канал", 400)
         source = body.get("source", "parsed")
-        if source not in ("parsed", "crm", "bot_users", "import_list"):
+        if source not in ("parsed", "crm", "bot_users", "import_list", "segment"):
             return _err("Неизвестный источник аудитории", 400)
         account_ids = body.get("account_ids") or []
         if account_ids:
@@ -7592,6 +7600,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     params["parse_run_id"] = int(_pr)
                 except (TypeError, ValueError):
                     pass
+            # «Сегмент контактов»: единый движок сегментов как источник инвайта —
+            # тот же таргетинг, что у рассылки (сохранённый срез или фильтры).
+            if source == "segment":
+                _ssid = body.get("saved_segment_id")
+                if _ssid:
+                    try:
+                        params["saved_segment_id"] = int(_ssid)
+                    except (TypeError, ValueError):
+                        pass
+                _sf = body.get("segment_filters")
+                if isinstance(_sf, dict):
+                    from services.contacts_hub.repository import _clean_filters
+                    params["segment_filters"] = _clean_filters(_sf)
             # Фильтры аудитории (только с username / не бот / premium / активные) —
             # применяются в _exec_mass_invite теми же условиями, что парсер-вью.
             _af_in = body.get("aud_filters") or {}

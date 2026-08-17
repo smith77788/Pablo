@@ -4138,11 +4138,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field">
         <label>Источник аудитории</label>
         <select id="massInviteSrc" onchange="massInviteSrcToggle()" class="sel">
-          <option value="parsed">Parsed Audience (из парсера)</option>
+          <option value="parsed">Парсер аудитории</option>
+          <option value="segment">Сегмент контактов</option>
           <option value="crm">CRM-контакты</option>
           <option value="bot_users">Подписчики ботов</option>
           <option value="import_list">Свой список (вставить)</option>
         </select>
+      </div>
+      <div class="field" id="massInviteSegmentField" style="display:none">
+        <label>Сохранённый сегмент</label>
+        <select id="massInviteSegment" onchange="loadInviteAudienceSize()" class="sel"><option value="">— весь список контактов —</option></select>
       </div>
       <div id="massInviteAudience" style="font-size:12px;color:var(--hint);margin:-6px 0 10px;padding:0 2px"></div>
       <div id="massInvitePreflight" style="font-size:12px;margin:-4px 0 10px;padding:0 2px"></div>
@@ -14578,8 +14583,23 @@ function massInviteSrcToggle() {
   const src = document.getElementById('massInviteSrc').value;
   const f = document.getElementById('massInviteImportField');
   if (f) f.style.display = (src==='import_list') ? 'block' : 'none';
+  const sf = document.getElementById('massInviteSegmentField');
+  if (sf) sf.style.display = (src==='segment') ? 'block' : 'none';
+  if (src==='segment') loadInviteSegments();
   loadInviteAudienceSize();
   if (src==='import_list') massInviteListPreview();
+}
+// Подтянуть сохранённые сегменты в источник инвайта (единый движок сегментов).
+async function loadInviteSegments() {
+  const sel = document.getElementById('massInviteSegment');
+  if (!sel || sel.dataset.loaded) return;
+  try {
+    const d = await api('/api/miniapp/uch/segments');
+    const segs = d.segments||d||[];
+    sel.innerHTML = '<option value="">— весь список контактов —</option>' +
+      (Array.isArray(segs)?segs:[]).map(s=>`<option value="${s.id}">${esc(s.name)}${s.count!=null?` (${s.count})`:''}</option>`).join('');
+    sel.dataset.loaded = '1';
+  } catch(e) {}
 }
 
 // Предпросмотр «Своего списка» ДО запуска: сколько распознано номеров/юзеров и
@@ -14725,6 +14745,10 @@ async function loadInviteAudienceSize() {
   try {
     let url = '/api/miniapp/invite/audience?source=' + encodeURIComponent(src);
     if (src === 'parsed' && INV_PARSE_RUN) url += '&parse_run_id=' + INV_PARSE_RUN;
+    if (src === 'segment') {
+      const sid = document.getElementById('massInviteSegment')?.value;
+      if (sid) url += '&saved_segment_id=' + encodeURIComponent(sid);
+    }
     const d = await api(url);
     INV_AUDIENCE = (d.total === null || d.total === undefined) ? null : +d.total;
     if (INV_AUDIENCE === null) { el.textContent = ''; return; }
@@ -14877,6 +14901,10 @@ async function submitMassInvite() {
   // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;
+  if (source==='segment') {
+    const sid = document.getElementById('massInviteSegment')?.value;
+    if (sid) body.saved_segment_id = parseInt(sid);
+  }
   if (source==='import_list') {
     // Список из файла (уже разобран) имеет приоритет над текстом.
     if ((INV_FILE_REFS && INV_FILE_REFS.length) || (INV_FILE_PHONES && INV_FILE_PHONES.length)) {
