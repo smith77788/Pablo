@@ -44,22 +44,18 @@ async def emit(pool, owner_id: int, kind: str, payload: dict | None = None) -> N
 
 async def submit_guarded(pool, owner_id: int, op_type: str, params: dict, *,
                          total_items: int = 1, label: str = "",
-                         gate: bool = True, gate_name: str | None = None,
-                         emit_kind: str = "op_queued") -> int:
+                         gate: bool = True, gate_name: str | None = None) -> int:
     """Поставить массовую операцию единым каркасом. Возвращает op_id.
 
     gate=True — сначала ban-safety гейт (по gate_name или op_type); при перегрузе
     бросает OpGateError с причиной. Постановка — через operation_bus (может бросить
-    PlanRequiredError/PermissionError по тарифу — пробрасываем). После постановки —
-    эмит события в организм.
+    PlanRequiredError/PermissionError по тарифу — пробрасываем). Событие "op_queued"
+    в организм эмитит сам operation_bus (единый choke point) — здесь не дублируем.
     """
     if gate:
         ok, reason = await ready_for(pool, owner_id, gate_name or op_type)
         if not ok:
             raise OpGateError(reason or "Инфраструктура перегружена")
     from services import operation_bus
-    op_id = await operation_bus.submit(
+    return await operation_bus.submit(
         pool, owner_id, op_type, params, total_items=total_items, label=label)
-    await emit(pool, owner_id, emit_kind,
-               {"op_id": op_id, "op_type": op_type, "label": label})
-    return op_id

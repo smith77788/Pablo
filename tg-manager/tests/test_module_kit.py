@@ -25,17 +25,12 @@ def test_submit_guarded_happy_path(monkeypatch):
     async def ready(pool, owner, op):
         return True, ""
     submitted = {}
-    emitted = {}
 
     async def fake_submit(pool, owner, op_type, params, **kw):
         submitted.update({"op_type": op_type, "kw": kw})
         return 777
 
-    async def fake_emit(pool, owner, kind, payload=None):
-        emitted.update({"kind": kind, "payload": payload})
-
     monkeypatch.setattr(module_kit, "ready_for", ready)
-    monkeypatch.setattr(module_kit, "emit", fake_emit)
     import services.operation_bus as ob
     monkeypatch.setattr(ob, "submit", fake_submit)
 
@@ -43,7 +38,7 @@ def test_submit_guarded_happy_path(monkeypatch):
                                            {"links": ["@x"]}, total_items=5, label="L"))
     assert op_id == 777
     assert submitted["op_type"] == "bulk_join" and submitted["kw"]["total_items"] == 5
-    assert emitted["kind"] == "op_queued" and emitted["payload"]["op_id"] == 777
+    # событие op_queued эмитит сам operation_bus (единый choke point), не module_kit
 
 
 def test_gate_false_skips_check(monkeypatch):
@@ -63,6 +58,15 @@ def test_gate_false_skips_check(monkeypatch):
 
 async def _noop():
     return None
+
+
+def test_operation_bus_emits_op_queued_centrally():
+    # Единый choke point: любая операция любого модуля → событие op_queued.
+    import os
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "services", "operation_bus.py"), encoding="utf-8").read()
+    tail = src[src.rindex("op_id: int = row"):]
+    assert "spine" in tail and '"op_queued"' in tail
 
 
 def test_ready_for_failopen(monkeypatch):

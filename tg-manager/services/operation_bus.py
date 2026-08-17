@@ -594,6 +594,16 @@ async def submit(
         owner_id,
         total_items,
     )
+    # Единый choke point: КАЖДАЯ операция любого модуля попадает в память организма
+    # (событие op_queued). Пара к op_done из op_worker — полный ЖЦ операции виден
+    # мозгу без правки 20 эндпоинтов. Fail-open — шина не блокер постановки.
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "op_queued",
+                         {"op_id": op_id, "op_type": op_type,
+                          "label": op_label, "total_items": total_items})
+    except Exception:
+        pass
     return op_id
 
 
