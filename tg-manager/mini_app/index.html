@@ -3736,6 +3736,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🔍 SEO-оптимизация</div>
   </div>
   <div class="sub-sb">
+    <div class="row" onclick="openSeoObj()" style="cursor:pointer;background:var(--bg2);border-radius:12px;margin-bottom:8px">
+      <div class="row-ico" style="background:var(--bg-purple-16)">🔎</div>
+      <div class="row-body"><div class="row-name">SEO объекта</div><div class="row-val">Оценить находимость канала/бота/группы и получить советы</div></div>
+      <div class="row-right">→</div>
+    </div>
     <div class="sec">Популярные ключевые слова</div>
     <div class="lst" id="seoKeywords"></div>
     <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Применить всё →</span></div>
@@ -3996,6 +4001,25 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ SCREEN: MASS INVITER ══════════════════════ -->
+<!-- ══════════ SEO-СОВЕТНИК ══════════ -->
+<div class="screen" id="s-seoobj">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔎 SEO объекта</div></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
+      Оценка находимости канала/бота/группы в поиске Telegram + конкретные советы.
+      Впишите как есть — увидите баллы и что улучшить.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0">
+      <input type="text" id="seoTitle" placeholder="Заголовок" class="inp" style="width:100%;box-sizing:border-box">
+      <input type="text" id="seoUser" placeholder="@username" class="inp" style="width:100%;box-sizing:border-box">
+      <textarea id="seoDesc" rows="3" placeholder="Описание" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
+      <input type="text" id="seoKw" placeholder="Целевые ключи через запятую (необязательно)" class="inp" style="width:100%;box-sizing:border-box">
+      <button class="btn btn-p" onclick="runSeoAnalyze()">📊 Проанализировать</button>
+    </div>
+    <div id="seoResult" style="padding:6px 0"></div>
+  </div>
+</div>
+
 <!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
 <div class="screen" id="s-campaign">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🎯 Планировщик кампании</div></div>
@@ -12272,6 +12296,41 @@ async function openSeo() {
     `).join('') : empty('🤖','Нет рекомендаций для ботов','Включите авто-переоптимизацию — рекомендации появятся при падении позиций'));
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+// ── SEO объекта: анализ находимости (чистые эвристики, без сети) ──
+function openSeoObj() {
+  push('s-seoobj');
+  txt('seoResult','');
+}
+async function runSeoAnalyze() {
+  const gv = id => (document.getElementById(id)?.value||'').trim();
+  const kw = gv('seoKw').split(',').map(s=>s.trim()).filter(Boolean);
+  txt('seoResult','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/seo/analyze', {method:'POST', body:JSON.stringify({
+      title: gv('seoTitle'), username: gv('seoUser'),
+      description: gv('seoDesc'), keywords: kw
+    })});
+    const gc = d.grade==='green'?'var(--green)':d.grade==='amber'?'var(--accent)':'var(--red)';
+    const gl = d.grade==='green'?'Отлично':d.grade==='amber'?'Средне':'Слабо';
+    let h = `<div style="display:flex;align-items:center;gap:12px;padding:10px 0">
+      <div style="width:56px;height:56px;border-radius:50%;border:3px solid ${gc};display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:${gc}">${d.score}</div>
+      <div><div style="font-weight:600;color:${gc}">${gl}</div><div style="font-size:12px;color:var(--hint)">Находимость в поиске Telegram</div></div>
+    </div>`;
+    const issues = d.issues||[];
+    if (issues.length) h += `<div class="sec">Что мешает</div>` + issues.map(i=>`
+      <div class="row"><div class="row-ico" style="background:var(--bg-red-16)">⚠️</div><div class="row-body"><div class="row-name" style="font-size:13px">${esc(i)}</div></div></div>`).join('');
+    const tips = d.tips||[];
+    if (tips.length) h += `<div class="sec" style="margin-top:8px">Рекомендации</div>` + tips.map(t=>`
+      <div class="row"><div class="row-ico" style="background:var(--bg-green-16)">💡</div><div class="row-body"><div class="row-name" style="font-size:13px;white-space:normal">${esc(t)}</div></div></div>`).join('');
+    const kh = d.keyword_hit||{};
+    const kk = Object.keys(kh);
+    if (kk.length) h += `<div class="sec" style="margin-top:8px">Целевые ключи</div>` + kk.map(k=>`
+      <div class="row"><div class="row-ico" style="background:${kh[k]?'var(--bg-green-16)':'var(--bg-red-16)'}">${kh[k]?'✅':'❌'}</div><div class="row-body"><div class="row-name" style="font-size:13px">${esc(k)}</div></div></div>`).join('');
+    txt('seoResult', h);
+  } catch(e) {
+    txt('seoResult', empty('⚠️','Ошибка',e.message||'Не удалось проанализировать'));
   }
 }
 // Применить рекомендацию по переоптимизации бота (имя/краткое описание) в один клик

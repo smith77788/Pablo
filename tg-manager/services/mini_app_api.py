@@ -6350,6 +6350,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await spine.state_set(pool, uid, "dismissed", cur[-100:])
         return _json_resp({"ok": True})
 
+    async def seo_analyze(request: web.Request) -> web.Response:
+        """SEO-советник: находимость объекта в поиске Telegram + рекомендации."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        kw = body.get("keywords")
+        if isinstance(kw, str):
+            kw = [k for k in re.split(r"[,\n]+", kw) if k.strip()]
+        from services import seo_advisor
+        return _json_resp(seo_advisor.analyze(
+            title=str(body.get("title") or "")[:200],
+            username=str(body.get("username") or "")[:64],
+            description=str(body.get("description") or "")[:1024],
+            target_keywords=kw if isinstance(kw, list) else None))
+
     async def campaign_plan(request: web.Request) -> web.Response:
         """Планировщик кампании: цель (+N участников к сроку) → ёмкостная раскладка."""
         uid = _get_uid(request)
@@ -13448,6 +13467,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
     app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_post("/api/miniapp/campaign/plan", campaign_plan)
+    app.router.add_post("/api/miniapp/seo/analyze", seo_analyze)
     app.router.add_get("/api/miniapp/organism/pulse", organism_pulse)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
