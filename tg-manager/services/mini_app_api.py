@@ -2329,11 +2329,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 for r in reversed(hist)
             ],
         }
+        # Публикаций через нас — из channel_service (единственный источник этой метрики).
+        posts_published = 0
+        try:
+            from services import channel_service
+            stats = await channel_service.get_channel_stats(pool, ch_id, uid)
+            posts_published = int(stats.get("posts_published") or 0)
+        except Exception:
+            log.debug("channel_detail: posts_published failed ch=%d", ch_id)
         return _json_resp({
             "channel": ch,
             "linked_account": acc,
             "recent_ops": recent_ops,
             "member_growth": member_growth,
+            "posts_published": posts_published,
         })
 
     # ── Operations ───────────────────────────────────────────────────────────

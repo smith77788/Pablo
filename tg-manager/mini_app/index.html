@@ -8732,6 +8732,9 @@ function buildChDetail(d) {
       <div class="row"><div class="row-ico" style="background:var(--bg-blue-16)">👥</div>
         <div class="row-body"><div class="row-name">Участников</div><div class="row-val">${num(c.member_count||0)}</div></div>
       </div>
+      <div class="row"><div class="row-ico" style="background:var(--bg-purple-16)">📝</div>
+        <div class="row-body"><div class="row-name">Публикаций через нас</div><div class="row-val">${num(d.posts_published||0)}</div></div>
+      </div>
       ${c.username?`<div class="row"><div class="row-ico" style="background:var(--bg-green-16)">🔗</div>
         <div class="row-body"><div class="row-name">Ссылка</div><div class="row-val">t.me/${esc(c.username)}</div></div>
         <div class="row-right" onclick="navigator.clipboard?.writeText('https://t.me/${esc(c.username)}').then(()=>toast('Скопировано!')).catch(()=>toast('Не удалось скопировать'))"><span style="font-size:20px;cursor:pointer">📋</span></div>
