@@ -1817,6 +1817,15 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     "summary": (result.get("summary") or "")[:300]})
             except Exception:
                 pass
+            # Комплаенс: подписанная запись в аудит-трейл — покрываем ВСЕ операции
+            # (единый choke point), а не выборочно. record() никогда не бросает.
+            try:
+                from services import compliance_engine
+                await compliance_engine.record(
+                    pool, owner_id, None, op_type, _final_status,
+                    op_id=op_id, params=params if isinstance(params, dict) else None)
+            except Exception:
+                pass
             # Autopost v2: рекуррентная переочередь постинг-операций в СВОИ каналы.
             # repeat_interval_min>0 → после успешного прогона ставим следующий с
             # scheduled_for=now()+interval. Только постинг-op'ы (allowlist) — чтобы
