@@ -2180,7 +2180,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-compliance">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">✅ Комплаенс</div></div>
   <div class="sub-sb">
-    <div class="sec">Аудит операций</div>
+    <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Выгрузить отчёт →</span></div>
     <div class="lst" id="complianceStats"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Последние записи</div>
     <div class="lst" id="complianceList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -17312,11 +17312,14 @@ async function openCompliance() {
   txt('complianceList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/compliance');
-    const t = d.totals||{};
+    const t = d.totals||{}; const rep = d.report||{};
+    const sr = (rep.success_rate!=null) ? rep.success_rate+'%' : '—';
     txt('complianceStats', `
       <div class="row"><div class="row-body"><div class="row-name">Всего записей</div><div class="row-val">${num(t.total||0)}</div></div></div>
       <div class="row"><div class="row-body"><div class="row-name">Успешных</div><div class="row-val" style="color:var(--green)">${num(t.ok_cnt||0)}</div></div></div>
       <div class="row"><div class="row-body"><div class="row-name">Рисковых</div><div class="row-val" style="color:var(--red)">${num(t.risk_cnt||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Успешность (30 дн.)</div><div class="row-val">${sr}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Охват (30 дн.)</div><div class="row-val">${num(rep.distinct_types||0)} тип. · ${num(rep.distinct_accounts||0)} акк.</div></div></div>
     `);
     document.getElementById('m-compliance-val').textContent = (t.total||0)+' записей';
     const rows = d.recent||[];
@@ -17333,6 +17336,21 @@ async function openCompliance() {
   } catch(e) {
     txt('complianceStats', empty('⚠️','Ошибка',e.message));
     txt('complianceList','');
+  }
+}
+// Выгрузка подписанного отчёта соответствия за 30 дней (текст → копирование).
+async function exportCompliance() {
+  try {
+    const d = await api('/api/miniapp/compliance/export?days=30');
+    const text = d.text || 'Нет данных.';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast('📋 Отчёт скопирован в буфер');
+    } else {
+      await askConfirm('Отчёт соответствия:\n\n' + text);
+    }
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка выгрузки'));
   }
 }
 

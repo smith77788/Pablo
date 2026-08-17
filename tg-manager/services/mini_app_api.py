@@ -12327,12 +12327,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
                 uid,
             )
+            # Подписанный отчёт за 30 дней (success_rate, охват типов/аккаунтов).
+            from services import compliance_engine
+            report = await compliance_engine.get_report(pool, uid, days=30)
             return _json_resp({
                 "totals": dict(totals) if totals else {},
                 "recent": [dict(r) for r in recent],
+                "report": report or {},
             })
         except Exception as exc:
             log.exception("compliance_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def compliance_export(request: web.Request) -> web.Response:
+        """Текстовый отчёт соответствия за период (для выгрузки/аудита)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            days = int(request.query.get("days", "30"))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 365))
+        try:
+            from services import compliance_engine
+            text = await compliance_engine.export_text(pool, uid, days=days)
+            return _json_resp({"text": text, "days": days})
+        except Exception as exc:
+            log.exception("compliance_export uid=%d", uid)
             return _err(str(exc), 500)
 
     # ── Content Cloner ───────────────────────────────────────────────────────
@@ -13846,6 +13868,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/graph/overlaps", graph_overlaps)
     # Compliance Hub
     app.router.add_get("/api/miniapp/compliance", compliance_overview)
+    app.router.add_get("/api/miniapp/compliance/export", compliance_export)
     # Content Cloner
     app.router.add_get("/api/miniapp/content_cloner/history", content_cloner_history)
     app.router.add_post("/api/miniapp/content_cloner/submit", content_cloner_submit)
