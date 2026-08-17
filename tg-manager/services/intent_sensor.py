@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re as _re
 
 import asyncpg
 
@@ -43,9 +44,22 @@ async def list_rules(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
 async def add_rule(pool: asyncpg.Pool, owner_id: int, phrase: str,
                    stage: str | None, tag: str | None, notify: bool = True) -> int:
-    phrase = (phrase or "").strip().lower()[:120]
+    phrase = (phrase or "").strip()[:120]
+    # Регэксп-правила (re:) сохраняем как есть — понижение регистра ломает
+    # экранированные классы (\B→\b). Совпадение всё равно идёт по IGNORECASE.
+    # Обычные фразы/альтернативы — в нижний регистр (как и раньше).
+    if phrase[:3].lower() != "re:":
+        phrase = phrase.lower()
     if not phrase:
         raise ValueError("Пустая фраза")
+    if phrase[:3].lower() == "re:":
+        pat = phrase[3:].strip()
+        if not pat:
+            raise ValueError("Пустой регэксп после re:")
+        try:
+            _re.compile(pat)
+        except _re.error as e:
+            raise ValueError(f"Некорректный регэксп: {e}") from e
     stage = stage if stage in VALID_STAGES else None
     tag = (tag or "").strip()[:60] or None
     if not stage and not tag:
@@ -104,9 +118,34 @@ async def _ensure_contact(pool: asyncpg.Pool, owner_id: int, peer: dict) -> str 
     })
 
 
+def _phrase_matches(phrase: str, low: str) -> bool:
+    """Совпадает ли правило с текстом (уже в нижнем регистре)?
+
+    Три формы фразы (обратная совместимость сохранена):
+      • обычная подстрока — «цена»
+      • несколько альтернатив через | — «цена|стоимость|прайс» (любая)
+      • регэксп с префиксом re: — «re:\\d{4,}\\s*руб» (гибкие шаблоны)
+    Битый регэксп никогда не роняет сканер — просто не матчит.
+    """
+    p = (phrase or "").strip()
+    if not p:
+        return False
+    if p[:3].lower() == "re:":
+        pat = p[3:].strip()
+        if not pat:
+            return False
+        try:
+            return _re.search(pat, low, _re.IGNORECASE) is not None
+        except _re.error:
+            return False
+    if "|" in p:
+        return any(a.strip() and a.strip().lower() in low for a in p.split("|"))
+    return p.lower() in low
+
+
 def _match(text: str, rules: list[dict]) -> list[dict]:
     low = (text or "").lower()
-    return [r for r in rules if r["phrase"] and r["phrase"] in low]
+    return [r for r in rules if _phrase_matches(r.get("phrase", ""), low)]
 
 
 async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,

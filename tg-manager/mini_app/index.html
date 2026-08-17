@@ -2991,7 +2991,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec" style="margin-top:4px">➕ Новое правило</div>
     <div style="background:var(--bg2);border-radius:12px;padding:12px;margin-bottom:10px">
-      <input type="text" id="intPhrase" placeholder="Фраза (напр. «цена», «купить»)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+      <input type="text" id="intPhrase" placeholder="Фраза (напр. «цена», «купить»)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:4px">
+      <div class="hint" style="font-size:11px;color:var(--hint);margin-bottom:8px;line-height:1.4">Несколько вариантов через <b>|</b> (цена|стоимость|прайс). Регэксп с префиксом <b>re:</b> (re:\d{4,}\s*руб).</div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <select id="intStage" class="inp" style="flex:1;box-sizing:border-box">
           <option value="">— стадия не менять —</option>
