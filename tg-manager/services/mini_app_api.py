@@ -7559,6 +7559,77 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("community_channel_add uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def community_members_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
+        from services import nodes_engine
+        members = await nodes_engine.list_node_members(pool, uid, node_id)
+        stats = await nodes_engine.node_member_stats(pool, node_id)
+        return _json_resp({"members": members, "stats": stats})
+
+    async def _community_owns(uid, node_id):
+        return await _safe_count(pool,
+            "SELECT COUNT(*) FROM community_nodes WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            node_id, uid)
+
+    async def community_liven(request: web.Request) -> web.Response:
+        """Оживить ноду флотом (ghost-присутствие): op community_liven."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+            data = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _community_owns(uid, node_id):
+            return _err("Нода не найдена", 404)
+        count = validate_integer(data.get("count", 5), min_val=1, max_val=50) or 5
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(pool, uid, "community_liven",
+                {"node_id": node_id, "count": count}, total_items=count,
+                label=f"Ноды: оживить × {count}")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("community_liven uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def community_set_staff(request: web.Request) -> web.Response:
+        """Назначить участников-флот ноды модераторами/админами: op community_set_staff."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+            data = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _community_owns(uid, node_id):
+            return _err("Нода не найдена", 404)
+        role = data.get("role") if data.get("role") in ("moderator", "admin") else "moderator"
+        acc_ids = [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()]
+        if not acc_ids:
+            return _err("Выберите аккаунты", 400)
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(pool, uid, "community_set_staff",
+                {"node_id": node_id, "role": role, "account_ids": acc_ids},
+                total_items=len(acc_ids), label=f"Ноды: роли {role} × {len(acc_ids)}")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("community_set_staff uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Gift Transfer ──────────────────────────────────────────────────────────
 
     async def gift_inventory(request: web.Request) -> web.Response:
@@ -14094,6 +14165,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/community/node/{node_id}", community_node_delete)
     app.router.add_get("/api/miniapp/community/node/{node_id}/channels", community_channels_list)
     app.router.add_post("/api/miniapp/community/node/{node_id}/channels", community_channel_add)
+    app.router.add_get("/api/miniapp/community/node/{node_id}/members", community_members_list)
+    app.router.add_post("/api/miniapp/community/node/{node_id}/liven", community_liven)
+    app.router.add_post("/api/miniapp/community/node/{node_id}/staff", community_set_staff)
     # Gift Transfer
     app.router.add_get("/api/miniapp/gifts", gift_inventory)
     app.router.add_post("/api/miniapp/gifts/scan", gift_scan_submit)

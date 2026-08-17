@@ -672,3 +672,37 @@ async def create_community_channel(
            DO UPDATE SET name=EXCLUDED.name RETURNING *""",
         node_id, topic.message_thread_id, safe)
     return dict(row)
+
+
+async def add_node_member(pool: asyncpg.Pool, node_id: int, account_id: int,
+                          role: str = "member") -> None:
+    """Записать аккаунт-флот как участника ноды (присутствие/стафф). Идемпотентно."""
+    role = role if role in ("member", "moderator", "admin") else "member"
+    await pool.execute(
+        """INSERT INTO community_node_members (node_id, account_id, role)
+           VALUES ($1,$2,$3) ON CONFLICT (node_id, account_id)
+           DO UPDATE SET role = EXCLUDED.role""",
+        node_id, account_id, role)
+
+
+async def list_node_members(pool: asyncpg.Pool, owner_id: int, node_id: int) -> list[dict[str, Any]]:
+    """Участники-флот ноды с ролями. Проверяет владение нодой."""
+    rows = await pool.fetch(
+        """SELECT m.account_id, m.role, m.joined_at,
+                  a.first_name, a.username, a.phone
+           FROM community_node_members m
+           JOIN community_nodes n ON n.id = m.node_id
+           LEFT JOIN tg_accounts a ON a.id = m.account_id
+           WHERE m.node_id=$1 AND n.owner_id=$2
+           ORDER BY (m.role='admin') DESC, (m.role='moderator') DESC, m.joined_at""",
+        node_id, owner_id)
+    return [dict(r) for r in rows]
+
+
+async def node_member_stats(pool: asyncpg.Pool, node_id: int) -> dict[str, int]:
+    """Счётчики участников-флота по ролям."""
+    r = await pool.fetchrow(
+        """SELECT COUNT(*) AS total,
+                  COUNT(*) FILTER (WHERE role IN ('moderator','admin')) AS staff
+           FROM community_node_members WHERE node_id=$1""", node_id)
+    return {"members": int(r["total"] or 0), "staff": int(r["staff"] or 0)} if r else {"members": 0, "staff": 0}

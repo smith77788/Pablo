@@ -4072,6 +4072,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<div class="screen" id="s-communitymembers">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🛡 Участники и роли</div></div>
+  <div class="sub-sb">
+    <div id="cmembersStats" style="display:flex;gap:8px;padding:6px 0"></div>
+    <div class="hint" style="font-size:12px;color:var(--hint);padding:0 2px 6px">Участники-флот ноды. «Назначить стаффом» — промоут аккаунтов в модераторы/админы.</div>
+    <div style="display:flex;gap:6px;padding:0 0 8px"><button class="btn btn-s" onclick="setCommunityStaff('moderator')" style="flex:1">🛡 В модераторы</button><button class="btn btn-s" onclick="setCommunityStaff('admin')" style="flex:1">👑 В админы</button></div>
+    <div class="lst" id="cmembersList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- Модалка: создать ноду-сообщество -->
 <div class="mbg" id="mo-community-create" onclick="if(event.target===this)closeModal('mo-community-create')">
   <div class="modal">
@@ -14363,6 +14373,8 @@ async function openCommunityNode(id, title, chatId) {
   txt('cnodeChannels','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('cnodeActions',`
     <button class="btn btn-p" onclick="inviteToCommunity(${chatId})" style="flex:0">➕ Пригласить аудиторию</button>
+    <button class="btn btn-s" onclick="livenCommunity(${id})" style="flex:0">🏛 Оживить флотом</button>
+    <button class="btn btn-s" onclick="openCommunityMembers(${id})" style="flex:0">🛡 Участники и роли</button>
     <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0">🗑 Убрать</button>`);
   try {
     const d = await api('/api/miniapp/community/node/'+id+'/channels');
@@ -14391,6 +14403,48 @@ async function deleteCommunityNode(id) {
 function inviteToCommunity(chatId) {
   openMassInvite();
   setTimeout(()=>{ const g=document.getElementById('massInviteGroup'); if(g && chatId){ g.value=String(chatId); } toast('🏛 Группа сообщества подставлена — выберите источник аудитории'); }, 250);
+}
+async function livenCommunity(id) {
+  const n = await askPrompt('Сколько аккаунтов флота ввести в сообщество?', {value:'5'});
+  if (!n) return;
+  try {
+    const r = await api('/api/miniapp/community/node/'+id+'/liven',{method:'POST',body:JSON.stringify({count:parseInt(n)||5})});
+    toast('🏛 Оживление запущено'+(r.op_id?` · операция #${r.op_id}`:''));
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+let _CMEMBER_SEL = new Set();
+async function openCommunityMembers(id) {
+  _CUR_CNODE = id; _CMEMBER_SEL = new Set();
+  push('s-communitymembers');
+  txt('cmembersList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('cmembersStats','');
+  try {
+    const d = await api('/api/miniapp/community/node/'+id+'/members');
+    const st = d.stats||{};
+    txt('cmembersStats',`<div class="kpi-chip"><div class="kpi-chip-val">${num(st.members||0)}</div><div class="kpi-chip-lbl">участников</div></div><div class="kpi-chip"><div class="kpi-chip-val">${num(st.staff||0)}</div><div class="kpi-chip-lbl">стафф</div></div>`);
+    const ms = d.members||[];
+    if (!ms.length) { txt('cmembersList', empty('🏛','Пусто','Нажмите «Оживить флотом», чтобы ввести аккаунты')); return; }
+    txt('cmembersList', ms.map(m=>{
+      const nm = esc(m.first_name||(m.username?'@'+m.username:('acc #'+m.account_id)));
+      const rl = m.role==='admin'?'👑 админ':m.role==='moderator'?'🛡 модератор':'участник';
+      return `<label class="row tap" style="cursor:pointer">
+        <input type="checkbox" onchange="toggleCMember(${m.account_id}, this)" style="margin-right:8px">
+        <div class="row-body"><div class="row-name">${nm}</div><div class="row-val">${rl}</div></div>
+      </label>`;
+    }).join(''));
+  } catch(e){ txt('cmembersList', errHtml(e.message)); }
+}
+function toggleCMember(aid, el) { if (el.checked) _CMEMBER_SEL.add(aid); else _CMEMBER_SEL.delete(aid); }
+async function setCommunityStaff(role) {
+  if (!_CUR_CNODE) return;
+  const ids = [..._CMEMBER_SEL];
+  if (!ids.length) { toast('Отметьте аккаунты'); return; }
+  if (!await askConfirm(`Назначить ${ids.length} аккаунт(ов) ${role==='admin'?'админами':'модераторами'} ноды?`)) return;
+  try {
+    const r = await api('/api/miniapp/community/node/'+_CUR_CNODE+'/staff',{method:'POST',body:JSON.stringify({role, account_ids:ids})});
+    toast('🛡 Роли назначаются'+(r.op_id?` · операция #${r.op_id}`:''));
+    setTimeout(()=>openCommunityMembers(_CUR_CNODE), 1500);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function openNodes() {
   push('s-nodes');

@@ -279,6 +279,8 @@ _NODE_FACTORY = {
     "group": {"label": "группу", "factory": "group"},
     "chat": {"label": "чат", "factory": "group"},
     "bot": {"label": "бота", "factory": "bot"},
+    "node": {"label": "ноду-сообщество", "factory": "community"},
+    "community": {"label": "ноду-сообщество", "factory": "community"},
 }
 
 _EDGE_ACTION = {

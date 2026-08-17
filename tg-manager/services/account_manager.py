@@ -4224,6 +4224,39 @@ async def set_discussion_group(
             log_exc_swallow(log, "Сбой в set_discussion_group")
 
 
+async def create_forum_supergroup(
+    session_string: str,
+    title: str,
+    about: str = "",
+    _acc: dict | None = None,
+) -> dict:
+    """Создать супергруппу и включить форум-режим (нода-комьюнити mini-Discord).
+
+    Возвращает {channel_id, access_hash, title, error?}. Форум-режим нужен, чтобы
+    каналы ноды были топиками. Один клиент: create → ToggleForum."""
+    from telethon.tl.functions.channels import ToggleForumRequest
+
+    res = await create_channel(session_string, title, about=about, megagroup=True, _acc=_acc)
+    if not isinstance(res, dict) or res.get("error") or not res.get("channel_id"):
+        return res if isinstance(res, dict) else {"error": "create failed"}
+    ch_id = res["channel_id"]
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await _resolve_channel_peer(client, ch_id, int(res.get("access_hash") or 0))
+        await client(ToggleForumRequest(channel=entity, enabled=True))
+        res["forum"] = True
+    except Exception as e:
+        log.warning("create_forum_supergroup: toggle forum failed chan=%s: %s", ch_id, e)
+        res["forum"] = False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в create_forum_supergroup")
+    return res
+
+
 async def forward_new_posts(
     session_string: str,
     source_channel_id: int | str,

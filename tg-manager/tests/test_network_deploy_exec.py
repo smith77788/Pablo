@@ -23,7 +23,7 @@ def test_op_dispatch_wired():
 def test_executor_creates_persists_and_wires():
     src = _ow()
     i = src.index("async def _exec_deploy_network")
-    fn = src[i:i + 7500]
+    fn = src[i:i + 9000]
     # создаёт объекты через фабрику аккаунта
     assert "account_manager.create_channel" in fn
     # пишет id обратно в узел
@@ -43,7 +43,7 @@ def test_executor_creates_persists_and_wires():
 def test_executor_handles_attach_discussion_group():
     src = _ow()
     i = src.index("async def _exec_deploy_network")
-    fn = src[i:i + 7000]
+    fn = src[i:i + 9000]
     # attach/link рёбра прикрепляют группу как чат обсуждений
     assert "set_discussion_group" in fn
     assert '"attach", "link"' in fn

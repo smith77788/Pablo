@@ -90,3 +90,46 @@ def test_community_organism_and_invite_wiring():
     assert "function inviteToCommunity" in html and "massInviteGroup" in html
     # действие мозга community маршрутизируется
     assert "if (k==='community') return openCommunity();" in html
+
+
+def test_node_type_in_deploy_plan_and_executor():
+    nb = open(os.path.join(ROOT, "services", "network_builder.py"), encoding="utf-8").read()
+    assert '"node":' in nb and '"community":' in nb and '"factory": "community"' in nb
+    ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+    i = ow.index("async def _exec_deploy_network")
+    fn = ow[i:i + 9000]
+    assert 'ntype in ("node", "community")' in fn
+    assert "create_forum_supergroup" in fn and "register_community_node" in fn
+
+
+def test_forum_supergroup_helper():
+    am = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
+    assert "async def create_forum_supergroup" in am
+    i = am.index("async def create_forum_supergroup")
+    assert "ToggleForumRequest" in am[i:i + 1200] and "megagroup=True" in am[i:i + 1200]
+
+
+def test_liven_and_staff_ops_and_schema():
+    sql = open(os.path.join(ROOT, "schema_v178.sql"), encoding="utf-8").read()
+    assert "community_node_members" in sql and "role" in sql
+    ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+    for op in ('op_type == "community_liven"', 'op_type == "community_set_staff"'):
+        assert op in ow
+    assert "async def _exec_community_liven" in ow
+    assert "async def _exec_community_set_staff" in ow
+    # оживление = вступление флота + запись участником; роли = промоут
+    li = ow.index("async def _exec_community_liven")
+    assert "join_channel_by_id" in ow[li:li + 2200] and "add_node_member" in ow[li:li + 2200]
+    si = ow.index("async def _exec_community_set_staff")
+    assert "promote_to_admin" in ow[si:si + 2600]
+
+
+def test_members_endpoints_and_ui():
+    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    for r in ('"/api/miniapp/community/node/{node_id}/members"',
+              '"/api/miniapp/community/node/{node_id}/liven"',
+              '"/api/miniapp/community/node/{node_id}/staff"'):
+        assert r in api
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "function livenCommunity" in html and "function setCommunityStaff" in html
+    assert 'id="s-communitymembers"' in html

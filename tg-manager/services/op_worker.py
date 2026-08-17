@@ -1631,6 +1631,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_crosspost_run(pool, bot, op_id, owner_id, params)
             elif op_type == "community_add_channel":
                 result = await _exec_community_add_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "community_liven":
+                result = await _exec_community_liven(pool, bot, op_id, owner_id, params)
+            elif op_type == "community_set_staff":
+                result = await _exec_community_set_staff(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_views":
                 result = await _exec_boost_views(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_reactions":
@@ -8054,6 +8058,24 @@ async def _exec_deploy_network(
             node_ref[n["id"]] = ch_id
             created += 1
             await _governed_sleep(pool, owner_id, random.uniform(30, 60))
+        elif ntype in ("node", "community"):
+            # Нода-сообщество = форум-супергруппа + регистрация community_node.
+            try:
+                res = await account_manager.create_forum_supergroup(
+                    acc["session_str"], label, _acc=acc)
+            except Exception as e:
+                manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
+                continue
+            ch_id = res.get("channel_id") if isinstance(res, dict) else None
+            if not ch_id or res.get("error"):
+                manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
+                continue
+            from services import nodes_engine as _ne
+            await _ne.register_community_node(pool, owner_id, int(ch_id), label)
+            await _nb.update_node_status(pool, n["id"], "created", ref_id=int(ch_id))
+            node_ref[n["id"]] = int(ch_id)
+            created += 1
+            await _governed_sleep(pool, owner_id, random.uniform(30, 60))
         elif ntype == "bot":
             manual.append(f"{label}: бота создайте через @BotFather (Manager Mode)")
 
@@ -8139,6 +8161,105 @@ async def _exec_community_add_channel(
             await asyncio.sleep(random.uniform(1.5, 3.5))
     return {"status": "done" if created else "failed", "created": created,
             "summary": f"🖥 Ноды: создано каналов {created}"}
+
+
+async def _exec_community_liven(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Оживить ноду флотом: N аккаунтов вступают в её супергруппу и становятся
+    участниками. Дальше их поддерживает ghost_engine (это их подписка). Под
+    губернатором. Роль по умолчанию 'member'."""
+    from services import account_manager, nodes_engine
+    try:
+        node_id = int(params.get("node_id"))
+    except (TypeError, ValueError):
+        return {"status": "failed", "summary": "⚠️ Оживление: не указан node_id"}
+    node = await _safe_fetchrow(
+        pool, "SELECT tg_chat_id FROM community_nodes WHERE id=$1 AND owner_id=$2 AND is_active",
+        node_id, owner_id)
+    if not node:
+        return {"status": "failed", "summary": "⚠️ Нода не найдена"}
+    try:
+        count = max(1, min(int(params.get("count") or 5), 50))
+    except (TypeError, ValueError):
+        count = 5
+    accs = await _safe_fetch(
+        pool, "SELECT id, session_str, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, proxy_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
+        "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+        "ORDER BY random() LIMIT $2", owner_id, count)
+    joined = 0
+    chat_id = int(node["tg_chat_id"])
+    for acc in (accs or []):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await account_manager.join_channel_by_id(
+                acc["session_str"], chat_id, _acc=dict(acc))
+        except Exception as e:
+            log.debug("_exec_community_liven join op=%d acc=%s: %s", op_id, acc["id"], e)
+            continue
+        if isinstance(res, dict) and res.get("ok"):
+            await nodes_engine.add_node_member(pool, node_id, int(acc["id"]), "member")
+            joined += 1
+            await _governed_sleep(pool, owner_id, random.uniform(20, 45))
+    return {"status": "done", "joined": joined,
+            "summary": f"🏛 Оживление ноды: вступило {joined} аккаунтов флота"}
+
+
+async def _exec_community_set_staff(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Назначить участников-флот ноды модераторами/админами (роли): промоут в
+    супергруппе через владельца ноды + запись роли. account_ids + role."""
+    from services import account_manager, nodes_engine
+    try:
+        node_id = int(params.get("node_id"))
+    except (TypeError, ValueError):
+        return {"status": "failed", "summary": "⚠️ Роли: не указан node_id"}
+    role = params.get("role")
+    role = role if role in ("moderator", "admin") else "moderator"
+    node = await _safe_fetchrow(
+        pool, "SELECT tg_chat_id FROM community_nodes WHERE id=$1 AND owner_id=$2 AND is_active",
+        node_id, owner_id)
+    if not node:
+        return {"status": "failed", "summary": "⚠️ Нода не найдена"}
+    acc_ids = [int(x) for x in (params.get("account_ids") or []) if str(x).isdigit()]
+    if not acc_ids:
+        return {"status": "failed", "summary": "⚠️ Роли: не выбраны аккаунты"}
+    # Владелец ноды (создатель супергруппы) промоутит. Берём аккаунт-члена с ролью
+    # admin, иначе любой активный владельца (должен быть админом группы).
+    owner_acc = await _safe_fetchrow(
+        pool, "SELECT id, session_str, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, proxy_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL ORDER BY id LIMIT 1",
+        owner_id)
+    if not owner_acc:
+        return {"status": "failed", "summary": "⚠️ Роли: нет аккаунта-промоутера"}
+    chat_id = int(node["tg_chat_id"])
+    promoted = 0
+    for aid in acc_ids:
+        if await _is_cancelled(pool, op_id):
+            break
+        target = await _safe_fetchrow(
+            pool, "SELECT tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, owner_id)
+        uid_tg = target["tg_user_id"] if target else None
+        if not uid_tg:
+            continue
+        try:
+            ok = await account_manager.promote_to_admin(
+                owner_acc["session_str"], chat_id, int(uid_tg), _acc=dict(owner_acc),
+                ban_users=True, delete_messages=True, pin_messages=True,
+                add_admins=(role == "admin"))
+            if ok:
+                await nodes_engine.add_node_member(pool, node_id, aid, role)
+                promoted += 1
+                await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+        except Exception as e:
+            log.debug("_exec_community_set_staff op=%d acc=%s: %s", op_id, aid, e)
+    return {"status": "done", "promoted": promoted,
+            "summary": f"🛡 Роли ноды: назначено {promoted} ({role})"}
 
 
 async def _exec_crosspost_run(
