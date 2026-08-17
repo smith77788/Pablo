@@ -1734,6 +1734,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Ноды</div>
         <div class="mgmt-tile-val" id="m-nodes-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openCommunity()">
+        <div class="mgmt-tile-ico">🏛</div>
+        <div class="mgmt-tile-lbl">Комьюнити</div>
+        <div class="mgmt-tile-val" id="m-community-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openGifts()">
         <div class="mgmt-tile-ico">🎁</div>
         <div class="mgmt-tile-lbl">Перевод подарков</div>
@@ -4037,6 +4042,46 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="lst" id="nodethreadsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════ КОМЬЮНИТИ (mini-Discord ноды) ══════════ -->
+<div class="screen" id="s-community">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🏛 Комьюнити</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCommunityCreate()">+ Создать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
+      Нода-сообщество — форум-супергруппа как mini-Discord для аудитории: каналы=топики, наполнение флотом, инвайт, модерация.<br>
+      1) Создайте форум-супергруппу · 2) добавьте бота админом · 3) вставьте Chat ID.
+    </div>
+    <div class="lst" id="communityList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-communitynode">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cnodeTitle">🏛 Сообщество</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="addCommunityChannel()">+ Канал</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="cnodeActions" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px"></div>
+    <div class="sec">Каналы (топики)</div>
+    <div class="lst" id="cnodeChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- Модалка: создать ноду-сообщество -->
+<div class="mbg" id="mo-community-create" onclick="if(event.target===this)closeModal('mo-community-create')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-community-create')">✕</div>
+    <div class="modal-title">🏛 Новое сообщество</div>
+    <input type="text" id="ccTitle" placeholder="Название сообщества" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+    <input type="text" id="ccChatId" placeholder="Chat ID (-1001234567890)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+    <textarea id="ccDesc" rows="2" placeholder="Описание (необязательно)" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
+    <div id="ccErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCommunityCreate()">Создать</button>
   </div>
 </div>
 
@@ -14274,6 +14319,77 @@ async function deleteAiMem(id) {
 
 // ── Nodes Hub ───────────────────────────────────────────
 const NODE_TYPE = {proxies:'🌐 Прокси',accounts:'👥 Аккаунты',tasks:'📋 Задачи',alerts:'🔔 Алерты'};
+// ── Ноды-комьюнити (mini-Discord) ────────────────────────
+let _CUR_CNODE = null;
+async function openCommunity() {
+  push('s-community');
+  txt('communityList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/community/nodes');
+    const nodes = d.nodes||[];
+    const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} сообществ`:'';
+    if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы')); return; }
+    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id}, ${JSON.stringify(esc(n.title||('Нода #'+n.id)))})">
+      <div class="row-ico" style="background:var(--bg-purple-16)">🏛</div>
+      <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id}</div></div>
+      <span class="chev">›</span>
+    </div>`).join(''));
+  } catch(e) { txt('communityList', errHtml(e.message)); }
+}
+function openCommunityCreate() {
+  ['ccTitle','ccChatId','ccDesc'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  const er=document.getElementById('ccErr'); if(er) er.textContent='';
+  showModal('mo-community-create');
+}
+async function submitCommunityCreate() {
+  const title=(document.getElementById('ccTitle').value||'').trim();
+  const chat=(document.getElementById('ccChatId').value||'').trim();
+  const desc=(document.getElementById('ccDesc').value||'').trim();
+  const er=document.getElementById('ccErr');
+  if(!title){er.textContent='Укажите название';return;}
+  if(!chat){er.textContent='Укажите Chat ID';return;}
+  try {
+    await api('/api/miniapp/community/node',{method:'POST',body:JSON.stringify({title,tg_chat_id:chat,description:desc})});
+    closeModal('mo-community-create');
+    openCommunity();
+  } catch(e){ er.textContent=e.message||'Ошибка'; }
+}
+async function openCommunityNode(id, title) {
+  _CUR_CNODE = id;
+  push('s-communitynode');
+  txt('cnodeTitle','🏛 '+(title||'Сообщество'));
+  txt('cnodeChannels','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('cnodeActions',`
+    <button class="btn btn-s" onclick="inviteToCommunity(${id})" style="flex:0">➕ Пригласить аудиторию</button>
+    <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0">🗑 Убрать</button>`);
+  try {
+    const d = await api('/api/miniapp/community/node/'+id+'/channels');
+    const chs = d.channels||[];
+    txt('cnodeChannels', chs.length ? chs.map(c=>`<div class="row">
+      <div class="row-ico" style="background:var(--bg-blue-16)">#</div>
+      <div class="row-body"><div class="row-name">${esc(c.name||('топик '+c.tg_topic_id))}</div></div>
+    </div>`).join('') : empty('#','Каналов нет','Добавьте канал — создастся форум-топик'));
+  } catch(e) { txt('cnodeChannels', errHtml(e.message)); }
+}
+async function addCommunityChannel() {
+  if (!_CUR_CNODE) return;
+  const name = await askPrompt('Название канала (топика):');
+  if (!name) return;
+  try {
+    const r = await api('/api/miniapp/community/node/'+_CUR_CNODE+'/channels',{method:'POST',body:JSON.stringify({name})});
+    toast('🖥 Канал создаётся'+(r.op_id?` · операция #${r.op_id}`:''));
+    setTimeout(()=>openCommunityNode(_CUR_CNODE, document.getElementById('cnodeTitle').textContent.replace('🏛 ','')), 1500);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function deleteCommunityNode(id) {
+  if (!await askConfirm('Убрать сообщество из списка? (сама группа в Telegram останется)')) return;
+  try { await api('/api/miniapp/community/node/'+id,{method:'DELETE'}); back(); openCommunity(); } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+// Пригласить аудиторию в ноду = инвайт в её супергруппу (переиспользуем инвайт).
+function inviteToCommunity(id) {
+  openMassInvite();
+  toast('Вставьте Chat ID сообщества в поле группы и выберите источник аудитории');
+}
 async function openNodes() {
   push('s-nodes');
   txt('nodesStats','<div class="spin-wrap"><div class="spin"></div></div>');

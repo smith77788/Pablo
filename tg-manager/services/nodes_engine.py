@@ -590,3 +590,85 @@ def build_status_report(
         lines.append(f"• {html.escape(str(key))}: <code>{html.escape(str(val))}</code>")
 
     return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  COMMUNITY NODES (mini-Discord для аудитории) — модель B, отдельно от инфра-нод
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Палитра иконок топиков-каналов (Bot API icon_color).
+_COMMUNITY_TOPIC_COLORS = [0x6FB9F0, 0xFFD67E, 0xCB86DB, 0x8EEE98, 0xFF93B2, 0xFB6F5F]
+
+
+async def register_community_node(
+    pool: asyncpg.Pool, owner_id: int, tg_chat_id: int,
+    title: str = "", description: str = "",
+) -> dict[str, Any]:
+    """Зарегистрировать форум-супергруппу как ноду-сообщество (для аудитории).
+
+    Форум-режим включается отдельно (enable_forum_mode) — как у инфра-нод.
+    Идемпотентно по (owner_id, tg_chat_id)."""
+    row = await pool.fetchrow(
+        """INSERT INTO community_nodes (owner_id, tg_chat_id, title, description, is_active)
+           VALUES ($1,$2,$3,$4,TRUE)
+           ON CONFLICT (owner_id, tg_chat_id)
+           DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description, is_active=TRUE
+           RETURNING *""",
+        owner_id, tg_chat_id, (title or "")[:128], (description or "")[:512])
+    log.info("nodes_engine: community node registered id=%d owner=%d chat=%d",
+             row["id"], owner_id, tg_chat_id)
+    return dict(row)
+
+
+async def list_community_nodes(pool: asyncpg.Pool, owner_id: int) -> list[dict[str, Any]]:
+    """Ноды-сообщества владельца + число каналов в каждой."""
+    rows = await pool.fetch(
+        """SELECT n.*, (SELECT COUNT(*) FROM community_channels c WHERE c.node_id=n.id) AS channels
+           FROM community_nodes n WHERE n.owner_id=$1 AND n.is_active=TRUE
+           ORDER BY n.created_at DESC""", owner_id)
+    return [dict(r) for r in rows]
+
+
+async def list_community_channels(pool: asyncpg.Pool, owner_id: int, node_id: int) -> list[dict[str, Any]]:
+    """Каналы (форум-топики) ноды-сообщества. Проверяет владение."""
+    rows = await pool.fetch(
+        """SELECT c.id, c.tg_topic_id, c.name, c.created_at
+           FROM community_channels c JOIN community_nodes n ON n.id=c.node_id
+           WHERE c.node_id=$1 AND n.owner_id=$2 ORDER BY c.id""", node_id, owner_id)
+    return [dict(r) for r in rows]
+
+
+async def deactivate_community_node(pool: asyncpg.Pool, owner_id: int, node_id: int) -> bool:
+    res = await pool.execute(
+        "UPDATE community_nodes SET is_active=FALSE WHERE id=$1 AND owner_id=$2",
+        node_id, owner_id)
+    return res == "UPDATE 1"
+
+
+async def create_community_channel(
+    pool: asyncpg.Pool, bot, owner_id: int, node_id: int, name: str,
+) -> dict[str, Any] | None:
+    """Создать канал ноды = форум-топик в её супергруппе. Требует bot (Bot API).
+
+    Возвращает запись канала или None при ошибке. Выполняется в процессе бота
+    (op community_add_channel), т.к. mini_app_api не держит bot-инстанс."""
+    node = await pool.fetchrow(
+        "SELECT id, tg_chat_id FROM community_nodes WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+        node_id, owner_id)
+    if not node:
+        return None
+    safe = (name or "Канал").strip()[:128] or "Канал"
+    import random as _r
+    try:
+        topic = await bot.create_forum_topic(
+            chat_id=node["tg_chat_id"], name=safe,
+            icon_color=_r.choice(_COMMUNITY_TOPIC_COLORS))
+    except Exception as exc:
+        log.error("nodes_engine: community topic failed node=%d: %s", node_id, exc)
+        return None
+    row = await pool.fetchrow(
+        """INSERT INTO community_channels (node_id, tg_topic_id, name)
+           VALUES ($1,$2,$3) ON CONFLICT (node_id, tg_topic_id)
+           DO UPDATE SET name=EXCLUDED.name RETURNING *""",
+        node_id, topic.message_thread_id, safe)
+    return dict(row)

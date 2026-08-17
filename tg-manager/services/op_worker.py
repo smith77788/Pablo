@@ -1629,6 +1629,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_deploy_network(pool, bot, op_id, owner_id, params)
             elif op_type == "crosspost_run":
                 result = await _exec_crosspost_run(pool, bot, op_id, owner_id, params)
+            elif op_type == "community_add_channel":
+                result = await _exec_community_add_channel(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_views":
                 result = await _exec_boost_views(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_reactions":
@@ -8114,6 +8116,29 @@ async def _exec_deploy_network(
         parts.append("Вручную: " + "; ".join(manual[:5]))
     return {"status": "done", "created": created, "wired": wired,
             "manual": manual, "summary": " · ".join(parts)}
+
+
+async def _exec_community_add_channel(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Ноды-комьюнити: создать канал (форум-топик) в ноде через Bot API.
+    Выполняется в процессе бота (у mini_app нет bot-инстанса)."""
+    from services import nodes_engine
+    try:
+        node_id = int(params.get("node_id"))
+    except (TypeError, ValueError):
+        return {"status": "failed", "summary": "⚠️ Канал ноды: не указан node_id"}
+    names = params.get("names") or ([params["name"]] if params.get("name") else [])
+    created = 0
+    for nm in names[:20]:
+        if await _is_cancelled(pool, op_id):
+            break
+        res = await nodes_engine.create_community_channel(pool, bot, owner_id, node_id, str(nm))
+        if res:
+            created += 1
+            await asyncio.sleep(random.uniform(1.5, 3.5))
+    return {"status": "done" if created else "failed", "created": created,
+            "summary": f"🖥 Ноды: создано каналов {created}"}
 
 
 async def _exec_crosspost_run(

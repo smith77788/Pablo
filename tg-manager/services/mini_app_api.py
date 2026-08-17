@@ -7470,6 +7470,95 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("node_delete uid=%d node=%d", uid, node_id)
             return _err(str(exc), 500)
 
+    # ── Ноды-комьюнити (mini-Discord для аудитории) ──────────────────────────
+    async def community_nodes_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import nodes_engine
+        try:
+            return _json_resp({"nodes": await nodes_engine.list_community_nodes(pool, uid)})
+        except Exception as exc:
+            log.exception("community_nodes_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def community_node_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        title = validate_string(data.get("title"), max_len=128) or ""
+        description = validate_string(data.get("description"), max_len=512) or ""
+        try:
+            tg_chat_id = int(str(data.get("tg_chat_id") or "").strip())
+        except (ValueError, TypeError):
+            return _err("tg_chat_id должен быть числом (например -1001234567890)", 400)
+        if not title:
+            return _err("Укажите название сообщества", 400)
+        from services import nodes_engine
+        try:
+            node = await nodes_engine.register_community_node(pool, uid, tg_chat_id, title, description)
+            return _json_resp({"ok": True, "node": node})
+        except Exception as exc:
+            log.exception("community_node_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def community_node_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
+        from services import nodes_engine
+        await nodes_engine.deactivate_community_node(pool, uid, node_id)
+        return _json_resp({"ok": True})
+
+    async def community_channels_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("bad node_id", 400)
+        from services import nodes_engine
+        return _json_resp({"channels": await nodes_engine.list_community_channels(pool, uid, node_id)})
+
+    async def community_channel_add(request: web.Request) -> web.Response:
+        """Добавить канал (форум-топик) в ноду — через op (создание в процессе бота)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+            data = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        name = validate_string(data.get("name"), max_len=128)
+        if not name:
+            return _err("Укажите название канала", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM community_nodes WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            node_id, uid)
+        if not owns:
+            return _err("Нода не найдена", 404)
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(pool, uid, "community_add_channel",
+                {"node_id": node_id, "name": name}, total_items=1,
+                label=f"Ноды: канал «{name[:40]}»")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("community_channel_add uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Gift Transfer ──────────────────────────────────────────────────────────
 
     async def gift_inventory(request: web.Request) -> web.Response:
@@ -14000,6 +14089,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/node", node_create)
     app.router.add_delete("/api/miniapp/node/{node_id}", node_delete)
     app.router.add_get("/api/miniapp/node/{node_id}/threads", node_threads)
+    app.router.add_get("/api/miniapp/community/nodes", community_nodes_list)
+    app.router.add_post("/api/miniapp/community/node", community_node_create)
+    app.router.add_delete("/api/miniapp/community/node/{node_id}", community_node_delete)
+    app.router.add_get("/api/miniapp/community/node/{node_id}/channels", community_channels_list)
+    app.router.add_post("/api/miniapp/community/node/{node_id}/channels", community_channel_add)
     # Gift Transfer
     app.router.add_get("/api/miniapp/gifts", gift_inventory)
     app.router.add_post("/api/miniapp/gifts/scan", gift_scan_submit)
