@@ -13,7 +13,8 @@ def _snap(**over):
         "vault": {"health": "ok", "stale_days": 0},
         "goal": None,
         "growth": {"channels": 0, "growth_ops_7d": 0},
-        "bots": {"total": 0, "active": 0, "inactive": 0},
+        "bots": {"total": 0, "active": 0, "inactive": 0,
+                 "community_nodes": 0, "community_empty": 0},
     }
     for k, v in over.items():
         base[k] = {**(base.get(k) or {}), **v} if isinstance(v, dict) else v

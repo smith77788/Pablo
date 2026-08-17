@@ -43,6 +43,17 @@ async def _bots(pool, owner_id: int) -> dict:
             out["inactive"] = out["total"] - out["active"]
     except Exception:
         log.debug("world._bots failed owner=%s", owner_id)
+    # Ноды-комьюнити: всего и «пустых» (без каналов) — для подсказки «наполните».
+    try:
+        r2 = await pool.fetchrow(
+            "SELECT COUNT(*) AS total, "
+            "COUNT(*) FILTER (WHERE (SELECT COUNT(*) FROM community_channels c WHERE c.node_id=n.id)=0) AS empty "
+            "FROM community_nodes n WHERE n.owner_id=$1 AND n.is_active", owner_id)
+        if r2:
+            out["community_nodes"] = int(r2["total"] or 0)
+            out["community_empty"] = int(r2["empty"] or 0)
+    except Exception:
+        log.debug("world._bots community failed owner=%s", owner_id)
     return out
 
 

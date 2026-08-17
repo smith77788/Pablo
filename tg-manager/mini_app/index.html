@@ -6666,7 +6666,7 @@ async function loadOrganismPulse() {
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
-    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов'})[a&&a.kind] || 'Открыть';
+    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити'})[a&&a.kind] || 'Открыть';
 }
 function runPulseAction(a) {
   const k = a && a.kind;
@@ -6680,6 +6680,7 @@ function runPulseAction(a) {
   if (k==='geo') return openGlobalPresence();
   if (k==='growth') return openGrowthHub();
   if (k==='bots') return openNetwork();
+  if (k==='community') return openCommunity();
   toast('Открываю…');
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).
@@ -14329,7 +14330,7 @@ async function openCommunity() {
     const nodes = d.nodes||[];
     const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} сообществ`:'';
     if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы')); return; }
-    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id}, ${JSON.stringify(esc(n.title||('Нода #'+n.id)))})">
+    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id}, ${JSON.stringify(esc(n.title||('Нода #'+n.id)))}, ${n.tg_chat_id})">
       <div class="row-ico" style="background:var(--bg-purple-16)">🏛</div>
       <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id}</div></div>
       <span class="chev">›</span>
@@ -14354,13 +14355,14 @@ async function submitCommunityCreate() {
     openCommunity();
   } catch(e){ er.textContent=e.message||'Ошибка'; }
 }
-async function openCommunityNode(id, title) {
-  _CUR_CNODE = id;
+let _CUR_CNODE_CHAT = null;
+async function openCommunityNode(id, title, chatId) {
+  _CUR_CNODE = id; _CUR_CNODE_CHAT = chatId;
   push('s-communitynode');
   txt('cnodeTitle','🏛 '+(title||'Сообщество'));
   txt('cnodeChannels','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('cnodeActions',`
-    <button class="btn btn-s" onclick="inviteToCommunity(${id})" style="flex:0">➕ Пригласить аудиторию</button>
+    <button class="btn btn-p" onclick="inviteToCommunity(${chatId})" style="flex:0">➕ Пригласить аудиторию</button>
     <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0">🗑 Убрать</button>`);
   try {
     const d = await api('/api/miniapp/community/node/'+id+'/channels');
@@ -14386,9 +14388,9 @@ async function deleteCommunityNode(id) {
   try { await api('/api/miniapp/community/node/'+id,{method:'DELETE'}); back(); openCommunity(); } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 // Пригласить аудиторию в ноду = инвайт в её супергруппу (переиспользуем инвайт).
-function inviteToCommunity(id) {
+function inviteToCommunity(chatId) {
   openMassInvite();
-  toast('Вставьте Chat ID сообщества в поле группы и выберите источник аудитории');
+  setTimeout(()=>{ const g=document.getElementById('massInviteGroup'); if(g && chatId){ g.value=String(chatId); } toast('🏛 Группа сообщества подставлена — выберите источник аудитории'); }, 250);
 }
 async function openNodes() {
   push('s-nodes');

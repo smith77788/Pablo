@@ -57,6 +57,12 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
             "Неактивные боты не принимают вебхуки и не участвуют в сетевой "
             "рассылке. Проверьте токены/вебхуки в разделе сети.",
             {"kind": "bots"})
+    if bots.get("community_empty", 0) > 0:
+        add("community_empty", "opportunity",
+            f"{bots['community_empty']} сообществ без каналов",
+            "Нода-комьюнити пуста: добавьте каналы-топики и пригласите аудиторию, "
+            "иначе сообщество не оживёт.",
+            {"kind": "community"})
 
     growth = snap.get("growth") or {}
     if growth.get("channels", 0) > 0 and growth.get("growth_ops_7d", 0) == 0:

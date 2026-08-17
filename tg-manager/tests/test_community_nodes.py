@@ -78,3 +78,15 @@ def test_frontend_community_ui():
     assert "function addCommunityChannel" in html
     assert "/api/miniapp/community/nodes" in html
     assert 'onclick="openCommunity()"' in html
+
+
+def test_community_organism_and_invite_wiring():
+    world = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
+    assert "community_nodes" in world and "community_empty" in world
+    brain = open(os.path.join(ROOT, "services", "organism", "brain.py"), encoding="utf-8").read()
+    assert "community_empty" in brain and '"kind": "community"' in brain
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    # инвайт в ноду подставляет её группу
+    assert "function inviteToCommunity" in html and "massInviteGroup" in html
+    # действие мозга community маршрутизируется
+    assert "if (k==='community') return openCommunity();" in html
