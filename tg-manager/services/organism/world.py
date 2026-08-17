@@ -55,6 +55,12 @@ async def _fleet(pool, owner_id: int) -> dict:
         out["bans_24h"] = int((await spine.event_counts(pool, owner_id, hours=24)).get("ban", 0))
     except Exception:
         pass
+    try:
+        from services import geo_router
+        dist = await geo_router.get_geo_distribution(pool, owner_id)
+        out["geo"] = geo_router.summarize_distribution(dist)
+    except Exception:
+        log.debug("world._fleet geo failed owner=%s", owner_id)
     return out
 
 

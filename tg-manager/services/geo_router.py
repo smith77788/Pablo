@@ -48,6 +48,32 @@ async def get_accounts_by_geo(
     return [dict(r) for r in rows]
 
 
+def summarize_distribution(dist: dict[str, int]) -> dict:
+    """Чистая свёртка распределения аккаунтов по гео — для мир-снимка и мозга.
+
+    Возвращает: total, distinct (стран с известным гео), top/top_share,
+    unknown (аккаунты без гео прокси)/unknown_share, concentrated (перекос в
+    одну страну). Детерминирована — тестируется без БД.
+    """
+    dist = {k: int(v) for k, v in (dist or {}).items() if int(v) > 0}
+    total = sum(dist.values())
+    unknown = dist.get("UNKNOWN", 0)
+    known = {k: v for k, v in dist.items() if k != "UNKNOWN"}
+    top = max(known, key=known.get) if known else None
+    top_cnt = known.get(top, 0) if top else 0
+    known_total = sum(known.values())
+    return {
+        "total": total,
+        "distinct": len(known),
+        "top": top,
+        "top_share": round(top_cnt / known_total, 3) if known_total else 0.0,
+        "unknown": unknown,
+        "unknown_share": round(unknown / total, 3) if total else 0.0,
+        # Перекос: ≥5 аккаунтов с гео и >70% в одной стране.
+        "concentrated": known_total >= 5 and top_cnt / known_total > 0.70,
+    }
+
+
 async def get_geo_distribution(
     pool: asyncpg.Pool,
     owner_id: int,

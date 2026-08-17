@@ -50,6 +50,20 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
             f"Давление {fleet.get('pressure')}/100 — рисковые операции лучше "
             "отложить, флот прогреть.", {"kind": "governor"})
 
+    geo = fleet.get("geo") or {}
+    if geo.get("concentrated") and geo.get("top"):
+        add("geo_concentrated", "opportunity",
+            f"Флот сосредоточен в {geo['top']} ({int(geo.get('top_share', 0) * 100)}%)",
+            "Одна гео = одна точка отказа (блок подсети/страны бьёт разом) и узкий "
+            "охват. Добавьте прокси других стран — присутствие шире, риск ниже.",
+            {"kind": "geo"})
+    elif geo.get("unknown_share", 0) > 0.5 and geo.get("total", 0) >= 5:
+        add("geo_unknown", "info",
+            f"{int(geo['unknown_share'] * 100)}% аккаунтов без гео-прокси",
+            "У большинства аккаунтов не определена страна прокси — гео-таргетинг и "
+            "ночной режим по таймзоне для них не работают. Привяжите гео-прокси.",
+            {"kind": "geo"})
+
     lf = ops.get("last_failed")
     if lf and ops.get("failed_24h", 0) > 0:
         add("op_fail", "warn", f"Операция #{lf['op_id']} не выполнена",
