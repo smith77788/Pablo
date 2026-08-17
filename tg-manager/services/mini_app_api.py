@@ -15776,7 +15776,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Список (вариант_текст, метка_варианта, его_получатели). Без A/B — один
         # «вариант» со всей аудиторией. С A/B — аудитория делится поровну.
         # ab_batch — общий id для операций одного A/B-теста (для сводки результатов).
-        ab_batch = int(time.time()) if variants else None
+        # мс-гранулярность: два A/B-запуска в одну секунду не сольются в один батч
+        ab_batch = int(time.time() * 1000) if variants else None
         if variants:
             groups = ab_engine.split_audience(refs, len(variants))
             plan = [(variants[i], f"A/B#{i + 1}", groups[i]) for i in range(len(variants))]

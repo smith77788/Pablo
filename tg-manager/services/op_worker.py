@@ -438,7 +438,8 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
         from services import operation_bus
         import time as _t
         _CH = 1000
-        ab_batch = int(_t.time()) if variants else None
+        # мс-гранулярность: два welcome-A/B в одну секунду не сольются в один батч
+        ab_batch = int(_t.time() * 1000) if variants else None
         if variants:
             groups = ab_engine.split_audience(targets, len(variants))
             plan = [(variants[i], f"A/B#{i + 1}", groups[i]) for i in range(len(variants))]
