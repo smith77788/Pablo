@@ -1,0 +1,82 @@
+"""Жизненный цикл организма: сердцебиение + проактивные нуджи.
+
+Раньше «мозг» существовал только когда пользователь открывал экран. Здесь у
+организма появляется ПУЛЬС: раз в N минут он смотрит на мир каждого владельца и,
+если видит срочное (хранилище отвалилось, флот под давлением, операция упала),
+сам пишет в ЛС — с кулдауном, чтобы не спамить. Так система «живёт» и «понимает»
+между сессиями, а не ждёт, пока её откроют.
+
+Кулдаун и антиспам держим в общем состоянии (organism_state.last_nudge).
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+
+log = logging.getLogger(__name__)
+
+INTERVAL = 15 * 60          # сердцебиение — раз в 15 мин
+_SAME_COOLDOWN = 6 * 3600   # та же подсказка не чаще раза в 6ч
+_ANY_GAP = 2 * 3600         # любой нудж не чаще раза в 2ч
+_NUDGE_SEV = ("urgent", "warn")
+
+
+async def run(pool, bot) -> None:
+    log.info("organism.runner: starting (heartbeat %ds)", INTERVAL)
+    while True:
+        try:
+            await _tick(pool, bot)
+        except Exception:
+            log.exception("organism.runner: tick failed")
+        await asyncio.sleep(INTERVAL)
+
+
+async def _active_owners(pool) -> list[int]:
+    rows = await pool.fetch(
+        "SELECT DISTINCT owner_id FROM tg_accounts WHERE is_active AND owner_id IS NOT NULL")
+    return [int(r["owner_id"]) for r in rows]
+
+
+async def _tick(pool, bot) -> int:
+    """Один проход по всем владельцам. Возвращает число отправленных нуджей."""
+    sent = 0
+    for oid in await _active_owners(pool):
+        try:
+            if await _tick_owner(pool, bot, oid):
+                sent += 1
+        except Exception:
+            log.debug("organism.runner: owner %s failed", oid, exc_info=True)
+    if sent:
+        log.info("organism.runner: нуджей отправлено %d", sent)
+    return sent
+
+
+async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | None = None) -> bool:
+    """Проверить одного владельца и при необходимости толкнуть. notifier/now —
+    seam для тестов. Возвращает True, если отправили нудж."""
+    from services.organism import brain, spine
+    now = time.time() if now is None else now
+    pulse = await brain.pulse(pool, owner_id)
+    top = next((s for s in pulse.get("suggestions", []) if s["severity"] in _NUDGE_SEV), None)
+    if not top:
+        return False
+    last = await spine.state_get(pool, owner_id, "last_nudge", {}) or {}
+    last_at = float(last.get("at") or 0)
+    # антиспам — только если нудж уже был: та же подсказка не чаще 6ч; любая — 2ч.
+    if last_at > 0:
+        if last.get("id") == top["id"] and now - last_at < _SAME_COOLDOWN:
+            return False
+        if now - last_at < _ANY_GAP:
+            return False
+    msg = f"🫀 <b>{top['title']}</b>\n{top['why']}"
+    try:
+        if notifier:
+            await notifier(owner_id, msg)
+        else:
+            await bot.send_message(owner_id, msg, parse_mode="HTML")
+    except Exception:
+        log.debug("organism.runner: notify failed owner=%s", owner_id)
+        return False
+    await spine.state_set(pool, owner_id, "last_nudge", {"id": top["id"], "at": now})
+    return True

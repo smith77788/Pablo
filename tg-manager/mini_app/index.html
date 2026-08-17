@@ -571,6 +571,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
     </div>
+    <!-- 🫀 Пульс организма: живой контекст + цепочки следующих действий -->
+    <div id="organismPulse" style="margin:12px 16px 0"></div>
     <!-- Operation Progress -->
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
@@ -6452,8 +6454,76 @@ async function loadHome() {
   } catch(e) {
     if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
-  loadNextActions();
+  loadOrganismPulse();
   renderFrequent();
+}
+
+// 🫀 Пульс организма — единый живой контекст + цепочки следующих действий.
+const ORG_SEV = {urgent:{c:'#ef4444',e:'🔴'}, warn:{c:'#f59e0b',e:'🟠'}, opportunity:{c:'#2dd4bf',e:'🟢'}, info:{c:'var(--hint)',e:'💡'}};
+async function loadOrganismPulse() {
+  const el = document.getElementById('organismPulse');
+  if (!el) return;
+  try {
+    const p = await api('/api/miniapp/organism/pulse');
+    const sugs = p.suggestions || [];
+    let html = `<div style="background:var(--bg);border:1px solid var(--sep);border-radius:16px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:18px">🫀</span>
+        <span style="font-size:14px;font-weight:700">Пульс</span>
+        <span style="margin-left:auto;font-size:16px;cursor:pointer;opacity:.6" onclick="loadOrganismPulse()">🔄</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--hint);line-height:1.5">${esc(p.narrative||'')}</div>`;
+    if (sugs.length) {
+      html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">';
+      html += sugs.map(s=>{
+        const sv = ORG_SEV[s.severity]||ORG_SEV.info;
+        return `<div style="border-left:3px solid ${sv.c};background:var(--bg2);border-radius:0 10px 10px 0;padding:9px 12px">
+          <div style="display:flex;align-items:flex-start;gap:6px">
+            <div style="flex:1">
+              <div style="font-size:13.5px;font-weight:600">${sv.e} ${esc(s.title)}</div>
+              <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
+            </div>
+            <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px">✕</span>
+          </div>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick='runPulseAction(${JSON.stringify(s.action)})'>▶ ${esc(pulseActionLabel(s.action))}</button>
+        </div>`;
+      }).join('');
+      html += '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = ''; }
+}
+function pulseActionLabel(a) {
+  return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
+    segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
+    campaign:'Планировщик', invite:'Запустить инвайт'})[a&&a.kind] || 'Открыть';
+}
+function runPulseAction(a) {
+  const k = a && a.kind;
+  if (k==='vault') return openVault();
+  if (k==='governor' || k==='invite') return openMassInvite();
+  if (k==='campaign') return openCampaignPlanner();
+  if (k==='intents') return openIntentSensor();
+  if (k==='operation') return openMassOps();
+  if (k==='purge_dead') { goTab('accounts'); setTimeout(()=>filterAcc('dead', document.querySelector('[data-filter="dead"]')), 200); return; }
+  if (k==='segment_hot') return openContactsHot();
+  toast('Открываю…');
+}
+// Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).
+function openContactsHot() {
+  push('s-contacts');
+  loadContacts();
+  setTimeout(()=>{
+    CONTACT_STAGE = 'negotiation';
+    document.querySelectorAll('.contact-stage').forEach(x=>x.classList.toggle('on', x.dataset.s==='negotiation'));
+    loadContacts();
+    toast('🔥 Горячие: включите «весь срез» и напишите оффер');
+  }, 150);
+}
+async function dismissPulse(id) {
+  try { await api('/api/miniapp/organism/dismiss', {method:'POST', body:JSON.stringify({id})}); loadOrganismPulse(); }
+  catch(e){}
 }
 
 // ── Copilot: контекстные подсказки «Что делать дальше» ──────────────

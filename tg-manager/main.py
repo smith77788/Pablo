@@ -666,6 +666,10 @@ async def main() -> None:
         # и один раз предупреждает владельца в ЛС (иначе узнаёт, только зайдя в архив).
         from services import vault_watchdog
         asyncio.create_task(_resilient("vault_watchdog", vault_watchdog.run, pool, bot))
+        # Пульс организма: сердцебиение — смотрит на мир владельца и проактивно
+        # подсказывает срочное в ЛС (с кулдауном). Система «живёт» между сессиями.
+        from services.organism import runner as organism_runner
+        asyncio.create_task(_resilient("organism_runner", organism_runner.run, pool, bot))
         asyncio.create_task(
             _resilient("payment_checker", payment_checker.run, pool, http, bot)
         )
