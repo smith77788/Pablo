@@ -15349,9 +15349,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         method = str(body.get("invite_method") or "direct").strip().lower()
         if method not in ("direct", "admin", "link"):
             method = "direct"
-        ready, reason = await _segment_pressure_ok(uid, "mass_invite")
-        if not ready:
-            return _err(f"Инфраструктура перегружена: {reason}", 429)
         params = {"group": group, "source": "import_list", "pace": "normal",
                   "batch_size": 5, "invite_method": method, "account_ids": acc_ids}
         if user_refs:
@@ -15361,13 +15358,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if method == "link" and body.get("link_message"):
             params["link_message"] = str(body.get("link_message"))[:500]
         n_targets = len(user_refs) + len(phones)
+        # Единый каркас: ban-safety гейт + постановка + событие в организм.
+        from services import module_kit
         try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
+            op_id = await module_kit.submit_guarded(
                 pool, uid, "mass_invite", params, total_items=n_targets,
                 label=f"Сегмент-инвайт → {group}: {n_targets} × {len(acc_ids)} акк.")
             return _json_resp({"ok": True, "op_id": op_id,
                                "targets": n_targets, "accounts": len(acc_ids)})
+        except module_kit.OpGateError as exc:
+            return _err(f"Инфраструктура перегружена: {exc}", 429)
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
