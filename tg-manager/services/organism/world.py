@@ -23,8 +23,25 @@ async def snapshot(pool, owner_id: int) -> dict:
         "graph": await _graph(pool, owner_id),
         "vault": await _vault(pool, owner_id),
         "goal": await _goal(pool, owner_id),
+        "growth": await _growth(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
     }
+
+
+async def _growth(pool, owner_id: int) -> dict:
+    """Активность роста и наличие каналов — для подсказки «застой роста»."""
+    out = {"channels": 0, "growth_ops_7d": 0}
+    try:
+        from services import growth_center
+        out["channels"] = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id) or 0)
+        out["growth_ops_7d"] = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
+            "AND op_type = ANY($2::text[]) AND created_at > NOW() - interval '7 days'",
+            owner_id, list(growth_center.GROWTH_OP_TYPES)) or 0)
+    except Exception:
+        log.debug("world._growth failed owner=%s", owner_id)
+    return out
 
 
 async def _fleet(pool, owner_id: int) -> dict:

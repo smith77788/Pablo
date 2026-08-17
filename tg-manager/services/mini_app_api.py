@@ -4850,6 +4850,85 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             report["live_test"] = {"ok": False, "reason": f"Ошибка теста подключения: {str(e)[:160]}"}
         return _json_resp(report)
 
+    async def growth_overview(request: web.Request) -> web.Response:
+        """Мотор роста: единый отчёт по инструментам продвижения за период.
+
+        Агрегирует операции роста (накрутка/Growth Agent/self-promo) из
+        operation_queue за N дней через чистый growth_center.summarize_growth,
+        добавляет прирост участников по каналам (channel_member_history).
+        Fail-open: сбой блока не рушит ответ."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            days = int(request.query.get("days", "30"))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 90))
+        from services import growth_center
+        rows = await _safe_fetch(pool,
+            """SELECT op_type, status, done_items, total_items, created_at
+               FROM operation_queue
+               WHERE owner_id=$1 AND op_type = ANY($2::text[])
+                 AND created_at > NOW() - ($3 || ' days')::interval
+               ORDER BY created_at DESC""",
+            uid, list(growth_center.GROWTH_OP_TYPES), str(days))
+        summary = growth_center.summarize_growth([dict(r) for r in rows])
+        # Прирост участников по каналам за период (лучшие 5 по d-приросту).
+        channels: list[dict] = []
+        try:
+            crows = await _safe_fetch(pool,
+                """SELECT mc.channel_id, mc.title, mc.username,
+                          COALESCE(mc.members_count,0) AS current,
+                          (SELECT members_count FROM channel_member_history h
+                           WHERE h.owner_id=mc.owner_id AND h.channel_id=mc.channel_id
+                             AND h.captured_on <= (CURRENT_DATE - ($2 || ' days')::interval)
+                           ORDER BY h.captured_on DESC LIMIT 1) AS base
+                   FROM managed_channels mc
+                   WHERE mc.owner_id=$1 AND COALESCE(mc.members_count,0) > 0
+                   ORDER BY mc.members_count DESC LIMIT 30""",
+                uid, str(min(days, 30)))
+            for r in crows:
+                base = r["base"]
+                delta = (int(r["current"]) - int(base)) if base is not None else None
+                channels.append({"channel_id": r["channel_id"], "title": r["title"],
+                                 "username": r["username"], "current": int(r["current"]),
+                                 "delta": delta})
+            channels.sort(key=lambda c: (c["delta"] is not None, c["delta"] or 0), reverse=True)
+            channels = channels[:5]
+        except Exception:
+            log.debug("growth_overview: channel growth failed uid=%s", uid)
+        return _json_resp({"days": days, "summary": summary, "channels": channels})
+
+    async def growth_plan(request: web.Request) -> web.Response:
+        """Цель «+N подписчиков к сроку» → раскладка по инструментам роста.
+
+        Ёмкость флота считается как в campaign_planner.plan (аккаунты + суточные
+        лимиты), затем чистый growth_center.recommend_plan раскладывает цель."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            goal = validate_integer(request.query.get("goal"), min_val=1, max_val=10_000_000) or 1000
+            days = validate_integer(request.query.get("days"), min_val=1, max_val=365) or 14
+        except (TypeError, ValueError):
+            goal, days = 1000, 14
+        accs = await _safe_fetch(pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+            "AND session_str IS NOT NULL", uid)
+        acc_ids = [int(r["id"]) for r in (accs or [])]
+        daily = 0
+        try:
+            from services import flood_engine
+            for aid in acc_ids:
+                d = await flood_engine.recommended_daily_limit(pool, aid)
+                daily += int(d.get("limit", 0) or 0)
+        except Exception:
+            log.debug("growth_plan: capacity calc failed uid=%s", uid)
+        from services import growth_center
+        return _json_resp(growth_center.recommend_plan(
+            int(goal), int(days), len(acc_ids), daily))
+
     async def boost_submit(request: web.Request) -> web.Response:
         """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах."""
         uid = _get_uid(request)
@@ -13786,6 +13865,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
     app.router.add_post("/api/miniapp/growth", growth_submit)
+    app.router.add_get("/api/miniapp/growth/overview", growth_overview)
+    app.router.add_get("/api/miniapp/growth/plan", growth_plan)
     app.router.add_post("/api/miniapp/ai_comment", ai_comment_submit)
     app.router.add_post("/api/miniapp/compliance_scan", compliance_scan_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)

@@ -50,6 +50,14 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
             f"Давление {fleet.get('pressure')}/100 — рисковые операции лучше "
             "отложить, флот прогреть.", {"kind": "governor"})
 
+    growth = snap.get("growth") or {}
+    if growth.get("channels", 0) > 0 and growth.get("growth_ops_7d", 0) == 0:
+        add("growth_stall", "opportunity",
+            f"{growth['channels']} каналов без роста 7 дн.",
+            "Инструменты роста простаивают. Запустите Мотор роста — накрутка, "
+            "агент роста и самопиар в одном месте с планом под цель.",
+            {"kind": "growth"})
+
     geo = fleet.get("geo") or {}
     if geo.get("concentrated") and geo.get("top"):
         add("geo_concentrated", "opportunity",

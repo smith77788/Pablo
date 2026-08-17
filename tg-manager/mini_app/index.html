@@ -1437,6 +1437,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Быстрый пост</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openGrowthHub()">
+        <div class="mgmt-tile-ico">📈</div>
+        <div class="mgmt-tile-lbl">Мотор роста</div>
+        <div class="mgmt-tile-val" id="m-growthhub-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openSelfPromo()">
         <div class="mgmt-tile-ico">📣</div>
         <div class="mgmt-tile-lbl">Самопродвижение</div>
@@ -3637,6 +3642,28 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ SCREEN: GROWTH AGENT ══════════════════════ -->
+<!-- ══════════ МОТОР РОСТА (единый хаб) ══════════ -->
+<div class="screen" id="s-growthhub">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Мотор роста</div></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 4px">
+      Единый взгляд на продвижение: активность инструментов и прирост каналов за период.
+    </div>
+    <div id="growthHubTotals" style="display:flex;gap:8px;padding:6px 0 4px;flex-wrap:wrap"></div>
+    <div class="sec">🎯 Цель роста</div>
+    <div style="display:flex;gap:8px;padding:4px 0 2px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:110px"><label style="font-size:11px;color:var(--hint)">+подписчиков</label><input type="number" id="ghGoal" value="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div style="flex:1;min-width:90px"><label style="font-size:11px;color:var(--hint)">за дней</label><input type="number" id="ghDays" value="14" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <button class="btn btn-p" style="flex:0 0 auto" onclick="runGrowthPlan()">План →</button>
+    </div>
+    <div id="growthHubPlan" style="padding:2px 0"></div>
+    <div class="sec">Инструменты роста</div>
+    <div class="lst" id="growthHubTools"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Прирост каналов</div>
+    <div class="lst" id="growthHubChannels"></div>
+  </div>
+</div>
+
 <div class="screen" id="s-growth">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
@@ -6556,7 +6583,7 @@ async function loadOrganismPulse() {
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
-    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть'})[a&&a.kind] || 'Открыть';
+    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста'})[a&&a.kind] || 'Открыть';
 }
 function runPulseAction(a) {
   const k = a && a.kind;
@@ -6568,6 +6595,7 @@ function runPulseAction(a) {
   if (k==='purge_dead') { goTab('accounts'); setTimeout(()=>filterAcc('dead', document.querySelector('[data-filter="dead"]')), 200); return; }
   if (k==='segment_hot') return openContactsHot();
   if (k==='geo') return openGlobalPresence();
+  if (k==='growth') return openGrowthHub();
   toast('Открываю…');
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).
@@ -12162,6 +12190,68 @@ async function runDiag() {
   } finally { btn.disabled=false; btn.textContent='▶️ Запустить диагностику'; }
 }
 
+// ── Мотор роста (единый хаб) ─────────────────────────────
+const _GROWTH_TOOL_FN = {boost:'openBoost', growth_agent:'openGrowth', self_promo:'openSelfPromo'};
+async function openGrowthHub() {
+  push('s-growthhub');
+  txt('growthHubTools','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('growthHubChannels','');
+  txt('growthHubTotals','');
+  try {
+    const d = await api('/api/miniapp/growth/overview?days=30');
+    const t = (d.summary&&d.summary.totals)||{};
+    txt('growthHubTotals', `
+      <div class="kpi-chip"><div class="kpi-chip-val">${num(t.ops||0)}</div><div class="kpi-chip-lbl">операций</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" style="color:var(--green)">${num(t.delivered||0)}</div><div class="kpi-chip-lbl">действий</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val">${t.active_tools||0}/3</div><div class="kpi-chip-lbl">инструментов</div></div>`);
+    const tools = (d.summary&&d.summary.tools)||{};
+    const order = ['boost','growth_agent','self_promo'];
+    txt('growthHubTools', order.map(k=>{
+      const x = tools[k]||{}; const fn = _GROWTH_TOOL_FN[k]||'';
+      const sub = x.ops ? `${x.ops} операц. · ${num(x.delivered||0)} действий${x.active?` · ${x.active} в работе`:''}` : 'нет активности — запустить';
+      return `<div class="row tap" onclick="${fn}()">
+        <div class="row-ico" style="background:var(--bg-purple-16)">${x.emoji||'📈'}</div>
+        <div class="row-body"><div class="row-name">${esc(x.label||k)}</div><div class="row-val">${sub}</div></div>
+        <span class="chev">›</span>
+      </div>`;
+    }).join(''));
+    const chs = d.channels||[];
+    txt('growthHubChannels', chs.length ? chs.map(c=>{
+      const nm = esc(c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id));
+      const dl = c.delta==null ? '<span style="color:var(--hint)">нет данных</span>'
+        : (c.delta>0?`<span style="color:var(--green)">+${num(c.delta)}</span>`
+          : c.delta<0?`<span style="color:var(--red)">${num(c.delta)}</span>`:'0');
+      return `<div class="row tap" onclick="openChannel(${c.channel_id})">
+        <div class="row-ico" style="background:var(--bg-blue-16)">📡</div>
+        <div class="row-body"><div class="row-name">${nm}</div><div class="row-val">${num(c.current)} участников · ${dl} за период</div></div>
+        <span class="chev">›</span>
+      </div>`;
+    }).join('') : empty('📡','Нет каналов','Создайте канал в фабрике — прирост появится здесь'));
+  } catch(e) {
+    txt('growthHubTools', empty('⚠️','Ошибка',e.message||'Не удалось загрузить'));
+  }
+}
+async function runGrowthPlan() {
+  const goal = parseInt(document.getElementById('ghGoal').value)||1000;
+  const days = parseInt(document.getElementById('ghDays').value)||14;
+  txt('growthHubPlan','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const p = await api(`/api/miniapp/growth/plan?goal=${goal}&days=${days}`);
+    const verdict = p.feasible_invite===false
+      ? `<div class="row" style="background:var(--bg-red-16);border-radius:10px;margin:4px 0"><div class="row-ico">⚠️</div><div class="row-body"><div class="row-name" style="font-size:12px;white-space:normal">${esc(p.verdict||'Инвайт-доля недостижима текущим флотом')}</div></div></div>`
+      : (p.verdict?`<div class="hint" style="font-size:11px;color:var(--hint);padding:2px 2px 6px">${esc(p.verdict)}</div>`:'');
+    const steps = (p.steps||[]).map(s=>`
+      <div class="row tap" onclick="${(_GROWTH_TOOL_FN[s.kind]||'openGrowthHub')}()">
+        <div class="row-ico" style="background:var(--bg-purple-16)">${Math.round((s.weight||0)*100)}%</div>
+        <div class="row-body"><div class="row-name">${esc(s.label)} <span style="color:var(--green)">+${num(s.target)}</span></div><div class="row-val" style="white-space:normal;font-size:12px">${esc(s.why)}</div></div>
+        <span class="chev">›</span>
+      </div>`).join('');
+    const seo = p.seo?`<div class="row tap" onclick="openSeoObj()"><div class="row-ico" style="background:var(--bg-green-16)">🔎</div><div class="row-body"><div class="row-name">${esc(p.seo.label)}</div><div class="row-val" style="white-space:normal;font-size:12px">${esc(p.seo.why)}</div></div><span class="chev">›</span></div>`:'';
+    txt('growthHubPlan', verdict + steps + seo);
+  } catch(e) {
+    txt('growthHubPlan', empty('⚠️','Ошибка',e.message||'Не удалось рассчитать план'));
+  }
+}
 // ── Growth Agent ─────────────────────────────────────────
 async function openGrowth() {
   push('s-growth');

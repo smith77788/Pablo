@@ -12,6 +12,7 @@ def _snap(**over):
         "graph": {"contacts": 500, "hot_leads": 0, "intents_24h": 0},
         "vault": {"health": "ok", "stale_days": 0},
         "goal": None,
+        "growth": {"channels": 0, "growth_ops_7d": 0},
     }
     for k, v in over.items():
         base[k] = {**(base.get(k) or {}), **v} if isinstance(v, dict) else v
