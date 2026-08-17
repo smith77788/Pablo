@@ -15798,6 +15798,7 @@ function strikeBackStep() {
 
 async function strikeLaunch() {
   if (!_STRIKE_TARGET || !_STRIKE_CAT) return;
+  if (!await askConfirm('Правовое подтверждение\n\nЖалобы подаются в Telegram только на РЕАЛЬНО противоправный контент выбранной категории. Ложные массовые жалобы на легальные ресурсы — нарушение и могут навредить вашим аккаунтам.\n\nПодтверждаете, что цель содержит нарушение категории «'+(_STRIKE_CAT.label||_STRIKE_CAT.key)+'»?')) return;
   const btn = document.getElementById('strikeLaunchBtn');
   btn.disabled = true; btn.textContent = '⏳ Запуск...';
   try {

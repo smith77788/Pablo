@@ -9205,6 +9205,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }),
                 len(accs),
             )
+            # Подписанная запись правового основания ДО запуска: жалоба подаётся
+            # только по abuse-категории (гейт MINI_CATEGORIES выше), и этот факт
+            # фиксируется в аудите вместе с целью — доказательная база кампании.
+            try:
+                from services import compliance_engine
+                await compliance_engine.record(
+                    pool, uid, None, "strike_legal_basis", "abuse_report",
+                    op_id=op_id,
+                    params={"target": normalized, "category": category,
+                            "category_label": cat.get("label")})
+            except Exception:
+                log.debug("strike_launch: compliance record failed op=%s", op_id)
             return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs), "num_waves": num_waves})
         except Exception as exc:
             log.exception("strike_launch uid=%d", uid)
