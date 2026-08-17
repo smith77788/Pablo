@@ -4929,6 +4929,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp(growth_center.recommend_plan(
             int(goal), int(days), len(acc_ids), daily))
 
+    async def invite_retention_overview(request: web.Request) -> web.Response:
+        """Ретеншен инвайта: приток (успешные вступления) vs отток (left-события).
+
+        joined — из operation_log по инвайт-операциям владельца за период;
+        left — из organism_events kind='left' (chat_guard). Свёртка — чистый
+        invite_retention.summarize. Отток виден только по модерируемым чатам."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            days = int(request.query.get("days", "30"))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 180))
+        joined = await _safe_count(pool,
+            """SELECT COUNT(*) FROM operation_log ol
+               JOIN operation_queue oq ON oq.id = ol.op_id
+               WHERE oq.owner_id=$1 AND oq.op_type LIKE '%invite%'
+                 AND ol.status='ok' AND ol.message='joined'
+                 AND ol.created_at > NOW() - ($2 || ' days')::interval""",
+            uid, str(days))
+        left = await _safe_count(pool,
+            "SELECT COUNT(*) FROM organism_events WHERE owner_id=$1 AND kind='left' "
+            "AND created_at > NOW() - ($2 || ' days')::interval", uid, str(days))
+        from services import invite_retention
+        summary = invite_retention.summarize(joined, left)
+        summary["health"] = invite_retention.health(summary["retention_pct"])
+        summary["days"] = days
+        return _json_resp(summary)
+
     async def boost_submit(request: web.Request) -> web.Response:
         """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах."""
         uid = _get_uid(request)
@@ -13909,6 +13939,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
+    app.router.add_get("/api/miniapp/invite/retention", invite_retention_overview)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_get("/api/miniapp/growth/overview", growth_overview)
     app.router.add_get("/api/miniapp/growth/plan", growth_plan)
@@ -15149,6 +15180,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.repository import get_contact
             result = await get_contact(pool, contact_id, uid)
             if not result: return _err("Not found", 404)
+            # Авто-обогащение (чистое, на чтение): активность + предполагаемый язык.
+            try:
+                from services.contacts_hub import enrich as _enr
+                if isinstance(result.get("contact"), dict):
+                    result["enriched"] = _enr.enrich(result["contact"])
+            except Exception:
+                pass
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)

@@ -4126,6 +4126,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 16px">📊 Аналитика флота и рекомендации</summary>
       <div class="sec">Сегодня по флоту</div>
       <div id="invAnalytics" style="padding:6px 0 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
+      <div class="sec">Ретеншен (30 дн.)</div>
+      <div id="invRetention" style="padding:6px 14px 10px"></div>
       <div class="sec">Разбор и рекомендации</div>
       <div id="invAdvice" style="padding:6px 14px 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
     </details>
@@ -12981,6 +12983,7 @@ async function openContactDetail(id) {
     const c = d.contact;
     const sources = d.sources||[];
     const groups = d.groups||[];
+    const enr = d.enriched||{};
     window._cdContact = c; window._cdSources = sources;  // для «Написать»/«Пригласить»
     const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'';
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
@@ -12993,6 +12996,8 @@ async function openContactDetail(id) {
       ${lastSeenLabel(c.last_seen_type)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
       ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Verified</div></div></div>`:''}
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
+      ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
+      ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 CJK',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
       ${Array.isArray(c.phones)&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
       ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Email</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
@@ -14363,6 +14368,23 @@ function startInviteFromParse(runId) {
 
 // Аналитика инвайтинга по флоту: считается из суточных фактов
 // (account_daily_stats), которые до этого в системе никто не писал.
+async function loadInviteRetention() {
+  try {
+    const d = await api('/api/miniapp/invite/retention');
+    const el = document.getElementById('invRetention');
+    if (!el) return;
+    if (d.retention_pct == null) {
+      el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Нет вступлений за период — ретеншен появится после инвайтов.</div>';
+      return;
+    }
+    const col = d.health==='green'?'var(--green)':d.health==='amber'?'var(--accent)':'var(--red)';
+    el.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="kpi-chip"><div class="kpi-chip-val" style="color:${col}">${d.retention_pct}%</div><div class="kpi-chip-lbl">остались</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val">${num(d.joined)}</div><div class="kpi-chip-lbl">вступили</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val" style="color:var(--red)">${num(d.left)}</div><div class="kpi-chip-lbl">ушли</div></div>
+    </div><div style="font-size:11px;color:var(--hint);padding:4px 2px">Отток считается по чатам под модерацией бота.</div>`;
+  } catch(e) {}
+}
 async function loadInviteAnalytics() {
   try {
     const d = await api('/api/miniapp/invite/analytics');
@@ -14491,6 +14513,7 @@ async function openMassInvite() {
   INV_PARSE_RUN = null;
   loadGovernorBar();
   loadInviteAnalytics();
+  loadInviteRetention();
   loadInviteAdvice();
   buildInvitePresets();
   txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');

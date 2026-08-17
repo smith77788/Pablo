@@ -806,11 +806,24 @@ async def cmd_stopword(message: Message, command: CommandObject, bot: Bot,
 @router.chat_member()
 async def on_chat_member(event: ChatMemberUpdated, pool: asyncpg.Pool) -> None:
     """Изменился статус ЛЮБОГО участника — сбрасываем кэш админов, если это
-    затронуло админку (промоут/демоут), чтобы модерация видела актуальный список."""
+    затронуло админку (промоут/демоут), чтобы модерация видела актуальный список.
+    Плюс: уход участника → событие «left» в организм (ретеншен инвайта)."""
     old = getattr(getattr(event, "old_chat_member", None), "status", "")
     new = getattr(getattr(event, "new_chat_member", None), "status", "")
     if old in _ADMIN_STATUSES or new in _ADMIN_STATUSES:
         _invalidate_admins(event.chat.id)
+    # Ушёл/выгнан после того как был участником — сигнал ретеншена.
+    if new in {"left", "kicked"} and old in {"member", "restricted", "administrator", "creator"}:
+        try:
+            row = await cg.get_chat(pool, event.chat.id)
+            owner_id = row.get("owner_id") if row else None
+            if owner_id:
+                uid = getattr(getattr(getattr(event, "new_chat_member", None), "user", None), "id", None)
+                from services.organism import spine
+                await spine.emit(pool, owner_id, "left",
+                                 {"chat_id": event.chat.id, "user_id": uid})
+        except Exception:
+            log_exc_swallow(log, "guard: emit left")
 
 
 @router.callback_query(GuardCb.filter(F.action == "toggle"))
