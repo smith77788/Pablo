@@ -7596,8 +7596,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if account_ids:
                 params["account_ids"] = account_ids
             # Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.
+            # A/B welcome: welcome_variants[] (2–4) делятся по вступившим (ab_engine).
             _wt = validate_string(body.get("welcome_message"), max_len=2048)
-            if _wt and not check_sql_suspicious(_wt):
+            from services import ab_engine as _ab
+            _wvars = _ab.clean_variants(body.get("welcome_variants"))
+            _wvars = [v for v in _wvars if not check_sql_suspicious(v)]
+            if _wvars and len(_wvars) >= 2:
+                params["welcome"] = {"variants": _wvars,
+                                     "delay": _clamp(body.get("welcome_delay"), 5, 600, 45)}
+            elif _wt and not check_sql_suspicious(_wt):
                 params["welcome"] = {"text": _wt,
                                      "delay": _clamp(body.get("welcome_delay"), 5, 600, 45)}
             op_id = await pool.fetchval(
@@ -15968,14 +15975,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 500)
 
     async def uch_timeline(request: web.Request) -> web.Response:
+        """Карточка-360: единая лента касаний контакта из всех подсистем —
+        правки полей, источники, CRM-стадия и события организма (intent с этим
+        contact_id) через чистый contacts_hub.timeline.build_timeline."""
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = request.match_info['contact_id']
             history = await pool.fetch(
-                'SELECT action, field_name, old_value, new_value, source, created_at FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 50',
+                'SELECT field_name, old_value, new_value, created_at FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 60',
                 cid, uid)
-            return _json_resp({'timeline': [dict(r) for r in history]})
+            srcs = await _safe_fetch(pool,
+                'SELECT account_id, first_seen_at FROM contact_sources WHERE contact_id=$1', cid)
+            events = await _safe_fetch(pool,
+                "SELECT kind, payload, created_at FROM organism_events "
+                "WHERE owner_id=$1 AND payload->>'contact_id'=$2 ORDER BY created_at DESC LIMIT 60",
+                uid, str(cid))
+            crm_row = await _safe_fetchrow(pool,
+                'SELECT stage, updated_at FROM contact_crm WHERE contact_id=$1', cid)
+            from services.contacts_hub import timeline as _tl
+            def _payload(p):
+                if isinstance(p, dict):
+                    return p
+                try:
+                    return _json.loads(p) if p else {}
+                except Exception:
+                    return {}
+            items = _tl.build_timeline(
+                history=[{"field": r["field_name"], "old_value": r["old_value"],
+                          "new_value": r["new_value"], "created_at": r["created_at"]}
+                         for r in (history or [])],
+                events=[{"kind": r["kind"], "payload": _payload(r["payload"]),
+                         "created_at": r["created_at"]} for r in (events or [])],
+                sources=[{"account_id": r["account_id"], "discovered_at": r["first_seen_at"]}
+                         for r in (srcs or [])],
+                crm=dict(crm_row) if crm_row else None)
+            out = [{**i, "ts": i["ts"].isoformat() if hasattr(i["ts"], "isoformat") else i["ts"]}
+                   for i in items]
+            return _json_resp({'timeline': out, 'count': len(out)})
         except Exception as e:
             return _err(str(e), 500)
 

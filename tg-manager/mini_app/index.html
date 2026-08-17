@@ -4218,6 +4218,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           Инвайт → вступление → приветствие одной транзакцией. Уйдёт только
           реально добавленным, с защитой темпа (губернатор). Не для метода «ссылка».
         </div>
+        <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block;margin-top:6px"><input type="checkbox" id="miWelcomeAbOn" onchange="toggleWelcomeAb(this)" style="vertical-align:middle"> 🧪 A/B приветствие: делить вступивших по вариантам</label>
+        <div id="miWelcomeAbBox" style="display:none;margin-top:6px">
+          <textarea id="miWelcomeVarB" rows="2" placeholder="Вариант B приветствия..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
+          <textarea id="miWelcomeVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical"></textarea>
+          <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Верхнее поле — вариант A. Сравните доставку в «Операциях»/A/B (метки A/B#1…).</div>
+        </div>
       </div>
       <div class="field">
         <div style="display:flex;gap:8px">
@@ -13074,6 +13080,10 @@ function toggleAb(el) {
   const box = document.getElementById('ccwAbBox');
   if (box) box.style.display = el.checked ? 'block' : 'none';
 }
+function toggleWelcomeAb(el) {
+  const box = document.getElementById('miWelcomeAbBox');
+  if (box) box.style.display = el.checked ? 'block' : 'none';
+}
 
 // Что за цель у сегментного действия: весь срез (фильтры) или отмеченные id.
 function _segmentTargetInit() {
@@ -13428,15 +13438,14 @@ async function openContactTimeline(id) {
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/timeline');
     const items = d.timeline||[];
-    if (!items.length) { txt('cdBody', empty('📅','Нет событий','Timeline пуст')); return; }
+    if (!items.length) { txt('cdBody', empty('📅','Нет событий','Касания появятся здесь: правки, источники, сигналы намерений')); return; }
     let html = '<div style="padding:12px 16px">';
     items.forEach(t=>{
-      const date = t.created_at ? new Date(t.created_at).toLocaleString('ru') : '';
-      const label = t.action||'';
+      const date = t.ts ? new Date(t.ts).toLocaleString('ru') : '';
       html += `<div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start">
-        <div style="min-width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div>
-        <div><div style="font-size:13px;color:var(--hint)">${esc(date)}</div><div style="font-size:14px;margin-top:2px">${esc(label)}${t.field_name?' · '+esc(t.field_name):''}</div>
-        ${t.old_value||t.new_value?`<div style="font-size:12px;color:var(--hint);margin-top:2px">${t.old_value?esc(String(t.old_value).substring(0,50))+' → ':''}${t.new_value?esc(String(t.new_value).substring(0,50)):''}</div>`:''}
+        <div style="min-width:20px;text-align:center;font-size:15px">${t.icon||'•'}</div>
+        <div style="flex:1"><div style="font-size:13px;color:var(--hint)">${esc(date)}</div><div style="font-size:14px;margin-top:2px">${esc(t.title||t.kind||'')}</div>
+        ${t.detail?`<div style="font-size:12px;color:var(--hint);margin-top:2px;white-space:normal">${esc(String(t.detail).substring(0,120))}</div>`:''}
         </div></div>`;
     });
     html += '</div>';
@@ -14881,6 +14890,14 @@ async function submitMassInvite() {
   // Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.
   const _wm = (document.getElementById('massInviteWelcome')?.value||'').trim();
   if (_wm) body.welcome_message = _wm;
+  // A/B приветствие: собрать варианты (A = основное поле, B/C — доп.).
+  const _wab = document.getElementById('miWelcomeAbOn');
+  if (_wab && _wab.checked) {
+    const _wv = [_wm,
+      (document.getElementById('miWelcomeVarB').value||'').trim(),
+      (document.getElementById('miWelcomeVarC').value||'').trim()].filter(Boolean);
+    if (_wv.length >= 2) body.welcome_variants = _wv;
+  }
   // Фильтры аудитории (только с username / не бот / premium / активные) —
   // применяются в исполнителе теми же условиями, что парсер-вью.
   const _af = {};

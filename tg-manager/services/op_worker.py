@@ -409,8 +409,12 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
     method = str(params.get("invite_method") or "direct").lower()
     if method not in ("direct", "admin"):
         return
+    from services import ab_engine
+    # A/B welcome: несколько вариантов приветствия → делим вступивших поровну и
+    # меряем доставку так же, как рассылку (ab_batch/ab_variant, экран A/B).
+    variants = ab_engine.clean_variants(w.get("variants"))
     text = (w.get("text") or "").strip()
-    if not text:
+    if not variants and not text:
         return
     try:
         rows = await _safe_fetch(
@@ -432,15 +436,28 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
             return
         delay = int(w.get("delay") or 45)
         from services import operation_bus
+        import time as _t
         _CH = 1000
-        for i in range(0, len(targets), _CH):
-            chunk = targets[i:i + _CH]
-            await operation_bus.submit(
-                pool, owner_id, "bulk_dm_adhoc",
-                {"account_ids": acc_ids, "usernames": chunk, "text": text, "delay": delay},
-                total_items=len(chunk),
-                label=f"Welcome вступившим ч.{i // _CH + 1}: {len(chunk)}")
-        log.info("chain_welcome op=%d owner=%s → %d получателей", op_id, owner_id, len(targets))
+        ab_batch = int(_t.time()) if variants else None
+        if variants:
+            groups = ab_engine.split_audience(targets, len(variants))
+            plan = [(variants[i], f"A/B#{i + 1}", groups[i]) for i in range(len(variants))]
+        else:
+            plan = [(text, "", targets)]
+        for vtext, vlabel, vtargets in plan:
+            for i in range(0, len(vtargets), _CH):
+                chunk = vtargets[i:i + _CH]
+                if not chunk:
+                    continue
+                tag = (vlabel + " ") if vlabel else ""
+                await operation_bus.submit(
+                    pool, owner_id, "bulk_dm_adhoc",
+                    {"account_ids": acc_ids, "usernames": chunk, "text": vtext,
+                     "delay": delay, "ab_variant": vlabel or None, "ab_batch": ab_batch},
+                    total_items=len(chunk),
+                    label=f"{tag}Welcome вступившим ч.{i // _CH + 1}: {len(chunk)}")
+        log.info("chain_welcome op=%d owner=%s → %d получателей (A/B=%s)",
+                 op_id, owner_id, len(targets), len(variants) or 0)
     except Exception:
         log_exc_swallow(log, f"_chain_welcome op={op_id}")
 
