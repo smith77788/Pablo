@@ -1627,6 +1627,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
             elif op_type == "deploy_network":
                 result = await _exec_deploy_network(pool, bot, op_id, owner_id, params)
+            elif op_type == "crosspost_run":
+                result = await _exec_crosspost_run(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_views":
                 result = await _exec_boost_views(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_reactions":
@@ -8089,7 +8091,17 @@ async def _exec_deploy_network(
             except Exception as ex:
                 log.debug("_exec_deploy_network attach op=%d: %s", op_id, ex)
         elif etype == "crosspost":
-            manual.append("Кросспостинг настройте контент-автоматизацией (нативного API нет)")
+            # Нативного кросспоста нет — создаём правило пересылки src → dst.
+            # Запускается по требованию/расписанию (op crosspost_run).
+            if not src_ref or not dst_ref:
+                continue
+            await _safe_execute(
+                pool,
+                "INSERT INTO crosspost_links(owner_id, source_channel_id, target_channel_id, account_id) "
+                "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, source_channel_id, target_channel_id) "
+                "DO UPDATE SET enabled=TRUE, account_id=EXCLUDED.account_id",
+                owner_id, int(src_ref), int(dst_ref), acc["id"])
+            wired += 1
 
     try:
         from services.organism import spine
@@ -8102,6 +8114,66 @@ async def _exec_deploy_network(
         parts.append("Вручную: " + "; ".join(manual[:5]))
     return {"status": "done", "created": created, "wired": wired,
             "manual": manual, "summary": " · ".join(parts)}
+
+
+async def _exec_crosspost_run(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Связки 2c: прогнать кросспостинг — переслать новые посты по всем активным
+    правилам владельца (crosspost_links). Под губернатором. Один прогон = одна
+    сессия на аккаунт-форвардер (безопасно), курсор last_msg_id двигается вперёд.
+    """
+    from services import account_manager
+    only_id = params.get("link_id")
+    if only_id:
+        links = await _safe_fetch(
+            pool, "SELECT * FROM crosspost_links WHERE owner_id=$1 AND id=$2 AND enabled",
+            owner_id, int(only_id))
+    else:
+        links = await _safe_fetch(
+            pool, "SELECT * FROM crosspost_links WHERE owner_id=$1 AND enabled "
+            "ORDER BY COALESCE(last_run_at, to_timestamp(0)) ASC LIMIT 50", owner_id)
+    if not links:
+        return {"status": "done", "summary": "🔁 Кросспостинг: активных правил нет"}
+    total_fwd = 0
+    runs = 0
+    for lk in links:
+        if await _is_cancelled(pool, op_id):
+            break
+        acc = None
+        if lk.get("account_id"):
+            acc = await _safe_fetchrow(
+                pool, "SELECT id, session_str, device_model, system_version, app_version, "
+                "lang_code, system_lang_code, proxy_id FROM tg_accounts "
+                "WHERE id=$1 AND owner_id=$2 AND is_active AND session_str IS NOT NULL",
+                lk["account_id"], owner_id)
+        if not acc:
+            acc = await _safe_fetchrow(
+                pool, "SELECT id, session_str, device_model, system_version, app_version, "
+                "lang_code, system_lang_code, proxy_id FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
+                "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "ORDER BY id LIMIT 1", owner_id)
+        if not acc:
+            continue
+        try:
+            res = await account_manager.forward_new_posts(
+                acc["session_str"], lk["source_channel_id"], lk["target_channel_id"],
+                since_msg_id=int(lk["last_msg_id"] or 0), _acc=dict(acc))
+        except Exception as e:
+            log.debug("_exec_crosspost_run link=%s: %s", lk.get("id"), e)
+            continue
+        fwd = int(res.get("forwarded") or 0)
+        total_fwd += fwd
+        runs += 1
+        await _safe_execute(
+            pool, "UPDATE crosspost_links SET last_msg_id=$1, forwarded_total=forwarded_total+$2, "
+            "last_run_at=now() WHERE id=$3",
+            int(res.get("last_msg_id") or lk["last_msg_id"] or 0), fwd, lk["id"])
+        if fwd:
+            await _governed_sleep(pool, owner_id, random.uniform(5, 12))
+    return {"status": "done", "forwarded": total_fwd, "rules": runs,
+            "summary": f"🔁 Кросспостинг: переслано {total_fwd} по {runs} правил."}
 
 
 async def _exec_promote_all_admins(

@@ -14609,6 +14609,54 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("network_deploy uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def crosspost_links_list(request: web.Request) -> web.Response:
+        """Правила кросспостинга владельца (связки 2c)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT id, source_channel_id, target_channel_id, enabled, "
+            "forwarded_total, last_run_at FROM crosspost_links "
+            "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 100", uid)
+        out = [dict(r) for r in (rows or [])]
+        # Подмешать названия каналов, если есть в managed_channels.
+        titles = {}
+        trows = await _safe_fetch(pool,
+            "SELECT channel_id, title, username FROM managed_channels WHERE owner_id=$1", uid)
+        for t in (trows or []):
+            titles[int(t["channel_id"])] = t["title"] or (("@" + t["username"]) if t["username"] else str(t["channel_id"]))
+        for d in out:
+            d["source_title"] = titles.get(int(d["source_channel_id"]), str(d["source_channel_id"]))
+            d["target_title"] = titles.get(int(d["target_channel_id"]), str(d["target_channel_id"]))
+        return _json_resp({"links": out})
+
+    async def crosspost_run(request: web.Request) -> web.Response:
+        """Прогнать кросспостинг: op crosspost_run через шину (под губернатором)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        n = await _safe_count(pool,
+            "SELECT COUNT(*) FROM crosspost_links WHERE owner_id=$1 AND enabled", uid)
+        if not n:
+            return _err("Нет активных правил кросспостинга", 400)
+        p = {}
+        if str(body.get("link_id") or "").isdigit():
+            p["link_id"] = int(body["link_id"])
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(pool, uid, "crosspost_run", p,
+                                               total_items=int(n), label="Кросспостинг: прогон")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("crosspost_run uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def network_add_node(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -14811,6 +14859,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
     app.router.add_get("/api/miniapp/networks/{net_id}/deploy_plan", network_deploy_plan)
     app.router.add_post("/api/miniapp/networks/{net_id}/deploy", network_deploy)
+    app.router.add_get("/api/miniapp/crosspost/links", crosspost_links_list)
+    app.router.add_post("/api/miniapp/crosspost/run", crosspost_run)
     app.router.add_post("/api/miniapp/networks/{net_id}/nodes", network_add_node)
     app.router.add_post("/api/miniapp/networks/{net_id}/edges", network_add_edge)
     app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)

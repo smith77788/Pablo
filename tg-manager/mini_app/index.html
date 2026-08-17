@@ -5693,6 +5693,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="lst" id="netNodesList"></div>
       <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
     </div>
+    <div class="sec" style="margin-top:12px">🔁 Кросспостинг <span class="sec-act" onclick="runCrosspost()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Прогнать →</span></div>
+    <div class="lst" id="crosspostList" style="padding:0 16px"><div style="font-size:12px;color:var(--hint)">Правила создаются при развёртывании связки с ребром «кросспостинг».</div></div>
   </div>
 </div>
 
@@ -19214,6 +19216,29 @@ let _currentNetId = null;
 async function openNetworkBuilder() {
   push('s-network-builder');
   loadNetworkBuilder();
+  loadCrosspost();
+}
+async function loadCrosspost() {
+  const el = document.getElementById('crosspostList');
+  if (!el) return;
+  try {
+    const d = await api('/api/miniapp/crosspost/links');
+    const links = d.links||[];
+    if (!links.length) { el.innerHTML = '<div style="font-size:12px;color:var(--hint)">Правил нет. Добавьте ребро «кросспостинг» в связку и разверните её.</div>'; return; }
+    el.innerHTML = links.map(l=>`<div class="row">
+      <div class="row-ico" style="background:${l.enabled?'var(--bg-green-16)':'rgba(113,113,122,.16)'}">🔁</div>
+      <div class="row-body"><div class="row-name" style="font-size:13px">${esc(String(l.source_title))} → ${esc(String(l.target_title))}</div>
+      <div class="row-val">переслано ${num(l.forwarded_total||0)}${l.last_run_at?' · '+ago(l.last_run_at):' · ещё не запускалось'}</div></div>
+    </div>`).join('');
+  } catch(e) {}
+}
+async function runCrosspost() {
+  try {
+    const r = await api('/api/miniapp/crosspost/run', {method:'POST', body:'{}'});
+    toast('🔁 Кросспостинг запущен'+(r.op_id?` · операция #${r.op_id}`:''));
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
+  }
 }
 
 async function loadNetworkBuilder() {

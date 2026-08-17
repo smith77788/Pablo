@@ -4224,6 +4224,54 @@ async def set_discussion_group(
             log_exc_swallow(log, "Сбой в set_discussion_group")
 
 
+async def forward_new_posts(
+    session_string: str,
+    source_channel_id: int | str,
+    target_channel_id: int | str,
+    since_msg_id: int = 0,
+    limit: int = 20,
+    _acc: dict | None = None,
+) -> dict:
+    """Переслать новые посты источника в цель (кросспостинг связки).
+
+    Берёт до `limit` сообщений источника новее since_msg_id (в хронологическом
+    порядке) и форвардит в цель. Возвращает {forwarded, last_msg_id, error?}.
+    Аккаунт должен видеть источник и уметь постить в цель."""
+    client = _make_client(session_string, _acc)
+    forwarded = 0
+    last_id = int(since_msg_id or 0)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        source = await _resolve_channel_peer(client, source_channel_id, 0)
+        target = await _resolve_channel_peer(client, target_channel_id, 0)
+        # min_id=since_msg_id → только новее курсора; reverse=True → хронологически.
+        msgs = []
+        async for m in client.iter_messages(source, min_id=int(since_msg_id or 0),
+                                             limit=limit, reverse=True):
+            if getattr(m, "service", False):
+                continue
+            msgs.append(m)
+        for m in msgs:
+            try:
+                await client.forward_messages(target, m)
+                forwarded += 1
+                last_id = max(last_id, int(getattr(m, "id", 0) or 0))
+                await asyncio.sleep(random.uniform(1.5, 4.0))
+            except Exception as e:
+                log.warning("forward_new_posts fwd src=%s dst=%s: %s",
+                            source_channel_id, target_channel_id, e)
+        return {"forwarded": forwarded, "last_msg_id": last_id}
+    except Exception as e:
+        log.warning("forward_new_posts error src=%s dst=%s: %s",
+                    source_channel_id, target_channel_id, e)
+        return {"forwarded": forwarded, "last_msg_id": last_id, "error": str(e)[:160]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в forward_new_posts")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTENT OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════

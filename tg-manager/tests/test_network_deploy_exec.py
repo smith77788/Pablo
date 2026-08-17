@@ -23,7 +23,7 @@ def test_op_dispatch_wired():
 def test_executor_creates_persists_and_wires():
     src = _ow()
     i = src.index("async def _exec_deploy_network")
-    fn = src[i:i + 6000]
+    fn = src[i:i + 7500]
     # создаёт объекты через фабрику аккаунта
     assert "account_manager.create_channel" in fn
     # пишет id обратно в узел
