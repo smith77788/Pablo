@@ -31,7 +31,9 @@ def test_message_autosplits_into_chunks():
     api = _read("services/mini_app_api.py")
     msg = _slice(api, "async def uch_segment_message", "async def uch_segment_media")
     assert "_SEG_DM_CHUNK" in msg
-    assert "range(0, len(refs), _SEG_DM_CHUNK)" in msg
+    # Разбивка на чанки по получателям варианта (vrefs — аудитория A/B-варианта
+    # либо весь сегмент без A/B).
+    assert "range(0, len(vrefs), _SEG_DM_CHUNK)" in msg
     assert '"bulk_dm_adhoc"' in msg
     assert '"op_ids"' in msg and '"chunks"' in msg
     # гейт давления перед постановкой (ban-safety)
