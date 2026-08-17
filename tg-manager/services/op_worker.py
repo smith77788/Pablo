@@ -383,6 +383,21 @@ async def _governed_sleep(pool, owner_id: int, base: float) -> None:
     await asyncio.sleep(await _governed_delay(pool, owner_id, base))
 
 
+async def _on_account_banned(pool, owner_id: int, acc_id: int, where: str) -> None:
+    """Реакция на бан: мгновенно сбросить кэш губернатора (чтобы темп упал СЕЙЧАС,
+    а не через 45с) и записать событие в память организма. Fail-open."""
+    try:
+        from services import fleet_governor
+        fleet_governor.invalidate(owner_id)
+    except Exception:
+        pass
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "ban", {"account_id": acc_id, "where": where})
+    except Exception:
+        pass
+
+
 async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
     """Шов «Инвайт → Welcome»: после успешного инвайта разослать приветствие тем,
     кто РЕАЛЬНО добавлен (operation_log.status='ok'). Только методы, где ok = член
@@ -3177,6 +3192,8 @@ async def _exec_bulk_join_inner(
                     pause = gaussian_delay(82.5 * chaos, minimum=30.0, maximum=150.0)
                 pause *= tod
             pause = max(pause, recommended_delay(acc["id"], "join"))
+            # Базовый темп вступлений — под глобальным губернатором (давление флота).
+            pause = await _governed_delay(pool, owner_id, pause)
             if flood_wait:
                 pause = max(
                     pause,
@@ -6698,6 +6715,7 @@ async def _exec_bulk_dm_adhoc(
 
             if result.get("banned"):
                 await _db.deactivate_account(pool, acc["id"], "banned detected in bulk_dm_adhoc")
+                await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc")
                 active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                 err_count += 1
                 log.info("bulk_dm_adhoc: account %s banned, removed from pool", acc["id"])
@@ -6891,6 +6909,7 @@ async def _exec_bulk_post_to_channel(
             continue
         if result.get("banned"):
             await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+            await _on_account_banned(pool, owner_id, acc["id"], "bulk_op")
             err_list.append(f"❌ {label}: забанен")
         elif result.get("flood_wait"):
             err_list.append(f"⏳ {label}: flood_wait, пропущен")

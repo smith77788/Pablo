@@ -39,6 +39,12 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
             f"{d} дн. без новых сообщений — вероятно бизнес-бот отвалился.",
             {"kind": "vault"})
 
+    bans = fleet.get("bans_24h", 0)
+    if bans > 0:
+        add("bans", "warn", f"{bans} бан(ов) за сутки",
+            "Флот теряет аккаунты. Снизьте темп, проверьте прокси/прогрев — "
+            "губернатор уже притормозил, но причину стоит устранить.",
+            {"kind": "governor"})
     if fleet.get("governor_level") == "red":
         add("gov_red", "warn", f"Флот под давлением ×{fleet.get('governor_mult')}",
             f"Давление {fleet.get('pressure')}/100 — рисковые операции лучше "

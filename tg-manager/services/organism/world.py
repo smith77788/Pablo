@@ -28,7 +28,7 @@ async def snapshot(pool, owner_id: int) -> dict:
 
 
 async def _fleet(pool, owner_id: int) -> dict:
-    out = {"accounts": 0, "active": 0, "dead": 0,
+    out = {"accounts": 0, "active": 0, "dead": 0, "bans_24h": 0,
            "pressure": 0, "governor_mult": 1.0, "governor_level": "green"}
     try:
         r = await pool.fetchrow(
@@ -50,6 +50,11 @@ async def _fleet(pool, owner_id: int) -> dict:
         out["governor_level"] = g.get("level", "green")
     except Exception:
         log.debug("world._fleet governor failed owner=%s", owner_id)
+    try:
+        from services.organism import spine
+        out["bans_24h"] = int((await spine.event_counts(pool, owner_id, hours=24)).get("ban", 0))
+    except Exception:
+        pass
     return out
 
 

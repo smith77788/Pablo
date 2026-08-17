@@ -95,16 +95,13 @@ async def _ensure_contact(pool: asyncpg.Pool, owner_id: int, peer: dict) -> str 
         owner_id, pid)
     if row:
         return row["id"]
+    # upsert_contact теперь возвращает РЕАЛЬНЫЙ id (RETURNING id) — доверяем ему.
     from services.contacts_hub.repository import upsert_contact
-    await upsert_contact(pool, owner_id, {
+    return await upsert_contact(pool, owner_id, {
         "telegram_user_id": pid, "username": peer.get("peer_username"),
         "first_name": peer.get("peer_name"), "display_name": peer.get("peer_name"),
         "discovered_at": dt.datetime.now(dt.timezone.utc),
     })
-    row = await pool.fetchrow(
-        "SELECT id FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2",
-        owner_id, pid)
-    return row["id"] if row else None
 
 
 def _match(text: str, rules: list[dict]) -> list[dict]:

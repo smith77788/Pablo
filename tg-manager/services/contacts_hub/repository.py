@@ -142,7 +142,10 @@ async def get_contact(pool, contact_id, owner_id):
 
 async def upsert_contact(pool, owner_id, data: dict) -> str:
     contact_id = data.get('id') or str(uuid.uuid4())
-    await pool.execute(
+    # RETURNING id: на конфликте по (owner, telegram_user_id) возвращаем id
+    # СУЩЕСТВУЮЩЕЙ строки, а не только что сгенерированный uuid. Иначе вызывающий
+    # привязывал бы CRM/теги/источники к несуществующему id (тихая потеря данных).
+    row = await pool.fetchrow(
         '''INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, last_name,
             display_name, phones, is_premium, discovered_at, last_synced_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)
@@ -154,13 +157,14 @@ async def upsert_contact(pool, owner_id, data: dict) -> str:
             phones = EXCLUDED.phones,
             is_premium = EXCLUDED.is_premium,
             last_synced_at = EXCLUDED.last_synced_at,
-            updated_at = NOW()''',
+            updated_at = NOW()
+           RETURNING id''',
         contact_id, owner_id, data.get('telegram_user_id'), data.get('username'),
         data.get('first_name'), data.get('last_name'), data.get('display_name'),
         json.dumps(data.get('phones', [])), data.get('is_premium', False),
         data.get('discovered_at'), data.get('last_synced_at'),
     )
-    return contact_id
+    return row['id'] if row else contact_id
 
 
 async def update_contact(pool, contact_id, owner_id, updates: dict) -> bool:
