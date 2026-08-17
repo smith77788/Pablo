@@ -60,6 +60,6 @@ def test_naive_datetime_treated_as_utc():
 
 def test_op_worker_uses_geo_aware_tempo():
     src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
-    assert "geo_tempo.local_factor(acc.get(\"geo_country\"))" in src
-    # старое серверное время не должно оставаться в этих циклах паузы join/leave
-    assert src.count("geo_tempo.local_factor(acc.get(\"geo_country\"))") >= 2
+    call = 'geo_tempo.local_factor(acc.get("geo_country"), account_id=acc["id"])'
+    # циклы join/leave берут гео-локальный час И персональный хронотип аккаунта
+    assert src.count(call) >= 2

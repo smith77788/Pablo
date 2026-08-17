@@ -87,14 +87,23 @@ def local_hour(country_code: str | None,
 
 
 def local_factor(country_code: str | None,
-                 now: _dt.datetime | None = None) -> float:
+                 now: _dt.datetime | None = None,
+                 account_id=None) -> float:
     """Множитель темпа с учётом ЛОКАЛЬНОГО времени аккаунта (≥ ~0.75).
 
     Если гео неизвестно — откатываемся на серверное время (текущее поведение),
     чтобы ничего не сломать. Реюз кривой `session_simulator.time_of_day_factor`.
+
+    Если передан `account_id` — накладывается персональный хронотип
+    (behavior_profile): флот не тормозит синхронно в один час (анти-сигнатура
+    ботнета). Без account_id — прежнее гео-поведение.
     """
     from services import session_simulator
     h = local_hour(country_code, now)
+    if account_id is not None:
+        from services import behavior_profile
+        return behavior_profile.tod_factor(
+            account_id, h, session_simulator.time_of_day_factor)
     return session_simulator.time_of_day_factor(h)  # h=None → серверный час
 
 

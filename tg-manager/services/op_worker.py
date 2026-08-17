@@ -3189,7 +3189,7 @@ async def _exec_bulk_join_inner(
             # Apply pacing based on delay_mode from params
             chaos = session_simulator.chaos_factor()
             # Ночной режим — по ЛОКАЛЬНОМУ времени аккаунта (гео прокси), а не сервера.
-            tod = geo_tempo.local_factor(acc.get("geo_country"))
+            tod = geo_tempo.local_factor(acc.get("geo_country"), account_id=acc["id"])
             if delay_mode == "fast":
                 pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
             elif delay_mode == "normal":
@@ -3438,7 +3438,7 @@ async def _exec_bulk_leave(
             # Apply pacing based on delay_mode from params
             chaos = session_simulator.chaos_factor()
             # Ночной режим — по ЛОКАЛЬНОМУ времени аккаунта (гео прокси), а не сервера.
-            tod = geo_tempo.local_factor(acc.get("geo_country"))
+            tod = geo_tempo.local_factor(acc.get("geo_country"), account_id=acc["id"])
             if delay_mode == "fast":
                 pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
             elif delay_mode == "normal":
