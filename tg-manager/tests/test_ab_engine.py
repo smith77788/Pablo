@@ -57,3 +57,18 @@ def test_segment_message_supports_ab_variants():
     assert "ab_engine.clean_variants" in window
     assert "ab_engine.split_audience" in window
     assert "ab_variant" in window
+
+
+def test_ab_results_endpoint_wired():
+    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    assert "async def ab_results" in src
+    assert '"/api/miniapp/ab/results"' in src
+    assert "ab_engine.pick_winner" in src
+    assert "ab_batch" in src   # операции A/B помечаются общим батчем
+
+
+def test_ab_results_frontend_present():
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert 'id="s-abresults"' in html
+    assert "function openAbResults" in html
+    assert "/api/miniapp/ab/results" in html

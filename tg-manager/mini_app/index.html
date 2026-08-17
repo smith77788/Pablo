@@ -950,7 +950,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div id="ccwAbBox" style="display:none;margin-top:6px">
         <textarea id="ccwVarB" rows="2" placeholder="Вариант B..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
         <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical"></textarea>
-        <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Основной текст — вариант A. Каждый вариант уйдёт своей равной доле; сравните доставку в «Операциях» (метки A/B#1, A/B#2…).</div>
+        <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Основной текст — вариант A. Каждый вариант уйдёт своей равной доле. <span onclick="openAbResults()" style="color:var(--accent);cursor:pointer">Результаты последнего A/B →</span></div>
       </div>
     </div>
     <label style="display:block;font-size:12px;color:var(--hint);margin:8px 0 2px">📎 Медиа (необязательно, до 50 МБ):</label>
@@ -4026,6 +4026,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-p" onclick="runSeoAnalyze()">📊 Проанализировать</button>
     </div>
     <div id="seoResult" style="padding:6px 0"></div>
+  </div>
+</div>
+
+<!-- ══════════ A/B РЕЗУЛЬТАТЫ РАССЫЛКИ ══════════ -->
+<div class="screen" id="s-abresults">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧪 A/B результаты</div></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
+      Последний A/B-тест рассылки: доставка по вариантам. Победитель определяется
+      статистически (нужна достаточная выборка и значимый отрыв).
+    </div>
+    <div id="abResults" style="padding:4px 0"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -12309,6 +12321,32 @@ async function openSeo() {
     `).join('') : empty('🤖','Нет рекомендаций для ботов','Включите авто-переоптимизацию — рекомендации появятся при падении позиций'));
   } catch(e) {
     txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+// ── A/B результаты рассылки ──────────────────────────────
+async function openAbResults() {
+  push('s-abresults');
+  txt('abResults','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/ab/results');
+    if (!d.batch || !(d.variants||[]).length) {
+      txt('abResults', empty('🧪','Нет A/B-тестов','Запустите рассылку сегменту с включённым A/B — результаты появятся здесь'));
+      return;
+    }
+    const maxRate = Math.max(1, ...d.variants.map(v=>v.rate||0));
+    let h = '';
+    if (d.winner) h += `<div class="row" style="background:var(--bg-green-16);border-radius:10px;margin-bottom:8px"><div class="row-ico">🏆</div><div class="row-body"><div class="row-name">Победитель: ${esc(d.winner)}</div><div class="row-val">Отрыв статистически значим</div></div></div>`;
+    else if (d.leader) h += `<div class="row" style="background:var(--bg2);border-radius:10px;margin-bottom:8px"><div class="row-ico">📈</div><div class="row-body"><div class="row-name">Лидер: ${esc(d.leader)}</div><div class="row-val">Выборки пока мало для уверенного вывода</div></div></div>`;
+    h += d.variants.map(v=>{
+      const w = Math.round((v.rate/maxRate)*100);
+      return `<div style="padding:8px 0">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(v.label)}</b><span>${v.rate}% · ${num(v.delivered)}/${num(v.sent)}</span></div>
+        <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
+      </div>`;
+    }).join('');
+    txt('abResults', h);
+  } catch(e) {
+    txt('abResults', empty('⚠️','Ошибка',e.message||'Не удалось загрузить'));
   }
 }
 // ── SEO объекта: анализ находимости (чистые эвристики, без сети) ──

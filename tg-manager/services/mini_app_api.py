@@ -15308,6 +15308,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         delay = min(max(validate_integer(body.get("delay", 45), min_val=5, max_val=600) or 45, 5), 600)
         # Список (вариант_текст, метка_варианта, его_получатели). Без A/B — один
         # «вариант» со всей аудиторией. С A/B — аудитория делится поровну.
+        # ab_batch — общий id для операций одного A/B-теста (для сводки результатов).
+        ab_batch = int(time.time()) if variants else None
         if variants:
             groups = ab_engine.split_audience(refs, len(variants))
             plan = [(variants[i], f"A/B#{i + 1}", groups[i]) for i in range(len(variants))]
@@ -15325,17 +15327,70 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     oid = await operation_bus.submit(
                         pool, uid, "bulk_dm_adhoc",
                         {"account_ids": acc_ids, "usernames": chunk, "text": vtext,
-                         "delay": delay, "ab_variant": vlabel or None},
+                         "delay": delay, "ab_variant": vlabel or None,
+                         "ab_batch": ab_batch},
                         total_items=len(chunk),
                         label=f"{tag}Сегмент ЛС ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)} × {len(acc_ids)} акк.")
                     op_ids.append(oid)
             return _json_resp({"ok": True, "op_ids": op_ids, "chunks": len(op_ids),
                                "recipients": len(refs), "skipped": len(contacts) - len(refs),
-                               "accounts": len(acc_ids), "variants": len(variants) or 1})
+                               "accounts": len(acc_ids), "variants": len(variants) or 1,
+                               "ab_batch": ab_batch})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("uch_segment_message uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def ab_results(request: web.Request) -> web.Response:
+        """Сводка последнего A/B-теста рассылки: доставка по вариантам + победитель.
+
+        Группирует операции bulk_dm_adhoc по ab_batch (последний батч владельца),
+        считает доставку (done_items) против отправленных (total_items) на вариант
+        и отдаёт победителя через ab_engine (z-тест). «Конверсия» здесь —
+        доля успешной доставки; для более глубоких метрик нужен трекинг ответов.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            batch = await pool.fetchval(
+                "SELECT (params->>'ab_batch')::bigint AS b FROM operation_queue "
+                "WHERE owner_id=$1 AND op_type='bulk_dm_adhoc' "
+                "AND params->>'ab_batch' IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1", uid)
+            if not batch:
+                return _json_resp({"batch": None, "variants": [], "winner": None})
+            rows = await pool.fetch(
+                "SELECT params->>'ab_variant' AS variant, "
+                "       COALESCE(SUM(total_items),0) AS sent, "
+                "       COALESCE(SUM(done_items),0) AS delivered "
+                "FROM operation_queue "
+                "WHERE owner_id=$1 AND op_type='bulk_dm_adhoc' "
+                "  AND (params->>'ab_batch')::bigint=$2 "
+                "GROUP BY params->>'ab_variant' ORDER BY variant", uid, int(batch))
+            from services import ab_engine
+            variants = []
+            stats = []
+            for idx, r in enumerate(rows):
+                sent = int(r["sent"] or 0)
+                delivered = int(r["delivered"] or 0)
+                variants.append({"label": r["variant"] or "—", "sent": sent,
+                                 "delivered": delivered,
+                                 "rate": round(delivered / sent * 100, 1) if sent else 0.0})
+                stats.append({"variant": idx, "sent": sent, "converted": delivered})
+            win = ab_engine.pick_winner(stats)
+            winner_label = None
+            if win.get("winner") is not None and 0 <= win["winner"] < len(variants):
+                winner_label = variants[win["winner"]]["label"]
+            leader_label = None
+            if win.get("leader") is not None and 0 <= win["leader"] < len(variants):
+                leader_label = variants[win["leader"]]["label"]
+            return _json_resp({"batch": int(batch), "variants": variants,
+                               "winner": winner_label, "leader": leader_label,
+                               "confident": win.get("confident", False)})
+        except Exception as exc:
+            log.exception("ab_results uid=%s", uid)
             return _err(str(exc), 500)
 
     async def uch_segment_media(request: web.Request) -> web.Response:
@@ -16220,6 +16275,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
     app.router.add_post("/api/miniapp/uch/segment/preview", uch_segment_preview)
     app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
+    app.router.add_get("/api/miniapp/ab/results", ab_results)
     app.router.add_post("/api/miniapp/uch/segment/media", uch_segment_media)
     app.router.add_post("/api/miniapp/uch/segment/invite", uch_segment_invite)
     app.router.add_get("/api/miniapp/uch/segments", uch_segments_list)
