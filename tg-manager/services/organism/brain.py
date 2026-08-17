@@ -50,6 +50,14 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
             f"Давление {fleet.get('pressure')}/100 — рисковые операции лучше "
             "отложить, флот прогреть.", {"kind": "governor"})
 
+    bots = snap.get("bots") or {}
+    if bots.get("inactive", 0) > 0 and bots.get("total", 0) > 0:
+        add("bots_inactive", "warn",
+            f"{bots['inactive']} из {bots['total']} ботов сети неактивны",
+            "Неактивные боты не принимают вебхуки и не участвуют в сетевой "
+            "рассылке. Проверьте токены/вебхуки в разделе сети.",
+            {"kind": "bots"})
+
     growth = snap.get("growth") or {}
     if growth.get("channels", 0) > 0 and growth.get("growth_ops_7d", 0) == 0:
         add("growth_stall", "opportunity",

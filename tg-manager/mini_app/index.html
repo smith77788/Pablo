@@ -1930,9 +1930,26 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openGpCreateModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
+    <div class="row tap" onclick="openPresenceMap()" style="background:var(--bg2);border-radius:12px;margin-bottom:8px">
+      <div class="row-ico" style="background:var(--bg-blue-16)">🗺️</div>
+      <div class="row-body"><div class="row-name">Карта присутствия</div><div class="row-val">Где есть флот и активы по странам · пробелы</div></div>
+      <span class="chev">›</span>
+    </div>
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Бот <b>создаёт НОВЫЕ</b> каналы/группы/боты сразу по многим городам с локализованными названиями. Чтобы объединить уже существующие — раздел «🔗 Связки».</div>
     <div class="sec">Мои планы гео-сети</div>
     <div class="lst" id="gpList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════ КАРТА ПРИСУТСТВИЯ ══════════ -->
+<div class="screen" id="s-presencemap">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🗺️ Карта присутствия</div></div>
+  <div class="sub-sb">
+    <div id="pmTotals" style="display:flex;gap:8px;padding:6px 0 4px;flex-wrap:wrap"></div>
+    <div class="sec">Флот по странам</div>
+    <div class="lst" id="pmGeo"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Пробелы присутствия</div>
+    <div class="lst" id="pmGaps"></div>
   </div>
 </div>
 
@@ -5657,7 +5674,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="padding:4px 16px;display:flex;gap:8px">
         <button class="btn btn-s" onclick="openNetAddNodeModal()" style="flex:1;font-size:13px;padding:8px 6px">+ Узел</button>
         <button class="btn btn-s" onclick="openNetAddEdgeModal()" style="flex:1;font-size:13px;padding:8px 6px">+ Ребро</button>
+        <button class="btn btn-p" onclick="showNetDeployPlan()" style="flex:1;font-size:13px;padding:8px 6px">🚀 План</button>
       </div>
+      <div id="netDeployPlan" style="padding:0 16px"></div>
       <div class="lst" id="netNodesList"></div>
       <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
     </div>
@@ -6583,7 +6602,7 @@ async function loadOrganismPulse() {
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
-    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста'})[a&&a.kind] || 'Открыть';
+    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов'})[a&&a.kind] || 'Открыть';
 }
 function runPulseAction(a) {
   const k = a && a.kind;
@@ -6596,6 +6615,7 @@ function runPulseAction(a) {
   if (k==='segment_hot') return openContactsHot();
   if (k==='geo') return openGlobalPresence();
   if (k==='growth') return openGrowthHub();
+  if (k==='bots') return openNetwork();
   toast('Открываю…');
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).
@@ -16755,6 +16775,41 @@ async function promotePresencePack() {
 
 // ── Global Presence ────────────────────────────────────
 const GP_TYPES = {channel:'📢 Канал',group:'👥 Группа',bot:'🤖 Бот',package:'📦 Пакет',full_package:'🎁 Полный пакет'};
+const _PM_COV = {narrow:['Узко','var(--red)'], moderate:['Умеренно','var(--accent)'], wide:['Широко','var(--green)']};
+async function openPresenceMap() {
+  push('s-presencemap');
+  txt('pmGeo','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('pmGaps',''); txt('pmTotals','');
+  try {
+    const d = await api('/api/miniapp/presence/map');
+    const a = d.assets||{}; const cov = d.coverage||{};
+    const cl = _PM_COV[cov.level]||['—','var(--hint)'];
+    txt('pmTotals', `
+      <div class="kpi-chip"><div class="kpi-chip-val" style="color:${cl[1]}">${cl[0]}</div><div class="kpi-chip-lbl">охват гео</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val">${num(cov.distinct_geo||0)}</div><div class="kpi-chip-lbl">стран флота</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val">${num(a.channels||0)}</div><div class="kpi-chip-lbl">каналов</div></div>
+      <div class="kpi-chip"><div class="kpi-chip-val">${num(a.bots||0)}</div><div class="kpi-chip-lbl">ботов</div></div>`);
+    const by = (d.geo&&d.geo.by_country)||{};
+    const entries = Object.entries(by).sort((x,y)=>y[1]-x[1]);
+    const mx = Math.max(1, ...entries.map(e=>e[1]));
+    txt('pmGeo', entries.length ? entries.map(([cc,n])=>{
+      const w = Math.round((n/mx)*100);
+      const label = cc==='UNKNOWN' ? '🌐 Без гео-прокси' : cc;
+      return `<div style="padding:8px 0">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(label)}</b><span>${num(n)} акк.</span></div>
+        <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
+      </div>`;
+    }).join('') : empty('🌐','Нет данных по гео','Привяжите гео-прокси к аккаунтам'));
+    const gaps = (d.presence&&d.presence.gaps)||[];
+    txt('pmGaps', gaps.length ? gaps.map(cc=>{
+      const c = (d.presence.countries||{})[cc]||{};
+      return `<div class="row"><div class="row-ico" style="background:var(--bg-yellow-16)">📍</div>
+        <div class="row-body"><div class="row-name">${esc(c.name||cc)}</div><div class="row-val">развёрнуто ${num(c.done||0)}/${num(c.planned||0)} — ${num(c.pending||0)} в очереди</div></div></div>`;
+    }).join('') : empty('✅','Пробелов нет','Запланированное присутствие развёрнуто'));
+  } catch(e) {
+    txt('pmGeo', empty('⚠️','Ошибка',e.message||'Не удалось загрузить'));
+  }
+}
 async function openGlobalPresence() {
   push('s-globalpresence');
   txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -19123,11 +19178,33 @@ async function loadNetworkBuilder() {
   }
 }
 
+// Превью-план развёртывания связки (Фаза 1: только план, без исполнения).
+async function showNetDeployPlan() {
+  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  txt('netDeployPlan','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const p = await api('/api/miniapp/networks/'+_currentNetId+'/deploy_plan');
+    const steps = p.steps||[];
+    if (!steps.length) { txt('netDeployPlan', empty('🔗','Нечего разворачивать','Добавьте узлы и рёбра в связку')); return; }
+    const facts = Object.entries(p.factories||{}).map(([f,n])=>`${n}× ${f}`).join(', ');
+    let h = `<div class="row" style="background:var(--bg2);border-radius:10px;margin:6px 0">
+      <div class="row-ico">${p.ready?'✅':'⚠️'}</div>
+      <div class="row-body"><div class="row-name">Создать: ${p.create}, связать: ${p.wire}</div>
+      <div class="row-val">${facts?('фабрики: '+esc(facts)):'все объекты уже существуют'}</div></div></div>`;
+    h += steps.map((s,i)=>`<div class="row"><div class="row-ico" style="background:${s.kind==='create'?'var(--bg-purple-16)':'var(--bg-blue-16)'}">${i+1}</div>
+      <div class="row-body"><div class="row-name" style="font-size:13px;white-space:normal">${esc(s.text)}</div></div></div>`).join('');
+    h += `<div class="hint" style="font-size:11px;color:var(--hint);padding:6px 2px">Фаза 1: план развёртывания. Автозапуск через фабрики появится следующим шагом.</div>`;
+    txt('netDeployPlan', h);
+  } catch(e) {
+    txt('netDeployPlan', empty('⚠️','Ошибка',e.message||'Не удалось построить план'));
+  }
+}
 async function selectNetwork(netId) {
   _currentNetId = netId;
   const el = document.getElementById('netTopologyNodes');
   el.style.display = 'block';
   document.getElementById('netTopologyEmpty').style.display = 'none';
+  txt('netDeployPlan','');
   try {
     const d = await api('/api/miniapp/networks/' + netId);
     renderNetTopology(d);

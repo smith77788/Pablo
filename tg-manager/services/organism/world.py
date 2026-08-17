@@ -24,8 +24,26 @@ async def snapshot(pool, owner_id: int) -> dict:
         "vault": await _vault(pool, owner_id),
         "goal": await _goal(pool, owner_id),
         "growth": await _growth(pool, owner_id),
+        "bots": await _bots(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
     }
+
+
+async def _bots(pool, owner_id: int) -> dict:
+    """Сеть управляемых ботов: всего/активны/неактивны — для заметки мозга."""
+    out = {"total": 0, "active": 0, "inactive": 0}
+    try:
+        r = await pool.fetchrow(
+            "SELECT COUNT(*) AS total, "
+            "COUNT(*) FILTER (WHERE is_active) AS active "
+            "FROM managed_bots WHERE added_by=$1", owner_id)
+        if r:
+            out["total"] = int(r["total"] or 0)
+            out["active"] = int(r["active"] or 0)
+            out["inactive"] = out["total"] - out["active"]
+    except Exception:
+        log.debug("world._bots failed owner=%s", owner_id)
+    return out
 
 
 async def _growth(pool, owner_id: int) -> dict:

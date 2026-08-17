@@ -272,6 +272,63 @@ async def get_network_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
         return {'templates': 0, 'instances': 0, 'total_nodes': 0, 'total_edges': 0}
 
 
+# ── Развёртывание связки: чистое планирование (без БД/Telegram) ──────────────
+
+_NODE_FACTORY = {
+    "channel": {"label": "канал", "factory": "channel"},
+    "group": {"label": "группу", "factory": "group"},
+    "chat": {"label": "чат", "factory": "group"},
+    "bot": {"label": "бота", "factory": "bot"},
+}
+
+_EDGE_ACTION = {
+    "admin": "Назначить {src} администратором {dst}",
+    "attach": "Прикрепить {dst} к {src}",
+    "link": "Связать {src} ↔ {dst}",
+    "crosspost": "Настроить кросспостинг {src} → {dst}",
+}
+
+
+def plan_deployment(nodes: list[dict], edges: list[dict]) -> dict:
+    """Из топологии связки — упорядоченный план развёртывания (чистая функция).
+
+    nodes: [{id, type, label, object_id}] — object_id задан → объект уже
+    существует (создавать не нужно). edges: [{from_id, to_id, type, from_label,
+    to_label}]. Сначала шаги создания недостающих узлов (через фабрики), затем
+    шаги связывания. Возвращает {steps[], create, wire, factories{}, ready}.
+    """
+    by_id = {n.get("id"): n for n in (nodes or [])}
+    steps: list[dict] = []
+    factories: dict[str, int] = {}
+    create = 0
+    for n in nodes or []:
+        if n.get("object_id"):
+            continue  # уже существует
+        meta = _NODE_FACTORY.get((n.get("type") or "").lower())
+        label = n.get("label") or (meta["label"] if meta else "узел")
+        if meta:
+            factories[meta["factory"]] = factories.get(meta["factory"], 0) + 1
+        steps.append({"kind": "create", "node_id": n.get("id"),
+                      "factory": meta["factory"] if meta else None,
+                      "text": f"Создать {label}" + (f" (фабрика: {meta['label']})" if meta else "")})
+        create += 1
+    wire = 0
+    for e in edges or []:
+        src = by_id.get(e.get("from_id"), {})
+        dst = by_id.get(e.get("to_id"), {})
+        src_l = e.get("from_label") or src.get("label") or "#"
+        dst_l = e.get("to_label") or dst.get("label") or "#"
+        tmpl = _EDGE_ACTION.get((e.get("type") or "").lower(), "Связать {src} ↔ {dst}")
+        steps.append({"kind": "wire", "edge_type": e.get("type"),
+                      "text": tmpl.format(src=src_l, dst=dst_l)})
+        wire += 1
+    # Готовность: есть ли что разворачивать и все ли рёбра ссылаются на реальные узлы.
+    dangling = any(e.get("from_id") not in by_id or e.get("to_id") not in by_id
+                   for e in (edges or []))
+    return {"steps": steps, "create": create, "wire": wire,
+            "factories": factories, "ready": bool(steps) and not dangling}
+
+
 async def get_graph_data(pool: asyncpg.Pool, owner_id: int) -> dict:
     """Get graph data for visualization across all user instances."""
     try:

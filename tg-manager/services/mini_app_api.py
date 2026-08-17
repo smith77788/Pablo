@@ -11503,6 +11503,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Presence Packs ────────────────────────────────────────────────────────
 
+    async def presence_map_overview(request: web.Request) -> web.Response:
+        """Карта присутствия: флот по странам + активы (каналы/боты) + пробелы.
+
+        Аккаунты по гео — geo_router; активы — счётчики; планы присутствия —
+        presence_map.summarize_targets. Fail-open поблочно."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import geo_router, presence_map
+        # Флот по странам.
+        geo = {}
+        try:
+            dist = await geo_router.get_geo_distribution(pool, uid)
+            geo = geo_router.summarize_distribution(dist)
+            geo["by_country"] = dist
+        except Exception:
+            log.debug("presence_map: geo failed uid=%s", uid)
+        # Активы.
+        channels = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+        bots = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+        # Планы присутствия по странам → покрытие/пробелы.
+        targets = {"countries": {}, "gaps": []}
+        try:
+            trows = await _safe_fetch(pool,
+                """SELECT t.country, t.country_code, t.status
+                   FROM global_presence_targets t
+                   JOIN global_presence_plans p ON p.id = t.plan_id
+                   WHERE p.owner_id=$1""", uid)
+            targets = presence_map.summarize_targets([dict(r) for r in trows])
+        except Exception:
+            log.debug("presence_map: targets failed uid=%s", uid)
+        cov = presence_map.coverage_score(int(geo.get("distinct", 0) or 0),
+                                          len(targets.get("gaps", [])))
+        return _json_resp({"geo": geo, "assets": {"channels": channels, "bots": bots},
+                           "presence": targets, "coverage": cov})
+
     async def presence_packs_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -13933,6 +13971,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Swarm
     app.router.add_get("/api/miniapp/swarm", swarm_metrics)
     # Presence Packs
+    app.router.add_get("/api/miniapp/presence/map", presence_map_overview)
     app.router.add_get("/api/miniapp/presence_packs", presence_packs_list)
     app.router.add_post("/api/miniapp/presence_pack", presence_pack_create)
     app.router.add_delete("/api/miniapp/presence_pack/{pack_id}", presence_pack_delete)
@@ -14450,6 +14489,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"id": nid, "name": inst.get("name"),
                            "status": inst.get("status"), "nodes": nodes, "edges": edges})
 
+    async def network_deploy_plan(request: web.Request) -> web.Response:
+        """Превью-план развёртывания связки: топология → упорядоченные шаги.
+
+        Чистый network_builder.plan_deployment по узлам/рёбрам инстанса —
+        показывает, что создать (через какие фабрики) и как связать. Фаза 1:
+        только план (исполнитель — отдельно)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        from services import network_builder as _nb
+        d = await _nb.get_instance_detail(pool, uid, nid)
+        if not d:
+            return _err("Сеть не найдена", 404)
+        nodes = [{"id": n["id"], "type": n.get("node_type"),
+                  "label": n.get("label") or "", "object_id": n.get("ref_id")}
+                 for n in d["nodes"]]
+        edges = [{"from_id": e.get("source_node_id"), "to_id": e.get("target_node_id"),
+                  "type": e.get("edge_type")} for e in d["edges"]]
+        return _json_resp(_nb.plan_deployment(nodes, edges))
+
     async def network_add_node(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -14650,6 +14713,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)
     app.router.add_delete("/api/miniapp/networks/edges/{edge_id}", network_delete_edge)
     app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
+    app.router.add_get("/api/miniapp/networks/{net_id}/deploy_plan", network_deploy_plan)
     app.router.add_post("/api/miniapp/networks/{net_id}/nodes", network_add_node)
     app.router.add_post("/api/miniapp/networks/{net_id}/edges", network_add_edge)
     app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)
