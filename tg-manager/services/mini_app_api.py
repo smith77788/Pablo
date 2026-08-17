@@ -14551,6 +14551,43 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                   "type": e.get("edge_type")} for e in d["edges"]]
         return _json_resp(_nb.plan_deployment(nodes, edges))
 
+    async def network_deploy(request: web.Request) -> web.Response:
+        """Развернуть связку (Фаза 2): поставить op deploy_network в очередь.
+        Создаёт недостающие каналы/группы и вяжет admin-рёбра под губернатором."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nid = int(request.match_info["net_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
+        if not owns:
+            return _err("Сеть не найдена", 404)
+        from services import network_builder as _nb
+        d = await _nb.get_instance_detail(pool, uid, nid)
+        nodes = [{"id": n["id"], "type": n.get("node_type"), "label": n.get("label") or "",
+                  "object_id": n.get("ref_id")} for n in (d["nodes"] if d else [])]
+        edges = [{"from_id": e.get("source_node_id"), "to_id": e.get("target_node_id"),
+                  "type": e.get("edge_type")} for e in (d["edges"] if d else [])]
+        plan = _nb.plan_deployment(nodes, edges)
+        if not plan.get("steps"):
+            return _err("Нечего разворачивать — добавьте узлы/рёбра", 400)
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "deploy_network", {"instance_id": nid},
+                total_items=len(plan["steps"]),
+                label=f"Развернуть связку #{nid}: +{plan['create']} объектов")
+            return _json_resp({"ok": True, "op_id": op_id,
+                               "create": plan["create"], "wire": plan["wire"]})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("network_deploy uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def network_add_node(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -14752,6 +14789,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/networks/edges/{edge_id}", network_delete_edge)
     app.router.add_get("/api/miniapp/networks/{net_id}", network_detail_plural)
     app.router.add_get("/api/miniapp/networks/{net_id}/deploy_plan", network_deploy_plan)
+    app.router.add_post("/api/miniapp/networks/{net_id}/deploy", network_deploy)
     app.router.add_post("/api/miniapp/networks/{net_id}/nodes", network_add_node)
     app.router.add_post("/api/miniapp/networks/{net_id}/edges", network_add_edge)
     app.router.add_get("/api/miniapp/ecosystem_recommendations", ecosystem_recommendations)

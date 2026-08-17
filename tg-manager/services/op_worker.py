@@ -1625,6 +1625,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_scan_owned_resources(pool, bot, op_id, owner_id, params)
             elif op_type == "promote_all_admins":
                 result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
+            elif op_type == "deploy_network":
+                result = await _exec_deploy_network(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_views":
                 result = await _exec_boost_views(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_reactions":
@@ -7973,6 +7975,114 @@ async def _exec_scan_owned_resources(
         "dead": dead_count,
         "summary": summary,
     }
+
+
+async def _exec_deploy_network(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Развернуть связку (Фаза 2): по плану создать недостающие узлы-каналы/группы
+    через фабрику, записать их id обратно в узлы, и по рёбрам «admin» назначить
+    бот-/аккаунт-узлы администраторами созданных каналов. Под губернатором.
+
+    Боты автоматически не создаются (нужен @BotFather) — такие узлы помечаются как
+    требующие ручного шага. Каждый узел/ребро изолирован (fail-open по элементу).
+    Использует обычный безопасный путь аккаунт-сессии — новых параллельных
+    подключений не вводит.
+    """
+    from services import network_builder as _nb, account_manager
+    try:
+        instance_id = int(params.get("instance_id"))
+    except (TypeError, ValueError):
+        return {"status": "failed", "summary": "⚠️ Связка: не указан instance_id"}
+    d = await _nb.get_instance_detail(pool, owner_id, instance_id)
+    if not d:
+        return {"status": "failed", "summary": "⚠️ Связка не найдена"}
+    nodes, edges = d["nodes"], d["edges"]
+
+    # Аккаунт-создатель: явный или первый живой с сессией.
+    acc = None
+    want_acc = params.get("account_id")
+    arow = await _safe_fetchrow(
+        pool,
+        "SELECT id, session_str, device_model, system_version, app_version, "
+        "lang_code, system_lang_code, proxy_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
+        "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+        + ("AND id=$2 " if want_acc else "") + "ORDER BY id LIMIT 1",
+        *([owner_id, int(want_acc)] if want_acc else [owner_id]))
+    if not arow:
+        return {"status": "failed", "summary": "⚠️ Связка: нет активного аккаунта с сессией"}
+    acc = dict(arow)
+
+    node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
+    created = wired = 0
+    manual: list[str] = []
+    for n in nodes:
+        if await _is_cancelled(pool, op_id):
+            return {"status": "cancelled", "created": created, "wired": wired,
+                    "summary": f"Отменено. Создано {created}, связано {wired}."}
+        if n.get("ref_id"):
+            continue
+        ntype = (n.get("node_type") or "").lower()
+        label = (n.get("label") or "").strip() or "Объект"
+        if ntype in ("channel", "group", "chat"):
+            try:
+                res = await account_manager.create_channel(
+                    acc["session_str"], label,
+                    megagroup=ntype in ("group", "chat"), _acc=acc)
+            except Exception as e:
+                manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
+                continue
+            ch_id = res.get("channel_id") if isinstance(res, dict) else None
+            if not ch_id or res.get("error"):
+                manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
+                continue
+            await _safe_execute(
+                pool,
+                "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type) "
+                "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id, channel_id) DO UPDATE "
+                "SET title=$4, access_hash=$6, type=$7",
+                owner_id, acc["id"], ch_id, label, res.get("username") or None,
+                int(res.get("access_hash") or 0),
+                res.get("type") or ("group" if ntype in ("group", "chat") else "channel"))
+            await _nb.update_node_status(pool, n["id"], "created", ref_id=ch_id)
+            node_ref[n["id"]] = ch_id
+            created += 1
+            await _governed_sleep(pool, owner_id, random.uniform(30, 60))
+        elif ntype == "bot":
+            manual.append(f"{label}: бота создайте через @BotFather (Manager Mode)")
+
+    # Рёбра «admin»: назначить узел-источник (бот/аккаунт с известным user_id)
+    # админом узла-канала. Промоутит аккаунт-создатель (он владелец созданных).
+    for e in edges:
+        if (e.get("edge_type") or "").lower() != "admin":
+            continue
+        if await _is_cancelled(pool, op_id):
+            break
+        target_ch = node_ref.get(e.get("target_node_id"))
+        promote_uid = node_ref.get(e.get("source_node_id"))
+        if not target_ch or not promote_uid:
+            continue
+        try:
+            ok = await account_manager.promote_to_admin(
+                acc["session_str"], target_ch, int(promote_uid), _acc=acc)
+            if ok:
+                wired += 1
+                await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+        except Exception as e:
+            log.debug("_exec_deploy_network wire op=%d: %s", op_id, e)
+
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "network_deployed",
+                         {"instance_id": instance_id, "created": created, "wired": wired})
+    except Exception:
+        pass
+    parts = [f"🔗 Связка развёрнута: создано {created}, связано {wired}"]
+    if manual:
+        parts.append("Вручную: " + "; ".join(manual[:5]))
+    return {"status": "done", "created": created, "wired": wired,
+            "manual": manual, "summary": " · ".join(parts)}
 
 
 async def _exec_promote_all_admins(

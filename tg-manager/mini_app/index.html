@@ -19233,10 +19233,23 @@ async function showNetDeployPlan() {
       <div class="row-val">${facts?('фабрики: '+esc(facts)):'все объекты уже существуют'}</div></div></div>`;
     h += steps.map((s,i)=>`<div class="row"><div class="row-ico" style="background:${s.kind==='create'?'var(--bg-purple-16)':'var(--bg-blue-16)'}">${i+1}</div>
       <div class="row-body"><div class="row-name" style="font-size:13px;white-space:normal">${esc(s.text)}</div></div></div>`).join('');
-    h += `<div class="hint" style="font-size:11px;color:var(--hint);padding:6px 2px">Фаза 1: план развёртывания. Автозапуск через фабрики появится следующим шагом.</div>`;
+    if (p.create > 0 || p.wire > 0) {
+      h += `<button class="btn btn-p" style="width:100%;margin-top:8px" onclick="deployNet()">🚀 Развернуть связку</button>`;
+      h += `<div class="hint" style="font-size:11px;color:var(--hint);padding:6px 2px">Создаст недостающие каналы/группы и назначит admin-связи под защитой темпа. Боты — вручную через @BotFather.</div>`;
+    }
     txt('netDeployPlan', h);
   } catch(e) {
     txt('netDeployPlan', empty('⚠️','Ошибка',e.message||'Не удалось построить план'));
+  }
+}
+async function deployNet() {
+  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!await askConfirm('Развернуть связку? Будут созданы недостающие каналы/группы и назначены admin-связи. Действие необратимо.')) return;
+  try {
+    const r = await api('/api/miniapp/networks/'+_currentNetId+'/deploy', {method:'POST', body:'{}'});
+    toast(`🚀 Запущено: +${r.create} объектов${r.op_id?` · операция #${r.op_id}`:''}`);
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка'));
   }
 }
 async function selectNetwork(netId) {
