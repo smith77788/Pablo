@@ -75,6 +75,18 @@ async def event_counts(pool, owner_id: int, hours: int = 24) -> dict[str, int]:
     return {r["kind"]: int(r["c"]) for r in rows}
 
 
+async def prune_events(pool, days: int = 30) -> int:
+    """Ретеншн журнала событий: удалить старше N дней (защита от разрастания)."""
+    try:
+        res = await pool.execute(
+            "DELETE FROM organism_events WHERE created_at < now() - ($1 || ' days')::interval",
+            str(int(days)))
+        return int(str(res).rsplit(" ", 1)[-1]) if str(res).startswith("DELETE") else 0
+    except Exception:
+        log.debug("spine.prune_events failed")
+        return 0
+
+
 async def state_get(pool, owner_id: int, key: str, default=None):
     row = await pool.fetchrow(
         "SELECT value FROM organism_state WHERE owner_id=$1 AND key=$2", owner_id, key)

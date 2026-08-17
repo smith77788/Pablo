@@ -12589,22 +12589,20 @@ let CONTACT_OFFSET = 0;      // сколько уже загружено (для
 async function loadContacts(append=false) {
   const q = (document.getElementById('contactSearch')?.value||'').trim();
   if (!append) CONTACT_OFFSET = 0;
-  let url, paged=false;
-  if (q) {
-    url = '/api/miniapp/uch/search?q='+encodeURIComponent(q);   // поиск — свой набор, без пагинации
-  } else {
-    const params = new URLSearchParams();
-    if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
-    if (CONTACT_FILTER === 'premium') params.set('premium', '1');
-    if (CONTACT_FILTER === 'multi') params.set('multi', '1');
-    if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
-    if (CONTACT_GENDER) params.set('gender', CONTACT_GENDER);
-    if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
-    params.set('limit', CONTACT_PAGE);
-    params.set('offset', CONTACT_OFFSET);
-    url = '/api/miniapp/uch/contacts?' + params.toString();
-    paged = true;
-  }
+  // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с
+  // резолвером сегмента — «вижу одно, действую по тому же». Одна пагинация.
+  const params = new URLSearchParams();
+  if (q) params.set('search', q);
+  if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
+  if (CONTACT_FILTER === 'premium') params.set('premium', '1');
+  if (CONTACT_FILTER === 'multi') params.set('multi', '1');
+  if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
+  if (CONTACT_GENDER) params.set('gender', CONTACT_GENDER);
+  if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
+  params.set('limit', CONTACT_PAGE);
+  params.set('offset', CONTACT_OFFSET);
+  const url = '/api/miniapp/uch/contacts?' + params.toString();
+  const paged = true;
   try {
     const d = await api(url);
     const contacts = d.results||d.contacts||[];

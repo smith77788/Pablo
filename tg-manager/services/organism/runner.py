@@ -20,6 +20,7 @@ INTERVAL = 15 * 60          # сердцебиение — раз в 15 мин
 _SAME_COOLDOWN = 6 * 3600   # та же подсказка не чаще раза в 6ч
 _ANY_GAP = 2 * 3600         # любой нудж не чаще раза в 2ч
 _NUDGE_SEV = ("urgent", "warn")
+_last_prune = 0.0          # троттл ретеншена журнала (не чаще раза в 6ч)
 
 
 async def run(pool, bot) -> None:
@@ -40,6 +41,15 @@ async def _active_owners(pool) -> list[int]:
 
 async def _tick(pool, bot) -> int:
     """Один проход по всем владельцам. Возвращает число отправленных нуджей."""
+    global _last_prune
+    now = time.time()
+    if now - _last_prune > 6 * 3600:      # ретеншен журнала — не чаще раза в 6ч
+        _last_prune = now
+        try:
+            from services.organism import spine
+            await spine.prune_events(pool, days=30)
+        except Exception:
+            pass
     sent = 0
     for oid in await _active_owners(pool):
         try:

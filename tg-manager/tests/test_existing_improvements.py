@@ -48,6 +48,35 @@ def test_ban_reaction_helper_invalidates_and_emits():
     assert "_on_account_banned(pool, owner_id, acc" in src
 
 
+# ── Контакты: поиск КОМБИНИРУЕТСЯ с фильтрами (единый путь, не отдельный /search)
+def test_contacts_list_unified_search_with_filters():
+    ui = _read("mini_app/index.html")
+    fn = ui[ui.index("async function loadContacts"):]
+    fn = fn[:fn.index("async function searchContacts")]
+    # список всегда идёт через uch/contacts (search как параметр), без ветки на /uch/search
+    assert "/api/miniapp/uch/contacts?" in fn
+    assert "params.set('search', q)" in fn
+    assert "/api/miniapp/uch/search?q=" not in fn   # разветвление убрано
+
+
+# ── Ретеншен журнала событий (защита от разрастания) ────────────────────────
+def test_event_retention_prune():
+    from services.organism import spine
+
+    class _Pool:
+        def __init__(self): self.sql = None
+        async def execute(self, sql, *a):
+            self.sql = sql
+            return "DELETE 42"
+
+    p = _Pool()
+    n = _run(spine.prune_events(p, days=30))
+    assert n == 42 and "DELETE FROM organism_events" in p.sql
+    # раннер вызывает ретеншен с троттлом
+    src = _read("services/organism/runner.py")
+    assert "prune_events" in src and "_last_prune" in src
+
+
 # ── Мозг: подсказка о банах из событий ──────────────────────────────────────
 def test_brain_surfaces_bans():
     from services.organism.brain import build_suggestions
