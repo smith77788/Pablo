@@ -15171,8 +15171,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     except Exception: d["phones"] = []
                 out.append(d)
             return out
-        from services.contacts_hub.repository import resolve_segment
-        return await resolve_segment(pool, uid, _segment_filters(body), limit=_SEG_MAX)
+        from services.contacts_hub.repository import resolve_segment, get_segment_filters
+        # Сохранённый сегмент (по id) ИЛИ фильтры из тела — единый резолвер.
+        filters = None
+        _sid = body.get("saved_segment_id")
+        if str(_sid).isdigit():
+            filters = await get_segment_filters(pool, uid, int(_sid))
+        if filters is None:
+            filters = _segment_filters(body)
+        return await resolve_segment(pool, uid, filters, limit=_SEG_MAX)
 
     async def _segment_pressure_ok(uid: int, op_name: str) -> tuple[bool, str]:
         """Гейт давления инфраструктуры (ban-safety) — как у остальных масс-опер."""
@@ -15373,6 +15380,50 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("uch_segment_invite uid=%s", uid)
             return _err(str(exc), 500)
+
+    async def uch_segments_list(request: web.Request) -> web.Response:
+        """Сохранённые сегменты владельца (+ актуальный размер каждого)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.repository import list_segments
+            return _json_resp({"segments": await list_segments(pool, uid)})
+        except Exception as exc:
+            log.exception("uch_segments_list uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_segment_save(request: web.Request) -> web.Response:
+        """Сохранить текущий срез как сегмент (имя + фильтры)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        name = (body.get("name") or "").strip()
+        if not name:
+            return _err("Укажите название сегмента", 400)
+        filters = _segment_filters(body.get("filters") or body)
+        try:
+            from services.contacts_hub.repository import save_segment
+            sid = await save_segment(pool, uid, name, filters)
+            return _json_resp({"ok": True, "id": sid})
+        except Exception as exc:
+            log.exception("uch_segment_save uid=%s", uid)
+            return _err(str(exc), 500)
+
+    async def uch_segment_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["seg_id"])
+        except (KeyError, ValueError):
+            return _err("bad seg_id", 400)
+        from services.contacts_hub.repository import delete_segment
+        return _json_resp({"ok": await delete_segment(pool, uid, sid)})
 
     async def uch_intent_rules(request: web.Request) -> web.Response:
         """Правила сенсора намерений (Vault → CRM) владельца."""
@@ -16091,6 +16142,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
     app.router.add_post("/api/miniapp/uch/segment/media", uch_segment_media)
     app.router.add_post("/api/miniapp/uch/segment/invite", uch_segment_invite)
+    app.router.add_get("/api/miniapp/uch/segments", uch_segments_list)
+    app.router.add_post("/api/miniapp/uch/segments/save", uch_segment_save)
+    app.router.add_delete("/api/miniapp/uch/segments/{seg_id}", uch_segment_delete)
     app.router.add_get("/api/miniapp/uch/intent/rules", uch_intent_rules)
     app.router.add_post("/api/miniapp/uch/intent/rule", uch_intent_rule_create)
     app.router.add_delete("/api/miniapp/uch/intent/rule/{rule_id}", uch_intent_rule_delete)

@@ -114,6 +114,62 @@ async def count_segment(pool, owner_id, filters: dict) -> int:
         f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params) or 0)
 
 
+_SEG_FILTER_KEYS = ("search", "tag", "group_id", "favorite_only", "premium_only",
+                    "multi_only", "mutual_only", "gender", "crm_stage", "account_id")
+
+
+def _clean_filters(filters: dict) -> dict:
+    """Оставить только валидные ключи фильтра (то, что понимает _segment_where)."""
+    return {k: filters[k] for k in _SEG_FILTER_KEYS if filters.get(k) not in (None, "", False)}
+
+
+async def save_segment(pool, owner_id, name: str, filters: dict) -> int:
+    name = (name or "").strip()[:80] or "Сегмент"
+    import json as _json
+    return int(await pool.fetchval(
+        "INSERT INTO saved_segments(owner_id, name, filters) VALUES($1,$2,$3::jsonb) RETURNING id",
+        owner_id, name, _json.dumps(_clean_filters(filters or {}))))
+
+
+async def list_segments(pool, owner_id) -> list[dict]:
+    """Сохранённые сегменты владельца + актуальный размер каждого (live count)."""
+    import json as _json
+    rows = await pool.fetch(
+        "SELECT id, name, filters, created_at FROM saved_segments WHERE owner_id=$1 "
+        "ORDER BY created_at DESC", owner_id)
+    out = []
+    for r in rows:
+        f = r["filters"]
+        if isinstance(f, str):
+            try: f = _json.loads(f)
+            except Exception: f = {}
+        try:
+            n = await count_segment(pool, owner_id, f)
+        except Exception:
+            n = None
+        out.append({"id": int(r["id"]), "name": r["name"], "filters": f, "count": n})
+    return out
+
+
+async def get_segment_filters(pool, owner_id, segment_id: int) -> dict | None:
+    import json as _json
+    row = await pool.fetchrow(
+        "SELECT filters FROM saved_segments WHERE id=$1 AND owner_id=$2", segment_id, owner_id)
+    if not row:
+        return None
+    f = row["filters"]
+    if isinstance(f, str):
+        try: f = _json.loads(f)
+        except Exception: f = {}
+    return f or {}
+
+
+async def delete_segment(pool, owner_id, segment_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM saved_segments WHERE id=$1 AND owner_id=$2", segment_id, owner_id)
+    return not str(res).endswith(" 0")
+
+
 async def resolve_segment(pool, owner_id, filters: dict, limit: int = 5000) -> list:
     """Срез контактов для массового действия: только поля, нужные для адресации
     (username / telegram_user_id / phones). Тот же WHERE, что и у списка."""

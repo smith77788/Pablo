@@ -2919,6 +2919,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="chip" style="flex:0 0 auto" onclick="detectDuplicates()">🔍 Дубликаты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchConflicts()">⚠️ Конфликты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchSmartTags()">🏷 Умные теги</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openSavedSegments()">📂 Сегменты</span>
+      <span class="chip" style="flex:0 0 auto" onclick="saveCurrentSegment()">💾 Сохранить срез</span>
       <span class="chip" style="flex:0 0 auto" onclick="openIntentSensor()">🎯 Намерения</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchReminders()">⏰ Напоминания</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
@@ -2960,6 +2962,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
     </div>
     <div class="lst" id="contactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════ СОХРАНЁННЫЕ СЕГМЕНТЫ ══════════ -->
+<div class="screen" id="s-segments">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📂 Сегменты</div></div>
+  <div class="sub-sb">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
+      Умный срез контактов как сущность («Горячие», «Молчуны 30д»). Один сегмент —
+      одним тапом написать или пригласить. «Сохранить срез» — на экране Контактов.
+    </div>
+    <div class="lst" id="segmentsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -12834,14 +12848,76 @@ function _segmentTargetInit() {
   const ids = [...CONTACT_SELECTED];
   return ids.length ? {mode:'ids', ids} : null;
 }
+// Тело запроса из цели сегмента (общее для preview/message/media/invite).
+function _segmentBody(seg) {
+  if (!seg) return {};
+  if (seg.mode==='saved') return {saved_segment_id: seg.id};
+  if (seg.mode==='whole') return seg.filters;
+  return {contact_ids: seg.ids};
+}
+
+// ── Сохранённые сегменты ────────────────────────────────────────────────────
+async function saveCurrentSegment() {
+  const name = await askPrompt('Название сегмента');
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/miniapp/uch/segments/save', {method:'POST',
+      body: JSON.stringify({name: name.trim(), filters: _currentSegmentFilters()})});
+    toast('💾 Сегмент сохранён');
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+async function openSavedSegments() {
+  push('s-segments');
+  const box = document.getElementById('segmentsList');
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/uch/segments');
+    const segs = d.segments || [];
+    if (!segs.length) { box.innerHTML = empty('📂','Сегментов пока нет','Настройте фильтры на экране Контактов и нажмите «💾 Сохранить срез»'); return; }
+    box.innerHTML = segs.map(s=>`<div class="li" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="li-body"><div class="li-name">${esc(s.name)}</div>
+          <div class="li-sub">${s.count!=null?('👥 '+num(s.count)+' контактов'):'—'}</div></div>
+        <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id})">🗑</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-p" style="flex:1;font-size:12px" onclick="segmentActFromSaved(${s.id},'write')">✍️ Написать</button>
+        <button class="btn btn-s" style="flex:1;font-size:12px" onclick="segmentActFromSaved(${s.id},'invite')">➕ Пригласить</button>
+      </div>
+    </div>`).join('');
+  } catch(e){ box.innerHTML = errHtml(e.message,'openSavedSegments()'); }
+}
+async function deleteSavedSegment(id) {
+  if (!await askConfirm('Удалить сегмент? (контакты не трогаются)')) return;
+  try { await api('/api/miniapp/uch/segments/'+id, {method:'DELETE'}); openSavedSegments(); }
+  catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+function segmentActFromSaved(id, kind) {
+  SEGMENT_TARGET = {mode:'saved', id};
+  if (kind==='write') {
+    const t=document.getElementById('ccwText'); if(t)t.value='';
+    const e=document.getElementById('ccwErr'); if(e)e.textContent='';
+    const f=document.getElementById('ccwFile'); if(f)f.value='';
+    const ttl=document.getElementById('ccwTitle'); if(ttl)ttl.textContent='✍️ Написать сегменту';
+    _renderContactAccPicker('ccwAccts','all');
+    showModal('mo-contact-write');
+    _loadSegmentPreview('ccwPreview');
+  } else {
+    const g=document.getElementById('cciGroup'); if(g)g.value='';
+    const e=document.getElementById('cciErr'); if(e)e.textContent='';
+    const ttl=document.getElementById('cciTitle'); if(ttl)ttl.textContent='➕ Пригласить сегмент';
+    _renderContactAccPicker('cciAccts','all');
+    showModal('mo-contact-invite');
+    _loadSegmentPreview('cciPreview');
+  }
+}
 async function _loadSegmentPreview(previewElId) {
   const el = document.getElementById(previewElId);
   if (!el || !SEGMENT_TARGET) return;
   el.style.display = 'block';
   el.innerHTML = '<span style="color:var(--hint)">Считаю сегмент…</span>';
   try {
-    const body = SEGMENT_TARGET.mode==='whole' ? SEGMENT_TARGET.filters : {contact_ids:SEGMENT_TARGET.ids};
-    const p = await api('/api/miniapp/uch/segment/preview', {method:'POST', body:JSON.stringify(body)});
+    const p = await api('/api/miniapp/uch/segment/preview', {method:'POST', body:JSON.stringify(_segmentBody(SEGMENT_TARGET))});
     el.innerHTML = `🎯 В сегменте: <b>${p.total}</b> · адресуемых в ЛС: <b>${p.addressable_dm}</b>`
       + (p.skipped_dm?` · без @username/ID: ${p.skipped_dm}`:'')
       + `<br>активных аккаунтов: <b>${p.accounts_active}</b>`
@@ -12887,12 +12963,12 @@ async function submitContactWrite() {
       if (file) {
         const fd = new FormData();
         fd.append('file', file); fd.append('text', text); fd.append('account_ids', accIds.join(','));
-        if (seg.mode==='whole') fd.append('filters', JSON.stringify(seg.filters));
+        if (seg.mode==='saved') fd.append('filters', JSON.stringify({saved_segment_id: seg.id}));
+        else if (seg.mode==='whole') fd.append('filters', JSON.stringify(seg.filters));
         else fd.append('contact_ids', JSON.stringify(seg.ids));
         r = await api('/api/miniapp/uch/segment/media', {method:'POST', body: fd});
       } else {
-        const body = Object.assign({text, account_ids: accIds},
-          seg.mode==='whole' ? seg.filters : {contact_ids: seg.ids});
+        const body = Object.assign({text, account_ids: accIds}, _segmentBody(seg));
         r = await api('/api/miniapp/uch/segment/message', {method:'POST', body: JSON.stringify(body)});
       }
       closeModal('mo-contact-write');
@@ -13009,8 +13085,7 @@ async function submitContactInvite() {
   try {
     let r;
     if (seg) {
-      const body = Object.assign({group, invite_method: method, account_ids: accIds},
-        seg.mode==='whole' ? seg.filters : {contact_ids: seg.ids});
+      const body = Object.assign({group, invite_method: method, account_ids: accIds}, _segmentBody(seg));
       r = await api('/api/miniapp/uch/segment/invite', {method:'POST', body: JSON.stringify(body)});
       closeModal('mo-contact-invite');
       SEGMENT_TARGET = null;
