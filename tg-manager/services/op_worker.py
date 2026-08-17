@@ -17,6 +17,7 @@ from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import infra_memory as _infra_mem
 from services import session_simulator
+from services import geo_tempo
 from services.pacing_engine import get_pacing_engine
 
 log = logging.getLogger(__name__)
@@ -3187,7 +3188,8 @@ async def _exec_bulk_join_inner(
                 )
             # Apply pacing based on delay_mode from params
             chaos = session_simulator.chaos_factor()
-            tod = session_simulator.time_of_day_factor()
+            # Ночной режим — по ЛОКАЛЬНОМУ времени аккаунта (гео прокси), а не сервера.
+            tod = geo_tempo.local_factor(acc.get("geo_country"))
             if delay_mode == "fast":
                 pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
             elif delay_mode == "normal":
@@ -3435,7 +3437,8 @@ async def _exec_bulk_leave(
                 )
             # Apply pacing based on delay_mode from params
             chaos = session_simulator.chaos_factor()
-            tod = session_simulator.time_of_day_factor()
+            # Ночной режим — по ЛОКАЛЬНОМУ времени аккаунта (гео прокси), а не сервера.
+            tod = geo_tempo.local_factor(acc.get("geo_country"))
             if delay_mode == "fast":
                 pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
             elif delay_mode == "normal":
