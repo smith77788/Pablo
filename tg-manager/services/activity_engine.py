@@ -355,16 +355,27 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
     total_fail = 0
 
     for acc_id in acc_ids:
-        # Не трогаем аккаунт, занятый операцией: параллельный коннект одной сессии
-        # активити-циклом и операцией = AUTH_KEY_DUPLICATED.
+        # Атомарный захват: одна сессия не должна коннектиться активити-циклом И
+        # операцией одновременно = AUTH_KEY_DUPLICATED. Захватываем ДО коннекта,
+        # освобождаем в finally; занятый операцией аккаунт пропускаем.
+        _opw = None
+        _act_leased = True
         try:
-            from services import op_worker as _opw
-            if _opw.is_account_in_use(int(acc_id)):
-                continue
+            from services import op_worker as _opw_mod
+            _opw = _opw_mod
+            _act_leased = await _opw.try_claim_account(int(acc_id))
         except Exception:
-            pass
+            _opw = None
+            _act_leased = True  # op_worker недоступен — best-effort
+        if not _act_leased:
+            continue
         acc_row = await db.get_account_for_telethon(pool, acc_id)
         if not acc_row or not acc_row["session_str"]:
+            if _opw and _act_leased:
+                try:
+                    await _opw.release_accounts([int(acc_id)])
+                except Exception:
+                    pass
             continue
 
         device = dict(acc_row) if acc_row["device_model"] else None
@@ -488,6 +499,12 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                 await asyncio.wait_for(client.disconnect(), timeout=5)
             except Exception as e:
                 log_exc_swallow(log, "run_resource_activity_session: disconnect")
+            # Возвращаем аккаунт арбитру — иначе он «зомби» до реконсилера.
+            if _opw and _act_leased:
+                try:
+                    await _opw.release_accounts([int(acc_id)])
+                except Exception:
+                    log_exc_swallow(log, "run_resource_activity_session: release")
 
         await asyncio.sleep(random.uniform(20, 60))
 

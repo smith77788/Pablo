@@ -57,20 +57,25 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
     session = acc["session_str"]
     if not session:
         return
-    # Не трогаем аккаунт, занятый операцией (одна сессия с двух коннектов =
-    # AUTH_KEY_DUPLICATED).
-    try:
-        from services import op_worker as _opw
-        if _opw.is_account_in_use(int(account_id)):
-            return
-    except Exception:
-        pass
-
     targets = await pool.fetch(
         "SELECT * FROM mesh_targets WHERE mesh_id=$1 AND enabled=TRUE",
         mesh_id,
     )
     if not targets:
+        return
+
+    # Атомарный захват ДО коннекта: одна сессия не коннектится mesh-циклом И
+    # операцией одновременно = AUTH_KEY_DUPLICATED. Освобождаем в finally.
+    _opw = None
+    _cm_leased = True
+    try:
+        from services import op_worker as _opw_mod
+        _opw = _opw_mod
+        _cm_leased = await _opw.try_claim_account(int(account_id))
+    except Exception:
+        _opw = None
+        _cm_leased = True
+    if not _cm_leased:
         return
 
     acc_dict = dict(acc)
@@ -127,6 +132,12 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
         log.debug("Content Mesh: can't access source %s for mesh %d: %s", source_channel, mesh_id, e)
     except Exception as e:
         log.debug("Content Mesh: source poll error for mesh %d: %s", mesh_id, e)
+    finally:
+        if _opw and _cm_leased:
+            try:
+                await _opw.release_accounts([int(account_id)])
+            except Exception:
+                log.debug("Content Mesh: release failed for account %d", account_id)
 
 
 # ─── Queue processing ─────────────────────────────────────────────────────────
@@ -167,18 +178,6 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
     if not session:
         await pool.execute("UPDATE mesh_queue SET status='error', error_msg='no_session' WHERE id=$1", item["id"])
         return
-    # Аккаунт занят операцией → откладываем доставку (не error: восстановится).
-    # Параллельный коннект одной сессии = AUTH_KEY_DUPLICATED.
-    try:
-        from services import op_worker as _opw
-        if _opw.is_account_in_use(int(account_id)):
-            await pool.execute(
-                "UPDATE mesh_queue SET scheduled_at = NOW() + INTERVAL '5 minutes' WHERE id=$1",
-                item["id"])
-            return
-    except Exception:
-        pass
-
     # Anti-detection (#7): не репостим через аккаунт в карантине (недавний
     # флуд/блок/ограничение). acc_status выше ловит только banned/deactivated —
     # единый пульс здоровья ловит ещё и флуд/cooldown. Откладываем доставку
@@ -198,6 +197,23 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
             return
     except Exception as _qe:
         log.debug("content_mesh: quarantine check failed (fail-open): %s", _qe)
+
+    # Атомарный захват ДО коннекта. Занят операцией → откладываем доставку (не
+    # error: восстановится), никакой второй сессии на одном auth-key.
+    _opw = None
+    _cm_leased = True
+    try:
+        from services import op_worker as _opw_mod
+        _opw = _opw_mod
+        _cm_leased = await _opw.try_claim_account(int(account_id))
+    except Exception:
+        _opw = None
+        _cm_leased = True
+    if not _cm_leased:
+        await pool.execute(
+            "UPDATE mesh_queue SET scheduled_at = NOW() + INTERVAL '5 minutes' WHERE id=$1",
+            item["id"])
+        return
 
     try:
         client = _make_client(session, dict(acc))
@@ -263,6 +279,12 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
             "UPDATE mesh_queue SET status='error', error_msg=$1, sent_at=NOW() WHERE id=$2",
             str(e)[:200], item["id"],
         )
+    finally:
+        if _opw and _cm_leased:
+            try:
+                await _opw.release_accounts([int(account_id)])
+            except Exception:
+                log.debug("content_mesh: release failed for account %d", account_id)
 
 
 # ─── Main loop ────────────────────────────────────────────────────────────────

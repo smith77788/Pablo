@@ -150,14 +150,6 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
 
     owner_id = watcher["owner_id"]
     wid = watcher["id"]
-    # Аккаунт-читатель занят операцией → пропускаем цикл: параллельный коннект
-    # одной сессии watcher'ом и операцией = AUTH_KEY_DUPLICATED.
-    try:
-        from services import op_worker as _opw
-        if _opw.is_account_in_use(int(watcher["account_id"])):
-            return {"messages": 0, "hits": 0, "skipped": True}
-    except Exception:
-        pass
     # Карантин аккаунта-читателя — не трогаем (fail-open внутри is_account_quarantined).
     if await _infra_mem.is_account_quarantined(pool, watcher["account_id"]):
         await pool.execute(
@@ -170,6 +162,22 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
         keywords = json.loads(keywords or "[]")
     cursor = int(watcher.get("last_msg_id") or 0)
 
+    # Атомарный захват аккаунта-читателя ДО коннекта в fetch: одна сессия не
+    # коннектится watcher'ом И операцией одновременно = AUTH_KEY_DUPLICATED.
+    # Занят операцией → пропускаем цикл. Освобождаем сразу после fetch (дальше
+    # только БД-работа, сессия не нужна).
+    _opw = None
+    _kw_leased = True
+    try:
+        from services import op_worker as _opw_mod
+        _opw = _opw_mod
+        _kw_leased = await _opw.try_claim_account(int(watcher["account_id"]))
+    except Exception:
+        _opw = None
+        _kw_leased = True
+    if not _kw_leased:
+        return {"messages": 0, "hits": 0, "skipped": True}
+
     fetch = fetch or _default_fetch
     try:
         messages = await fetch(pool, watcher, cursor, _MAX_MSGS_PER_POLL)
@@ -179,6 +187,12 @@ async def poll_watcher(pool: asyncpg.Pool, bot, watcher: dict, *, fetch=None) ->
             "UPDATE keyword_watchers SET last_checked_at=now(), last_error=$2 WHERE id=$1",
             wid, str(e)[:200])
         return {"messages": 0, "hits": 0, "skipped": False}
+    finally:
+        if _opw and _kw_leased:
+            try:
+                await _opw.release_accounts([int(watcher["account_id"])])
+            except Exception:
+                log.debug("keyword_watcher: release failed wid=%s", wid)
 
     new_hits = 0
     max_id = cursor

@@ -103,6 +103,19 @@ def test_invite_preflight_uses_atomic_batch_claim():
     assert "if _opw.is_account_in_use(int(a[\"id\"]))" not in src
 
 
+def test_background_connectors_claim_atomically_and_release():
+    # Все фоновые циклы, ОТКРЫВАЮЩИЕ живые сессии, теперь атомарно захватывают
+    # аккаунт и освобождают его (раньше только читали снимок is_account_in_use).
+    for rel in ("services/activity_engine.py", "services/content_mesh.py",
+                "services/keyword_watcher.py"):
+        src = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+        assert "try_claim_account" in src, f"{rel}: нет атомарного захвата"
+        assert "release_accounts(" in src, f"{rel}: нет освобождения аккаунта"
+        # снимочная проверка-без-захвата убрана (она допускала гонку)
+        assert "is_account_in_use" not in src, \
+            f"{rel}: остался небезопасный снимок is_account_in_use вместо захвата"
+
+
 def test_strike_claims_atomically_and_works_only_on_claimed():
     src = open(os.path.join(ROOT, "services", "strike_engine.py"), encoding="utf-8").read()
     i = src.index("async def staggered_strike")
