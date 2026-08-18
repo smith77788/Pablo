@@ -78,6 +78,7 @@ _POLL_INTERVAL = 10  # секунд между проверками очеред
 _STALE_RUNNING_TIMEOUT_MIN = 60  # операции в running > N минут → reset в pending
 _MAX_PARALLEL = 8  # максимум параллельных операций глобально
 _MAX_PARALLEL_PER_OWNER = 3  # максимум на одного владельца (далее в коде)
+_MIN_ACCOUNTS_PER_OP = 1     # честный дележ флота: минимум аккаунтов на операцию
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
@@ -190,6 +191,39 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
         float(defer),
         log_ctx=f"[circuit_release op={op_id}]",
     )
+
+
+_ACCT_WAIT_MAX_MIN = 20  # сколько ждать свободные аккаунты, потом — провал
+
+
+async def _requeue_op_no_accounts(pool: "asyncpg.Pool", op_id: int, defer_s: int = 90) -> None:
+    """Флот временно занят другими операциями — вернуть op в очередь с задержкой,
+    а не проваливать. Ограничено по времени: если операция ждёт свободные
+    аккаунты дольше _ACCT_WAIT_MAX_MIN — провалить (без вечного цикла).
+
+    Это делает параллельные операции «живой очередью»: конкурентная операция не
+    падает «все аккаунты заняты», а мягко ждёт и стартует, когда флот освободится
+    (после честного дележа большинство операций стартуют сразу)."""
+    import datetime as __dt
+    row = await _safe_fetchrow(
+        pool, "SELECT created_at FROM operation_queue WHERE id=$1", op_id,
+        log_ctx=f"[requeue_no_acc op={op_id}]")
+    if row and row.get("created_at"):
+        age = __dt.datetime.now(__dt.timezone.utc) - row["created_at"]
+        if age > __dt.timedelta(minutes=_ACCT_WAIT_MAX_MIN):
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET status='failed', finished_at=now(), "
+                "error_msg=$2 WHERE id=$1",
+                op_id, "Флот занят другими операциями — не дождались свободных аккаунтов",
+                log_ctx=f"[requeue_no_acc_fail op={op_id}]")
+            return
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
+        op_id, float(defer_s),
+        log_ctx=f"[requeue_no_acc op={op_id}]")
 
 
 # ── Адаптивный темп по времени суток + ML ─────────────────────────────────────
@@ -341,10 +375,38 @@ async def release_operation_accounts(op_id: int) -> None:
             log.warning("op_worker: db flag update (release_operation) failed: %s", e)
 
 
-async def _claim_available_accounts(op_id: int, accounts: list) -> list:
-    """Atomically claim free accounts and bind them to operation cleanup."""
+async def _claim_available_accounts(
+    op_id: int, accounts: list, owner_id: int | None = None
+) -> list:
+    """Atomically claim free accounts and bind them to operation cleanup.
+
+    Честный дележ флота (fair-share): если у владельца ПАРАЛЛЕЛЬНО идут другие
+    операции — один op не забирает весь свободный флот, а берёт справедливую долю
+    (⌈флот / число параллельных операций⌉), чтобы конкурентные операции реально
+    запускались, а не падали «все аккаунты заняты». В одиночку op берёт весь
+    свободный флот (без потери пропускной способности). Захват дизъюнктен →
+    одна сессия никогда не используется двумя операциями одновременно
+    (защита от AUTH_KEY_DUPLICATED сохраняется)."""
+    # Сколько операций владельца уже в работе — считаем ДО блокировки (это await).
+    concurrency = 1
+    if owner_id and _db_pool:
+        try:
+            n = await _db_pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'",
+                owner_id,
+            )
+            concurrency = max(1, int(n or 1))
+        except Exception:
+            concurrency = 1
     async with _accounts_lock:
-        claimed = [a for a in accounts if int(a["id"]) not in _accounts_in_use]
+        free = [a for a in accounts if int(a["id"]) not in _accounts_in_use]
+        # Доля флота на операцию при конкуренции. В одиночку (concurrency=1) —
+        # весь свободный флот.
+        if concurrency > 1 and accounts:
+            share = max(_MIN_ACCOUNTS_PER_OP,
+                        -(-len(accounts) // concurrency))  # ceil(len/concurrency)
+            free = free[:share]
+        claimed = free
         acc_ids = [int(a["id"]) for a in claimed]
         _accounts_in_use.update(acc_ids)
         if acc_ids:
@@ -353,7 +415,7 @@ async def _claim_available_accounts(op_id: int, accounts: list) -> list:
         try:
             await _db_pool.execute(
                 "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
-                [int(a["id"]) for a in claimed],
+                acc_ids,
             )
         except Exception as e:
             log.warning("op_worker: db flag update (claim_accounts) failed: %s", e)
@@ -1735,6 +1797,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     "summary": f"⚠️ Неизвестный тип операции: {op_type}",
                 }
 
+            # Флот временно занят другими операциями — не проваливаем, а мягко
+            # возвращаем в очередь (запустится, когда освободятся аккаунты).
+            if result.get("status") == "requeue":
+                await _requeue_op_no_accounts(pool, op_id)
+                return
+
             # Не перезаписывать статус если операция была отменена в процессе
             if result.get("status") == "cancelled":
                 await _safe_execute(
@@ -2426,13 +2494,13 @@ async def _exec_mass_publish(
     if not accounts_raw:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
 
-    accounts_rows = await _claim_available_accounts(op_id, accounts_raw)
+    accounts_rows = await _claim_available_accounts(op_id, accounts_raw, owner_id)
     mp_used_acc_ids = [int(a["id"]) for a in accounts_rows]
 
     if not accounts_rows:
         return {
-            "status": "failed",
-            "summary": "⚠️ Mass Publish: все аккаунты заняты другой операцией",
+            "status": "requeue",
+            "summary": "⏳ Mass Publish: флот занят другими операциями — операция в очереди",
         }
 
     # Account health awareness: filter out banned/restricted accounts before publishing
@@ -2934,13 +3002,13 @@ async def _exec_bulk_join(
         respect_daily_budget=True,  # долговечность: щадим выжатые аккаунты
     )
 
-    accounts = await _claim_available_accounts(op_id, accounts)
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
     used_acc_ids = [int(a["id"]) for a in accounts]
 
     if not accounts:
         return {
-            "status": "failed",
-            "summary": "⚠️ Bulk Join: все аккаунты заняты другой операцией",
+            "status": "requeue",
+            "summary": "⏳ Bulk Join: флот занят другими операциями — операция в очереди",
         }
 
     try:
@@ -3288,13 +3356,13 @@ async def _exec_bulk_leave(
         action_type="leave",
         respect_daily_budget=True,  # долговечность: щадим выжатые аккаунты
     )
-    accounts = await _claim_available_accounts(op_id, accounts_raw)
+    accounts = await _claim_available_accounts(op_id, accounts_raw, owner_id)
     used_acc_ids = [int(a["id"]) for a in accounts]
 
     if not accounts:
         return {
-            "status": "failed",
-            "summary": "⚠️ Bulk Leave: все аккаунты заняты другой операцией",
+            "status": "requeue",
+            "summary": "⏳ Bulk Leave: флот занят другими операциями — операция в очереди",
         }
 
     ok_count = 0
@@ -7554,7 +7622,7 @@ async def _exec_channel_add(
     accounts = await resource_selector.select_all_active(
         pool, owner_id, action_type="join", respect_daily_budget=True,
     )
-    accounts = await _claim_available_accounts(op_id, accounts)
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет свободных активных аккаунтов"}
 
@@ -9345,7 +9413,7 @@ async def _exec_mass_invite(
     # (release_operation_accounts по op_id), утечки claim нет.
     _busy_skipped = 0
     try:
-        _free = await _claim_available_accounts(op_id, accounts)
+        _free = await _claim_available_accounts(op_id, accounts, owner_id)
         _busy_skipped = len(accounts) - len(_free)
         if _busy_skipped:
             log.info("mass_invite op=%d: %d аккаунтов заняты другой операцией — пропущены",

@@ -43,7 +43,7 @@ def test_claim_registers_accounts_per_op():
     их не освободит."""
     ow = _read("services/op_worker.py")
     seg = ow[ow.index("async def _claim_available_accounts"):
-             ow.index("async def _claim_available_accounts") + 1200]
+             ow.index("async def _claim_available_accounts") + 2400]
     assert "_operation_account_locks.setdefault(op_id" in seg
 
 

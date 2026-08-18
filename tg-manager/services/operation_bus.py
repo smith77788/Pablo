@@ -484,6 +484,36 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🗑",
     },
+    "deploy_network": {
+        "description": "Развернуть связку",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔗",
+    },
+    "crosspost_run": {
+        "description": "Кросспостинг",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔁",
+    },
+    "community_add_channel": {
+        "description": "Канал ноды-сообщества",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🖥",
+    },
+    "community_liven": {
+        "description": "Оживление ноды флотом",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🏛",
+    },
+    "community_set_staff": {
+        "description": "Роли ноды-сообщества",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🛡",
+    },
 }
 
 
