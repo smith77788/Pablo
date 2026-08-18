@@ -1304,6 +1304,37 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
 
 
+async def _reconcile_in_operation(pool: asyncpg.Pool) -> None:
+    """Снять залипший in_operation=TRUE с аккаунтов, которые НЕ держит ни одна
+    живая операция (in-memory _accounts_in_use — источник истины).
+
+    Зачем: множество подсистем (warmup, ghost, health, proxy-rotation, monitor)
+    фильтруют `in_operation=FALSE`. Если операция умерла/была сброшена сторожем,
+    её DB-флаг мог остаться TRUE — аккаунт становится «зомби»: молча выпадает из
+    прогрева/призрака/ротации до полного рестарта. Реконсилер лечит это без
+    рестарта: чистит флаг там, где память говорит «свободен».
+
+    Однопроцессная модель (как и весь claim по _accounts_in_use): в памяти этого
+    процесса — полная картина занятых аккаунтов.
+    """
+    try:
+        async with _accounts_lock:
+            held = [int(a) for a in _accounts_in_use]
+        result = await pool.execute(
+            "UPDATE tg_accounts SET in_operation=FALSE "
+            "WHERE COALESCE(in_operation, FALSE)=TRUE "
+            "  AND ($1::int[] IS NULL OR id <> ALL($1::int[]))",
+            held or None,
+        )
+        freed = int((result or "UPDATE 0").split()[-1])
+        if freed:
+            log.warning(
+                "op_worker reconcile: freed %d zombie in_operation flags "
+                "(no live op held them)", freed)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker reconcile error: {e}")
+
+
 # Алертинг о застрявших операциях (наблюдаемость очереди).
 _STUCK_PENDING_MIN = 15   # pending дольше N минут = очередь не разбирается
 _LONG_RUNNING_MIN = 45    # running дольше N минут = вероятно завис (до reset на 60)
@@ -1393,6 +1424,9 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         # Run stale-running watchdog every 6 poll cycles (~1 minute)
         if _watchdog_tick % 6 == 0:
             await _watchdog_stale(pool)
+            # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
+            # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
+            await _reconcile_in_operation(pool)
         # Alert admins about stuck operations every ~5 minutes (30 cycles)
         if _watchdog_tick % 30 == 0:
             await _watchdog_alerts(pool, bot)

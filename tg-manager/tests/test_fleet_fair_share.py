@@ -114,3 +114,41 @@ def test_claim_passes_owner_id_at_call_sites():
     # каждый вызов (кроме определения) должен содержать owner_id
     assert src.count("_claim_available_accounts(op_id,") >= 5
     assert src.count(", owner_id)") >= 5
+
+
+class _CapturePool:
+    """Ловит SQL и параметры UPDATE-реконсилера."""
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, q, *a):
+        self.calls.append((q, a))
+        return "UPDATE 3"
+
+
+def test_reconciler_frees_only_accounts_no_live_op_holds():
+    ow._accounts_in_use.clear()
+    ow._accounts_in_use.update({5, 6})   # эти держит живая операция
+    pool = _CapturePool()
+    asyncio.run(ow._reconcile_in_operation(pool))
+    assert pool.calls, "реконсилер должен выполнить UPDATE"
+    q, args = pool.calls[0]
+    assert "SET in_operation=FALSE" in q
+    assert "id <> ALL" in q                       # исключаем занятые
+    held = args[0]
+    assert set(held) == {5, 6}                    # именно занятые исключены
+
+
+def test_reconciler_clears_all_when_nothing_held():
+    ow._accounts_in_use.clear()
+    pool = _CapturePool()
+    asyncio.run(ow._reconcile_in_operation(pool))
+    q, args = pool.calls[0]
+    # ничего не занято → held=None → чистим все залипшие флаги
+    assert args[0] is None
+
+
+def test_reconciler_wired_into_watchdog_cycle():
+    src = open("services/op_worker.py", encoding="utf-8").read()
+    assert "await _reconcile_in_operation(pool)" in src
+    assert "async def _reconcile_in_operation" in src
