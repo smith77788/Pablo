@@ -353,6 +353,45 @@ async def release_accounts(acc_ids: list[int]) -> None:
             log.warning("op_worker: db flag update (release) failed: %s", e)
 
 
+async def try_claim_accounts(acc_ids: list[int]) -> list[int]:
+    """Атомарно захватить СВОБОДНЫЕ аккаунты из списка под живые сессии.
+
+    Возвращает подмножество реально захваченных id (те, что были свободны).
+    Проверка занятости и захват — под одним `_accounts_lock`, поэтому между ними
+    op_worker/другой цикл не может вклиниться (устранён TOCTOU проверки-затем-
+    пометки). Единый арбитр `_accounts_in_use` для ВСЕХ живых сессий (операции +
+    прогрев + призрак + пре-флайт) — одна auth-key сессия НИКОГДА не коннектится
+    из двух мест (защита от AUTH_KEY_DUPLICATED).
+
+    Освобождать через release_accounts(claimed) в finally у вызывающего.
+    """
+    ids = [int(a) for a in acc_ids]
+    async with _accounts_lock:
+        claimed = [a for a in ids if a not in _accounts_in_use]
+        _accounts_in_use.update(claimed)
+    if claimed and _db_pool:
+        try:
+            await _db_pool.execute(
+                "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
+                claimed,
+            )
+        except Exception as e:
+            log.warning("op_worker: db flag update (try_claim) failed: %s", e)
+    return claimed
+
+
+async def try_claim_account(acc_id: int) -> bool:
+    """Атомарно захватить ОДИН аккаунт под живую фоновую сессию (ghost/warmup).
+
+    True — аккаунт был свободен и теперь захвачен; False — уже занят операцией
+    или другим циклом. Тонкая обёртка над try_claim_accounts (см. её докстринг:
+    единый арбитр + защита от AUTH_KEY_DUPLICATED). Освобождать через
+    release_accounts([acc_id]) в finally у вызывающего.
+    """
+    claimed = await try_claim_accounts([int(acc_id)])
+    return bool(claimed)
+
+
 async def release_operation_accounts(op_id: int) -> None:
     """Release every account claimed by an operation after executor errors.
 

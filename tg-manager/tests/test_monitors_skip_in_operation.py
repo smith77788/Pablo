@@ -26,7 +26,16 @@ _CONNECTING_MONITORS = [
     "services/account_health.py",
     "services/account_manager.py",   # run_session_health_monitor
     "services/account_warmer.py",
+    "services/ghost_engine.py",      # фоновый «шум» — тоже живая сессия
 ]
+
+# Захват перед коннектом: is_account_in_use (снимок) ИЛИ атомарный try_claim_account
+# (сильнее — check-and-set под локом, без TOCTOU). Любой закрывает окно гонки.
+_GUARD_TOKENS = ("try_claim_account", "try_claim_accounts", "is_account_in_use")
+
+
+def _has_guard(src: str) -> bool:
+    return any(tok in src for tok in _GUARD_TOKENS)
 
 
 def test_connecting_monitors_filter_in_operation_in_sql():
@@ -41,8 +50,8 @@ def test_connecting_monitors_guard_before_connect():
     # Ин-мемори сверка прямо перед коннектом (закрывает окно гонки после SELECT).
     for rel in _CONNECTING_MONITORS:
         src = _read(rel)
-        assert "is_account_in_use" in src, \
-            f"{rel}: нет проверки op_worker.is_account_in_use перед коннектом"
+        assert _has_guard(src), \
+            f"{rel}: нет захвата (try_claim_account/is_account_in_use) перед коннектом"
 
 
 # Прочие фоновые циклы (main.py _resilient), которые тоже коннектят аккаунты по
@@ -58,8 +67,8 @@ _OTHER_BG_CONNECTORS = [
 def test_other_background_connectors_guard():
     for rel in _OTHER_BG_CONNECTORS:
         src = _read(rel)
-        assert "is_account_in_use" in src, \
-            f"{rel}: фоновый коннект аккаунта без проверки is_account_in_use"
+        assert _has_guard(src), \
+            f"{rel}: фоновый коннект аккаунта без захвата (try_claim/is_account_in_use)"
 
 
 def test_shadowban_monitor_does_not_connect():

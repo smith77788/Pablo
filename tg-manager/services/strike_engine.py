@@ -1317,15 +1317,29 @@ async def staggered_strike(
             log.warning('is_strike_cancelled query failed: %s', e)
             return False
 
-    # Claim every account for the whole strike so warmup/op_worker won't drive
-    # the same sessions in parallel (concurrent clients on one auth_key = ban).
-    _claimed_ids = [int(a["id"]) for a in plan.accounts if a.get("id")]
+    # Claim every account for the whole strike so warmup/op_worker/ghost won't
+    # drive the same sessions in parallel (concurrent clients on one auth_key =
+    # AUTH_KEY_DUPLICATED, безвозвратно). Атомарный захват (try_claim_accounts):
+    # берём только реально свободные и работаем ТОЛЬКО с ними — аккаунты, занятые
+    # другой операцией/прогревом, из этого страйка исключаются (никакой второй
+    # сессии на чужой auth-key).
+    _wanted_ids = [int(a["id"]) for a in plan.accounts if a.get("id")]
+    _claimed_ids: list[int] = []
     try:
         from services import op_worker as _opw
 
-        await _opw.mark_accounts_in_use(_claimed_ids)
+        _claimed_ids = await _opw.try_claim_accounts(_wanted_ids)
     except Exception:
-        log_exc_swallow(log, "staggered_strike: mark_accounts_in_use failed")
+        log_exc_swallow(log, "staggered_strike: try_claim_accounts failed")
+        _claimed_ids = _wanted_ids  # op_worker недоступен — best-effort как раньше
+    if _wanted_ids:
+        _claimed_set = set(_claimed_ids)
+        _skipped = [i for i in _wanted_ids if i not in _claimed_set]
+        if _skipped:
+            log.info("staggered_strike: %d аккаунтов заняты — исключены из страйка: %s",
+                     len(_skipped), _skipped)
+        # Работаем строго с захваченными сессиями.
+        plan.accounts = [a for a in plan.accounts if int(a.get("id") or 0) in _claimed_set]
 
     try:
         for _target_idx, target in enumerate(plan.targets):

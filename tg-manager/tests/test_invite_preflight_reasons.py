@@ -68,15 +68,17 @@ def test_run_preflight_claims_free_accounts(monkeypatch):
     marked: list = []
     released: list = []
 
-    async def fake_mark(ids):
-        marked.extend(ids)
+    async def fake_try_claim(ids):
+        # атомарный захват: аккаунт 2 «занят» реальной операцией → не захватываем
+        claimed = [i for i in ids if i != 2]
+        marked.extend(claimed)
+        return claimed
 
     async def fake_release(ids):
         released.extend(ids)
 
     # 3 свободных, аккаунт 2 — «занят» реальной операцией: его НЕ проверяем/захватываем.
-    monkeypatch.setattr(op_worker, "is_account_in_use", lambda i: i == 2)
-    monkeypatch.setattr(op_worker, "mark_accounts_in_use", fake_mark)
+    monkeypatch.setattr(op_worker, "try_claim_accounts", fake_try_claim)
     monkeypatch.setattr(op_worker, "release_accounts", fake_release)
 
     rows = [{"id": i, "phone": f"+{i}", "session_str": "s"} for i in (1, 2, 3)]

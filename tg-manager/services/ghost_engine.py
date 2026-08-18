@@ -259,7 +259,7 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
                p.proxy_url, p.geo_country
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-        WHERE a.id = $1 AND a.in_operation = FALSE AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
+        WHERE a.id = $1 AND COALESCE(a.in_operation, FALSE) = FALSE AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
         """,
         account_id,
     )
@@ -284,6 +284,26 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
     action = random.choice(_ACTION_POOLS.get(personality, _ACTION_POOLS["ghost"]))
     fn = _ACTION_FNS[action]
 
+    # Атомарный захват аккаунта у единого арбитра op_worker ПЕРЕД открытием
+    # сессии. SELECT выше фильтрует in_operation=FALSE по БД, но это снимок: пока
+    # призрак дошёл до коннекта, операция могла захватить ту же сессию in-memory.
+    # Если аккаунт уже занят — молча пропускаем цикл (фоновый шум подождёт), иначе
+    # один auth-key коннектится призраком И операцией одновременно → Telegram
+    # видит вход с двух мест и УНИЧТОЖАЕТ ключ (AUTH_KEY_DUPLICATED, безвозвратно).
+    try:
+        from services import op_worker as _opw
+    except Exception:
+        _opw = None
+    leased = True
+    if _opw is not None:
+        try:
+            leased = await _opw.try_claim_account(account_id)
+        except Exception:
+            leased = True  # op_worker недоступен — best-effort как раньше
+    if not leased:
+        log.debug("Ghost Engine: account %d занят операцией — пропуск цикла", account_id)
+        return
+
     try:
         client = _make_client(session, acc_dict)
         async with client:
@@ -300,6 +320,13 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
     except Exception as e:
         log.debug("Ghost Engine: profile %d / account %d error: %s", profile_id, account_id, e)
         await _log_action(pool, profile_id, account_id, action, None, "error", str(e)[:200])
+    finally:
+        # Всегда отпускаем аккаунт назад арбитру — иначе он «зомби» до реконсилера.
+        if _opw is not None and leased:
+            try:
+                await _opw.release_accounts([account_id])
+            except Exception:
+                log.debug("Ghost Engine: release_accounts failed for %d", account_id)
 
 
 # ─── Main loop ────────────────────────────────────────────────────────────────

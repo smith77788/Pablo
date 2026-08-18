@@ -97,12 +97,12 @@ async def run_preflight(pool: asyncpg.Pool, owner_id: int, group: str,
         try:
             from services import op_worker as _opw_mod
             _opw = _opw_mod
-            busy_ids = {int(a["id"]) for a in accounts
-                        if _opw.is_account_in_use(int(a["id"]))}
-            claimed_ids = [int(a["id"]) for a in accounts
-                           if int(a["id"]) not in busy_ids]
-            if claimed_ids:
-                await _opw.mark_accounts_in_use(claimed_ids)
+            # Атомарный захват свободных (check-and-set под одним локом): устраняет
+            # TOCTOU между проверкой is_account_in_use и mark. Что не захватилось —
+            # занято реальной операцией; такие пропускаем из живой проверки.
+            all_ids = [int(a["id"]) for a in accounts]
+            claimed_ids = await _opw.try_claim_accounts(all_ids)
+            busy_ids = set(all_ids) - set(claimed_ids)
         except Exception:
             _opw = None  # op_worker недоступен — работаем без захвата (best-effort)
 

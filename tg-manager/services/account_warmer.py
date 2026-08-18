@@ -1160,12 +1160,20 @@ async def _run_daily_warmup_impl(
                 pass
 
     # Claim the account so op_worker/parallel warmup won't touch the same session.
+    # Атомарный захват (check-and-set под одним локом) вместо проверки-затем-пометки:
+    # закрывает TOCTOU-окно, где op_worker захватывал аккаунт между is_account_in_use
+    # (выше) и mark. Если аккаунт уже занят операцией — прогрев пропускаем, иначе
+    # одна сессия коннектится прогревом И операцией → AUTH_KEY_DUPLICATED.
     try:
         from services import op_worker as _opw
 
-        await _opw.mark_accounts_in_use([account_id])
+        _leased = await _opw.try_claim_account(account_id)
     except Exception:
-        log_exc_swallow(log, "warmup: mark_accounts_in_use failed")
+        log_exc_swallow(log, "warmup: try_claim_account failed")
+        _leased = True  # op_worker недоступен — best-effort как раньше
+    if not _leased:
+        log.info("warmup: acc=%d занят операцией/циклом — пропуск прогрева", account_id)
+        return _skip_result
 
     # Профиль аккаунта из таблицы niche_profiles (если есть)
     niche_row = await pool.fetchrow(
@@ -1756,14 +1764,16 @@ async def _run_warmup_session_impl(
         try:
             from services import op_worker as _opw
 
-            if _opw.is_account_in_use(acc_id):
+            # Атомарный захват (check-and-set) — устраняет TOCTOU между проверкой
+            # занятости и пометкой: op_worker больше не может вклиниться и открыть
+            # операцию на той же сессии во время прогрева (AUTH_KEY_DUPLICATED).
+            _claimed = await _opw.try_claim_account(acc_id)
+            if not _claimed:
                 log.info(
                     "warmup_session: acc=%d in use by op_worker, skipping this cycle",
                     acc_id,
                 )
                 continue
-            await _opw.mark_accounts_in_use([acc_id])
-            _claimed = True
         except Exception as e:
             log.warning(
                 "warmup_session: claim check failed acc=%d: %s", acc_id, e
