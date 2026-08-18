@@ -430,13 +430,21 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
     )
 
     for acc in accounts:
-        # Аккаунт мог быть захвачен операцией после выборки (гонка) — проверяем.
+        # Атомарный захват у арбитра op_worker ПЕРЕД коннектом: check_account_
+        # status_full открывает ЖИВУЮ сессию. Снимок is_account_in_use оставлял
+        # окно гонки — операция захватывала аккаунт между проверкой и коннектом →
+        # одна сессия с двух IP = AUTH_KEY_DUPLICATED (особенно свежий флот).
+        _opw = None
+        _leased = True
         try:
-            from services import op_worker as _opw
-            if _opw.is_account_in_use(int(acc["id"])):
-                continue
+            from services import op_worker as _opw_mod
+            _opw = _opw_mod
+            _leased = await _opw.try_claim_account(int(acc["id"]))
         except Exception:
-            pass
+            _opw = None
+            _leased = True
+        if not _leased:
+            continue
         try:
             result = await asyncio.wait_for(
                 check_account_status_full(
@@ -491,6 +499,12 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
             log_exc_swallow(
                 log, "account_health spambot check acc=%d: %s", acc["id"], e
             )
+        finally:
+            if _opw and _leased:
+                try:
+                    await _opw.release_accounts([int(acc["id"])])
+                except Exception:
+                    log_exc_swallow(log, "account_health: release acc=%d", acc["id"])
 
         await asyncio.sleep(3)  # небольшая пауза между аккаунтами
 

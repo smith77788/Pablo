@@ -47,11 +47,15 @@ def test_connecting_monitors_filter_in_operation_in_sql():
 
 
 def test_connecting_monitors_guard_before_connect():
-    # Ин-мемори сверка прямо перед коннектом (закрывает окно гонки после SELECT).
+    # АТОМАРНЫЙ захват прямо перед коннектом. Снимок is_account_in_use недостаточен:
+    # операция может захватить аккаунт между проверкой и коннектом (TOCTOU) → одна
+    # сессия с двух IP = AUTH_KEY_DUPLICATED (сжигание свежего флота). Только
+    # try_claim_account (check-and-set под _accounts_lock) закрывает окно.
     for rel in _CONNECTING_MONITORS:
         src = _read(rel)
-        assert _has_guard(src), \
-            f"{rel}: нет захвата (try_claim_account/is_account_in_use) перед коннектом"
+        assert "try_claim_account" in src, \
+            f"{rel}: коннектящий монитор обязан АТОМАРНО захватывать сессию " \
+            f"(try_claim_account), снимок is_account_in_use допускает гонку"
 
 
 # Прочие фоновые циклы (main.py _resilient), которые тоже коннектят аккаунты по

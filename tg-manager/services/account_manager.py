@@ -2760,14 +2760,21 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
     for acc in accounts:
         if not acc["session_str"]:
             continue
-        # Аккаунт мог быть захвачен операцией уже ПОСЛЕ выборки (окно гонки) —
-        # проверяем ин-мемори реестр прямо перед коннектом и пропускаем занятых.
+        # Атомарный захват у арбитра op_worker ПЕРЕД коннектом: check_account_
+        # status_full открывает ЖИВУЮ сессию. Снимок is_account_in_use оставлял
+        # окно гонки — операция захватывала аккаунт между проверкой и коннектом →
+        # одна сессия с двух IP = AUTH_KEY_DUPLICATED (особенно свежий флот).
+        _opw = None
+        _leased = True
         try:
-            from services import op_worker as _opw
-            if _opw.is_account_in_use(int(acc["id"])):
-                continue
+            from services import op_worker as _opw_mod
+            _opw = _opw_mod
+            _leased = await _opw.try_claim_account(int(acc["id"]))
         except Exception:
-            pass
+            _opw = None
+            _leased = True
+        if not _leased:
+            continue
         try:
             result = await check_account_status_full(
                 acc["session_str"], _acc=dict(acc), check_spambot=False
@@ -2802,7 +2809,13 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
         except Exception as e:
             failed += 1
             log.warning("session_health: acc=%d check failed: %s", acc["id"], e)
-    
+        finally:
+            if _opw and _leased:
+                try:
+                    await _opw.release_accounts([int(acc["id"])])
+                except Exception:
+                    log.debug("session_health: release acc=%d failed", acc["id"])
+
     log.info("session_health_monitor: checked=%d failed=%d total=%d", checked, failed, len(accounts))
 
 

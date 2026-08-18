@@ -289,14 +289,24 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
     now = time.time()
 
     for acc in accounts:
-        # Аккаунт мог быть захвачен операцией уже после выборки (окно гонки) —
-        # проверяем ин-мемори реестр op_worker прямо перед коннектом.
+        # Атомарный захват у арбитра op_worker ПЕРЕД коннектом: check_account_
+        # status_full открывает ЖИВУЮ сессию. Снимок is_account_in_use оставлял
+        # окно гонки — операция захватывала аккаунт между проверкой и коннектом →
+        # одна сессия с двух IP = AUTH_KEY_DUPLICATED. Особенно критично для
+        # СВЕЖЕГО флота: монитор берёт его первым (last_real_check_at IS NULL)
+        # ровно в момент старта операции. Освобождаем сразу после проверки —
+        # дальше только БД-обновления, сессия уже закрыта.
+        _opw = None
+        _leased = True
         try:
-            from services import op_worker as _opw
-            if _opw.is_account_in_use(int(acc["id"])):
-                continue
+            from services import op_worker as _opw_mod
+            _opw = _opw_mod
+            _leased = await _opw.try_claim_account(int(acc["id"]))
         except Exception:
-            pass
+            _opw = None
+            _leased = True
+        if not _leased:
+            continue
         try:
             result = await asyncio.wait_for(
                 check_account_status_full(
@@ -310,6 +320,12 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as exc:
             log_exc_swallow(log, "account_monitor dead-session check acc=%d: %s", acc["id"], exc)
             continue
+        finally:
+            if _opw and _leased:
+                try:
+                    await _opw.release_accounts([int(acc["id"])])
+                except Exception:
+                    log_exc_swallow(log, "account_monitor: release acc=%d", acc["id"])
 
         status = result.get("status", "active")
         auth_error = result.get("auth_error", False)
