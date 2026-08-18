@@ -34,8 +34,10 @@ def _isolate_op_worker_globals():
     saved_pool = ow._db_pool
     saved_in_use = set(ow._accounts_in_use)
     saved_locks = dict(ow._operation_account_locks)
+    saved_active = set(ow._active_op_ids)
     ow._accounts_in_use.clear()
     ow._operation_account_locks.clear()
+    ow._active_op_ids.clear()
     try:
         yield
     finally:
@@ -44,22 +46,44 @@ def _isolate_op_worker_globals():
         ow._accounts_in_use.update(saved_in_use)
         ow._operation_account_locks.clear()
         ow._operation_account_locks.update(saved_locks)
+        ow._active_op_ids.clear()
+        ow._active_op_ids.update(saved_active)
 
 
 def _reset():
     ow._accounts_in_use.clear()
     ow._operation_account_locks.clear()
+    ow._active_op_ids.clear()
+
+
+def _set_live_ops(n: int):
+    """Смоделировать n РЕАЛЬНО живых операций в памяти процесса (делитель fair-share
+    считает только их, игнорируя залипшие DB-строки status='running')."""
+    ow._active_op_ids.clear()
+    ow._active_op_ids.update(range(1000, 1000 + n))
 
 
 def test_solo_op_claims_whole_free_fleet():
     _reset()
-    ow._db_pool = _FakePool(running=1)  # только эта операция
+    _set_live_ops(1)                    # только эта операция реально жива
+    ow._db_pool = _FakePool(running=1)
     claimed = asyncio.run(ow._claim_available_accounts(101, _accts(9), owner_id=7))
     assert len(claimed) == 9   # в одиночку — весь флот
 
 
+def test_solo_op_not_starved_by_phantom_running_rows():
+    """Регресс: залипшие DB-строки status='running' (упавшие процессы) НЕ должны
+    урезать долю одиночной операции. Живых операций в памяти нет → делитель=1."""
+    _reset()
+    ow._active_op_ids.clear()           # ни одной живой операции в этом процессе
+    ow._db_pool = _FakePool(running=5)  # но в БД 5 «фантомных» running-строк
+    claimed = asyncio.run(ow._claim_available_accounts(101, _accts(26), owner_id=7))
+    assert len(claimed) == 26           # весь флот, а не 26/5≈6 (прежний баг)
+
+
 def test_three_parallel_ops_split_fleet_disjointly():
     _reset()
+    _set_live_ops(3)                    # три РЕАЛЬНО живые операции
     ow._db_pool = _FakePool(running=3)  # три параллельные операции владельца
     a = asyncio.run(ow._claim_available_accounts(1, _accts(9), owner_id=7))
     b = asyncio.run(ow._claim_available_accounts(2, _accts(9), owner_id=7))
@@ -72,6 +96,7 @@ def test_three_parallel_ops_split_fleet_disjointly():
 
 def test_second_op_is_not_starved_under_contention():
     _reset()
+    _set_live_ops(2)
     ow._db_pool = _FakePool(running=2)
     a = asyncio.run(ow._claim_available_accounts(1, _accts(10), owner_id=7))
     b = asyncio.run(ow._claim_available_accounts(2, _accts(10), owner_id=7))
@@ -82,13 +107,15 @@ def test_second_op_is_not_starved_under_contention():
 
 def test_min_floor_when_more_ops_than_accounts():
     _reset()
-    ow._db_pool = _FakePool(running=5)  # больше операций, чем аккаунтов
+    _set_live_ops(5)                    # больше операций, чем аккаунтов
+    ow._db_pool = _FakePool(running=5)
     a = asyncio.run(ow._claim_available_accounts(1, _accts(2), owner_id=7))
     assert len(a) >= ow._MIN_ACCOUNTS_PER_OP   # хотя бы минимум
 
 
 def test_no_owner_id_keeps_legacy_whole_claim():
     _reset()
+    _set_live_ops(3)
     ow._db_pool = _FakePool(running=3)
     claimed = asyncio.run(ow._claim_available_accounts(1, _accts(9)))  # owner_id=None
     assert len(claimed) == 9   # без owner-контекста — прежнее поведение

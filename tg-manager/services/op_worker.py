@@ -426,15 +426,26 @@ async def _claim_available_accounts(
     свободный флот (без потери пропускной способности). Захват дизъюнктен →
     одна сессия никогда не используется двумя операциями одновременно
     (защита от AUTH_KEY_DUPLICATED сохраняется)."""
-    # Сколько операций владельца уже в работе — считаем ДО блокировки (это await).
+    # Сколько операций владельца РЕАЛЬНО идут прямо сейчас — считаем ДО блокировки
+    # (это await). Берём только операции, живые в памяти ЭТОГО процесса
+    # (_active_op_ids), а не все строки status='running' в БД: залипшие 'running'
+    # от упавших процессов (сброс сторожем только через 60 мин) иначе раздули бы
+    # делитель, и ОДИНОЧНАЯ операция получила бы лишь долю флота вместо всего
+    # свободного флота (симптом «стартует лишь несколько аккаунтов из N»).
     concurrency = 1
     if owner_id and _db_pool:
         try:
-            n = await _db_pool.fetchval(
-                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'",
-                owner_id,
-            )
-            concurrency = max(1, int(n or 1))
+            async with _active_lock:
+                active_ids = [int(i) for i in _active_op_ids]
+            if active_ids:
+                n = await _db_pool.fetchval(
+                    "SELECT COUNT(*) FROM operation_queue "
+                    "WHERE owner_id=$1 AND status='running' AND id = ANY($2::bigint[])",
+                    owner_id, active_ids,
+                )
+                concurrency = max(1, int(n or 1))
+            else:
+                concurrency = 1
         except Exception:
             concurrency = 1
     async with _accounts_lock:
