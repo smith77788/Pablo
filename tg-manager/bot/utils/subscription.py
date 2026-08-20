@@ -197,12 +197,35 @@ async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
         if now - ts < _PLAN_CACHE_TTL:
             return plan
 
+    # Подписка живёт в ДВУХ источниках и оба легитимны:
+    #   • subscriptions — оплата/бот (is_active + не истёкшая);
+    #   • platform_users.current_plan — РУЧНАЯ выдача админом (не истёкшая).
+    # Берём НАИВЫСШИЙ тариф среди них. Раньше get_plan читал только subscriptions,
+    # поэтому вручную выданный тариф (живёт лишь в platform_users) резолвился как
+    # free — и все гейты (require_plan/require_feature/лимиты) резали такого
+    # пользователя до free: «подписку выдали вручную, а функционал недоступен».
     row = await pool.fetchrow(
         "SELECT plan FROM subscriptions "
         "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
         user_id,
     )
-    plan = coerce_plan(row["plan"] if row else "free")
+    pu_plan = None
+    try:
+        pu_row = await pool.fetchrow(
+            "SELECT current_plan FROM platform_users "
+            "WHERE user_id=$1 AND (plan_expires_at IS NULL OR plan_expires_at > now())",
+            user_id,
+        )
+        pu_plan = pu_row["current_plan"] if pu_row else None
+    except Exception:
+        pu_plan = None  # schema drift/сбой — не роняем гейтинг, деградируем к subscriptions
+    plan = "free"
+    for cand in ((row["plan"] if row else None), pu_plan):
+        if not cand:
+            continue
+        cc = coerce_plan(cand)
+        if PLAN_LEVELS.get(cc, 0) > PLAN_LEVELS.get(plan, 0):
+            plan = cc
     _plan_cache[user_id] = (plan, now)
     return plan
 
