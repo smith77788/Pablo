@@ -806,6 +806,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
+    <!-- Поднять флот: снять залипшие блокировки с недавно переподключённых аккаунтов -->
+    <button onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(52,199,89,.14);color:var(--green);font-size:13px;font-weight:600;cursor:pointer">🚀 Поднять флот</button>
     <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
     <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
@@ -7826,6 +7828,16 @@ async function massCheckAccounts() {
   try {
     const r = await api('/api/miniapp/accounts/check', {method:'POST'});
     toast(`🔍 Проверка ${r.count} аккаунтов запущена (#${r.op_id}). Результат придёт в бот.`);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// ── Поднять флот: снять залипшие блокировки с переподключённого флота ──────
+async function reviveFleet() {
+  if (!await askConfirm('Поднять флот? Снимет залипшие блокировки (in_operation, кулдаун, обнулённый траст) со всех аккаунтов, у которых есть сессия — недавно переподключённый флот сразу заработает. Реально мёртвые сессии монитор пометит заново.')) return;
+  try {
+    const r = await api('/api/miniapp/accounts/revive', {method:'POST'});
+    toast(`🚀 Флот поднят: разблокировано ${r.revived||0} аккаунтов`);
+    if (typeof loadAccounts==='function') loadAccounts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 

@@ -6978,6 +6978,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def accounts_bulk_profile(request: web.Request) -> web.Response:
         return await _bulk_edit_op(request, "profile")
 
+    async def accounts_revive(request: web.Request) -> web.Response:
+        """«Поднять флот»: снять операционные блокировки со ВСЕХ аккаунтов
+        владельца, у которых есть сессия, чтобы недавно переподключённый флот
+        сразу заработал.
+
+        Переимпорт чинит это на будущее (add_tg_account), но уже переподключённые
+        аккаунты сохранили залипшие блокировки от прошлой (сожжённой) сессии:
+        in_operation (исключал из выборки/прогрева), cooldown_until (старый
+        кулдаун), trust_score=0 (крит-обнуление не проходило min_trust-гейт),
+        is_active=FALSE / acc_status. Чистим их одним апдейтом. Оптимистично
+        активируем — если сессия физически мертва, монитор пере-пометит её
+        session_expired на следующем цикле (безопасно, как и при импорте).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            res = await pool.execute(
+                """UPDATE tg_accounts
+                   SET is_active=TRUE,
+                       acc_status='active',
+                       status_reason=NULL,
+                       in_operation=FALSE,
+                       cooldown_until=NULL,
+                       trust_score=GREATEST(COALESCE(trust_score, 1.0), 1.0),
+                       flood_count_7d=0
+                   WHERE owner_id=$1
+                     AND session_str IS NOT NULL AND session_str != ''
+                     AND (
+                           COALESCE(is_active, FALSE) = FALSE
+                        OR COALESCE(in_operation, FALSE) = TRUE
+                        OR cooldown_until IS NOT NULL
+                        OR COALESCE(acc_status, 'active') <> 'active'
+                        OR COALESCE(trust_score, 1.0) < 1.0
+                     )""",
+                uid,
+            )
+            try:
+                revived = int(str(res).split()[-1])
+            except (ValueError, IndexError):
+                revived = 0
+            # Снимаем и in-memory lock op_worker'а (иначе арбитр держал бы «занят»
+            # до рестарта, и revive из БД не помог бы операции их захватить).
+            try:
+                from services import op_worker as _opw
+                _ids = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND session_str IS NOT NULL", uid)
+                await _opw.release_accounts([int(r["id"]) for r in (_ids or [])])
+            except Exception:
+                log.debug("accounts_revive: op_worker release skipped", exc_info=True)
+            return _json_resp({"ok": True, "revived": revived})
+        except Exception as e:
+            log.exception("accounts_revive uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
     async def groups_announce(request: web.Request) -> web.Response:
         """Объявление во все группы аккаунта (паритет с ботом).
 
@@ -13907,6 +13962,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/bulk_edit", channels_bulk_edit)
     app.router.add_post("/api/miniapp/bots/bulk_edit", bots_bulk_edit)
     app.router.add_post("/api/miniapp/accounts/bulk_profile", accounts_bulk_profile)
+    app.router.add_post("/api/miniapp/accounts/revive", accounts_revive)
     app.router.add_post("/api/miniapp/channels/bulk_join", channels_bulk_join)
     app.router.add_post("/api/miniapp/channels/bulk_leave", channels_bulk_leave)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)

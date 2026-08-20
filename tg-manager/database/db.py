@@ -3097,6 +3097,18 @@ async def add_tg_account(
                status_reason=NULL,
                status_checked_at=now(),
                is_active=true,
+               -- Переимпорт = НОВАЯ рабочая сессия: снимаем ВСЕ операционные
+               -- блокировки, унаследованные от прошлой (сожжённой) сессии, иначе
+               -- «переподключил, а флот не работает» — аккаунт молча исключался
+               -- из операций/мониторов:
+               --  • in_operation — залипший lock исключал из выборки/прогрева;
+               --  • cooldown_until — старый кулдаун держал respect_cooldown-фильтр;
+               --  • trust_score — крит-обнуление (trust_engine) не проходило
+               --    min_trust-гейт операций и показывало 0% здоровья.
+               in_operation=FALSE,
+               cooldown_until=NULL,
+               trust_score=GREATEST(COALESCE(tg_accounts.trust_score, 1.0), 1.0),
+               flood_count_7d=0,
                last_used=now()
            RETURNING id""",
         owner_id,
