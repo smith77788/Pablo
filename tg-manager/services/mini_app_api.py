@@ -1050,10 +1050,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COUNT(*) FILTER (WHERE status='pending') AS pending
                    FROM operation_queue WHERE owner_id=$1""", uid),
             "health": _safe_fetchrow(pool,
-                """SELECT ROUND(AVG(COALESCE(trust_score,50)))::int AS avg,
-                          COUNT(*) FILTER (WHERE COALESCE(trust_score,50) >= 70) AS good,
-                          COUNT(*) FILTER (WHERE COALESCE(trust_score,50) BETWEEN 40 AND 69) AS warn,
-                          COUNT(*) FILTER (WHERE COALESCE(trust_score,50) < 40) AS bad
+                # trust_score хранится в 0..1 (schema/trust_engine). Показываем как
+                # проценты 0..100: без *100 все аккаунты давали avg≈1 и попадали в
+                # «bad» (<40) — отсюда «здоровье у всех одинаково ~1%».
+                """SELECT ROUND(AVG(COALESCE(trust_score,1.0)) * 100)::int AS avg,
+                          COUNT(*) FILTER (WHERE COALESCE(trust_score,1.0) >= 0.70) AS good,
+                          COUNT(*) FILTER (WHERE COALESCE(trust_score,1.0) BETWEEN 0.40 AND 0.699) AS warn,
+                          COUNT(*) FILTER (WHERE COALESCE(trust_score,1.0) < 0.40) AS bad
                    FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""", uid),
         }
         _keys = list(_q.keys())
@@ -1820,7 +1823,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         page_args = args + [limit, offset]
         rows = await _safe_fetch(pool,
             f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
-                      COALESCE(trust_score, 100) AS trust_score,
+                      -- trust_score хранится 0..1 → отдаём как проценты 0..100
+                      -- (фронт рендерит как «${{trust}}%»). Без *100 всё было ~1%.
+                      ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
                       cooldown_until, cluster, stage
                FROM tg_accounts WHERE {where}
@@ -1922,7 +1927,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc = await _safe_fetchrow(pool,
                 """SELECT id, phone, first_name, username, tg_user_id,
                           is_active, added_at, last_used,
-                          COALESCE(trust_score, 100) AS trust_score,
+                          ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
                           status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1""", acc_id)
@@ -1930,7 +1935,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc = await _safe_fetchrow(pool,
                 """SELECT id, phone, first_name, username, tg_user_id,
                           is_active, added_at, last_used,
-                          COALESCE(trust_score, 100) AS trust_score,
+                          ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
                           status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
@@ -2025,7 +2030,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = await _safe_fetch(pool,
                 """SELECT id, phone, first_name, username, tg_user_id,
                           is_active, added_at, last_used,
-                          COALESCE(trust_score, 100) AS trust_score,
+                          ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
                           cooldown_until
                    FROM tg_accounts
@@ -2034,7 +2039,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = await _safe_fetch(pool,
                 """SELECT id, phone, first_name, username, tg_user_id,
                           is_active, added_at, last_used,
-                          COALESCE(trust_score, 100) AS trust_score,
+                          ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                           COALESCE(acc_status, 'ok') AS acc_status,
                           cooldown_until
                    FROM tg_accounts WHERE owner_id=$1

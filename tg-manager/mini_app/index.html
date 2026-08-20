@@ -8514,7 +8514,7 @@ function buildAccDetail(d) {
   const avatarColors = ['pava-blue','pava-green','pava-orange','pava-purple','pava-teal'];
   const avatarCls = avatarColors[(a.id||0) % avatarColors.length];
 
-  const trust = Math.round(a.trust_score||100);
+  const trust = a.trust_score!=null?Math.round(a.trust_score):100;
   const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
   const cd = a.cooldown_until && new Date(a.cooldown_until) > new Date();
 
