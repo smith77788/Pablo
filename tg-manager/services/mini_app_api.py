@@ -3741,6 +3741,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("global_search uid=%d q=%r", uid, query)
             return _err(f"Ошибка: {str(exc)[:140]}", 400)
 
+    async def find_contact(request: web.Request) -> web.Response:
+        """Поиск потерянного контакта по имени профиля + началу @username.
+        Ставит фоновую операцию find_contact (нативный поиск + перебор @prefix+цифры).
+        body: {name, username_prefix, digits(1-4), account_ids?, offset?}. Результат —
+        в отчёте операции (перебор до 10k вариантов не влезает в инлайн-запрос)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        name = sanitize_search_query(body.get("name") or "")
+        prefix = sanitize_search_query(body.get("username_prefix") or "").lstrip("@")
+        if not name:
+            return _err("Укажите имя профиля (напр. Oracle)", 400)
+        if not prefix:
+            return _err("Укажите начало @username (напр. Smile)", 400)
+        try:
+            digits = validate_integer(body.get("digits"), min_val=1, max_val=4)
+        except (TypeError, ValueError):
+            digits = None
+        if not digits:
+            return _err("Число цифр после префикса — 1–4", 400)
+        try:
+            offset = validate_integer(body.get("offset") or 0, min_val=0, max_val=100000) or 0
+        except (TypeError, ValueError):
+            offset = 0
+        account_ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
+        params = {"name": name, "username_prefix": prefix, "digits": int(digits),
+                  "account_ids": account_ids, "offset": int(offset)}
+        try:
+            from services import operation_bus as _obus
+            op_id = await _obus.submit(
+                pool, uid, "find_contact", params, total_items=0,
+                label=f"Поиск контакта @{prefix}*")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("find_contact uid=%d", uid)
+            return _err(str(exc)[:160], 500)
+
     async def account_login_code(request: web.Request) -> web.Response:
         """Получить последний код входа Telegram для аккаунта (инлайн, из чата 777000).
         Аналог «Получить код авторизации» — раньше в mini-app недоступно."""
@@ -14089,6 +14132,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/accounts/mass", accounts_mass)
     app.router.add_post("/api/miniapp/account/{acc_id}/profile", account_profile)
     app.router.add_post("/api/miniapp/global_search", global_search)
+    app.router.add_post("/api/miniapp/find_contact", find_contact)
     app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
     app.router.add_post("/api/miniapp/account/{acc_id}/check_restriction", account_check_restriction)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)

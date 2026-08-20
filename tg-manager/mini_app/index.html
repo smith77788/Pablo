@@ -2848,6 +2848,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-p" style="flex:0 0 auto;padding:9px 16px" onclick="submitGlobalSearch()">🔍</button>
     </div>
     <div class="lst" id="gsResults"><div class="hint" style="opacity:.6;padding:12px">Введите запрос и нажмите 🔍</div></div>
+
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 2px">🔎 Найти потерянный контакт</summary>
+      <div style="padding:6px 2px 2px">
+        <div class="hint" style="opacity:.7;padding:0 0 8px;font-size:12px;line-height:1.4">
+          Знаете имя профиля и начало @username с числовым хвостом? Сначала пробуем
+          нативный поиск, затем перебираем @начало+цифры и ищем нужное имя.
+          Перебор идёт в фоне — результат придёт <b>отчётом операции</b> (раздел «Отчёты»).
+        </div>
+        <div class="field"><label>Имя профиля</label>
+          <input type="text" id="fcName" placeholder="Например: Oracle"></div>
+        <div class="field"><label>Начало @username (без цифр)</label>
+          <input type="text" id="fcPrefix" placeholder="Например: Smile"></div>
+        <div class="field"><label>Сколько цифр в хвосте</label>
+          <select id="fcDigits" class="sel">
+            <option value="2">2 цифры (до 100 вариантов)</option>
+            <option value="3" selected>3 цифры (до 1000)</option>
+            <option value="4">4 цифры (до 10000 — паузами, дольше)</option>
+          </select>
+        </div>
+        <div class="field-err" id="fcErr"></div>
+        <button class="btn btn-p" id="fcBtn" style="width:100%" onclick="submitFindContact()">🚀 Запустить поиск</button>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -18613,6 +18637,26 @@ async function submitGlobalSearch(){
         </div></div>`;
     }).join('');
   }catch(e){ el.innerHTML=empty('⚠️','Ошибка',e.message||'Ошибка'); }
+}
+
+// Поиск потерянного контакта: имя профиля + начало @username → фоновая операция
+// (нативный поиск + перебор @начало+цифры). Результат — в отчёте операции.
+async function submitFindContact(){
+  const name=(document.getElementById('fcName').value||'').trim();
+  const prefix=(document.getElementById('fcPrefix').value||'').replace(/^@/,'').trim();
+  const digits=parseInt(document.getElementById('fcDigits').value||'3',10);
+  const err=document.getElementById('fcErr'); const btn=document.getElementById('fcBtn');
+  err.textContent='';
+  if(!name){ err.textContent='Укажите имя профиля'; return; }
+  if(!prefix){ err.textContent='Укажите начало @username'; return; }
+  if(!/^[A-Za-z][A-Za-z0-9_]{3,30}$/.test(prefix)){ err.textContent='Начало @username: латиница/цифры/_, от 4 символов, не с цифры'; return; }
+  btn.disabled=true; const _t=btn.textContent; btn.textContent='Запускаю…';
+  try{
+    const d=await api('/api/miniapp/find_contact',{method:'POST',body:JSON.stringify({name,username_prefix:prefix,digits})});
+    toast('🔎 Поиск запущен (операция #'+(d.op_id||'?')+') — результат в «Отчётах»');
+    if(typeof openOpDetail==='function' && d.op_id){ openOpDetail(d.op_id); }
+  }catch(e){ err.textContent=e.message||'Ошибка запуска'; }
+  finally{ btn.disabled=false; btn.textContent=_t; }
 }
 
 // ── Auto Funnels ───────────────────────────────────────

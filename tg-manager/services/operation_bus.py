@@ -112,6 +112,12 @@ OP_REGISTRY: dict[str, dict] = {
         # target = str(channel) — элемент списка channels как есть.
         "retry_targets": {"param": "channels", "kind": "str"},
     },
+    "find_contact": {
+        "description": "Поиск потерянного контакта",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔎",
+    },
     "bulk_bot_edit": {
         "description": "Массовое редактирование ботов",
         "min_plan": "pro",

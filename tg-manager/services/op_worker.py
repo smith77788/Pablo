@@ -1700,6 +1700,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_join(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_leave":
                 result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
+            elif op_type == "find_contact":
+                result = await _exec_find_contact(pool, bot, op_id, owner_id, params)
             elif op_type == "global_presence_channel":
                 result = await _exec_global_presence_channel(
                     pool, bot, op_id, owner_id, params
@@ -3411,6 +3413,202 @@ async def _exec_bulk_join_inner(
         "failed_links": failed_links[:50],
         "summary": ", ".join(parts),
     }
+
+
+async def _exec_find_contact(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Найти потерянный контакт по имени профиля + началу @username.
+
+    Два прохода (см. services/contact_finder): нативный поиск (безопасно) + перебор
+    @prefix+цифры через ResolveUsername с паузами/ротацией аккаунтов на FloodWait и
+    ранней остановкой при совпадении имени. Резолв username — лёгкий вызов (легче
+    инвайта), но всё равно паузим и не молотим вслепую (слой массовых действий).
+    """
+    from services import account_manager, contact_finder, resource_selector
+    from services import global_search_engine as gse
+
+    name = str(params.get("name") or "").strip()
+    prefix = str(params.get("username_prefix") or "").lstrip("@").strip()
+    digits = int(params.get("digits") or 0)
+    offset = max(0, int(params.get("offset") or 0))
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+
+    if not prefix or not contact_finder.valid_username(prefix + "0" * max(1, digits)):
+        return {"status": "failed", "summary": "⚠️ Некорректное начало @username."}
+    if digits < 1 or digits > 4:
+        return {"status": "failed", "summary": "⚠️ Число цифр должно быть 1–4."}
+
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=account_ids or None, action_type="default",
+    )
+    accounts = await _claim_available_accounts(op_id, accounts)
+    used_acc_ids = [int(a["id"]) for a in accounts]
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет свободных аккаунтов для поиска."}
+
+    async def _log(target: str, status: str, message: str) -> None:
+        await _safe_execute(
+            pool,
+            "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+            " VALUES($1,0,$2,$3,$4)",
+            op_id, target[:120], status, message[:400],
+            log_ctx=f"[find_contact op={op_id}]",
+        )
+
+    found_all: dict[str, dict] = {}   # username(lower) → rec, дедуп между проходами
+    matches: list[dict] = []
+
+    def _record(rec: dict) -> bool:
+        """Вернёт True, если это совпадение по имени (для раннего стопа)."""
+        key = (rec.get("username") or "").lower()
+        if key and key not in found_all:
+            found_all[key] = rec
+        if contact_finder.name_matches(rec.get("name"), name):
+            if not any((m.get("username") or "").lower() == key for m in matches):
+                matches.append(rec)
+            return True
+        return False
+
+    try:
+        # ── Проход 1: нативный поиск (safe, мгновенно) ───────────────────────────
+        acc0 = dict(accounts[0])
+        for q in filter(None, [prefix, name]):
+            try:
+                res = await asyncio.wait_for(
+                    gse.search_public(acc0["session_str"], q, 30, _acc=acc0), timeout=40
+                )
+            except Exception as e:
+                log.warning("find_contact op=%d нативный поиск q=%r: %s", op_id, q, e)
+                continue
+            for r in (res.get("results") or []):
+                if r.get("type") != "user":
+                    continue
+                un = (r.get("username") or "")
+                rec = {"username": un, "user_id": r.get("id"),
+                       "name": r.get("title") or "", "premium": False}
+                # Релевантно: username начинается с префикса ИЛИ имя совпало.
+                if un.lower().startswith(prefix.lower()) or contact_finder.name_matches(rec["name"], name):
+                    is_match = _record(rec)
+                    await _log(
+                        "@" + un if un else str(rec["user_id"]),
+                        "ok" if is_match else "info",
+                        ("🎯 совпадение имени: " if is_match else "🌐 нативный поиск: ")
+                        + f"{rec['name']} (@{un or '—'})",
+                    )
+
+        if matches:
+            # Нативный проход уже нашёл — перебор не нужен.
+            return _find_contact_summary(name, prefix, matches, found_all,
+                                         checked=0, total_planned=0, native_only=True)
+
+        # ── Проход 2: перебор @prefix+цифры ──────────────────────────────────────
+        all_cands = list(contact_finder.iter_candidates(prefix, digits, cap=10 ** digits))
+        cands = all_cands[offset: offset + contact_finder.MAX_CANDIDATES_PER_RUN]
+        total_remaining = len(all_cands) - offset
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+            len(cands), op_id,
+        )
+
+        # Клиент на текущий аккаунт; ротация на следующий при FloodWait.
+        state = {"idx": 0, "client": None}
+
+        async def _ensure_client():
+            if state["client"] is None:
+                acc = dict(accounts[state["idx"]])
+                state["client"] = await account_manager.connect_client(
+                    acc["session_str"], acc, "resolve")
+            return state["client"]
+
+        async def _drop_client():
+            if state["client"] is not None:
+                try:
+                    await state["client"].disconnect()
+                except Exception:
+                    pass
+                state["client"] = None
+
+        async def _resolve(uname: str) -> dict:
+            try:
+                client = await _ensure_client()
+            except Exception as e:
+                # Аккаунт не подключился — сигналим как FloodWait-подобный откат,
+                # чтобы hunt ротировал на следующий аккаунт, а не считал проверенным.
+                await _drop_client()
+                return {"username": uname, "exists": False, "user_id": None,
+                        "name": "", "premium": False, "flood_wait": 1,
+                        "error": f"connect:{str(e)[:60]}"}
+            return await contact_finder.resolve_on_client(client, uname)
+
+        _progress = {"n": 0}
+
+        async def _on_result(rec: dict) -> None:
+            _record(rec)
+            await _log("@" + (rec.get("username") or ""), "info",
+                       f"👤 существует: {rec.get('name') or '—'} (@{rec.get('username') or '—'})")
+
+        async def _backoff(sec: int) -> None:
+            # FloodWait/сбой на текущем аккаунте → отключаем и ротируем на следующий.
+            await _drop_client()
+            state["idx"] = (state["idx"] + 1) % len(accounts)
+            await asyncio.sleep(min(int(sec) or 1, 8))
+
+        async def _cancelled() -> bool:
+            return await _is_cancelled(pool, op_id)
+
+        # Пейсинг: перебор username безопаснее инвайта, но не «в лоб» — 1.2с между
+        # резолвами держит нас далеко от лимитов; матч останавливает перебор.
+        result = await contact_finder.hunt(
+            candidates=cands, target_name=name, resolve=_resolve,
+            pace_s=1.2, flood_backoff_cb=_backoff, is_cancelled=_cancelled,
+            on_result=_on_result, stop_on_match=True,
+        )
+        await _drop_client()
+
+        checked = result["checked"]
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+            min(checked, len(cands)), op_id,
+        )
+        return _find_contact_summary(
+            name, prefix, matches, found_all,
+            checked=checked, total_planned=total_remaining,
+            next_offset=offset + len(cands) if (len(cands) < total_remaining and not matches) else None,
+            cancelled=result.get("cancelled", False),
+        )
+    finally:
+        await release_accounts(used_acc_ids)
+
+
+def _find_contact_summary(name, prefix, matches, found_all, *, checked, total_planned,
+                          next_offset=None, native_only=False, cancelled=False) -> dict:
+    """Собрать честный человекочитаемый итог поиска контакта."""
+    def _line(rec):
+        un = rec.get("username") or "—"
+        link = f"https://t.me/{un}" if un != "—" else ""
+        nm = rec.get("name") or "—"
+        return f"• {nm} — @{un}" + (f" · {link}" if link else "")
+
+    if matches:
+        head = f"🎯 Нашёл {len(matches)} совпадение(й) по имени «{name}»:"
+        body = "\n".join(_line(m) for m in matches[:20])
+        tail = "" if native_only else f"\nПроверено вариантов: {checked}."
+        return {"status": "done", "found": len(matches),
+                "summary": f"{head}\n{body}{tail}"}
+
+    parts = [f"😕 Точного совпадения имени «{name}» не найдено."]
+    if found_all:
+        parts.append(f"Существующих @{prefix}*-юзернеймов найдено: {len(found_all)} "
+                     "(имя не совпало) — см. лог операции.")
+    if cancelled:
+        parts.append("Операция отменена.")
+    if next_offset is not None:
+        parts.append(f"Проверено {checked} из {total_planned}. Остаток НЕ потерян — "
+                     f"запустите поиск ещё раз для продолжения (offset={next_offset}).")
+    elif not native_only:
+        parts.append(f"Проверено вариантов: {checked}.")
+    return {"status": "done", "found": 0, "summary": "\n".join(parts)}
 
 
 async def _exec_bulk_leave(
