@@ -6505,6 +6505,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("organism_pulse uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def organism_digest(request: web.Request) -> web.Response:
+        """Пульс-Дайджест: единый отчёт организма (флот/аудитория/рост/сеть/риски)
+        с трендами неделя-к-неделе и приоритетными действиями. Read-only."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.organism import digest
+            return _json_resp(await digest.build(pool, uid))
+        except Exception as exc:
+            log.exception("organism_digest uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def organism_dismiss(request: web.Request) -> web.Response:
         """Отклонить подсказку — организм её больше не показывает."""
         uid = _get_uid(request)
@@ -13950,6 +13963,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/campaign/plan", campaign_plan)
     app.router.add_post("/api/miniapp/seo/analyze", seo_analyze)
     app.router.add_get("/api/miniapp/organism/pulse", organism_pulse)
+    app.router.add_get("/api/miniapp/organism/digest", organism_digest)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
