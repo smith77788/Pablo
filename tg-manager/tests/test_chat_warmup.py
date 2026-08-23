@@ -119,17 +119,43 @@ def test_generate_reply_none_without_any_ai(monkeypatch):
 
 
 def test_generate_reply_uses_groq_fallback(monkeypatch):
-    """Claude выключен, но есть провайдер (Groq) → генерируем через spintax_ai."""
+    """Claude выключен, но есть провайдер → генерируем через каскад (spintax_ai)."""
     import asyncio
     from services import ai_claude, ai_providers, spintax_ai, chat_warmup as cwm
     monkeypatch.setattr(ai_claude, "enabled", lambda: False)
     monkeypatch.setattr(ai_providers, "configured_providers",
-                        lambda: [object()])   # непустой список провайдеров
+                        lambda: [object()])   # непустой, но не «groq» → идём в spintax
     async def _fake_complete(system, user):
         return "  ага, звучит норм  "
     monkeypatch.setattr(spintax_ai, "complete", _fake_complete)
     out = asyncio.run(cwm.generate_reply("персона", [], None, "болтовня", "seed"))
     assert out == "ага, звучит норм"   # сгенерировано провайдером + очищено
+
+
+def test_groq_model_pinned_to_llama_33_70b():
+    from services import chat_warmup as cwm
+    assert cwm.GROQ_WARMUP_MODEL == "llama-3.3-70b-versatile"
+    src = open(os.path.join(ROOT, "services", "chat_warmup.py"), encoding="utf-8").read()
+    # фиксированная модель передаётся в запрос Groq
+    assert "model=GROQ_WARMUP_MODEL" in src and "async def _groq_complete" in src
+
+
+def test_groq_path_preferred_over_spintax(monkeypatch):
+    """Когда Groq отвечает — используем его (фикс. llama-3.3-70b), spintax не нужен."""
+    import asyncio
+    from services import ai_claude, spintax_ai, chat_warmup as cwm
+    monkeypatch.setattr(ai_claude, "enabled", lambda: True)   # Claude «включён»…
+    async def _claude_fail(system, user, timeout=60.0):
+        raise RuntimeError("claude down")
+    monkeypatch.setattr(ai_claude, "complete", _claude_fail)  # …но падает
+    async def _groq_ok(system, user, timeout=45.0):
+        return "  норм тема, го  "
+    monkeypatch.setattr(cwm, "_groq_complete", _groq_ok)
+    async def _spintax_boom(system, user):
+        raise AssertionError("spintax не должен вызываться, когда ответил Groq")
+    monkeypatch.setattr(spintax_ai, "complete", _spintax_boom)
+    out = asyncio.run(cwm.generate_reply("персона", [], None, "темы", "seed"))
+    assert out == "норм тема, го"
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert "chat_warmup.run" in main   # цикл зарегистрирован
 

@@ -27,12 +27,17 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import re
 
 log = logging.getLogger(__name__)
 
 MODES = ("seed", "engage", "mixed")
+
+# Фиксированная модель Groq для разогрева — сильнее дефолтной, живее диалог.
+# Переопределяемо через env, но по умолчанию llama-3.3-70b-versatile.
+GROQ_WARMUP_MODEL = os.getenv("CHAT_WARMUP_GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # Паузы между репликами (сек, диапазон для джиттера) — человеческий темп.
 INTENSITY = {
@@ -213,10 +218,10 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
     или ответ пустой/не прошёл очистку (лучше пропустить ход, чем слать мусор:
     осмысленность важнее активности).
 
-    Каскад через spintax_ai.complete: сначала Claude (ключ/ambient), при сбое или
-    отсутствии — бесплатный/дешёвый fallback на OpenAI-совместимые провайдеры
-    (Groq/OpenRouter/Gemini). Так разогрев работает даже без ключа Anthropic —
-    достаточно задать, например, бесплатный ключ Groq в админ-меню «AI-ключи»."""
+    Каскад: сначала Claude (ключ/ambient), затем ФИКСИРОВАННАЯ Groq-модель
+    llama-3.3-70b-versatile (сильнее дефолтной — живее диалог), затем прочие
+    OpenAI-совместимые провайдеры (OpenRouter/Gemini) через spintax_ai. Так
+    разогрев работает даже без ключа Anthropic — достаточно бесплатного Groq."""
     try:
         from services import ai_claude, spintax_ai
         from services.ai_providers import configured_providers
@@ -224,10 +229,47 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
         if not (ai_claude.enabled() or configured_providers()):
             return None
         system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode)
-        raw = await spintax_ai.complete(system, user)   # Claude → Groq/OpenRouter/Gemini
-        return sanitize_reply(raw) or None
+        raw = None
+        # 1) Claude Opus — предпочтительный путь.
+        if ai_claude.enabled():
+            try:
+                raw = await ai_claude.complete(system, user, timeout=60.0)
+            except Exception:
+                raw = None
+        # 2) Groq на зафиксированной llama-3.3-70b.
+        if not (raw and raw.strip()):
+            raw = await _groq_complete(system, user)
+        # 3) Остальные провайдеры (OpenRouter/Gemini) — общий каскад spintax_ai.
+        if not (raw and raw.strip()):
+            try:
+                raw = await spintax_ai.complete(system, user)
+            except Exception:
+                raw = None
+        return sanitize_reply(raw or "") or None
     except Exception as e:
         log.debug("chat_warmup.generate_reply failed: %s", e)
+        return None
+
+
+async def _groq_complete(system: str, user: str, timeout: float = 45.0) -> str | None:
+    """Прямой вызов Groq на ФИКСИРОВАННОЙ модели GROQ_WARMUP_MODEL. None — если
+    Groq не настроен или запрос не удался (тогда вызывающий идёт дальше по каскаду)."""
+    try:
+        from services.ai_providers import configured_providers
+        prov = next((p for p in configured_providers() if getattr(p, "name", "") == "groq"), None)
+        if not prov:
+            return None
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=timeout)
+        resp = await client.chat.completions.create(
+            model=GROQ_WARMUP_MODEL,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            max_tokens=300, temperature=0.9)   # живее и короче — как в чате
+        txt = (resp.choices[0].message.content or "").strip()
+        return txt or None
+    except Exception as e:
+        log.debug("chat_warmup._groq_complete failed: %s", e)
         return None
 
 
