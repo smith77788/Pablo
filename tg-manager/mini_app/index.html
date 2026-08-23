@@ -808,6 +808,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <!-- Поднять флот: снять залипшие блокировки с недавно переподключённых аккаунтов -->
     <button onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(52,199,89,.14);color:var(--green);font-size:13px;font-weight:600;cursor:pointer">🚀 Поднять флот</button>
+    <button onclick="openChatWarmup()" title="Флот вступает в указанный чат и ведёт осмысленный LLM-диалог: между собой и с реальными участниками" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(91,141,239,.14);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">💬 Разогрев чата флотом</button>
     <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
     <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
@@ -1886,6 +1887,35 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="margin-left:auto;font-size:18px;cursor:pointer;opacity:.7" onclick="openDigest()">🔄</div></div>
   <div class="sub-sb">
     <div id="digestBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ CHAT WARMUP ══════════════════════ -->
+<div class="screen" id="s-chatwarmup">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">💬 Разогрев чата</div></div>
+  <div class="sub-sb">
+    <div style="font-size:12.5px;color:var(--hint);line-height:1.5;margin-bottom:10px">
+      Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (LLM понимает контекст). Темп человеческий, сессии защищены.
+    </div>
+    <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    <div style="font-size:12px;color:var(--hint);margin:4px 2px">Режим работы</div>
+    <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">🔀 Смешанный</button>
+      <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🗣 Вовлечение</button>
+      <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🌱 Оживление</button>
+    </div>
+    <div id="cwModeHint" style="font-size:11.5px;color:var(--hint);margin:0 2px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
+    <input id="cwTopics" type="text" placeholder="Темы через запятую (пусто = любые)" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    <div style="font-size:12px;color:var(--hint);margin:4px 2px">Интенсивность</div>
+    <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🐢 Спокойно</button>
+      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">⚖️ Обычно</button>
+      <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">⚡ Активно</button>
+    </div>
+    <div style="font-size:11.5px;color:var(--hint);margin:0 2px 10px">Используется весь живой флот (до 30 аккаунтов).</div>
+    <button class="btn btn-p" onclick="cwStart()" style="width:100%;padding:11px;font-size:14px">▶ Запустить разогрев</button>
+    <div class="sec" style="margin-top:14px">Активные разогревы</div>
+    <div class="lst" id="cwList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -6758,6 +6788,55 @@ async function openDigest() {
     }
     el.innerHTML = h;
   } catch(e) { el.innerHTML = errHtml(e.message,'openDigest()'); }
+}
+
+// 💬 Разогрев чата флотом с осмысленным диалогом.
+let CW_MODE='mixed', CW_INT='normal';
+const CW_MODE_HINT={
+  mixed:'Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.',
+  engage:'Вовлечение: флот только реагирует на сообщения реальных участников (сам с собой не болтает).',
+  seed:'Оживление: флот общается между собой по заданным темам — чтобы наполнить тихий чат активностью.'};
+function cwPickMode(m){CW_MODE=m;
+  document.querySelectorAll('#cwMode .cw-mode').forEach(b=>{b.style.background=b.dataset.m===m?'rgba(91,141,239,.18)':'rgba(255,255,255,.06)';});
+  const h=document.getElementById('cwModeHint'); if(h) h.textContent=CW_MODE_HINT[m]||'';}
+function cwPickInt(i){CW_INT=i;
+  document.querySelectorAll('#cwInt .cw-int').forEach(b=>{b.style.background=b.dataset.i===i?'rgba(91,141,239,.18)':'rgba(255,255,255,.06)';});}
+function openChatWarmup(){push('s-chatwarmup'); cwLoad();}
+async function cwLoad(){
+  const el=document.getElementById('cwList'); if(!el) return;
+  try{
+    const r=await api('/api/miniapp/chatwarmup/sessions'); const s=r.sessions||[];
+    if(!s.length){el.innerHTML=empty('💬','Пока нет активных разогревов','Укажите чат и нажмите «Запустить»');return;}
+    el.innerHTML=s.map(x=>{
+      const st=x.status;
+      const badge=st==='active'?'🟢 активен':(st==='paused'?'⏸ пауза':'⏹ остановлен');
+      const modeLbl=({mixed:'смешанный',engage:'вовлечение',seed:'оживление'})[x.mode]||x.mode;
+      const ctrl=st==='stopped'?'':(st==='active'
+        ?`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'paused')">⏸</button>`
+        :`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'active')">▶</button>`);
+      return `<div class="li"><div class="li-body"><div class="li-name">${esc(x.chat_ref)}</div>
+        <div class="li-sub">${badge} · ${esc(modeLbl)} · отправлено ${x.messages_sent||0}</div></div>
+        <div style="display:flex;gap:5px">${ctrl}<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'stopped')">⏹</button></div></div>`;
+    }).join('');
+  }catch(e){el.innerHTML=errHtml(e.message,'cwLoad()');}
+}
+async function cwStart(){
+  const chat=document.getElementById('cwChat').value.trim();
+  if(!chat){toast('Укажите чат');return;}
+  const topics=document.getElementById('cwTopics').value.trim();
+  try{
+    const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
+      body:JSON.stringify({chat_ref:chat,account_ids:[],mode:CW_MODE,topics:topics,intensity:CW_INT})});
+    toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`);
+    document.getElementById('cwChat').value='';
+    cwLoad();
+  }catch(e){toast('⚠️ '+(e.message||'Ошибка'));}
+}
+async function cwStatus(id,st){
+  try{
+    await api(`/api/miniapp/chatwarmup/session/${id}/status`,{method:'POST',body:JSON.stringify({status:st})});
+    cwLoad();
+  }catch(e){toast('⚠️ '+(e.message||'Ошибка'));}
 }
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',

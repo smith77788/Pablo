@@ -131,6 +131,7 @@ from bot.handlers import spintax as spintax_handler
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
+from services import chat_warmup
 from services import content_mesh
 from services import physics_engine
 from services import graph_engine
@@ -741,6 +742,9 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("ghost_engine", ghost_engine.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("chat_warmup", chat_warmup.run, pool, bot)
         )
         asyncio.create_task(
             _resilient("content_mesh", content_mesh.run, pool, bot)

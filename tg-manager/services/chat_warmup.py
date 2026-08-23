@@ -1,0 +1,466 @@
+"""Разогрев ЛЮБОГО чата флотом с ОСМЫСЛЕННЫМ диалогом.
+
+Пользователь указывает чат, выбирает аккаунты флота и режим — флот вступает и
+ведёт естественную беседу: между собой по темам и/или реагируя на реальных
+участников, понимая контекст. Осмысленность — за счёт LLM (`ai_claude`): каждая
+реплика генерируется по СВЕЖЕМУ контексту чата в роли живого человека, а не по
+шаблону. Это принципиально отличает модуль от `activity_engine`/`ghost` (там
+случайные шаблоны реакций).
+
+Композиция существующих модулей:
+  • ai_claude.complete — генерация реплики по контексту (Claude Opus);
+  • account_manager (_make_client / send / join) — чтение и отправка флотом;
+  • op_worker.try_claim_account — атомарный захват сессии (без AUTH_KEY_DUPLICATED);
+  • fleet_governor / geo_tempo — человеческий темп, тишина под давлением;
+  • content_safety — гард исходящего текста;
+  • persona_engine (опц.) — характер аккаунта для устойчивого стиля.
+
+Слои: ЧИСТОЕ ядро (plan_turn / build_dialogue_prompt / sanitize_reply) —
+юнит-тестируемо; generate_reply — LLM; фоновый loop run() — как ghost_engine.
+
+Режимы (mode):
+  • seed   — флот общается ТОЛЬКО между собой по темам (оживить тихий чат);
+  • engage — флот РЕАГИРУЕТ на реальных участников (не болтает сам с собой);
+  • mixed  — приоритет вовлечения реальных, иначе поддерживает беседу (по умолч.).
+"""
+from __future__ import annotations
+
+import logging
+import random
+import re
+
+log = logging.getLogger(__name__)
+
+MODES = ("seed", "engage", "mixed")
+
+# Паузы между репликами (сек, диапазон для джиттера) — человеческий темп.
+INTENSITY = {
+    "calm":   (300, 900),    # раз в 5–15 мин
+    "normal": (90, 300),     # раз в 1.5–5 мин
+    "active": (30, 120),     # раз в 0.5–2 мин
+}
+
+# Сколько последних сообщений чата даём LLM как контекст.
+CONTEXT_WINDOW = 14
+# Максимальная длина реплики (символов) — живые сообщения короткие.
+MAX_REPLY_LEN = 320
+
+
+def valid_mode(mode: str | None) -> str:
+    m = (mode or "mixed").strip().lower()
+    return m if m in MODES else "mixed"
+
+
+def intensity_delay(intensity: str | None) -> tuple[int, int]:
+    return INTENSITY.get((intensity or "normal").strip().lower(), INTENSITY["normal"])
+
+
+# ── ЧИСТОЕ ядро: кто говорит и на что отвечает ───────────────────────────────
+
+def _pick_speaker(own_ids: list[int], last_speaker) -> int | None:
+    """Следующий говорящий из флота — не тот же, что говорил последним."""
+    ids = [int(a) for a in own_ids]
+    if not ids:
+        return None
+    if len(ids) == 1:
+        return ids[0]
+    pool = [i for i in ids if i != last_speaker] or ids
+    return random.choice(pool)
+
+
+def plan_turn(recent: list[dict], own_ids: list[int], mode: str,
+              last_speaker=None, last_seen_msg: int = 0) -> dict | None:
+    """Решить следующий ход диалога. ЧИСТАЯ функция (без БД/сети/LLM).
+
+    recent — последние сообщения [{"id","sender_id","sender_name","text","is_fleet"}]
+    в хронологическом порядке (старые → новые). own_ids — id аккаунтов флота.
+    Возвращает {speaker, kind, reply_to_id, reply_to_text, reply_to_sender} либо
+    None (ход пропускаем — например, engage без новых внешних сообщений).
+    """
+    mode = valid_mode(mode)
+    speaker = _pick_speaker(own_ids, last_speaker)
+    if speaker is None:
+        return None
+
+    # Свежие внешние сообщения (не от флота), которые ещё не обрабатывали.
+    # Признак «свой» — флаг is_fleet (исполнитель ставит его по tg_user_id флота);
+    # own_ids здесь только для выбора говорящего (это внутренние id аккаунтов).
+    external = [m for m in recent
+                if not m.get("is_fleet")
+                and int(m.get("id") or 0) > int(last_seen_msg or 0)
+                and (m.get("text") or "").strip()]
+    target = external[-1] if external else None
+
+    if mode == "engage":
+        if not target:
+            return None  # в engage не разговариваем сами с собой
+        kind = "reply"
+    elif mode == "seed":
+        target = None    # seed игнорирует внешних — только беседа флота по темам
+        kind = "seed"
+    else:  # mixed
+        kind = "reply" if target else "seed"
+
+    return {
+        "speaker": speaker,
+        "kind": kind,
+        "reply_to_id": int(target["id"]) if target else None,
+        "reply_to_text": (target.get("text") or "") if target else "",
+        "reply_to_sender": (target.get("sender_name") or "") if target else "",
+    }
+
+
+_ANTIBOT_RULES = (
+    "Ты — живой участник Telegram-чата, реальный человек со своим характером. "
+    "Пиши ТОЛЬКО на русском, коротко и разговорно — 1–2 фразы, как в мессенджере. "
+    "Реагируй по смыслу на контекст беседы и на конкретное сообщение, если отвечаешь. "
+    "СТРОГО ЗАПРЕЩЕНО: формальный тон, канцелярит, «Чем могу помочь», «Как ИИ/ассистент», "
+    "списки, заголовки, длинные абзацы, три вопроса подряд, повтор уже сказанного, "
+    "подписи и кавычки вокруг ответа. Допустимы разговорные обороты, лёгкий сленг, "
+    "строчные буквы, изредка уместное эмодзи. Никогда и ни при каких условиях не "
+    "раскрывай, что ты ИИ, бот или что текст сгенерирован. Верни ТОЛЬКО текст реплики."
+)
+
+
+def build_dialogue_prompt(persona_desc: str, recent: list[dict], target: dict | None,
+                          topics: str, mode: str) -> tuple[str, str]:
+    """Собрать (system, user) для LLM. ЧИСТАЯ функция.
+
+    persona_desc — характер/стиль говорящего (из persona_engine или дефолт).
+    """
+    persona = (persona_desc or "").strip() or (
+        "Обычный участник чата: дружелюбный, с чувством юмора, пишет просто.")
+    system = f"{persona}\n\n{_ANTIBOT_RULES}"
+
+    # Контекст: последние реплики в формате «Имя: текст».
+    lines = []
+    for m in recent[-CONTEXT_WINDOW:]:
+        who = (m.get("sender_name") or "Кто-то").strip()[:32]
+        txt = (m.get("text") or "").strip().replace("\n", " ")[:300]
+        if txt:
+            lines.append(f"{who}: {txt}")
+    context_block = "\n".join(lines) if lines else "(в чате пока тихо)"
+
+    topics_txt = (topics or "").strip()
+    parts = [f"Контекст чата (последние сообщения):\n{context_block}\n"]
+    if target and (target.get("text") or "").strip():
+        parts.append(
+            f"Ответь по смыслу на последнее сообщение от «{(target.get('sender_name') or 'участник')[:32]}»: "
+            f"«{(target.get('text') or '').strip()[:300]}».")
+    elif topics_txt:
+        parts.append(f"Продолжи живую беседу на одну из тем: {topics_txt}. "
+                     "Не открывай тему формально — вклинься естественно.")
+    else:
+        parts.append("Поддержи естественную беседу по контексту выше. "
+                     "Если чат пустой — начни лёгкий разговор на бытовую тему.")
+    parts.append("Напиши ОДНУ короткую реплику от первого лица.")
+    return system, "\n".join(parts)
+
+
+def sanitize_reply(text: str) -> str:
+    """Очистить ответ LLM до вида живой реплики. ЧИСТАЯ функция."""
+    if not text:
+        return ""
+    t = text.strip()
+    # Снять обрамляющие кавычки.
+    if len(t) >= 2 and t[0] in "\"'«“" and t[-1] in "\"'»”":
+        t = t[1:-1].strip()
+    # Снять префикс «Имя:» в начале (модель иногда подписывает).
+    t = re.sub(r"^[A-Za-zА-Яа-яЁё0-9_ ]{1,32}:\s+", "", t, count=1)
+    # Снять markdown-заголовки/маркеры списка в начале строк.
+    t = re.sub(r"(?m)^\s*[#>\-\*]+\s*", "", t)
+    # Схлопнуть переносы — живая реплика однострочна.
+    t = re.sub(r"\s*\n\s*", " ", t).strip()
+    # Выкинуть явные само-раскрытия ИИ (страховка поверх промпта).
+    low = t.lower()
+    if any(p in low for p in ("как ии", "как ассистент", "я — ии", "я ии",
+                              "языковая модель", "as an ai", "я бот", "как бот")):
+        return ""
+    if len(t) > MAX_REPLY_LEN:
+        # Обрезать по границе предложения, не рвать слово.
+        cut = t[:MAX_REPLY_LEN]
+        m = re.search(r"[.!?…]\s", cut[::-1])
+        t = cut[: MAX_REPLY_LEN - m.start()].strip() if m else cut.rsplit(" ", 1)[0].strip()
+    return t.strip()
+
+
+# ── LLM-генерация реплики ────────────────────────────────────────────────────
+
+async def generate_reply(persona_desc: str, recent: list[dict], target: dict | None,
+                         topics: str, mode: str) -> str | None:
+    """Сгенерировать осмысленную реплику по контексту. None — если LLM недоступен
+    или ответ пустой/не прошёл очистку (лучше пропустить ход, чем слать мусор:
+    осмысленность важнее активности)."""
+    try:
+        from services import ai_claude
+        if not ai_claude.enabled():
+            return None
+        system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode)
+        raw = await ai_claude.complete(system, user, timeout=60.0)
+        return sanitize_reply(raw) or None
+    except Exception as e:
+        log.debug("chat_warmup.generate_reply failed: %s", e)
+        return None
+
+
+# ── CRUD сессий ──────────────────────────────────────────────────────────────
+
+async def create_session(pool, owner_id: int, chat_ref: str, account_ids: list[int],
+                         mode: str = "mixed", topics: str = "",
+                         intensity: str = "normal") -> dict:
+    row = await pool.fetchrow(
+        """INSERT INTO chat_warmup_sessions
+               (owner_id, chat_ref, account_ids, mode, topics, intensity, status)
+           VALUES ($1,$2,$3,$4,$5,$6,'active')
+           RETURNING *""",
+        owner_id, chat_ref.strip(), [int(a) for a in account_ids],
+        valid_mode(mode), (topics or "").strip(),
+        (intensity or "normal").strip().lower())
+    return dict(row)
+
+
+async def list_sessions(pool, owner_id: int) -> list[dict]:
+    rows = await pool.fetch(
+        "SELECT * FROM chat_warmup_sessions WHERE owner_id=$1 ORDER BY created_at DESC",
+        owner_id)
+    return [dict(r) for r in rows]
+
+
+async def get_session(pool, owner_id: int, sid: int) -> dict | None:
+    row = await pool.fetchrow(
+        "SELECT * FROM chat_warmup_sessions WHERE id=$1 AND owner_id=$2", sid, owner_id)
+    return dict(row) if row else None
+
+
+async def set_status(pool, owner_id: int, sid: int, status: str) -> bool:
+    if status not in ("active", "paused", "stopped"):
+        return False
+    res = await pool.execute(
+        "UPDATE chat_warmup_sessions SET status=$3, updated_at=NOW() "
+        "WHERE id=$1 AND owner_id=$2", sid, owner_id, status)
+    return res != "UPDATE 0"
+
+
+async def _touch(pool, sid: int, speaker: int, last_seen_msg: int, sent: bool) -> None:
+    await pool.execute(
+        "UPDATE chat_warmup_sessions SET last_run_at=NOW(), last_speaker=$2, "
+        "last_seen_msg=GREATEST(last_seen_msg,$3), "
+        "messages_sent=messages_sent + $4, updated_at=NOW() WHERE id=$1",
+        sid, int(speaker or 0), int(last_seen_msg or 0), 1 if sent else 0)
+
+
+# ── Фоновый исполнитель: один осмысленный ход диалога ────────────────────────
+
+async def _warmup_allowed(pool, owner_id: int, geo_country, now) -> bool:
+    """Разрешить реплику сейчас? Уважает губернатор (реже под давлением) и
+    локальную ночь аккаунта. Fail-open. Только skip-гейт (сессий не открывает)."""
+    try:
+        level = "green"
+        if owner_id:
+            from services import fleet_governor
+            mult = await fleet_governor.tempo_multiplier(pool, owner_id)
+            level = fleet_governor.level_for_multiplier(mult)
+        night = False
+        try:
+            from services import geo_tempo
+            night = geo_tempo.is_local_night(geo_country, now)
+        except Exception:
+            night = False
+        skip = {"green": 0.0, "yellow": 0.25, "orange": 0.55, "red": 0.85}.get(level, 0.0)
+        if night:
+            skip = max(skip, 0.7)
+        return random.random() >= skip
+    except Exception:
+        return True
+
+
+async def _fleet_tg_ids(pool, account_ids: list[int]) -> set[int]:
+    try:
+        rows = await pool.fetch(
+            "SELECT tg_user_id FROM tg_accounts WHERE id = ANY($1::bigint[]) "
+            "AND tg_user_id IS NOT NULL", [int(a) for a in account_ids])
+        return {int(r["tg_user_id"]) for r in rows}
+    except Exception:
+        return set()
+
+
+def _sender_name(msg) -> str:
+    s = getattr(msg, "sender", None)
+    if s is not None:
+        for attr in ("first_name", "username", "title"):
+            v = getattr(s, attr, None)
+            if v:
+                return str(v)
+    return "Участник"
+
+
+def _msg_to_dict(msg, own_tg_ids: set[int]) -> dict:
+    sid = int(getattr(msg, "sender_id", 0) or 0)
+    return {
+        "id": int(getattr(msg, "id", 0) or 0),
+        "sender_id": sid,
+        "sender_name": _sender_name(msg),
+        "text": (getattr(msg, "message", None) or getattr(msg, "text", None) or ""),
+        "is_fleet": sid in own_tg_ids,
+    }
+
+
+async def _resolve_and_join(client, chat_ref: str):
+    """Вернуть entity целевого чата, лениво вступив при необходимости (в ТОМ ЖЕ
+    клиенте — без второго параллельного коннекта)."""
+    ref = (chat_ref or "").strip()
+    # Приватная инвайт-ссылка: t.me/+hash или /joinchat/hash.
+    m = re.search(r"(?:joinchat/|/\+)([\w-]+)", ref)
+    if m:
+        from telethon.tl.functions.messages import ImportChatInviteRequest
+        from telethon.errors import UserAlreadyParticipantError
+        try:
+            upd = await client(ImportChatInviteRequest(m.group(1)))
+            return upd.chats[0]
+        except UserAlreadyParticipantError:
+            from telethon.tl.functions.messages import CheckChatInviteRequest
+            inv = await client(CheckChatInviteRequest(m.group(1)))
+            return getattr(inv, "chat", None)
+    # Публичный @username / ссылка / id.
+    entity = await client.get_entity(ref)
+    from telethon.tl.functions.channels import JoinChannelRequest
+    try:
+        await client(JoinChannelRequest(entity))
+    except Exception:
+        pass  # уже участник / базовая группа / нет прав — читать/писать всё равно можно
+    return entity
+
+
+async def _persona_desc(pool, account_id: int) -> str:
+    try:
+        from services import persona_engine
+        p = await persona_engine.get_persona(pool, account_id)
+        if p:
+            return persona_engine.build_persona_system_prompt(p)
+    except Exception:
+        pass
+    return ""
+
+
+async def _process_session(pool, session: dict) -> None:
+    from services import account_manager
+    sid = int(session["id"])
+    owner_id = int(session["owner_id"])
+    account_ids = [int(a) for a in (session.get("account_ids") or [])]
+    mode = valid_mode(session.get("mode"))
+    if not account_ids:
+        return
+    speaker = _pick_speaker(account_ids, session.get("last_speaker"))
+    if speaker is None:
+        return
+
+    acc = await pool.fetchrow(
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version, "
+        "a.lang_code, a.system_lang_code, a.proxy_id, p.geo_country "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.id=$1 AND a.is_active AND a.session_str IS NOT NULL "
+        "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
+        speaker)
+    if not acc:
+        return
+    if not await _warmup_allowed(pool, owner_id, acc.get("geo_country"), __import__("datetime").datetime.now(__import__("datetime").timezone.utc)):
+        return
+
+    # Атомарный захват — одна сессия не коннектится диалогом И операцией/прогревом.
+    try:
+        from services import op_worker
+        leased = await op_worker.try_claim_account(int(speaker))
+    except Exception:
+        op_worker = None  # type: ignore
+        leased = True
+    if not leased:
+        return
+
+    own_tg = await _fleet_tg_ids(pool, account_ids)
+    acc_d = dict(acc)
+    client = account_manager._make_client(acc_d["session_str"], acc_d)
+    sent = False
+    max_seen = int(session.get("last_seen_msg") or 0)
+    try:
+        await account_manager._connect_and_track(client, acc_d, "chat_warmup")
+        entity = await _resolve_and_join(client, session["chat_ref"])
+        if entity is None:
+            return
+        raw = await client.get_messages(entity, limit=CONTEXT_WINDOW)
+        recent = [_msg_to_dict(m, own_tg) for m in reversed(list(raw))]  # старые → новые
+        plan = plan_turn(recent, account_ids, mode, session.get("last_speaker"),
+                         int(session.get("last_seen_msg") or 0))
+        if recent:
+            max_seen = max([max_seen] + [m["id"] for m in recent if not m["is_fleet"]])
+        if not plan:
+            return  # engage без новых внешних сообщений — тихо ждём
+        target = None
+        if plan["kind"] == "reply" and plan.get("reply_to_id"):
+            target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"]}
+        persona_desc = await _persona_desc(pool, speaker)
+        reply = await generate_reply(persona_desc, recent, target,
+                                     session.get("topics") or "", mode)
+        if not reply:
+            return  # LLM недоступен/пусто — пропускаем ход (без мусора)
+        from services import content_safety
+        if content_safety.scan_text(reply).blocked:
+            log.info("chat_warmup s=%d: реплика отклонена content_safety", sid)
+            return
+        # Имитация набора текста — человеческий ритм.
+        import asyncio as _a
+        await _a.sleep(random.uniform(2.0, 6.0))
+        reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
+        await client.send_message(entity, reply, reply_to=reply_to)
+        sent = True
+    except Exception as e:
+        log.debug("chat_warmup s=%d acc=%s ход не удался: %s", sid, speaker, e)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        if op_worker is not None:
+            try:
+                await op_worker.release_accounts([int(speaker)])
+            except Exception:
+                pass
+    await _touch(pool, sid, speaker, max_seen, sent)
+
+
+def _due(session: dict, now) -> bool:
+    """Пора ли сессии сделать ход — по интенсивности с джиттером."""
+    last = session.get("last_run_at")
+    if last is None:
+        return True
+    lo, hi = intensity_delay(session.get("intensity"))
+    gap = (now - last).total_seconds()
+    return gap >= random.uniform(lo, hi)
+
+
+async def run(pool, bot=None) -> None:
+    """Фоновый цикл разогрева чатов. Регистрируется в main как ghost_engine.run.
+
+    Каждый тик обрабатывает по ОДНОМУ ходу на созревшую активную сессию —
+    человеческий темп, атомарный захват, губернатор. Осмысленность — LLM."""
+    import asyncio
+    from datetime import datetime, timezone
+    log.info("Chat Warmup engine started")
+    while True:
+        try:
+            rows = await pool.fetch(
+                "SELECT * FROM chat_warmup_sessions WHERE status='active' ORDER BY last_run_at NULLS FIRST")
+            now = datetime.now(timezone.utc)
+            for r in rows:
+                s = dict(r)
+                if not _due(s, now):
+                    continue
+                try:
+                    await _process_session(pool, s)
+                except Exception as e:
+                    log.debug("chat_warmup session %s error: %s", s.get("id"), e)
+                await asyncio.sleep(random.uniform(1.5, 4.0))  # разнос ходов между сессиями
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("chat_warmup loop error: %s", e)
+        await asyncio.sleep(20)

@@ -6518,6 +6518,70 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("organism_digest uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def chatwarmup_sessions(request: web.Request) -> web.Response:
+        """Список сессий разогрева чатов владельца."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import chat_warmup
+            return _json_resp({"ok": True, "sessions": await chat_warmup.list_sessions(pool, uid)})
+        except Exception as e:
+            log.exception("chatwarmup_sessions uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def chatwarmup_create(request: web.Request) -> web.Response:
+        """Создать сессию разогрева: {chat_ref, account_ids[], mode, topics, intensity}.
+        Флот вступит в чат и начнёт осмысленный диалог (фоновый цикл chat_warmup)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        chat_ref = validate_string(body.get("chat_ref"), max_len=256)
+        if not chat_ref:
+            return _err("Укажите чат (@username, ссылка или ID)", 400)
+        if check_sql_suspicious(chat_ref):
+            return _err("Недопустимые символы в ссылке на чат", 400)
+        ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
+        acc_ids = await _alive_accounts(uid, ids or None)
+        if not acc_ids:
+            return _err("Выберите хотя бы один живой аккаунт для разогрева", 400)
+        acc_ids = acc_ids[:30]   # разумный потолок флота на один чат
+        from services import chat_warmup
+        mode = chat_warmup.valid_mode(body.get("mode"))
+        topics = validate_string(body.get("topics"), max_len=500) or ""
+        intensity = (body.get("intensity") or "normal")
+        if intensity not in ("calm", "normal", "active"):
+            intensity = "normal"
+        try:
+            s = await chat_warmup.create_session(pool, uid, chat_ref, acc_ids,
+                                                 mode=mode, topics=topics, intensity=intensity)
+            return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids)})
+        except Exception as e:
+            log.exception("chatwarmup_create uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
+    async def chatwarmup_status(request: web.Request) -> web.Response:
+        """Сменить статус сессии: {status: active|paused|stopped}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["sid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        status = body.get("status")
+        from services import chat_warmup
+        ok = await chat_warmup.set_status(pool, uid, sid, status)
+        return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
+
     async def organism_dismiss(request: web.Request) -> web.Response:
         """Отклонить подсказку — организм её больше не показывает."""
         uid = _get_uid(request)
@@ -13964,6 +14028,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/seo/analyze", seo_analyze)
     app.router.add_get("/api/miniapp/organism/pulse", organism_pulse)
     app.router.add_get("/api/miniapp/organism/digest", organism_digest)
+    app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
+    app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
+    app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
