@@ -858,18 +858,25 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     @web.middleware
     async def plan_gate_middleware(request, handler):
-        """Отказ по тарифу → 403 с причиной, а не 500.
+        """Единая страховка ответов API: отказ по тарифу → 403, любое иное
+        необработанное исключение → чистый JSON-500 (а не сырой HTML-краш,
+        который мини-апп не распарсит).
 
         `operation_bus.submit` поднимает PlanRequiredError (наследник
-        PermissionError), когда у владельца нет нужной подписки. Это НЕ сбой
-        сервера: пользователь должен увидеть, что операция платная, а не
-        «внутреннюю ошибку». Хендлеры ловят это сами; middleware — страховка на
-        случай, если новый хендлер добавят без перехвата.
+        PermissionError), когда у владельца нет нужной подписки — это НЕ сбой
+        сервера. Штатные HTTP-ответы (404/редиректы) пропускаем без изменений.
+        Хендлеры по-прежнему ловят ошибки сами; middleware — гарантия, что даже
+        хендлер БЕЗ try/except не покажет пользователю «внутреннюю ошибку».
         """
         try:
             return await handler(request)
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
+        except web.HTTPException:
+            raise  # штатные HTTP-ответы (404/302/…) — не глушим
+        except Exception:
+            log.exception("unhandled API error: %s %s", request.method, request.rel_url.path)
+            return _err("Внутренняя ошибка сервера. Повторите позже.", 500)
 
     app.middlewares.append(plan_gate_middleware)
     # Apply security middleware (rate limiting + security headers)

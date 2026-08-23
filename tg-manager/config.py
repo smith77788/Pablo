@@ -11,8 +11,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Core ───────────────────────────────────────────────────────────────────────
-BOT_TOKEN: str = os.environ["MANAGER_BOT_TOKEN"]  # Telegram bot token from @BotFather
-DATABASE_URL: str = os.environ["DATABASE_URL"]  # PostgreSQL connection string
+def _require(name: str) -> str:
+    """Обязательная переменная окружения с ВНЯТНОЙ ошибкой вместо KeyError.
+
+    Без этого отсутствие MANAGER_BOT_TOKEN/DATABASE_URL роняло импорт config.py
+    (и каскадом всё приложение) с непонятным `KeyError('...')` — оператор не
+    понимал, что именно не настроено. Теперь — явное сообщение с действием."""
+    val = os.environ.get(name)
+    if not val:
+        raise RuntimeError(
+            f"Не задана обязательная переменная окружения {name}. "
+            "Укажите её в .env или в переменных окружения деплоя (Railway/хост)."
+        )
+    return val
+
+
+BOT_TOKEN: str = _require("MANAGER_BOT_TOKEN")  # Telegram bot token from @BotFather
+DATABASE_URL: str = _require("DATABASE_URL")  # PostgreSQL connection string
 ADMIN_IDS: list[int] = [  # Comma-separated list of admin Telegram user IDs
     int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip()
 ]
