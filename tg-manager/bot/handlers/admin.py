@@ -3318,6 +3318,14 @@ async def _ai_keys_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     for pid, plabel, skey, _env in _AI_PROVIDERS:
         if pid in active:
             kb.button(text=f"🗑 Удалить {plabel}", callback_data=f"adm:ai_del:{pid}")
+    # Тумблер «Claude без ключа» (ambient): SDK сам резолвит креды окружения
+    # (OAuth-профиль/WIF/дефолт). Работает, только если такие креды есть в
+    # окружении деплоя; иначе нужен обычный ключ Anthropic.
+    amb_on = bool(await db.get_platform_setting(pool, "ai_anthropic_ambient", ""))
+    lines.append(f"\n{'🆓✅' if amb_on else '🆓⚪️'} <b>Claude без ключа (ambient)</b> — "
+                 f"{'включён' if amb_on else 'выключен'}")
+    kb.button(text=f"{'🔴 Выключить' if amb_on else '🆓 Включить'} Claude без ключа",
+              callback_data="adm:ai_ambient")
     kb.button(text="◀️ Назад", callback_data="adm:main")
     kb.adjust(1)
     lines.append(
@@ -3335,6 +3343,21 @@ async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.answer("Нет доступа.", show_alert=True)
         return
     await safe_answer(callback)
+    await _ai_keys_menu(callback, pool)
+
+
+@router.callback_query(F.data == "adm:ai_ambient")
+async def cb_adm_ai_ambient(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Тумблер «Claude без ключа» (ambient): keyless-резолв кредов SDK."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await safe_answer(callback)
+    cur = bool(await db.get_platform_setting(pool, "ai_anthropic_ambient", ""))
+    new = "" if cur else "1"
+    await db.set_platform_setting(pool, "ai_anthropic_ambient", new)
+    from services.ai_providers import set_ai_keys
+    set_ai_keys({"ANTHROPIC_USE_AMBIENT": new})   # "" снимает override
     await _ai_keys_menu(callback, pool)
 
 

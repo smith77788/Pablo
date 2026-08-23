@@ -178,3 +178,26 @@ def test_anthropic_key_path_wired():
     assert '("anthropic", "Anthropic (Claude)", "ai_anthropic_key", "ANTHROPIC_API_KEY")' in admin
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert '("ANTHROPIC_API_KEY", "ai_anthropic_key")' in main
+
+
+def test_ambient_keyless_flag(monkeypatch):
+    """«Модели без ключа»: флаг ambient включается через override из БД/UI."""
+    from services import ai_providers, ai_claude
+    monkeypatch.delenv("ANTHROPIC_USE_AMBIENT", raising=False)
+    ai_providers._KEY_OVERRIDES.pop("ANTHROPIC_USE_AMBIENT", None)
+    assert ai_claude._ambient_allowed() is False
+    ai_providers.set_ai_keys({"ANTHROPIC_USE_AMBIENT": "1"})   # тумблер ВКЛ
+    try:
+        assert ai_claude._ambient_allowed() is True
+        assert ai_claude.enabled() is True                    # keyless → доступно
+    finally:
+        ai_providers.set_ai_keys({"ANTHROPIC_USE_AMBIENT": ""})  # снять override
+    assert ai_claude._ambient_allowed() is False
+
+
+def test_ambient_toggle_wired():
+    admin = open(os.path.join(ROOT, "bot", "handlers", "admin.py"), encoding="utf-8").read()
+    assert "adm:ai_ambient" in admin and "ai_anthropic_ambient" in admin
+    assert "ANTHROPIC_USE_AMBIENT" in admin
+    main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    assert "ai_anthropic_ambient" in main and "ANTHROPIC_USE_AMBIENT" in main

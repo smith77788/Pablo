@@ -469,6 +469,9 @@ async def main() -> None:
             _val = await _db.get_platform_setting(pool, _skey, "")
             if _val:
                 _ai_map[_env_name] = decrypt_token(_val)  # хранится зашифрованным
+        # «Claude без ключа» (ambient) — незашифрованный флаг (не секрет).
+        if await _db.get_platform_setting(pool, "ai_anthropic_ambient", ""):
+            _ai_map["ANTHROPIC_USE_AMBIENT"] = "1"
         if _ai_map:
             set_ai_keys(_ai_map)
         log.info("AI providers on startup: %d configured", len(configured_providers()))

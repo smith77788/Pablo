@@ -55,9 +55,12 @@ def _explicit_credential() -> tuple[str | None, str | None]:
 
 
 def _ambient_allowed() -> bool:
-    """Разрешён ли keyless-резолв кредов SDK (OAuth-профиль/WIF/дефолт). По флагу
-    ANTHROPIC_USE_AMBIENT — иначе не пытаемся, чтобы не падать без настройки."""
-    return os.getenv("ANTHROPIC_USE_AMBIENT", "").strip().lower() in ("1", "true", "yes", "on")
+    """Разрешён ли keyless-резолв кредов SDK (OAuth-профиль/WIF/дефолт SDK) —
+    «модели без ключа». Флаг ANTHROPIC_USE_AMBIENT читается через _key: сначала
+    override из БД (тумблер в админке), затем переменная окружения. Так режим
+    включается и из UI (override), и из env."""
+    val = (_key("ANTHROPIC_USE_AMBIENT") or os.getenv("ANTHROPIC_USE_AMBIENT", "") or "")
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 
 def enabled() -> bool:
