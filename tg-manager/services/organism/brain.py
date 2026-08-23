@@ -128,6 +128,18 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
             "Нет активных операций, давление в норме. Запустите инвайт или "
             "напишите сегменту.", {"kind": "invite"})
 
+    cw = snap.get("chat_warmup") or {}
+    if cw.get("stalled", 0) > 0:
+        add("cw_stalled", "warn", "Разогрев чата простаивает",
+            f"{cw['stalled']} активных сессий без реплик 30+ мин — вероятно не задан "
+            "ключ Claude (Anthropic) или флот занят. Задайте ключ в админке / проверьте флот.",
+            {"kind": "chatwarmup"})
+    elif cw.get("active", 0) == 0 and cw.get("chats", 0) > 0:
+        add("cw_idle", "opportunity", "Оживите тихие чаты",
+            f"У вас {cw['chats']} групп/чатов — флот может вести в них ОСМЫСЛЕННЫЙ "
+            "диалог: между собой по темам и отвечая реальным участникам.",
+            {"kind": "chatwarmup"})
+
     out.sort(key=lambda x: _SEV.get(x["severity"], 9))
     return out[:6]
 

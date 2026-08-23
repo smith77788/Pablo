@@ -1912,7 +1912,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">⚖️ Обычно</button>
       <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">⚡ Активно</button>
     </div>
-    <div style="font-size:11.5px;color:var(--hint);margin:0 2px 10px">Используется весь живой флот (до 30 аккаунтов).</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 2px">
+      <span style="font-size:12px;color:var(--hint)">Аккаунты флота</span>
+      <span onclick="cwToggleAllAccs()" style="font-size:11.5px;color:var(--accent);cursor:pointer">выбрать все / сбросить</span>
+    </div>
+    <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div style="font-size:11px;color:var(--hint);margin:0 2px 10px">Ничего не выбрано = весь живой флот (до 30 аккаунтов).</div>
     <button class="btn btn-p" onclick="cwStart()" style="width:100%;padding:11px;font-size:14px">▶ Запустить разогрев</button>
     <div class="sec" style="margin-top:14px">Активные разогревы</div>
     <div class="lst" id="cwList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -6801,7 +6806,26 @@ function cwPickMode(m){CW_MODE=m;
   const h=document.getElementById('cwModeHint'); if(h) h.textContent=CW_MODE_HINT[m]||'';}
 function cwPickInt(i){CW_INT=i;
   document.querySelectorAll('#cwInt .cw-int').forEach(b=>{b.style.background=b.dataset.i===i?'rgba(91,141,239,.18)':'rgba(255,255,255,.06)';});}
-function openChatWarmup(){push('s-chatwarmup'); cwLoad();}
+let CW_ACCS=new Set(), CW_ACC_ALL=[];
+function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad();}
+async function cwLoadAccounts(){
+  const el=document.getElementById('cwAccs'); if(!el) return;
+  try{
+    const r=await api('/api/miniapp/chatwarmup/accounts'); CW_ACC_ALL=r.accounts||[];
+    if(!CW_ACC_ALL.length){el.innerHTML='<span style="font-size:12px;color:var(--hint)">Нет живых аккаунтов</span>';return;}
+    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11.5px;padding:5px 10px;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
+  }catch(e){el.innerHTML=errHtml(e.message,'cwLoadAccounts()');}
+}
+function _cwChipStyle(el,on){el.style.background=on?'rgba(91,141,239,.22)':'rgba(255,255,255,.06)';el.style.borderColor=on?'var(--accent)':'transparent';}
+function cwToggleAcc(id){
+  if(CW_ACCS.has(id)) CW_ACCS.delete(id); else CW_ACCS.add(id);
+  const el=document.querySelector(`#cwAccs .cw-chip[data-id="${id}"]`); if(el)_cwChipStyle(el,CW_ACCS.has(id));
+}
+function cwToggleAllAccs(){
+  const all=CW_ACCS.size<CW_ACC_ALL.length;
+  CW_ACCS=new Set(all?CW_ACC_ALL.map(a=>a.id):[]);
+  document.querySelectorAll('#cwAccs .cw-chip').forEach(el=>_cwChipStyle(el,all));
+}
 async function cwLoad(){
   const el=document.getElementById('cwList'); if(!el) return;
   try{
@@ -6826,7 +6850,7 @@ async function cwStart(){
   const topics=document.getElementById('cwTopics').value.trim();
   try{
     const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
-      body:JSON.stringify({chat_ref:chat,account_ids:[],mode:CW_MODE,topics:topics,intensity:CW_INT})});
+      body:JSON.stringify({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT})});
     toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`);
     document.getElementById('cwChat').value='';
     cwLoad();
@@ -6841,7 +6865,7 @@ async function cwStatus(id,st){
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
-    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити'})[a&&a.kind] || 'Открыть';
+    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата'})[a&&a.kind] || 'Открыть';
 }
 function runPulseAction(a) {
   const k = a && a.kind;
@@ -6852,6 +6876,7 @@ function runPulseAction(a) {
   if (k==='operation') return openMassOps();
   if (k==='purge_dead') { goTab('accounts'); setTimeout(()=>filterAcc('dead', document.querySelector('[data-filter="dead"]')), 200); return; }
   if (k==='segment_hot') return openContactsHot();
+  if (k==='chatwarmup') return openChatWarmup();
   if (k==='geo') return openGlobalPresence();
   if (k==='growth') return openGrowthHub();
   if (k==='bots') return openNetwork();

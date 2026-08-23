@@ -3284,6 +3284,7 @@ def _gate_text(gate_on: bool, channels: list) -> str:
 
 # ── AI-ключи провайдеров (настройка из UI вместо env) ────────────────────────
 _AI_PROVIDERS = [
+    ("anthropic", "Anthropic (Claude)", "ai_anthropic_key", "ANTHROPIC_API_KEY"),
     ("openrouter", "OpenRouter", "ai_openrouter_key", "OPENROUTER_API_KEY"),
     ("groq", "Groq", "ai_groq_key", "GROQ_API_KEY"),
     ("gemini", "Google Gemini", "ai_gemini_key", "GEMINI_API_KEY"),
@@ -3293,11 +3294,19 @@ _AI_PROVIDERS = [
 async def _ai_keys_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     from services.ai_providers import configured_providers
     active = {p.name for p in configured_providers()}
+    # Anthropic (Claude) — отдельный путь (ai_claude), не входит в OpenAI-совместимые
+    # configured_providers(): считаем его настроенным по наличию ключа/ambient.
+    try:
+        from services import ai_claude
+        if ai_claude.enabled():
+            active.add("anthropic")
+    except Exception:
+        pass
     kb = InlineKeyboardBuilder()
     lines = [
         "🤖 <b>AI-ключи провайдеров</b>\n",
         "Нужны для: Narrative, Growth Agent, AI-ассистент, SEO-AI, "
-        "AI-генерация шаблонов и постов.\n",
+        "AI-генерация шаблонов/постов и ОСМЫСЛЕННЫЙ разогрев чатов (Claude).\n",
     ]
     for pid, plabel, skey, _env in _AI_PROVIDERS:
         is_on = pid in active

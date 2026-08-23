@@ -6582,6 +6582,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ok = await chat_warmup.set_status(pool, uid, sid, status)
         return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
 
+    async def chatwarmup_accounts(request: web.Request) -> web.Response:
+        """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT id, phone, first_name, username FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
+            "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+            "ORDER BY trust_score DESC NULLS LAST, added_at LIMIT 200", uid)
+        accs = [{"id": r["id"],
+                 "label": (r["username"] or r["first_name"] or r["phone"] or f"#{r['id']}")}
+                for r in (rows or [])]
+        return _json_resp({"ok": True, "accounts": accs})
+
     async def organism_dismiss(request: web.Request) -> web.Response:
         """Отклонить подсказку — организм её больше не показывает."""
         uid = _get_uid(request)
@@ -14031,6 +14046,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
     app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
     app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
+    app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)

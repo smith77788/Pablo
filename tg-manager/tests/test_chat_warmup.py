@@ -130,3 +130,51 @@ def test_frontend_screen_and_functions():
     # выбор режима работы модуля присутствует в UI
     for m in ("mixed", "engage", "seed"):
         assert f"cwPickMode('{m}')" in html
+
+
+# ── Улучшения: реакции, выбор аккаунтов, подсказка Пульса, путь ключа ─────────
+
+def test_reactions_pure_logic():
+    assert cw.pick_reaction() in cw.REACTIONS
+    # реакция только когда отвечаем реальному участнику
+    assert cw.should_react("seed", True, roll=0.0) is False
+    assert cw.should_react("reply", False, roll=0.0) is False
+    assert cw.should_react("reply", True, roll=0.0) is True                 # низкий roll → реагируем
+    assert cw.should_react("reply", True, roll=0.99) is False               # высокий roll → пишем текст
+
+
+def test_executor_has_reaction_branch():
+    src = open(os.path.join(ROOT, "services", "chat_warmup.py"), encoding="utf-8").read()
+    assert "SendReactionRequest" in src and "should_react" in src
+
+
+def test_account_selection_endpoint_and_ui():
+    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    assert "async def chatwarmup_accounts" in api
+    assert '"/api/miniapp/chatwarmup/accounts"' in api
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "cwLoadAccounts" in html and "cwToggleAcc" in html
+    assert "account_ids:[...CW_ACCS]" in html   # выбранные аккаунты уходят на бэкенд
+
+
+def test_pulse_suggestion_when_chats_quiet():
+    from services.organism import brain
+    # есть группы, разогрев не запущен → подсказка оживить чаты
+    snap = {"fleet": {"accounts": 5}, "chat_warmup": {"active": 0, "stalled": 0, "chats": 4}}
+    sugs = brain.build_suggestions(snap)
+    assert any(s["action"].get("kind") == "chatwarmup" for s in sugs)
+    # активные простаивают → предупреждение
+    snap2 = {"fleet": {"accounts": 5}, "chat_warmup": {"active": 2, "stalled": 2, "chats": 4}}
+    assert any(s["id"] == "cw_stalled" for s in brain.build_suggestions(snap2))
+    # world отдаёт блок chat_warmup
+    world = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
+    assert "async def _chat_warmup" in world and '"chat_warmup":' in world
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "if (k==='chatwarmup') return openChatWarmup();" in html
+
+
+def test_anthropic_key_path_wired():
+    admin = open(os.path.join(ROOT, "bot", "handlers", "admin.py"), encoding="utf-8").read()
+    assert '("anthropic", "Anthropic (Claude)", "ai_anthropic_key", "ANTHROPIC_API_KEY")' in admin
+    main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    assert '("ANTHROPIC_API_KEY", "ai_anthropic_key")' in main

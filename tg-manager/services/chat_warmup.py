@@ -45,6 +45,26 @@ CONTEXT_WINDOW = 14
 # Максимальная длина реплики (символов) — живые сообщения короткие.
 MAX_REPLY_LEN = 320
 
+# Реакции-эмодзи: иногда живой человек не пишет, а ставит реакцию. Лёгкий след,
+# добавляет естественности. Набор — стандартные реакции Telegram.
+REACTIONS = ("👍", "🔥", "❤️", "😁", "🤔", "👏", "💯", "🙏", "😍", "🤝")
+# Вероятность, что ход-ответ реального участника будет РЕАКЦИЕЙ, а не текстом.
+REACT_CHANCE = 0.28
+
+
+def pick_reaction() -> str:
+    """Случайная реакция из безопасного набора. ЧИСТАЯ функция."""
+    return random.choice(REACTIONS)
+
+
+def should_react(kind: str, has_target: bool, roll: float | None = None) -> bool:
+    """Ставить реакцию вместо текста на этом ходу? Только когда отвечаем реальному
+    участнику (kind='reply' + есть цель). ЧИСТАЯ функция (roll — для тестов)."""
+    if kind != "reply" or not has_target:
+        return False
+    r = random.random() if roll is None else roll
+    return r < REACT_CHANCE
+
 
 def valid_mode(mode: str | None) -> str:
     m = (mode or "mixed").strip().lower()
@@ -394,24 +414,36 @@ async def _process_session(pool, session: dict) -> None:
             max_seen = max([max_seen] + [m["id"] for m in recent if not m["is_fleet"]])
         if not plan:
             return  # engage без новых внешних сообщений — тихо ждём
-        target = None
-        if plan["kind"] == "reply" and plan.get("reply_to_id"):
-            target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"]}
-        persona_desc = await _persona_desc(pool, speaker)
-        reply = await generate_reply(persona_desc, recent, target,
-                                     session.get("topics") or "", mode)
-        if not reply:
-            return  # LLM недоступен/пусто — пропускаем ход (без мусора)
-        from services import content_safety
-        if content_safety.scan_text(reply).blocked:
-            log.info("chat_warmup s=%d: реплика отклонена content_safety", sid)
-            return
-        # Имитация набора текста — человеческий ритм.
-        import asyncio as _a
-        await _a.sleep(random.uniform(2.0, 6.0))
-        reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
-        await client.send_message(entity, reply, reply_to=reply_to)
-        sent = True
+
+        if should_react(plan["kind"], bool(plan.get("reply_to_id"))):
+            # Иногда живой человек просто ставит реакцию, а не пишет — лёгкий след.
+            try:
+                from telethon.tl.functions.messages import SendReactionRequest
+                from telethon.tl.types import ReactionEmoji
+                await client(SendReactionRequest(
+                    peer=entity, msg_id=int(plan["reply_to_id"]),
+                    reaction=[ReactionEmoji(emoticon=pick_reaction())]))
+                sent = True
+            except Exception as e:
+                log.debug("chat_warmup s=%d: реакция не удалась: %s", sid, e)
+        else:
+            target = None
+            if plan["kind"] == "reply" and plan.get("reply_to_id"):
+                target = {"text": plan["reply_to_text"], "sender_name": plan["reply_to_sender"]}
+            persona_desc = await _persona_desc(pool, speaker)
+            reply = await generate_reply(persona_desc, recent, target,
+                                         session.get("topics") or "", mode)
+            if reply:
+                from services import content_safety
+                if content_safety.scan_text(reply).blocked:
+                    log.info("chat_warmup s=%d: реплика отклонена content_safety", sid)
+                else:
+                    import asyncio as _a
+                    await _a.sleep(random.uniform(2.0, 6.0))  # имитация набора
+                    reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
+                    await client.send_message(entity, reply, reply_to=reply_to)
+                    sent = True
+            # reply пусто (LLM недоступен) → тихо пропускаем ход (без мусора)
     except Exception as e:
         log.debug("chat_warmup s=%d acc=%s ход не удался: %s", sid, speaker, e)
     finally:

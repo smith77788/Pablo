@@ -25,6 +25,7 @@ async def snapshot(pool, owner_id: int) -> dict:
         "goal": await _goal(pool, owner_id),
         "growth": await _growth(pool, owner_id),
         "bots": await _bots(pool, owner_id),
+        "chat_warmup": await _chat_warmup(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
     }
 
@@ -54,6 +55,30 @@ async def _bots(pool, owner_id: int) -> dict:
             out["community_empty"] = int(r2["empty"] or 0)
     except Exception:
         log.debug("world._bots community failed owner=%s", owner_id)
+    return out
+
+
+async def _chat_warmup(pool, owner_id: int) -> dict:
+    """Разогрев чатов флотом: активные/простаивающие сессии + сколько групп-чатов
+    у владельца — для подсказки «чаты тихие, оживите флотом»."""
+    out = {"active": 0, "stalled": 0, "chats": 0}
+    try:
+        r = await pool.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE status='active') AS active, "
+            "COUNT(*) FILTER (WHERE status='active' AND (last_run_at IS NULL "
+            "  OR last_run_at < NOW() - INTERVAL '30 minutes')) AS stalled "
+            "FROM chat_warmup_sessions WHERE owner_id=$1", owner_id)
+        if r:
+            out["active"] = int(r["active"] or 0)
+            out["stalled"] = int(r["stalled"] or 0)
+    except Exception:
+        log.debug("world._chat_warmup failed owner=%s", owner_id)
+    try:
+        out["chats"] = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 "
+            "AND type IN ('megagroup','supergroup','group','chat')", owner_id) or 0)
+    except Exception:
+        log.debug("world._chat_warmup chats failed owner=%s", owner_id)
     return out
 
 
