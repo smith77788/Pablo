@@ -5589,8 +5589,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.ai_providers import configured_providers
             provs = configured_providers()
+            claude_on = False
+            try:
+                from services import ai_claude
+                claude_on = ai_claude.enabled()
+            except Exception:
+                claude_on = False
+            # Модель Groq, зафиксированная для разогрева чатов (переопр. env).
+            try:
+                from services.chat_warmup import GROQ_WARMUP_MODEL
+            except Exception:
+                GROQ_WARMUP_MODEL = "llama-3.3-70b-versatile"
             return _json_resp({
-                "configured": bool(provs),
+                "configured": bool(provs) or claude_on,
+                "claude": claude_on,
+                "warmup_groq_model": GROQ_WARMUP_MODEL,
                 "providers": [{"name": p.name, "model": (p.models[0] if p.models else None)}
                               for p in provs],
             })

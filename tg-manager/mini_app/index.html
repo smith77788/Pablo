@@ -1897,6 +1897,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:12.5px;color:var(--hint);line-height:1.5;margin-bottom:10px">
       Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (LLM понимает контекст). Темп человеческий, сессии защищены.
     </div>
+    <div id="cwAiStatus" style="font-size:11.5px;line-height:1.5;margin-bottom:10px"></div>
     <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 2px">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px">
@@ -6807,7 +6808,24 @@ function cwPickMode(m){CW_MODE=m;
 function cwPickInt(i){CW_INT=i;
   document.querySelectorAll('#cwInt .cw-int').forEach(b=>{b.style.background=b.dataset.i===i?'rgba(91,141,239,.18)':'rgba(255,255,255,.06)';});}
 let CW_ACCS=new Set(), CW_ACC_ALL=[];
-function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad();}
+function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();}
+async function cwAiStatus(){
+  const el=document.getElementById('cwAiStatus'); if(!el) return;
+  try{
+    const s=await api('/api/miniapp/ai/status');
+    const eng=[];
+    if(s.claude) eng.push('Claude Opus');
+    (s.providers||[]).forEach(p=>{
+      if(p.name==='groq') eng.push('Groq · '+(s.warmup_groq_model||'llama-3.3-70b'));
+      else eng.push(p.name+(p.model?(' · '+p.model):''));
+    });
+    if(eng.length){
+      el.innerHTML='🧠 <span style="color:var(--green)">Модели разогрева:</span> '+eng.map(esc).join(' → ');
+    }else{
+      el.innerHTML='⚠️ <span style="color:var(--orange)">AI-ключи не найдены</span> — задайте ключ (Claude/Groq) в админ-меню «AI-ключи», иначе флот вступит, но писать не будет.';
+    }
+  }catch(e){ el.innerHTML=''; }
+}
 async function cwLoadAccounts(){
   const el=document.getElementById('cwAccs'); if(!el) return;
   try{

@@ -248,6 +248,17 @@ def test_ambient_keyless_flag(monkeypatch):
     assert ai_claude._ambient_allowed() is False
 
 
+def test_ai_status_reports_claude_and_warmup_model():
+    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    i = api.index("async def ai_status")
+    body = api[i:i + 1600]
+    assert '"claude": claude_on' in body                # статус Claude
+    assert "warmup_groq_model" in body                  # какая Groq-модель у разогрева
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert 'id="cwAiStatus"' in html
+    assert "async function cwAiStatus" in html and "/api/miniapp/ai/status" in html
+
+
 def test_ambient_toggle_wired():
     admin = open(os.path.join(ROOT, "bot", "handlers", "admin.py"), encoding="utf-8").read()
     assert "adm:ai_ambient" in admin and "ai_anthropic_ambient" in admin
