@@ -8,7 +8,8 @@
 случайные шаблоны реакций).
 
 Композиция существующих модулей:
-  • ai_claude.complete — генерация реплики по контексту (Claude Opus);
+  • spintax_ai.complete — генерация реплики по контексту с каскадом провайдеров:
+    Claude Opus (ключ/ambient) → бесплатный fallback Groq/OpenRouter/Gemini;
   • account_manager (_make_client / send / join) — чтение и отправка флотом;
   • op_worker.try_claim_account — атомарный захват сессии (без AUTH_KEY_DUPLICATED);
   • fleet_governor / geo_tempo — человеческий темп, тишина под давлением;
@@ -210,13 +211,20 @@ async def generate_reply(persona_desc: str, recent: list[dict], target: dict | N
                          topics: str, mode: str) -> str | None:
     """Сгенерировать осмысленную реплику по контексту. None — если LLM недоступен
     или ответ пустой/не прошёл очистку (лучше пропустить ход, чем слать мусор:
-    осмысленность важнее активности)."""
+    осмысленность важнее активности).
+
+    Каскад через spintax_ai.complete: сначала Claude (ключ/ambient), при сбое или
+    отсутствии — бесплатный/дешёвый fallback на OpenAI-совместимые провайдеры
+    (Groq/OpenRouter/Gemini). Так разогрев работает даже без ключа Anthropic —
+    достаточно задать, например, бесплатный ключ Groq в админ-меню «AI-ключи»."""
     try:
-        from services import ai_claude
-        if not ai_claude.enabled():
+        from services import ai_claude, spintax_ai
+        from services.ai_providers import configured_providers
+        # Нет ни Claude, ни настроенных провайдеров → тихо пропускаем ход.
+        if not (ai_claude.enabled() or configured_providers()):
             return None
         system, user = build_dialogue_prompt(persona_desc, recent, target, topics, mode)
-        raw = await ai_claude.complete(system, user, timeout=60.0)
+        raw = await spintax_ai.complete(system, user)   # Claude → Groq/OpenRouter/Gemini
         return sanitize_reply(raw) or None
     except Exception as e:
         log.debug("chat_warmup.generate_reply failed: %s", e)

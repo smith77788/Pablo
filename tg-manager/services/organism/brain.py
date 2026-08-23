@@ -132,7 +132,7 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
     if cw.get("stalled", 0) > 0:
         add("cw_stalled", "warn", "Разогрев чата простаивает",
             f"{cw['stalled']} активных сессий без реплик 30+ мин — вероятно не задан "
-            "ключ Claude (Anthropic) или флот занят. Задайте ключ в админке / проверьте флот.",
+            "AI-ключ (Claude/Groq) или флот занят. Задайте ключ в админке / проверьте флот.",
             {"kind": "chatwarmup"})
     elif cw.get("active", 0) == 0 and cw.get("chats", 0) > 0:
         add("cw_idle", "opportunity", "Оживите тихие чаты",

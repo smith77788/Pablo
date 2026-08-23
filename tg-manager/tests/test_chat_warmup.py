@@ -101,8 +101,35 @@ def test_loop_and_executor_wired():
     src = open(os.path.join(ROOT, "services", "chat_warmup.py"), encoding="utf-8").read()
     # ход диалога безопасен для сессий и осмыслен
     assert "try_claim_account" in src and "release_accounts" in src
-    assert "ai_claude" in src and "content_safety" in src
+    assert "content_safety" in src
+    # каскад провайдеров: Claude → бесплатный fallback Groq/OpenRouter/Gemini
+    assert "spintax_ai.complete" in src and "configured_providers" in src
     assert "async def run(" in src
+
+
+def test_generate_reply_none_without_any_ai(monkeypatch):
+    """Без Claude и без провайдеров — ход пропускается (None), мусор не шлём."""
+    import asyncio
+    from services import ai_claude, ai_providers, chat_warmup as cwm
+    monkeypatch.setattr(ai_claude, "enabled", lambda: False)
+    monkeypatch.setattr(ai_providers, "configured_providers", lambda: [])
+    recent = [{"id": 1, "text": "привет", "is_fleet": False, "sender_name": "Аня"}]
+    out = asyncio.run(cwm.generate_reply("персона", recent, None, "", "seed"))
+    assert out is None
+
+
+def test_generate_reply_uses_groq_fallback(monkeypatch):
+    """Claude выключен, но есть провайдер (Groq) → генерируем через spintax_ai."""
+    import asyncio
+    from services import ai_claude, ai_providers, spintax_ai, chat_warmup as cwm
+    monkeypatch.setattr(ai_claude, "enabled", lambda: False)
+    monkeypatch.setattr(ai_providers, "configured_providers",
+                        lambda: [object()])   # непустой список провайдеров
+    async def _fake_complete(system, user):
+        return "  ага, звучит норм  "
+    monkeypatch.setattr(spintax_ai, "complete", _fake_complete)
+    out = asyncio.run(cwm.generate_reply("персона", [], None, "болтовня", "seed"))
+    assert out == "ага, звучит норм"   # сгенерировано провайдером + очищено
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert "chat_warmup.run" in main   # цикл зарегистрирован
 
