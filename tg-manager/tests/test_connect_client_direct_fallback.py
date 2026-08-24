@@ -20,16 +20,16 @@ from services import account_manager as am
 
 
 def test_direct_fallback_ok_matrix():
-    # БЕЗПРОКСЁВЫЕ транспорты откатываются на прямой host-IP (allow_direct):
-    assert am._direct_fallback_ok("pool", "allow_direct") is True
+    # БЕЗПРОКСЁВЫЕ транспорты relay/ipv6 откатываются на прямой host-IP (allow_direct):
     assert am._direct_fallback_ok("relay", "allow_direct") is True   # лежащий CF-релей → host-IP
     assert am._direct_fallback_ok("ipv6", "allow_direct") is True    # недоступный IPv6 → host-IP
     # strict и bound-прокси — НЕ откатываем:
-    assert am._direct_fallback_ok("pool", "strict") is False         # strict запрещает host IP
-    assert am._direct_fallback_ok("relay", "strict") is False
+    assert am._direct_fallback_ok("relay", "strict") is False        # strict запрещает host IP
     assert am._direct_fallback_ok("bound", "allow_direct") is False  # смена IP ломает auth key
     assert am._direct_fallback_ok("direct", "allow_direct") is False  # уже прямой — фолбэкать некуда
     assert am._direct_fallback_ok(None, "allow_direct") is False
+    # free-pool удалён — транспорта 'pool' больше нет:
+    assert am._direct_fallback_ok("pool", "allow_direct") is False
 
 
 class _FakeClient:
@@ -64,11 +64,11 @@ def _install(monkeypatch, policy, first_transport, direct_ok=True):
 
 
 def test_no_proxy_account_falls_back_to_direct(monkeypatch):
-    calls = _install(monkeypatch, "allow_direct", "pool")
+    # free-pool удалён: безпроксёвый аккаунт без релея/IPv6 идёт СРАЗУ прямым host-IP.
+    calls = _install(monkeypatch, "allow_direct", "direct")
     client = asyncio.run(am.connect_client("sess", {"id": 1}, "join"))
-    assert client._infragram_transport == "direct"       # переподключились напрямую
-    assert calls["make_no_pool"] == [False, True]         # сначала пул, потом _no_pool
-    assert calls["connect"] == 2
+    assert client._infragram_transport == "direct"
+    assert calls["connect"] == 1                          # прямой сразу, без промежуточного пула
 
 
 def test_relay_falls_back_to_direct(monkeypatch):

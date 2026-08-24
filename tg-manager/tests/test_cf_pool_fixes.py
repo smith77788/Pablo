@@ -227,12 +227,16 @@ def test_pool_lifecycle_ops_exist():
     assert "assignCfRelay" in ui and "clearCfPool" in ui
 
 
-def test_cf_pool_monitor_registered_as_organ():
-    """Монитор пула — фоновый орган (health→heal→sync), зарегистрирован в main.py."""
+def test_cf_pool_monitor_only_heals_no_autoassign():
+    """Монитор пула — только health→heal для аккаунтов, УЖЕ на CF (пользователь
+    выбрал CF явно). Авто-раздачи релея «голым» аккаунтам в цикле больше НЕТ
+    (CF opt-in, безпроксёвый аккаунт идёт прямым host-IP)."""
     cf = _read("services/cf_pool_manager.py")
     assert "async def run(" in cf
     seg = cf[cf.index("async def run("):]
-    assert "check_pool" in seg and "heal_dead_relays" in seg and "sync_relay_assignment" in seg
+    assert "check_pool" in seg and "heal_dead_relays" in seg
+    # авто-раздача релея в фоновом цикле убрана
+    assert "await sync_relay_assignment(pool, oid)" not in seg
     m = _read("main.py")
     assert "cf_pool_monitor" in m and "_cf_pool_manager.run" in m
 
@@ -263,15 +267,16 @@ def test_down_worker_debounced():
     assert "ADD COLUMN IF NOT EXISTS fail_streak" in m
 
 
-def test_relay_auto_assigned_on_account_add():
-    """Новый аккаунт без прокси получает релей сразу (обе точки вставки), а не
-    ждёт 30-мин цикл монитора. Хук изолирован (сбой не роняет добавление)."""
+def test_cf_relay_not_auto_assigned_on_account_add():
+    """CF-релей НЕ раздаётся автоматически при добавлении/импорте аккаунта — CF
+    opt-in. Без прокси аккаунт идёт прямым host-IP; прокси задаёт пользователь.
+    (Раньше авто-CF делала релей «основой» и запирала аккаунты на нерабочих воркерах.)"""
     dbsrc = _read("database/db.py")
     seg = dbsrc[dbsrc.index("async def add_tg_account"):]
     seg = seg[:seg.index("return acc_id")+20]
-    assert "sync_relay_assignment" in seg and "except Exception:" in seg
+    assert "sync_relay_assignment" not in seg
     imp = _read("services/session_importer.py")
-    assert "sync_relay_assignment" in imp
+    assert "sync_relay_assignment" not in imp
 
 
 def test_cf_relay_url_column_self_healed():

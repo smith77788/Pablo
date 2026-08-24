@@ -163,7 +163,6 @@ from services import db_maintenance
 from services import recovery_engine
 from services import anomaly_detector
 from services import ecosystem_brain
-from services import proxy_scraper
 from services import activity_logger
 from services import promo_scheduler
 
@@ -708,9 +707,8 @@ async def main() -> None:
         )
         # payment_webhook already started via _web_resilient above (no stagger)
         asyncio.create_task(_resilient("task_registry", task_registry.run_cleanup_loop))
-        asyncio.create_task(
-            _resilient("proxy_scraper", proxy_scraper.run_scraper_loop, pool)
-        )
+        # proxy_scraper (бесплатный публичный пул) УДАЛЁН: пул нестабилен и блокировал
+        # работу. Транспорт — прокси пользователя или прямой host-IP; CF/IPv6 opt-in.
         asyncio.create_task(_resilient("activity_logger", activity_logger.run, pool))
         asyncio.create_task(_resilient("drift_detector", drift_detector.run, pool, bot))
         asyncio.create_task(

@@ -171,14 +171,9 @@ async def import_sessions(
         except Exception as e:
             failed += 1
             errors.append(f"Строка {i+1}: ошибка БД — {str(e)[:100]}")
-    # Импортированные аккаунты без прокси сразу получают воркеры из CF-пула (одним
-    # проходом после цикла). Изолировано: сбой раздачи не влияет на итог импорта.
-    if imported:
-        try:
-            from services.cf_pool_manager import sync_relay_assignment
-            await sync_relay_assignment(pool, owner_id)
-        except Exception:
-            pass
+    # CF-релей НЕ раздаём импортированным аккаунтам автоматически: без прокси —
+    # прямой host-IP. Прокси задаёт пользователь (proxy_id при импорте), CF/IPv6 —
+    # только по явному выбору. Авто-CF делала релей «основой» и запирала аккаунты.
     if truncated:
         # ВПЕРЁД: иначе срез errors[:20] обрезал бы это важное сообщение, когда
         # набралось 20 построчных ошибок.

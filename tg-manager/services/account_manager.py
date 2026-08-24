@@ -173,8 +173,8 @@ _IPV6_SUBNET = _os.getenv("IPV6_SUBNET", "").strip()
 # первая операция уходила через другой (прокси умер между циклами) → скачок IP →
 # AUTH_KEY_DUPLICATED / «не ответил». Правильное поведение для безпроксёвого
 # аккаунта — стабильный ПРЯМОЙ выход с реального host-IP (одинаковый на логине и в
-# операциях). Кому реально нужен пул — включает USE_FREE_POOL=1.
-_USE_FREE_POOL = _os.getenv("USE_FREE_POOL", "").strip().lower() in ("1", "true", "yes", "on")
+# операциях). Бесплатный публичный пул УДАЛЁН (блокировал работу): прокси задаёт
+# пользователь, иначе прямой host-IP.
 
 # Пер-владелец IPv6-подсеть, заданная в приложении (перекрывает env). Кэш в памяти
 # (обновляется при сохранении настроек), + читается из БД в get_account_for_telethon.
@@ -218,58 +218,17 @@ _TG_INVITE_RE = re.compile(
 )
 _TG_JOIN_URI_RE = re.compile(r"^tg://join\?invite=([\w-]+)", re.IGNORECASE)
 
-# ── Free proxy pool cache (populated by proxy_scraper service) ─────────────────
-# Round-robin selection — no lock needed (list writes are GIL-safe for simple ops)
-_pool_proxy_cache: list[str] = []
-_pool_proxy_idx: int = 0
-# account_id → ЗАЛИПШИЙ pool-прокси. Один аккаунт = один стабильный exit IP на всё
-# время, пока прокси жив в пуле. Иначе round-robin отдавал бы РАЗНЫЙ IP на каждый
-# коннект → одна сессия видится Telegram с нескольких IP подряд → AUTH_KEY_DUPLICATED
-# (ключ убивается). Это и есть причина «переавторизовал, а всё равно падает».
-_acc_pool_proxy: dict[int, str] = {}
-
-
-def set_pool_proxy_cache(urls: list[str]) -> None:
-    """Called by proxy_scraper after each scrape cycle to update the in-memory pool."""
-    global _pool_proxy_cache, _pool_proxy_idx
-    _pool_proxy_cache = list(urls)
-    _pool_proxy_idx = 0
-    # Чистим залипшие назначения, которых больше нет в пуле (self-heal мёртвых
-    # прокси): пропавший прокси переназначится на живой при следующем запросе.
-    _live = set(_pool_proxy_cache)
-    for _aid in [k for k, v in _acc_pool_proxy.items() if v not in _live]:
-        _acc_pool_proxy.pop(_aid, None)
-
-
-def _get_pool_proxy_url(key: object | None = None) -> str:
-    """Прокси из бесплатного пула. Возвращает '' если пул пуст.
-
-    С key (стабильный идентификатор аккаунта — телефон или account_id) — ЗАЛИПАЮЩИЙ
-    выбор: один и тот же аккаунт всегда получает ОДИН прокси (стабильный exit IP),
-    пока тот жив в пуле. Это критично: без залипания round-robin отдавал бы аккаунту
-    разные IP на каждый коннект, и одна и та же сессия виделась бы Telegram с
-    нескольких IP → AUTH_KEY_DUPLICATED (ключ убивается), даже если сессия только что
-    переавторизована. ВАЖНО: ключ обязан быть одинаковым на ЛОГИНЕ и в операциях —
-    иначе сессия авторизуется с одного IP, а первая операция идёт с другого. Поэтому
-    ключом служит ТЕЛЕФОН (есть и на логине, и у аккаунта), а не account_id (на логине
-    его ещё нет). Назначение детерминировано (по хэшу ключа), запоминается; пропавший
-    из пула прокси переназначается. Без key — прежний round-robin (совместимость)."""
-    global _pool_proxy_idx
-    if not _pool_proxy_cache:
-        return ""
-    if key is not None and str(key):
-        k = str(key)
-        assigned = _acc_pool_proxy.get(k)
-        if assigned and assigned in _pool_proxy_cache:
-            return assigned  # тот же IP, что и в прошлый раз — сессия не «скачет»
-        # Детерминированный, но не по порядку добавления в пул: хэш ключа.
-        idx = (hash(k) & 0x7FFFFFFF) % len(_pool_proxy_cache)
-        url = _pool_proxy_cache[idx]
-        _acc_pool_proxy[k] = url
-        return url
-    url = _pool_proxy_cache[_pool_proxy_idx % len(_pool_proxy_cache)]
-    _pool_proxy_idx = (_pool_proxy_idx + 1) % len(_pool_proxy_cache)
-    return url
+# ── Free proxy pool: УДАЛЁН ────────────────────────────────────────────────────
+# Бесплатный публичный пул SOCKS5 полностью удалён из транспорта: публичные прокси
+# нестабильны, умирают между логином и операцией → сессия видится Telegram с разных
+# IP → AUTH_KEY_DUPLICATED, и это БЛОКИРОВАЛО работу флота. Политика транспорта:
+# прокси задаёт ПОЛЬЗОВАТЕЛЬ (при подключении аккаунтов или позже); если прокси нет —
+# стабильный ПРЯМОЙ host-IP; CF-релей/IPv6 — только по явному выбору. Функция-заглушка
+# сохранена, чтобы proxy_scraper (если ещё вызывает) не падал — пул больше не влияет
+# на транспорт.
+def set_pool_proxy_cache(urls: list[str]) -> None:  # noqa: D401 - deprecated no-op
+    """DEPRECATED: free-pool удалён. No-op — публичный пул больше не используется."""
+    return None
 
 
 def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
@@ -990,23 +949,14 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         _transport = "relay"
     else:
         connection_cls = ConnectionTcpObfuscated
-        if not has_bound_proxy and (_no_pool or _force_direct):
-            # Fallback-режим: пропускаем free-pool/релей/IPv6, идём напрямую (host IP).
+        if not has_bound_proxy:
+            # Нет назначенного прокси, релея, IPv6 → стабильный ПРЯМОЙ host-IP.
+            # Публичный free-pool удалён (нестабильные IP блокировали работу).
+            # Прокси задаёт пользователь; без него — прямой выход.
             proxy = None
-        elif not has_bound_proxy and _USE_FREE_POOL and not _force_direct:
-            # Опционально (USE_FREE_POOL=1): бесплатный пул публичных SOCKS5-прокси
-            # (populated by proxy_scraper). ЗАЛИПАЮЩИЙ по ТЕЛЕФОНУ (а не account_id):
-            # телефон известен и на логине, и в операциях, поэтому сессия авторизуется
-            # и работает с ОДНОГО exit IP. По умолчанию ВЫКЛ: публичные прокси
-            # нестабильны, и их смерть между логином и операцией = скачок IP =
-            # AUTH_KEY_DUPLICATED. Без пула безпроксёвый аккаунт идёт ПРЯМО (host IP).
-            _pool_key = (device.get("phone") if device else None) or _acc_id
-            pool_url = _get_pool_proxy_url(_pool_key)
-            proxy = _parse_proxy(pool_url) if pool_url else None
         effective_proxy = proxy
         if not has_bound_proxy:
-            # 'pool' → connect_client может фолбэкнуться на прямое; 'direct' — уже прямой.
-            _transport = "pool" if effective_proxy is not None else "direct"
+            _transport = "direct"
         # ── KILL-SWITCH (strict) ──────────────────────────────────────────────
         # Сюда попадаем, только когда все не-host транспорты недоступны (нет
         # аккаунт-прокси/TG_PROXY, нет CF-relay, нет IPv6, пуст free-pool). Если
@@ -1069,16 +1019,16 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
 def _direct_fallback_ok(transport: str | None, policy: str) -> bool:
     """Можно ли после сбоя коннекта переподключиться НАПРЯМУЮ (host IP).
 
-    Разрешено для ВСЕХ безпроксёвых транспортов (pool/relay/ipv6): это лишь
-    способы выхода для аккаунта БЕЗ назначенного прокси, и если способ недоступен
-    (мёртвый free-pool, лежащий/несконфигурированный CF-релей, недоступный IPv6) —
-    прямой стабильный host-IP лучше несостоявшегося коннекта. Именно так флот и
-    работал «на реальном IP», когда прокси/релей/IPv6 не заданы; авто-раздача
-    cf_relay_url больше не запирает безпроксёвый аккаунт на нерабочем релее.
+    Разрешено для безпроксёвых транспортов relay/ipv6: это лишь способы выхода для
+    аккаунта БЕЗ назначенного прокси, и если способ недоступен (лежащий/
+    несконфигурированный CF-релей, недоступный IPv6) — прямой стабильный host-IP
+    лучше несостоявшегося коннекта. Именно так флот и работает «на реальном IP»,
+    когда прокси/релей/IPv6 не заданы.
 
     ЗАПРЕЩЕНО для bound-прокси (сессия привязана к IP прокси — смена IP ломает
-    auth key) и для strict-политики (осознанная изоляция реального адреса)."""
-    return transport in ("pool", "relay", "ipv6") and policy != "strict"
+    auth key) и для strict-политики (осознанная изоляция реального адреса).
+    (Публичный free-pool / транспорт 'pool' удалён.)"""
+    return transport in ("relay", "ipv6") and policy != "strict"
 
 
 async def connect_client(session_string: str = "", device: dict | None = None,

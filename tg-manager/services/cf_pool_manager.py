@@ -521,10 +521,10 @@ async def heal_dead_relays(pool, owner_id: int) -> dict:
 async def run(pool, bot=None, *, interval_min: float = 30.0) -> None:
     """Фоновый монитор CF-пула (регистрируется в main.py как _resilient).
 
-    Каждые interval_min: по каждому владельцу с воркерами — health-check, перевод
-    аккаунтов с мёртвых воркеров на живые (heal_dead_relays), доназначение релея
-    новым «голым» аккаунтам (sync_relay_assignment). Держит IP-изоляцию живой без
-    ручного вмешательства — как орган, а не разовая кнопка.
+    Каждые interval_min: по каждому владельцу с воркерами — health-check и перевод
+    аккаунтов С УЖЕ назначенным CF-релеем с мёртвых воркеров на живые
+    (heal_dead_relays). Авто-раздачу релея «голым» аккаунтам НЕ делаем — CF opt-in:
+    безпроксёвый аккаунт идёт прямым host-IP, если пользователь не задал прокси.
     process-local таймер, не переживает рестарт (перезапустится сам с задержкой)."""
     log.info("cf_pool monitor: started (interval=%gmin)", interval_min)
     await asyncio.sleep(180)  # дать системе прогреться
@@ -536,13 +536,15 @@ async def run(pool, bot=None, *, interval_min: float = 30.0) -> None:
                 oid = row["owner_id"]
                 try:
                     chk = await check_pool(pool, oid)
+                    # Только failover между ЖИВЫМИ воркерами для аккаунтов, которые
+                    # УЖЕ на CF (пользователь выбрал CF явно). Авто-раздачу релея
+                    # «голым» аккаунтам НЕ делаем — CF больше не основа транспорта,
+                    # безпроксёвый аккаунт идёт прямым host-IP, если не задан прокси.
                     healed = await heal_dead_relays(pool, oid)
-                    synced = await sync_relay_assignment(pool, oid)
-                    if healed.get("reassigned") or synced.get("assigned"):
-                        log.info("cf_pool monitor owner=%s: alive=%d/%d healed=%d "
-                                 "synced=%d", oid, chk.get("alive", 0),
-                                 chk.get("checked", 0), healed["reassigned"],
-                                 synced["assigned"])
+                    if healed.get("reassigned"):
+                        log.info("cf_pool monitor owner=%s: alive=%d/%d healed=%d",
+                                 oid, chk.get("alive", 0), chk.get("checked", 0),
+                                 healed["reassigned"])
                 except Exception as e:
                     log.warning("cf_pool monitor owner=%s: %s", oid, e)
         except asyncio.CancelledError:
