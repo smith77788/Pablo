@@ -1104,7 +1104,10 @@ async def cb_mini_strike_run(
     # Claim the account so warmup/op_worker won't drive the same session in parallel.
     from services import op_worker as _opw
 
-    if _opw.is_account_in_use(acc["id"]):
+    # Один атомарный захват вместо «проверить снимок → пометить»: между этими
+    # двумя шагами аккаунт успевал уйти другой операции (TOCTOU), а снимок
+    # is_account_in_use к тому же видел только память СВОЕГО процесса.
+    if not await _opw.try_claim_account(int(acc["id"])):
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
@@ -1113,7 +1116,6 @@ async def cb_mini_strike_run(
             "⏳ Аккаунт сейчас занят другой операцией. Попробуйте позже.",
             kb.as_markup())
         return
-    await _opw.mark_accounts_in_use([acc["id"]])
 
     # Live-обновления в сообщение
     msg = callback.message

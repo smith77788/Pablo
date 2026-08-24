@@ -436,30 +436,13 @@ async def _do_db_flag(acc_ids: list[int], value: bool) -> None:
         log.debug("op_worker: db flag update failed: %s", e)
 
 
-async def mark_accounts_in_use(acc_ids: list[int]) -> None:
-    """Пометить аккаунты занятыми (БЕЗУСЛОВНО — не отказывает вызывающему).
-
-    УНАСЛЕДОВАННЫЙ путь: в отличие от try_claim_accounts, он не арбитрирует, а
-    заявляет «эти аккаунты мои». Оставшиеся вызовы (bot_factory, массовые правки
-    каналов, strike из бота) написаны в расчёте на это. Переводить их на
-    отказной захват — отдельная задача; здесь мы лишь делаем состояние в БД
-    ПРАВИЛЬНЫМ: берём аренду на эту реплику, чтобы строка принадлежала владельцу
-    и истекала сама. Если аренду выдали не на все id — значит их держит другая
-    реплика; это ЛОГИРУЕТСЯ как риск двойной сессии, но поток не меняем.
-    """
-    ids = [int(a) for a in acc_ids]
-    async with _accounts_lock:
-        _accounts_in_use.update(ids)
-    if not ids:
-        return
-    granted = await _db_claim(ids)
-    missed = set(ids) - set(granted)
-    if missed:
-        log.error(
-            "op_worker: mark_accounts_in_use не смог взять аренду на %s — "
-            "их держит другая реплика (риск двойной сессии на этих аккаунтах)",
-            sorted(missed),
-        )
+# mark_accounts_in_use() УДАЛЁН намеренно (сторожит
+# tests/test_session_concurrency_safety.py). Он помечал аккаунты занятыми
+# БЕЗУСЛОВНО — заявлял «эти сессии мои», не спрашивая арбитра, — и поэтому
+# пропускал в работу аккаунт, уже занятый другой операцией или репликой
+# (вторая сессия на одном auth-key → AUTH_KEY_DUPLICATED, смерть сессии).
+# Все его вызовы переведены на отказной try_claim_account(s). Не возвращать:
+# нужна занятость — берите захват и честно обрабатывайте отказ.
 
 
 async def release_accounts(acc_ids: list[int]) -> None:
@@ -5307,6 +5290,18 @@ async def _exec_bulk_create_channels_multi(
     if not active_accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
 
+    # Отказной захват: работаем ТОЛЬКО с реально захваченными сессиями. Раньше
+    # здесь был безусловный mark_accounts_in_use — он не спрашивал арбитра, и
+    # занятый аккаунт всё равно шёл в работу (вторая сессия → AUTH_KEY_DUPLICATED).
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(active_accounts) - len(claimed_ids)
+    active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
+
+    # Итоги считаем ПОСЛЕ захвата — иначе прогресс-бар обещал бы работу на
+    # аккаунтах, которые нам не достались.
     total_ops = len(active_accounts) * channel_count
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_ops, op_id)
@@ -5315,7 +5310,6 @@ async def _exec_bulk_create_channels_multi(
     failed_count = 0
     global_idx = 1
 
-    await mark_accounts_in_use([a["id"] for a in active_accounts])
     try:
         for task_i in range(total_ops):
             if await _is_cancelled(pool, op_id):
@@ -5403,13 +5397,14 @@ async def _exec_bulk_create_channels_multi(
                 chaos = session_simulator.chaos_factor()
                 await asyncio.sleep(max(delay * chaos, flood_wait))
     finally:
-        await release_accounts([a["id"] for a in active_accounts])
+        await release_accounts(claimed_ids)
 
     return {
         "status": "done",
         "created": created_count,
         "failed": failed_count,
-        "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+        "summary": (f"Создано каналов: {created_count}, ошибок: {failed_count}"
+                    + (f", пропущено занятых аккаунтов: {_busy}" if _busy else "")),
     }
 
 
@@ -5711,8 +5706,13 @@ async def _exec_bot_factory_multi(
     if not active_accounts:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для Bot Factory"}
 
-    claimed_ids = [a["id"] for a in active_accounts]
-    await mark_accounts_in_use(claimed_ids)
+    # Отказной захват вместо безусловной пометки: занятую сессию в работу не берём.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(active_accounts) - len(claimed_ids)
+    active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
     total = len(active_accounts) * bot_count
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
@@ -5819,7 +5819,8 @@ async def _exec_bot_factory_multi(
         "ok": created_count,
         "failed": failed_count,
         "created_tokens": created_tokens[:10],
-        "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
+        "summary": (f"Создано ботов: {created_count}, ошибок: {failed_count}"
+                    + (f", пропущено занятых аккаунтов: {_busy}" if _busy else "")),
     }
 
 
@@ -7699,11 +7700,23 @@ async def _exec_bulk_chan_exec(
 
     acc_map = {int(r["id"]): dict(r) for r in rows}
 
+    # Отказной захват вместо безусловной пометки. Пары «канал↔аккаунт» с
+    # незахваченным аккаунтом выбрасываем: работать ими нельзя, а молча оставить
+    # их в total — соврать в прогрессе и в итоге.
+    claimed_ids = await try_claim_accounts([int(a) for a in acc_map])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _claimed_set = set(claimed_ids)
+    _pairs_before = len(channel_acc_pairs)
+    channel_acc_pairs = [p for p in channel_acc_pairs
+                         if int(p["acc_id"]) in _claimed_set]
+    _busy = _pairs_before - len(channel_acc_pairs)
+
     total = len(channel_acc_pairs)
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
 
-    await mark_accounts_in_use(acc_ids)
     ok_list: list[str] = []
     err_list: list[str] = []
 
@@ -7808,11 +7821,12 @@ async def _exec_bulk_chan_exec(
             )
             await asyncio.sleep(2)
     finally:
-        await release_accounts(acc_ids)
+        await release_accounts(claimed_ids)
 
     op_label = {"chan_uname": "🔤 Username", "chan_about": "📄 Описание", "chan_title": "📛 Название"}.get(op, op)
     summary_lines = [
         f"{op_label} — завершено: ✅ {len(ok_list)} ❌ {len(err_list)} из {total}"
+        + (f" · пропущено (аккаунт занят): {_busy}" if _busy else "")
     ] + (ok_list + err_list)[:40]
     summary = "\n".join(summary_lines)
 

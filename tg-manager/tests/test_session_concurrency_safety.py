@@ -169,6 +169,67 @@ def test_partial_grant_rolls_back_only_ungranted():
         ow._db_pool = saved
 
 
+def test_unconditional_mark_is_gone_for_good():
+    """Храповик: безусловной пометки «эти сессии мои» в продукте больше нет.
+
+    mark_accounts_in_use() не спрашивал арбитра и пропускал в работу аккаунт,
+    уже занятый другой операцией/репликой. Все пути переведены на отказной
+    try_claim_account(s). Если функция вернётся — вернётся и класс аварии.
+    """
+    assert not hasattr(ow, "mark_accounts_in_use"), (
+        "mark_accounts_in_use воскрешён — это безусловный захват без арбитража"
+    )
+    for rel in ("services/op_worker.py", "bot/handlers/strike.py"):
+        src = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+        calls = [ln for ln in src.split("\n")
+                 if "mark_accounts_in_use(" in ln and not ln.strip().startswith("#")]
+        assert not calls, f"{rel}: остался безусловный вызов: {calls[:2]}"
+
+
+def _func_source(path: str, name: str) -> str:
+    """Точное тело функции по границам AST.
+
+    Окно фиксированной длины тут не годится: `finally: release_accounts(...)`
+    лежит в сотнях строк от начала исполнителя и в окно не попадал — проверка
+    «освобождает то, что захватил» молча меряла не то.
+    """
+    import ast
+    src = open(path, encoding="utf-8").read()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(src.split("\n")[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"{name} не найдена в {path}")
+
+
+def _calls(body: str, needle: str) -> list[str]:
+    """Строки с вызовом, без комментариев (упоминание в комментарии — не вызов)."""
+    return [ln for ln in body.split("\n")
+            if needle in ln and not ln.strip().startswith("#")]
+
+
+def test_every_executor_claim_is_refusable():
+    """Исполнители, берущие флот, обязаны УМЕТЬ ОТКАЗАТЬ, а не помечать вслепую."""
+    path = os.path.join(ROOT, "services", "op_worker.py")
+    for fn in ("_exec_bulk_create_channels_multi", "_exec_bot_factory_multi",
+               "_exec_bulk_chan_exec"):
+        body = _func_source(path, fn)
+        assert _calls(body, "try_claim_accounts("), f"{fn}: захват без арбитража"
+        assert "claimed_ids" in body, f"{fn}: не сузился до захваченных аккаунтов"
+        assert _calls(body, "release_accounts(claimed_ids)"), (
+            f"{fn}: освобождает НЕ то, что захватил"
+        )
+
+
+def test_strike_handler_claims_atomically_not_check_then_mark():
+    """Проверка-снимок + пометка — это TOCTOU; должен быть один захват."""
+    src = open(os.path.join(ROOT, "bot", "handlers", "strike.py"), encoding="utf-8").read()
+    assert _calls(src, "try_claim_account(")
+    assert not _calls(src, "is_account_in_use("), (
+        "снимок is_account_in_use виден только в СВОЁМ процессе и допускает гонку"
+    )
+
+
 def test_release_is_scoped_to_own_lease():
     """Освобождение обязано скоупиться владельцем аренды: иначе реплика снимает
     защиту с живой сессии соседа."""
