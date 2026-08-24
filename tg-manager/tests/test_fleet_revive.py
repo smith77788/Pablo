@@ -28,12 +28,14 @@ def test_revive_endpoint_and_route_exist():
     assert "async def accounts_revive" in api
     assert '"/api/miniapp/accounts/revive"' in api
     i = api.index("async def accounts_revive")
-    body = api[i:i + 3200]
+    body = api[i:i + 4200]
     # снимает блокировки только у аккаунтов С сессией, оптимистично активирует
     assert "session_str IS NOT NULL" in body
     assert "in_operation=FALSE" in body
     assert "cooldown_until=NULL" in body
     assert "release_accounts" in body   # снимаем и in-memory lock op_worker
+    # снимаем cf_relay_url с аккаунтов на мёртвом CF-воркере (иначе таймаут на релей)
+    assert "SET cf_relay_url=NULL" in body and "cf_worker_pool" in body
 
 
 def test_revive_button_wired_in_ui():

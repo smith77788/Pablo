@@ -7144,6 +7144,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 revived = int(str(res).split()[-1])
             except (ValueError, IndexError):
                 revived = 0
+            # Снимаем cf_relay_url с аккаунтов, чей CF-воркер лёг (нет в живом пуле):
+            # иначе безпроксёвый аккаунт при каждом коннекте тратит таймаут на
+            # мёртвый релей, прежде чем откатиться на прямой host-IP. Best-effort
+            # (таблица cf_worker_pool может отсутствовать на старой схеме).
+            try:
+                cleared = await pool.execute(
+                    "UPDATE tg_accounts SET cf_relay_url=NULL "
+                    "WHERE owner_id=$1 AND proxy_id IS NULL AND cf_relay_url IS NOT NULL "
+                    "AND cf_relay_url NOT IN (SELECT worker_url FROM cf_worker_pool "
+                    "  WHERE owner_id=$1 AND status <> 'down')",
+                    uid)
+                log.info("accounts_revive uid=%s: cleared dead relays %s", uid, cleared)
+            except Exception:
+                log.debug("accounts_revive: dead-relay clear skipped", exc_info=True)
             # Снимаем и in-memory lock op_worker'а (иначе арбитр держал бы «занят»
             # до рестарта, и revive из БД не помог бы операции их захватить).
             try:
