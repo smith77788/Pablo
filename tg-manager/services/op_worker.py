@@ -3,9 +3,12 @@
 import asyncio
 import json
 import logging
+import os
 import random
 import re
+import socket
 import time
+import uuid
 import aiohttp
 import asyncpg
 from aiogram import Bot
@@ -82,6 +85,12 @@ _MIN_ACCOUNTS_PER_OP = 1     # честный дележ флота: миним�
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
+#
+# ВАЖНО о роли этого set. Он — БЫСТРЫЙ ЛОКАЛЬНЫЙ фильтр, а НЕ арбитр. Настоящий
+# арбитр — аренда в БД (см. _db_claim): только она видна другим репликам. Пока
+# процесс один, локального set достаточно; со второй репликой он видит своё
+# пустое множество и без БД пустил бы одну сессию в два процесса
+# (AUTH_KEY_DUPLICATED). Поэтому захват = локальный фильтр И аренда в БД.
 _accounts_in_use: set[int] = set()
 _operation_account_locks: dict[int, set[int]] = {}
 _accounts_lock = asyncio.Lock()
@@ -90,11 +99,111 @@ _accounts_lock = asyncio.Lock()
 # Устанавливается через init_op_worker_pool() при старте.
 _db_pool: "asyncpg.Pool | None" = None
 
+# ── Аренда аккаунта (межпроцессный арбитр) ───────────────────────────────────
+# Идентификатор ЭТОЙ реплики. Пишется в op_lease_owner, чтобы:
+#   • освобождать только своё (реплика не должна снимать защиту с чужой сессии);
+#   • продлевать только своё (heartbeat);
+#   • на старте чистить залипшее, не трогая живые аренды соседей.
+_WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+# Аренда живёт 15 минут и продлевается heartbeat'ом каждый цикл воркера (10 с).
+# Упал процесс — аренда истекает сама, и аккаунты возвращаются в оборот без
+# 60-минутного сторожа.
+_LEASE_TTL_S = 900
+
 
 def init_op_worker_pool(pool: "asyncpg.Pool") -> None:
     """Вызывать один раз при старте, чтобы mark/release синхронизировались с БД."""
     global _db_pool
     _db_pool = pool
+
+
+async def _db_claim(acc_ids: list[int]) -> list[int]:
+    """Атомарно взять аренду на аккаунты. Возвращает РЕАЛЬНО захваченные id.
+
+    Единственный межпроцессный арбитр. Один UPDATE ... RETURNING: Postgres
+    сериализует конкурирующие обновления строки и перепроверяет WHERE по
+    свежей версии, поэтому две реплики физически не могут получить один id.
+
+    Забрать можно свободный аккаунт, аккаунт с истёкшей арендой и СВОЙ
+    собственный (идемпотентный повтор). Чужую живую аренду — нельзя.
+
+    FAIL-CLOSED: сбой БД → пустой список. Взять сессию без арбитража опаснее,
+    чем не взять: цена ошибки — мёртвый auth-key, а не задержка операции.
+    """
+    if not acc_ids:
+        return []
+    if not _db_pool:
+        # Нет пула (тесты, одиночный процесс без БД) — решает локальный фильтр.
+        return list(acc_ids)
+    try:
+        rows = await _db_pool.fetch(
+            """UPDATE tg_accounts
+                  SET in_operation   = TRUE,
+                      op_lease_owner = $2,
+                      op_lease_until = now() + make_interval(secs => $3)
+                WHERE id = ANY($1::int[])
+                  AND (in_operation = FALSE
+                       OR op_lease_until IS NULL
+                       OR op_lease_until < now()
+                       OR op_lease_owner = $2)
+             RETURNING id""",
+            [int(i) for i in acc_ids], _WORKER_ID, float(_LEASE_TTL_S),
+        )
+        return [int(r["id"]) for r in rows]
+    except Exception as e:
+        log.error(
+            "op_worker: захват аренды не удался (%s) — НИЧЕГО не захватываем "
+            "(fail-closed: сессия без арбитража рискует auth-key)", e,
+        )
+        return []
+
+
+async def _db_release(acc_ids: list[int]) -> None:
+    """Снять аренду — ТОЛЬКО со своих аккаунтов.
+
+    Условие по op_lease_owner обязательно: без него рестарт/уборка одной реплики
+    снимала бы in_operation с сессий, которые прямо сейчас держит другая.
+    op_lease_owner IS NULL — legacy-строки до миграции аренды, их освобождаем.
+    """
+    if not _db_pool or not acc_ids:
+        return
+    try:
+        await _db_pool.execute(
+            """UPDATE tg_accounts
+                  SET in_operation   = FALSE,
+                      op_lease_until = NULL,
+                      op_lease_owner = NULL
+                WHERE id = ANY($1::int[])
+                  AND (op_lease_owner = $2 OR op_lease_owner IS NULL)""",
+            [int(i) for i in acc_ids], _WORKER_ID,
+        )
+    except Exception as e:
+        log.warning("op_worker: снятие аренды не удалось: %s", e)
+
+
+async def renew_leases() -> int:
+    """Heartbeat: продлить аренду всех аккаунтов, которые держит ЭТА реплика.
+
+    Вызывается из цикла воркера. Пока процесс жив — его аккаунты не уводят;
+    умер — аренды истекают, и флот возвращается в оборот сам.
+    Возвращает число продлённых строк.
+    """
+    if not _db_pool:
+        return 0
+    try:
+        res = await _db_pool.execute(
+            """UPDATE tg_accounts
+                  SET op_lease_until = now() + make_interval(secs => $2)
+                WHERE op_lease_owner = $1 AND in_operation = TRUE""",
+            _WORKER_ID, float(_LEASE_TTL_S),
+        )
+        try:
+            return int(str(res).rsplit(" ", 1)[-1])
+        except (TypeError, ValueError):
+            return 0
+    except Exception as e:
+        log.warning("op_worker: продление аренды не удалось: %s", e)
+        return 0
 
 
 # ── Circuit Breaker (аварийный выключатель) ──────────────────────────────────
@@ -272,13 +381,31 @@ def get_adaptive_batch_delay(base_delay: float, batch_size: int, tz_offset: int 
 
 
 async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
-    """Reset all stale in_operation=TRUE flags after bot restart.
+    """Освободить ЗАЛИПШИЕ in_operation при старте — не трогая живые аренды.
 
-    Called once at startup to clear flags from the previous process.
+    Раньше здесь был безусловный сброс всех флагов. С одной репликой это верно
+    («прошлый процесс — это я»), но со второй репликой рестарт одного контейнера
+    снимал защиту с сессий, которые прямо сейчас держит другой: обе реплики
+    считали аккаунт свободным и открывали одну сессию дважды.
+
+    Теперь освобождаем только то, за что никто живой не отвечает:
+      • аренда истекла (процесс умер, продлевать некому);
+      • аренды нет вовсе (legacy-строки до миграции v179);
+      • аренда наша собственная (мы и есть перезапустившийся процесс).
     """
     try:
-        await pool.execute("UPDATE tg_accounts SET in_operation = FALSE WHERE in_operation = TRUE")
-        log.info("op_worker: stale in_operation flags cleared")
+        res = await pool.execute(
+            """UPDATE tg_accounts
+                  SET in_operation   = FALSE,
+                      op_lease_until = NULL,
+                      op_lease_owner = NULL
+                WHERE in_operation = TRUE
+                  AND (op_lease_until IS NULL
+                       OR op_lease_until < now()
+                       OR op_lease_owner = $1)""",
+            _WORKER_ID,
+        )
+        log.info("op_worker: освобождены залипшие аккаунты (%s); живые аренды сохранены", res)
     except Exception as e:
         log.warning("op_worker: failed to clear stale in_operation: %s", e)
 
@@ -310,24 +437,29 @@ async def _do_db_flag(acc_ids: list[int], value: bool) -> None:
 
 
 async def mark_accounts_in_use(acc_ids: list[int]) -> None:
-    """Mark accounts as busy for op_worker operations.
+    """Пометить аккаунты занятыми (БЕЗУСЛОВНО — не отказывает вызывающему).
 
-    Updates both in-memory registry and database in_operation flag.
-    Prevents account_warmer from using these accounts.
-
-    Args:
-        acc_ids: List of account IDs to mark as in use.
+    УНАСЛЕДОВАННЫЙ путь: в отличие от try_claim_accounts, он не арбитрирует, а
+    заявляет «эти аккаунты мои». Оставшиеся вызовы (bot_factory, массовые правки
+    каналов, strike из бота) написаны в расчёте на это. Переводить их на
+    отказной захват — отдельная задача; здесь мы лишь делаем состояние в БД
+    ПРАВИЛЬНЫМ: берём аренду на эту реплику, чтобы строка принадлежала владельцу
+    и истекала сама. Если аренду выдали не на все id — значит их держит другая
+    реплика; это ЛОГИРУЕТСЯ как риск двойной сессии, но поток не меняем.
     """
+    ids = [int(a) for a in acc_ids]
     async with _accounts_lock:
-        _accounts_in_use.update(acc_ids)
-    if _db_pool and acc_ids:
-        try:
-            await _db_pool.execute(
-                "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
-                acc_ids,
-            )
-        except Exception as e:
-            log.warning("op_worker: db flag update (mark_in_use) failed: %s", e)
+        _accounts_in_use.update(ids)
+    if not ids:
+        return
+    granted = await _db_claim(ids)
+    missed = set(ids) - set(granted)
+    if missed:
+        log.error(
+            "op_worker: mark_accounts_in_use не смог взять аренду на %s — "
+            "их держит другая реплика (риск двойной сессии на этих аккаунтах)",
+            sorted(missed),
+        )
 
 
 async def release_accounts(acc_ids: list[int]) -> None:
@@ -343,14 +475,7 @@ async def release_accounts(acc_ids: list[int]) -> None:
             _accounts_in_use.discard(aid)
             for locked_acc_ids in _operation_account_locks.values():
                 locked_acc_ids.discard(aid)
-    if _db_pool and acc_ids:
-        try:
-            await _db_pool.execute(
-                "UPDATE tg_accounts SET in_operation=FALSE WHERE id = ANY($1::int[])",
-                acc_ids,
-            )
-        except Exception as e:
-            log.warning("op_worker: db flag update (release) failed: %s", e)
+    await _db_release([int(a) for a in acc_ids])
 
 
 async def try_claim_accounts(acc_ids: list[int]) -> list[int]:
@@ -364,20 +489,24 @@ async def try_claim_accounts(acc_ids: list[int]) -> list[int]:
     из двух мест (защита от AUTH_KEY_DUPLICATED).
 
     Освобождать через release_accounts(claimed) в finally у вызывающего.
+
+    Два уровня: локальный фильтр (быстро отсекает своё) и аренда в БД
+    (единственный арбитр, видимый другим репликам). Если БД дала меньше, чем
+    отфильтровал локальный уровень — лишнее возвращаем обратно, иначе аккаунт
+    остался бы «занят» в памяти навсегда, не будучи занятым на деле.
     """
     ids = [int(a) for a in acc_ids]
     async with _accounts_lock:
-        claimed = [a for a in ids if a not in _accounts_in_use]
-        _accounts_in_use.update(claimed)
-    if claimed and _db_pool:
-        try:
-            await _db_pool.execute(
-                "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
-                claimed,
-            )
-        except Exception as e:
-            log.warning("op_worker: db flag update (try_claim) failed: %s", e)
-    return claimed
+        local = [a for a in ids if a not in _accounts_in_use]
+        _accounts_in_use.update(local)          # предварительный захват
+    if not local:
+        return []
+    granted = await _db_claim(local)
+    if len(granted) != len(local):
+        lost = set(local) - set(granted)
+        async with _accounts_lock:
+            _accounts_in_use.difference_update(lost)   # откат непрошедших
+    return granted
 
 
 async def try_claim_account(acc_id: int) -> bool:
@@ -404,14 +533,7 @@ async def release_operation_accounts(op_id: int) -> None:
         for aid in acc_ids:
             _accounts_in_use.discard(aid)
             freed.append(aid)
-    if freed and _db_pool:
-        try:
-            await _db_pool.execute(
-                "UPDATE tg_accounts SET in_operation=FALSE WHERE id = ANY($1::int[])",
-                freed,
-            )
-        except Exception as e:
-            log.warning("op_worker: db flag update (release_operation) failed: %s", e)
+    await _db_release(freed)
 
 
 async def _claim_available_accounts(
@@ -461,14 +583,20 @@ async def _claim_available_accounts(
         _accounts_in_use.update(acc_ids)
         if acc_ids:
             _operation_account_locks.setdefault(op_id, set()).update(acc_ids)
-    if claimed and _db_pool:
-        try:
-            await _db_pool.execute(
-                "UPDATE tg_accounts SET in_operation=TRUE WHERE id = ANY($1::int[])",
-                acc_ids,
-            )
-        except Exception as e:
-            log.warning("op_worker: db flag update (claim_accounts) failed: %s", e)
+    if not acc_ids:
+        return []
+    # Межпроцессный арбитр: без него вторая реплика взяла бы те же сессии.
+    granted = set(await _db_claim(acc_ids))
+    if len(granted) != len(acc_ids):
+        lost = set(acc_ids) - granted
+        async with _accounts_lock:
+            _accounts_in_use.difference_update(lost)
+            held = _operation_account_locks.get(op_id)
+            if held is not None:
+                held.difference_update(lost)
+                if not held:
+                    _operation_account_locks.pop(op_id, None)
+        claimed = [a for a in claimed if int(a["id"]) in granted]
     return claimed
 
 
@@ -1471,6 +1599,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as e:
             log.exception("op_worker error: %s", e)
         _watchdog_tick += 1
+        # Heartbeat аренды: пока процесс жив, его аккаунты не уводит другая
+        # реплика. Каждые ~30с — на порядок чаще TTL (15 мин), так что одна
+        # неудачная попытка ничего не роняет.
+        if _watchdog_tick % 3 == 0:
+            await renew_leases()
         # Run stale-running watchdog every 6 poll cycles (~1 minute)
         if _watchdog_tick % 6 == 0:
             await _watchdog_stale(pool)

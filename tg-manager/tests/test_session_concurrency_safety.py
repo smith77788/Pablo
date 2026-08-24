@@ -116,6 +116,68 @@ def test_background_connectors_claim_atomically_and_release():
             f"{rel}: остался небезопасный снимок is_account_in_use вместо захвата"
 
 
+# ─── Межпроцессный арбитр (аренда в БД) ───────────────────────────────────────
+# Дизъюнктность двух реплик проверяется на живом Postgres в
+# tests/test_account_lease_postgres.py. Эти проверки работают ВСЕГДА (без БД) —
+# иначе регресс арбитра проехал бы CI незамеченным, ведь тот файл пропускается
+# без INFRAGRAM_TEST_DSN.
+
+def test_both_claim_paths_go_through_db_arbiter():
+    src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+    for fn in ("try_claim_accounts", "_claim_available_accounts"):
+        i = src.index(f"async def {fn}(")
+        body = src[i:i + 3000]
+        assert "_db_claim(" in body, (
+            f"{fn} не проходит через межпроцессный арбитр — вторая реплика "
+            f"возьмёт те же сессии (AUTH_KEY_DUPLICATED)"
+        )
+
+
+def test_db_claim_fails_closed_and_rolls_back_local_set():
+    """Сбой БД: захвата нет, локальный фильтр откатывается (иначе аккаунт
+    навсегда «занят» в памяти, не будучи занятым на деле)."""
+    class _Broken:
+        async def fetch(self, *_a, **_k):
+            raise RuntimeError("БД недоступна")
+        async def execute(self, *_a, **_k):
+            raise RuntimeError("БД недоступна")
+
+    saved = ow._db_pool
+    ow._db_pool = _Broken()
+    try:
+        assert asyncio.run(ow.try_claim_accounts([21, 22])) == []
+        assert ow._accounts_in_use == set(), "локальный набор не откатился"
+    finally:
+        ow._db_pool = saved
+
+
+def test_partial_grant_rolls_back_only_ungranted():
+    """БД выдала часть — в памяти остаётся ровно выданное."""
+    class _Partial:
+        async def fetch(self, _q, ids, *_a):
+            return [{"id": int(i)} for i in ids if int(i) != 31]  # 31 занят соседом
+        async def execute(self, *_a, **_k):
+            return "UPDATE"
+
+    saved = ow._db_pool
+    ow._db_pool = _Partial()
+    try:
+        got = asyncio.run(ow.try_claim_accounts([30, 31, 32]))
+        assert set(got) == {30, 32}
+        assert ow._accounts_in_use == {30, 32}, "невыданный аккаунт остался занятым"
+    finally:
+        ow._db_pool = saved
+
+
+def test_release_is_scoped_to_own_lease():
+    """Освобождение обязано скоупиться владельцем аренды: иначе реплика снимает
+    защиту с живой сессии соседа."""
+    src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+    i = src.index("async def _db_release(")
+    body = src[i:i + 900]
+    assert "op_lease_owner = $2" in body
+
+
 def test_strike_claims_atomically_and_works_only_on_claimed():
     src = open(os.path.join(ROOT, "services", "strike_engine.py"), encoding="utf-8").read()
     i = src.index("async def staggered_strike")

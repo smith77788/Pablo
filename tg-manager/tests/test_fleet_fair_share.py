@@ -14,11 +14,24 @@ import services.op_worker as ow
 
 
 class _FakePool:
-    def __init__(self, running):
+    """Заглушка пула, моделирующая межпроцессную аренду аккаунтов (v179).
+
+    `fetch` повторяет контракт `UPDATE ... RETURNING id` из op_worker._db_claim:
+    аренду выдаём на всё, что не держит ДРУГОЙ владелец. Так дележ флота
+    проверяется без живой БД, а межпроцессная дизъюнктность — в
+    tests/test_account_lease_postgres.py на настоящем Postgres.
+    """
+
+    def __init__(self, running, held_by_others: set[int] | None = None):
         self._running = running
+        self._held = set(held_by_others or ())
 
     async def fetchval(self, q, *a):
         return self._running
+
+    async def fetch(self, q, *a):
+        ids = list(a[0]) if a else []
+        return [{"id": int(i)} for i in ids if int(i) not in self._held]
 
     async def execute(self, q, *a):
         return "UPDATE"

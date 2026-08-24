@@ -24,7 +24,11 @@ def _version(path: str) -> int:
     name = os.path.basename(path)
     if name == "schema.sql":
         return 0  # базовый файл применяется первым (как в create_pool)
-    m = re.search(r"schema_v(\d+)\.sql$", name)
+    # Версию берём как рантайм (database/db.py::_version_key) — по первому числу
+    # после «v», а НЕ строгим `schema_vN.sql$`. Иначе файл с суффиксом
+    # (schema_v146_ban_weather.sql) считался здесь версией 0, и линтер проверял
+    # НЕ ТОТ порядок, в котором миграции реально применяются.
+    m = re.search(r"schema_v(\d+)", name)
     return int(m.group(1)) if m else 0
 
 
