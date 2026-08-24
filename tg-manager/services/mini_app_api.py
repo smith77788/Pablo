@@ -6602,6 +6602,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ok = await chat_warmup.set_status(pool, uid, sid, status)
         return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
 
+    async def fleet_diagnose(request: web.Request) -> web.Response:
+        """Диагностика «почему флот не исполняет»: воронка отбора аккаунтов +
+        конфиг + залипшие операции + последние реальные ошибки."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import fleet_doctor
+            return _json_resp(await fleet_doctor.diagnose(pool, uid))
+        except Exception as e:
+            log.exception("fleet_diagnose uid=%s", uid)
+            return _err(str(e)[:150], 500)
+
     async def chatwarmup_accounts(request: web.Request) -> web.Response:
         """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
         uid = _get_uid(request)
@@ -14067,6 +14080,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
     app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
     app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)
+    app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
