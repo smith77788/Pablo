@@ -44,7 +44,7 @@ def test_retries_then_succeeds(monkeypatch):
     state = {"connect": 0, "make": 0}
     sleeps: list = []
 
-    def fake_make(session, device, low_risk=False, _no_pool=False):
+    def fake_make(session, device, low_risk=False, _no_pool=False, _force_direct=False):
         state["make"] += 1
         return _FakeClient()
 
@@ -85,7 +85,7 @@ def test_exhausts_retries_reraises(monkeypatch):
     sleeps: list = []
     made: list = []
 
-    def fake_make(session, device, low_risk=False, _no_pool=False):
+    def fake_make(session, device, low_risk=False, _no_pool=False, _force_direct=False):
         c = _FakeClient()
         made.append(c)
         return c

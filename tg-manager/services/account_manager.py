@@ -900,7 +900,7 @@ def generate_device_fingerprint(
 
 
 def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False,
-                 _no_pool: bool = False):
+                 _no_pool: bool = False, _force_direct: bool = False):
     """Создать TelegramClient с правильным fingerprint и транспортом.
 
     _no_pool=True — НЕ брать прокси из free-pool для безпроксёвого аккаунта, а идти
@@ -968,7 +968,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     if not _subnet:
         _subnet = _IPV6_SUBNET
 
-    if not has_bound_proxy and _subnet and _acc_id:
+    if not has_bound_proxy and _subnet and _acc_id and not _force_direct:
         # ПРИОРИТЕТ над CF-релеем: IPv6 даёт РЕАЛЬНО уникальный IP на аккаунт
         # (у CF-релея общий edge-IP на пул). Прямое obfuscated-подключение к
         # IPv6-DC Telegram с bind на свой адрес.
@@ -983,17 +983,17 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
 
     if local_addr is not None:
         pass  # транспорт уже выбран (IPv6 direct)
-    elif not has_bound_proxy and relay_url:
+    elif not has_bound_proxy and relay_url and not _force_direct:
         from services.cf_relay import make_cf_relay_connection as _make_relay
         connection_cls = _make_relay(relay_url)
         effective_proxy = None  # relay сам маршрутизирует
         _transport = "relay"
     else:
         connection_cls = ConnectionTcpObfuscated
-        if not has_bound_proxy and _no_pool:
-            # Fallback-режим: пропускаем free-pool, идём напрямую (host IP).
+        if not has_bound_proxy and (_no_pool or _force_direct):
+            # Fallback-режим: пропускаем free-pool/релей/IPv6, идём напрямую (host IP).
             proxy = None
-        elif not has_bound_proxy and _USE_FREE_POOL:
+        elif not has_bound_proxy and _USE_FREE_POOL and not _force_direct:
             # Опционально (USE_FREE_POOL=1): бесплатный пул публичных SOCKS5-прокси
             # (populated by proxy_scraper). ЗАЛИПАЮЩИЙ по ТЕЛЕФОНУ (а не account_id):
             # телефон известен и на логине, и в операциях, поэтому сессия авторизуется
@@ -1069,10 +1069,16 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
 def _direct_fallback_ok(transport: str | None, policy: str) -> bool:
     """Можно ли после сбоя коннекта переподключиться НАПРЯМУЮ (host IP).
 
-    Только если шли через free-pool ('pool') и политика допускает прямой выход
-    (не strict). Для bound-прокси/relay/ipv6 прямой fallback запрещён: там смена IP
-    ломает auth key либо это осознанная изоляция. strict запрещает host IP всегда."""
-    return transport == "pool" and policy != "strict"
+    Разрешено для ВСЕХ безпроксёвых транспортов (pool/relay/ipv6): это лишь
+    способы выхода для аккаунта БЕЗ назначенного прокси, и если способ недоступен
+    (мёртвый free-pool, лежащий/несконфигурированный CF-релей, недоступный IPv6) —
+    прямой стабильный host-IP лучше несостоявшегося коннекта. Именно так флот и
+    работал «на реальном IP», когда прокси/релей/IPv6 не заданы; авто-раздача
+    cf_relay_url больше не запирает безпроксёвый аккаунт на нерабочем релее.
+
+    ЗАПРЕЩЕНО для bound-прокси (сессия привязана к IP прокси — смена IP ломает
+    auth key) и для strict-политики (осознанная изоляция реального адреса)."""
+    return transport in ("pool", "relay", "ipv6") and policy != "strict"
 
 
 async def connect_client(session_string: str = "", device: dict | None = None,
@@ -1107,24 +1113,33 @@ async def connect_client(session_string: str = "", device: dict | None = None,
     # HTTP-запрос до таймаута шлюза. Такие вызовы падают быстро.
     _backoff = _AUTH_DUP_BACKOFF if retry_auth_dup else ()
     last_dup: Exception | None = None
+    _force_direct_retry = False  # после duplicated на безпроксёвом транспорте
     for _attempt in range(len(_backoff) + 1):
-        client = _make_client(session_string, device, low_risk=low_risk)
+        client = _make_client(session_string, device, low_risk=low_risk,
+                              _force_direct=_force_direct_retry)
         try:
             await _connect_and_track(client, device, action_type)
             return client
         except AuthKeyDuplicatedError as e:
             last_dup = e
+            _transport = getattr(client, "_infragram_transport", None)
             try:
                 await client.disconnect()
             except Exception:
                 pass
             if _attempt < len(_backoff):
                 _delay = _backoff[_attempt]
+                # Для БЕЗПРОКСЁВОГО транспорта (релей/пул/IPv6) частая причина
+                # duplicated — скачущий/общий exit-IP. На ретрае уходим на прямой
+                # стабильный host-IP. Bound-прокси/strict не трогаем.
+                if _direct_fallback_ok(_transport, _effective_proxy_policy(device or {})):
+                    _force_direct_retry = True
                 log.warning(
-                    "acc=%s: AUTH_KEY_DUPLICATED (сессия с двух IP) — авто-ретрай "
-                    "через %.0fс (попытка %d/%d)",
-                    (device or {}).get("id"), _delay, _attempt + 1,
-                    len(_backoff) + 1,
+                    "acc=%s: AUTH_KEY_DUPLICATED (сессия с двух IP, транспорт '%s') — "
+                    "авто-ретрай через %.0fс%s (попытка %d/%d)",
+                    (device or {}).get("id"), _transport, _delay,
+                    " на прямой host-IP" if _force_direct_retry else "",
+                    _attempt + 1, len(_backoff) + 1,
                 )
                 await asyncio.sleep(_delay)
                 continue
@@ -1142,10 +1157,14 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             except Exception:
                 pass
             log.warning(
-                "acc=%s: free-pool прокси недоступен (%s) — fallback на прямое подключение (allow_direct)",
-                (device or {}).get("id"), str(e)[:80],
+                "acc=%s: транспорт '%s' недоступен (%s) — fallback на ПРЯМОЕ подключение "
+                "с host-IP (allow_direct)",
+                (device or {}).get("id"), transport, str(e)[:80],
             )
-            client = _make_client(session_string, device, low_risk=low_risk, _no_pool=True)
+            # _force_direct: минуем релей/IPv6/пул — идём стабильным host-IP,
+            # иначе fallback снова уткнётся в тот же нерабочий релей.
+            client = _make_client(session_string, device, low_risk=low_risk,
+                                  _no_pool=True, _force_direct=True)
             await _connect_and_track(client, device, action_type)
             return client
     # Теоретически недостижимо (цикл либо возвращает, либо пробрасывает).

@@ -20,11 +20,14 @@ from services import account_manager as am
 
 
 def test_direct_fallback_ok_matrix():
+    # БЕЗПРОКСЁВЫЕ транспорты откатываются на прямой host-IP (allow_direct):
     assert am._direct_fallback_ok("pool", "allow_direct") is True
-    assert am._direct_fallback_ok("pool", "strict") is False       # strict запрещает host IP
+    assert am._direct_fallback_ok("relay", "allow_direct") is True   # лежащий CF-релей → host-IP
+    assert am._direct_fallback_ok("ipv6", "allow_direct") is True    # недоступный IPv6 → host-IP
+    # strict и bound-прокси — НЕ откатываем:
+    assert am._direct_fallback_ok("pool", "strict") is False         # strict запрещает host IP
+    assert am._direct_fallback_ok("relay", "strict") is False
     assert am._direct_fallback_ok("bound", "allow_direct") is False  # смена IP ломает auth key
-    assert am._direct_fallback_ok("relay", "allow_direct") is False
-    assert am._direct_fallback_ok("ipv6", "allow_direct") is False
     assert am._direct_fallback_ok("direct", "allow_direct") is False  # уже прямой — фолбэкать некуда
     assert am._direct_fallback_ok(None, "allow_direct") is False
 
@@ -41,9 +44,10 @@ class _FakeClient:
 def _install(monkeypatch, policy, first_transport, direct_ok=True):
     calls = {"make_no_pool": [], "connect": 0}
 
-    def fake_make(session, device=None, low_risk=False, _no_pool=False):
+    def fake_make(session, device=None, low_risk=False, _no_pool=False, _force_direct=False):
         calls["make_no_pool"].append(_no_pool)
-        return _FakeClient("direct" if _no_pool else first_transport)
+        # _force_direct/_no_pool → реально прямой транспорт (минуя релей/пул/IPv6).
+        return _FakeClient("direct" if (_no_pool or _force_direct) else first_transport)
 
     async def fake_connect(client, device, action):
         calls["connect"] += 1
@@ -64,6 +68,23 @@ def test_no_proxy_account_falls_back_to_direct(monkeypatch):
     client = asyncio.run(am.connect_client("sess", {"id": 1}, "join"))
     assert client._infragram_transport == "direct"       # переподключились напрямую
     assert calls["make_no_pool"] == [False, True]         # сначала пул, потом _no_pool
+    assert calls["connect"] == 2
+
+
+def test_relay_falls_back_to_direct(monkeypatch):
+    # Регресс «раньше работало на host-IP»: авто-раздача cf_relay_url увела флот на
+    # CF-релей; лежащий релей теперь откатывается на прямой host-IP, а не падает.
+    calls = _install(monkeypatch, "allow_direct", "relay")
+    client = asyncio.run(am.connect_client("sess", {"id": 1}, "join"))
+    assert client._infragram_transport == "direct"
+    assert calls["make_no_pool"] == [False, True]         # релей → прямой host-IP
+    assert calls["connect"] == 2
+
+
+def test_ipv6_falls_back_to_direct(monkeypatch):
+    calls = _install(monkeypatch, "allow_direct", "ipv6")
+    client = asyncio.run(am.connect_client("sess", {"id": 1}, "join"))
+    assert client._infragram_transport == "direct"
     assert calls["connect"] == 2
 
 
