@@ -53,6 +53,52 @@ def _two_prop_z(n_a: int, c_a: int, n_b: int, c_b: int) -> float:
     return (p_a - p_b) / denom
 
 
+def plan_winner_followup(variants: list[dict], winner_label: str) -> dict:
+    """Follow-up по победителю: кому дослать ПОБЕДИВШИЙ текст.
+
+    variants: [{"label": str, "text": str, "recipients": [ref, ...]}, ...] —
+    по одному на A/B-вариант (получатели каждой группы + её текст).
+
+    Логика: получатели проигравших групп «потрачены» на худшую копию —
+    дошлём им текст победителя. Тех, кто уже в группе победителя, НЕ трогаем
+    (у них и так лучший вариант — повтор был бы спамом). Дедуп, стабильный
+    порядок.
+
+    Возвращает {"winner_text": str|None, "targets": [ref, ...],
+    "loser_variants": int, "reason": str|None}. Если победитель не найден или
+    его текст пуст — targets пуст и reason объясняет почему.
+    """
+    winner_label = (winner_label or "").strip()
+    if not winner_label:
+        return {"winner_text": None, "targets": [], "loser_variants": 0,
+                "reason": "победитель не определён"}
+    winner_text = None
+    winner_recips: set = set()
+    for v in variants or []:
+        if (v.get("label") or "").strip() == winner_label:
+            winner_text = (v.get("text") or "").strip() or None
+            for r in v.get("recipients") or []:
+                if r:
+                    winner_recips.add(r)
+    if not winner_text:
+        return {"winner_text": None, "targets": [], "loser_variants": 0,
+                "reason": "у победителя нет текста для рассылки"}
+    seen: set = set(winner_recips)
+    targets: list = []
+    loser_variants = 0
+    for v in variants or []:
+        if (v.get("label") or "").strip() == winner_label:
+            continue
+        loser_variants += 1
+        for r in v.get("recipients") or []:
+            if r and r not in seen:
+                seen.add(r)
+                targets.append(r)
+    reason = None if targets else "нет получателей проигравших вариантов"
+    return {"winner_text": winner_text, "targets": targets,
+            "loser_variants": loser_variants, "reason": reason}
+
+
 def pick_winner(stats: list[dict], min_sample: int = 30) -> dict:
     """Определить победителя A/B по конверсии.
 

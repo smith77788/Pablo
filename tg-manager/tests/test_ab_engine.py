@@ -72,3 +72,63 @@ def test_ab_results_frontend_present():
     assert 'id="s-abresults"' in html
     assert "function openAbResults" in html
     assert "/api/miniapp/ab/results" in html
+
+
+# ── Follow-up по победителю ────────────────────────────────────────────────
+
+def test_followup_targets_losers_not_winner():
+    variants = [
+        {"label": "A/B#1", "text": "win", "recipients": ["@w1", "@w2"]},
+        {"label": "A/B#2", "text": "lose1", "recipients": ["@l1", "@l2"]},
+        {"label": "A/B#3", "text": "lose2", "recipients": ["@l3"]},
+    ]
+    r = ab_engine.plan_winner_followup(variants, "A/B#1")
+    assert r["winner_text"] == "win"
+    assert r["targets"] == ["@l1", "@l2", "@l3"]     # только проигравшие
+    assert "@w1" not in r["targets"] and "@w2" not in r["targets"]
+    assert r["loser_variants"] == 2
+    assert r["reason"] is None
+
+
+def test_followup_dedups_and_excludes_winner_recipients():
+    # получатель, попавший и в проигравший, и в победивший — не дублируем и не шлём
+    variants = [
+        {"label": "A", "text": "win", "recipients": ["@x", "@w"]},
+        {"label": "B", "text": "lose", "recipients": ["@x", "@l", "@l"]},
+    ]
+    r = ab_engine.plan_winner_followup(variants, "A")
+    assert r["targets"] == ["@l"]                    # @x уже у победителя, дубль @l схлопнут
+
+
+def test_followup_no_winner_text():
+    variants = [{"label": "A", "text": "  ", "recipients": ["@l"]}]
+    r = ab_engine.plan_winner_followup(variants, "A")
+    assert r["targets"] == [] and r["winner_text"] is None
+    assert "текст" in (r["reason"] or "")
+
+
+def test_followup_no_losers():
+    variants = [{"label": "A", "text": "win", "recipients": ["@w"]}]
+    r = ab_engine.plan_winner_followup(variants, "A")
+    assert r["targets"] == []
+    assert r["reason"]
+
+
+def test_followup_blank_winner_label():
+    r = ab_engine.plan_winner_followup([{"label": "A", "text": "t", "recipients": ["@a"]}], "")
+    assert r["targets"] == [] and r["winner_text"] is None
+
+
+def test_ab_followup_endpoint_wired():
+    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    assert "async def ab_followup" in src
+    assert '"/api/miniapp/ab/followup"' in src
+    assert "plan_winner_followup" in src
+    # follow-up идёт через ту же массовую рассылку под губернатором
+    assert "bulk_dm_adhoc" in src[src.index("async def ab_followup"):]
+
+
+def test_ab_followup_frontend_present():
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "function runAbFollowup" in html
+    assert "/api/miniapp/ab/followup" in html

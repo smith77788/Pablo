@@ -16111,6 +16111,132 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ab_results uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def ab_followup(request: web.Request) -> web.Response:
+        """Follow-up по победителю A/B: дослать ПОБЕДИВШИЙ текст получателям
+        проигравших вариантов (они получили худшую копию). Победителей не
+        трогаем. Тем самым «догреваем» аудиторию лучшим сообщением без ручного
+        копипаста. Тот же bulk_dm_adhoc под губернатором/флуд-темпом.
+
+        Тело: {"batch": <ab_batch>|null (по умолчанию последний),
+        "require_confident": bool (по умолчанию false — хватает лидера)}.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        require_confident = bool(body.get("require_confident"))
+        try:
+            batch = body.get("batch")
+            if batch:
+                batch = int(batch)
+            else:
+                batch = await pool.fetchval(
+                    "SELECT (params->>'ab_batch')::bigint FROM operation_queue "
+                    "WHERE owner_id=$1 AND op_type='bulk_dm_adhoc' "
+                    "AND params->>'ab_batch' IS NOT NULL "
+                    "ORDER BY created_at DESC LIMIT 1", uid)
+            if not batch:
+                return _err("Нет A/B-теста для follow-up — сначала запустите A/B-рассылку", 400)
+            # Собираем по каждому варианту: текст, метку, получателей и доставку.
+            # done_items — «конверсия» (доля успешной доставки), по ней и победитель.
+            rows = await pool.fetch(
+                "SELECT params->>'ab_variant' AS variant, "
+                "       COALESCE(SUM(total_items),0) AS sent, "
+                "       COALESCE(SUM(done_items),0) AS delivered "
+                "FROM operation_queue "
+                "WHERE owner_id=$1 AND op_type='bulk_dm_adhoc' "
+                "  AND (params->>'ab_batch')::bigint=$2 "
+                "GROUP BY params->>'ab_variant' ORDER BY variant", uid, int(batch))
+            if not rows:
+                return _err("A/B-тест не найден", 404)
+            from services import ab_engine
+            stats = []
+            labels = []
+            for idx, r in enumerate(rows):
+                labels.append(r["variant"] or "—")
+                stats.append({"variant": idx, "sent": int(r["sent"] or 0),
+                              "converted": int(r["delivered"] or 0)})
+            win = ab_engine.pick_winner(stats)
+            if require_confident and not win.get("confident"):
+                return _err("Победитель ещё не статзначим — дождитесь выборки или снимите строгость", 409)
+            widx = win.get("winner") if win.get("winner") is not None else win.get("leader")
+            if widx is None or not (0 <= widx < len(labels)):
+                return _err("Победитель не определён — недостаточно данных", 409)
+            winner_label = labels[widx]
+            # Текст + получатели каждого варианта из params операций батча.
+            op_rows = await pool.fetch(
+                "SELECT params->>'ab_variant' AS variant, params->>'text' AS text, "
+                "       params->'usernames' AS usernames, params->'account_ids' AS account_ids "
+                "FROM operation_queue "
+                "WHERE owner_id=$1 AND op_type='bulk_dm_adhoc' "
+                "  AND (params->>'ab_batch')::bigint=$2", uid, int(batch))
+            by_variant: dict = {}
+            acc_ids: list = []
+            for r in op_rows:
+                lab = r["variant"] or "—"
+                d = by_variant.setdefault(lab, {"label": lab, "text": r["text"] or "", "recipients": []})
+                try:
+                    us = _json.loads(r["usernames"]) if isinstance(r["usernames"], str) else (r["usernames"] or [])
+                except Exception:
+                    us = []
+                d["recipients"].extend([u for u in us if u])
+                if not acc_ids:
+                    try:
+                        a = _json.loads(r["account_ids"]) if isinstance(r["account_ids"], str) else (r["account_ids"] or [])
+                        acc_ids = [int(x) for x in a if str(x).isdigit()]
+                    except Exception:
+                        pass
+            plan = ab_engine.plan_winner_followup(list(by_variant.values()), winner_label)
+            targets = plan["targets"]
+            if not targets:
+                return _err(plan.get("reason") or "Некому досылать follow-up", 400)
+            # Аккаунты: живые из батча, иначе — любые живые владельца.
+            acc_ids = await _alive_accounts(uid, acc_ids)
+            if not acc_ids:
+                arows = await pool.fetch(
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                    "AND session_str IS NOT NULL", uid)
+                acc_ids = await _alive_accounts(uid, [int(r["id"]) for r in (arows or [])])
+            if not acc_ids:
+                return _err("Нет живых аккаунтов для рассылки", 400)
+            ready, reason = await _segment_pressure_ok(uid, "bulk_dm_adhoc")
+            if not ready:
+                return _err(f"Инфраструктура перегружена: {reason}", 429)
+            from services import operation_bus
+            op_ids = []
+            fu_batch = int(time.time() * 1000)
+            for i in range(0, len(targets), _SEG_DM_CHUNK):
+                chunk = targets[i:i + _SEG_DM_CHUNK]
+                if not chunk:
+                    continue
+                oid = await operation_bus.submit(
+                    pool, uid, "bulk_dm_adhoc",
+                    {"account_ids": acc_ids, "usernames": chunk, "text": plan["winner_text"],
+                     "delay": 45, "ab_variant": f"followup:{winner_label}", "ab_batch": fu_batch},
+                    total_items=len(chunk),
+                    label=f"Follow-up победителем ({winner_label}) ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)}")
+                op_ids.append(oid)
+            try:
+                from services.organism import spine
+                await spine.emit(pool, uid, "ab_followup", {
+                    "batch": int(batch), "winner": winner_label,
+                    "targets": len(targets), "ops": len(op_ids)})
+            except Exception:
+                pass
+            return _json_resp({"ok": True, "winner": winner_label,
+                               "confident": win.get("confident", False),
+                               "targets": len(targets), "op_ids": op_ids,
+                               "loser_variants": plan["loser_variants"],
+                               "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("ab_followup uid=%s", uid)
+            return _err(str(exc), 500)
+
     async def uch_segment_media(request: web.Request) -> web.Response:
         """Медиа всему сегменту. Multipart: file + text + account_ids + фильтры.
         Авто-разбивка: КАЖДЫЙ чанк получает свою копию файла (op удаляет свою)."""
@@ -17024,6 +17150,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/segment/preview", uch_segment_preview)
     app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
     app.router.add_get("/api/miniapp/ab/results", ab_results)
+    app.router.add_post("/api/miniapp/ab/followup", ab_followup)
     app.router.add_post("/api/miniapp/uch/segment/media", uch_segment_media)
     app.router.add_post("/api/miniapp/uch/segment/invite", uch_segment_invite)
     app.router.add_get("/api/miniapp/uch/segments", uch_segments_list)

@@ -12845,9 +12845,41 @@ async function openAbResults() {
         <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
       </div>`;
     }).join('');
+    // Follow-up по победителю: дослать выигравший текст тем, кто получил
+    // проигравший вариант. Доступно, когда есть победитель или хотя бы лидер.
+    const champ = d.winner || d.leader;
+    if (champ) {
+      h += `<div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:10px">
+        <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:8px">Дослать текст «<b>${esc(champ)}</b>» получателям проигравших вариантов (они получили худшую копию). Победителей не трогаем.</div>
+        <button class="btn btn-p" id="abFollowupBtn" onclick="runAbFollowup(${d.batch})" style="width:100%">📨 Дослать победителем${d.winner?'':' (по лидеру)'}</button>
+        <div id="abFollowupMsg" style="font-size:12px;margin-top:8px"></div>
+      </div>`;
+    }
     txt('abResults', h);
   } catch(e) {
     txt('abResults', empty('⚠️','Ошибка',e.message||'Не удалось загрузить'));
+  }
+}
+async function runAbFollowup(batch){
+  const btn=document.getElementById('abFollowupBtn');
+  const msg=document.getElementById('abFollowupMsg');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Запускаю…'; }
+  if(msg) msg.textContent='';
+  try{
+    const r=await api('/api/miniapp/ab/followup',{method:'POST',body:JSON.stringify({batch})});
+    if(r&&r.ok){
+      tg.HapticFeedback?.notificationOccurred?.('success');
+      if(msg){ msg.style.color='var(--green)';
+        msg.innerHTML=`✅ Запущено: <b>${num(r.targets)}</b> получателей · ${num((r.op_ids||[]).length)} операц. · победитель «${esc(r.winner)}»`; }
+      if(btn){ btn.textContent='✅ Отправлено'; }
+    } else {
+      if(msg){ msg.style.color='var(--red)'; msg.textContent='⚠️ Не удалось запустить'; }
+      if(btn){ btn.disabled=false; btn.textContent='📨 Дослать победителем'; }
+    }
+  }catch(e){
+    tg.HapticFeedback?.notificationOccurred?.('error');
+    if(msg){ msg.style.color='var(--red)'; msg.textContent='⚠️ '+(e.message||'Ошибка'); }
+    if(btn){ btn.disabled=false; btn.textContent='📨 Дослать победителем'; }
   }
 }
 // ── SEO объекта: анализ находимости (чистые эвристики, без сети) ──
