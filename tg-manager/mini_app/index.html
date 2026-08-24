@@ -5314,9 +5314,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field">
       <label>Прокси аккаунта (рекомендуется)</label>
       <select id="accImportProxy" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
-        <option value="">Без прокси (общий CF-relay)</option>
+        <option value="">Без прокси (прямое подключение)</option>
       </select>
-      <div class="field-note">Закрепляется за аккаунтом сразу (изоляция с первого шага). Без прокси — общий relay с единым IP, рискованно.</div>
+      <div class="field-note">Закрепляется за аккаунтом сразу (изоляция с первого шага). Без прокси — прямой выход с IP сервера.</div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <input type="text" id="accImportProxyNew" placeholder="или вставьте новый: socks5://user:pass@host:port" style="flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;box-sizing:border-box">
+        <button type="button" class="btn" id="accImportProxyAddBtn" onclick="addAccImportProxy()" style="white-space:nowrap;padding:9px 12px">＋ Добавить</button>
+      </div>
+      <div class="field-note">Новый прокси сохранится в ваш список и сразу закрепится за импортируемыми аккаунтами.</div>
     </div>
 
     <!-- Способ 1: строка сессии -->
@@ -10845,6 +10850,7 @@ async function saveProxy() {
 // сценария не работал в основном UI. Тянет существующий /import_sessions.
 async function openAccImportModal() {
   document.getElementById('accImportText').value='';
+  { const np=document.getElementById('accImportProxyNew'); if(np) np.value=''; }
   const err=document.getElementById('accImportErr'); err.style.display='none';
   const res=document.getElementById('accImportResult'); res.style.display='none'; res.innerHTML='';
   const btn=document.getElementById('accImportBtn'); btn.disabled=false; btn.textContent='➕ Импортировать';
@@ -10875,6 +10881,28 @@ function closeAccImportModal() {
 let _accLoginPhone='', _accLoginHash='', _accQrTimer=null;
 function _accErr(msg){ const e=document.getElementById('accImportErr'); if(!msg){e.style.display='none';return;} e.textContent=msg; e.style.display='block'; }
 function _accProxy(){ const sel=document.getElementById('accImportProxy'); const opt=sel.options[sel.selectedIndex]; return { id: sel.value||null, url:(opt&&opt.dataset&&opt.dataset.url)||null }; }
+// Создать НОВЫЙ прокси прямо в форме импорта: сохраняем в список пользователя и
+// сразу выбираем — чтобы он закрепился за аккаунтом при любом способе входа
+// (строка/номер/QR/файл), а не только при импорте строк сессий.
+async function addAccImportProxy(){
+  const inp=document.getElementById('accImportProxyNew');
+  const url=(inp.value||'').trim();
+  if(!url){ _accErr('Вставьте URL прокси'); return; }
+  if(!/^(socks5|socks4|http):\/\//i.test(url)){ _accErr('Прокси должен начинаться с socks5://, socks4:// или http://'); return; }
+  const btn=document.getElementById('accImportProxyAddBtn'); btn.disabled=true; btn.textContent='…';
+  try{
+    const r=await api('/api/miniapp/proxy',{method:'POST',body:JSON.stringify({proxy_url:url})});
+    if(!r||!r.ok||!r.id){ _accErr('Не удалось добавить прокси'); return; }
+    const sel=document.getElementById('accImportProxy');
+    let o=Array.from(sel.options).find(x=>x.value===String(r.id));
+    if(!o){ o=document.createElement('option'); o.value=String(r.id); o.dataset.url=url; o.textContent=(url.split('@').pop()); sel.appendChild(o); }
+    else { o.dataset.url=url; }
+    sel.value=String(r.id);
+    inp.value=''; _accErr('');
+    tg.HapticFeedback?.notificationOccurred?.('success');
+  }catch(e){ _accErr('Ошибка сети при добавлении прокси'); }
+  finally{ btn.disabled=false; btn.textContent='＋ Добавить'; }
+}
 function accStopQrPoll(){ if(_accQrTimer){ clearInterval(_accQrTimer); _accQrTimer=null; } }
 
 function accSetLoginMethod(m){
@@ -11009,8 +11037,12 @@ async function submitAccImport() {
   const raw=document.getElementById('accImportText').value.trim();
   const sel=document.getElementById('accImportProxy');
   const opt=sel.options[sel.selectedIndex];
-  const proxyId=sel.value||null;                       // закрепим за аккаунтом
-  const proxyUrl=(opt&&opt.dataset&&opt.dataset.url)||null;  // через него проверим
+  let proxyId=sel.value||null;                         // закрепим за аккаунтом
+  let proxyUrl=(opt&&opt.dataset&&opt.dataset.url)||null;    // через него проверим
+  // Пользователь вставил новый прокси, но не нажал «Добавить» — не теряем его:
+  // отправляем сырой URL, import_sessions сам создаст user_proxy и закрепит.
+  const newProxy=(document.getElementById('accImportProxyNew').value||'').trim();
+  if(!proxyId && newProxy){ proxyUrl=newProxy; }
   const err=document.getElementById('accImportErr'); err.style.display='none';
   const res=document.getElementById('accImportResult'); res.style.display='none';
   if (!raw) { err.textContent='Вставьте хотя бы одну строку сессии'; err.style.display='block'; return; }

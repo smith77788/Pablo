@@ -18,6 +18,19 @@ SESSION_FORMATS = {
 }
 
 
+def _proxy_type(proxy_url: str) -> str | None:
+    """Тип прокси по схеме URL (socks5/socks4/http) или None. Инлайн-копия
+    parse_proxy_type — чтобы не тянуть тяжёлый mini_app_api в импортёр сессий."""
+    u = (proxy_url or "").strip().lower()
+    if u.startswith("socks5://"):
+        return "socks5"
+    if u.startswith("socks4://"):
+        return "socks4"
+    if u.startswith("http://"):
+        return "http"
+    return None
+
+
 def detect_format(data: str) -> str:
     data = data.strip()
     if data.startswith('{'):
@@ -69,6 +82,46 @@ async def validate_session(session_string: str, proxy_url: str | None = None) ->
             await client.disconnect()
 
 
+async def ensure_user_proxy(
+    pool: asyncpg.Pool, owner_id: int, proxy_url: str, label: str | None = None
+) -> int | None:
+    """Найти или создать user_proxy владельца из сырого URL и вернуть его id.
+
+    Переиспользует ту же логику, что и ручное «Добавить прокси» (шифр at-rest +
+    детерминированный proxy_fp для дедупа). Нужна, чтобы пользователь мог задать
+    НОВЫЙ прокси прямо в форме импорта (а не только выбрать из уже сохранённых) —
+    вставленный прокси сразу СОЗДАЁТСЯ и ЗАКРЕПЛЯЕТСЯ за импортируемыми аккаунтами.
+    Возвращает None, если URL не похож на прокси или вставка не удалась (тогда
+    импорт продолжится напрямую с host-IP, а не упадёт целиком).
+    """
+    proxy_url = (proxy_url or "").strip()
+    proxy_type = _proxy_type(proxy_url)
+    if not proxy_type:
+        return None
+    try:
+        from services.token_vault import encrypt_token, proxy_fingerprint
+
+        _fp = proxy_fingerprint(proxy_url)
+        _enc = encrypt_token(proxy_url)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type, proxy_fp)
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO UPDATE
+                   SET label=COALESCE(EXCLUDED.label, user_proxies.label) RETURNING id""",
+                owner_id, label, _enc, proxy_type, _fp)
+        except asyncpg.UndefinedColumnError:
+            # proxy_fp ещё не мигрирован (лаг деплоя) — фолбэк без него.
+            row = await pool.fetchrow(
+                """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type)
+                   VALUES($1,$2,$3,$4) RETURNING id""",
+                owner_id, label, _enc, proxy_type)
+        return int(row["id"]) if row else None
+    except Exception:
+        log.exception("ensure_user_proxy owner=%s", owner_id)
+        return None
+
+
 async def import_sessions(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -88,6 +141,11 @@ async def import_sessions(
                 proxy_id = None  # чужой/несуществующий прокси не закрепляем
         except Exception:
             proxy_id = None
+    # Пользователь задал НОВЫЙ прокси прямо в форме (без выбора из сохранённых):
+    # proxy_id не пришёл, но есть сырой proxy_url — создаём/находим user_proxy и
+    # закрепляем его. «Задать прокси перед подключением» без лишнего шага в UI.
+    if proxy_id is None and proxy_url:
+        proxy_id = await ensure_user_proxy(pool, owner_id, proxy_url)
     lines = [l.strip() for l in raw_data.strip().splitlines() if l.strip()]
     if not lines:
         return {"imported": 0, "failed": 0, "errors": ["Пустые данные"]}
