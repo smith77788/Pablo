@@ -79,6 +79,90 @@ def verdict(f: dict) -> dict:
             "text": f"Флот готов: {f['operable_join']} для вступления, {f['operable_invite']} для инвайта/рассылки."}
 
 
+def classify_errors(recent_errors: list[dict]) -> dict:
+    """Определить ДОМИНИРУЮЩИЙ класс сбоя по текстам последних ошибок. ЧИСТАЯ.
+
+    Возвращает {"class": transport|auth_dup|flood|banned|none, "count": n}.
+    Это ловит случай, когда воронка отбора зелёная, но операции всё равно падают
+    системно (обычно транспорт/подключение) — тогда вердикт нельзя ставить «готов».
+    """
+    cnt = {"transport": 0, "auth_dup": 0, "flood": 0, "banned": 0}
+    for e in recent_errors or []:
+        t = (e.get("error") or "").lower()
+        if not t:
+            continue
+        if ("auth_key_duplicated" in t or "two different ip" in t
+                or "duplicated" in t):
+            cnt["auth_dup"] += 1
+        elif ("сбой подключения" in t or "сбой подключения" in t
+              or "подключени" in t or "транспорт" in t or "connect" in t
+              or "proxy" in t or "прокси" in t or "timeout" in t
+              or "таймаут" in t or "network" in t or "relay" in t):
+            cnt["transport"] += 1
+        elif "flood" in t or "флуд" in t:
+            cnt["flood"] += 1
+        elif "ban" in t or "бан" in t or "deactiv" in t:
+            cnt["banned"] += 1
+    dominant = max(cnt, key=lambda k: cnt[k]) if any(cnt.values()) else "none"
+    return {"class": dominant if cnt.get(dominant, 0) else "none",
+            "count": cnt.get(dominant, 0), "breakdown": cnt}
+
+
+def _transport_verdict(err_class: str, transport: dict) -> dict | None:
+    """Если воронка зелёная, но операции падают на подключении — назвать транспорт."""
+    if err_class == "transport":
+        return {"key": "transport_fail", "ok": False,
+                "text": "Аккаунты отбираются, но ПОДКЛЮЧЕНИЕ системно падает "
+                        "(сеть/прокси/CF-релей/IPv6). Назначьте аккаунтам прокси "
+                        "или настройте CF-релей/IPv6 — на общем/недоступном выходе "
+                        "флот не может подключиться к Telegram."}
+    if err_class == "auth_dup":
+        no_transport = transport.get("no_proxy", 0) and not (
+            transport.get("cf_relay_configured") or transport.get("ipv6_configured"))
+        extra = (" У большинства аккаунтов нет стабильного выходного IP — "
+                 "назначьте прокси, иначе сессии видятся Telegram с разных IP."
+                 if no_transport else "")
+        return {"key": "auth_dup", "ok": False,
+                "text": "AUTH_KEY_DUPLICATED: сессия используется с двух IP. Обычно "
+                        "это скачущий выходной IP (нет стабильного прокси на аккаунт) "
+                        "или параллельный коннект." + extra}
+    return None
+
+
+async def _transport_summary(pool, owner_id: int) -> dict:
+    """Сколько аккаунтов имеют стабильный выход (прокси/релей/IPv6) vs прямой."""
+    out = {"total": 0, "with_proxy": 0, "with_relay": 0, "direct_only": 0,
+           "cf_relay_configured": False, "ipv6_configured": False, "global_proxy": False}
+    try:
+        from config import CF_RELAY_URL, TG_PROXY
+        out["cf_relay_configured"] = bool(str(CF_RELAY_URL or "").strip())
+        out["global_proxy"] = bool(str(TG_PROXY or "").strip())
+    except Exception:
+        pass
+    try:
+        import os as _os
+        out["ipv6_configured"] = bool(_os.getenv("IPV6_SUBNET", "").strip())
+    except Exception:
+        pass
+    # Считаем по колонкам защищённо — cf_relay_url может отсутствовать в старой схеме.
+    for col, key in (("proxy_id IS NOT NULL", "with_proxy"),
+                     ("cf_relay_url IS NOT NULL AND cf_relay_url <> ''", "with_relay")):
+        try:
+            out[key] = int(await pool.fetchval(
+                f"SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                f"AND {col}", owner_id) or 0)
+        except Exception:
+            out[key] = 0
+    try:
+        out["total"] = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active", owner_id) or 0)
+    except Exception:
+        pass
+    out["no_proxy"] = max(0, out["total"] - out["with_proxy"])
+    out["direct_only"] = max(0, out["total"] - out["with_proxy"] - out["with_relay"])
+    return out
+
+
 async def diagnose(pool, owner_id: int) -> dict:
     """Полная диагностика: воронка + конфиг + залипшие op + последние ошибки."""
     out = {"funnel": compute_funnel([]), "verdict": {}, "config": {},
@@ -123,6 +207,18 @@ async def diagnose(pool, owner_id: int) -> dict:
             "ORDER BY finished_at DESC NULLS LAST LIMIT 5", owner_id)
         out["recent_errors"] = [
             {"op": r["op"], "error": (r["error_msg"] or "")[:200]} for r in er]
+    except Exception:
+        pass
+
+    # Транспорт + класс ошибок: воронка может быть зелёной, но операции падают
+    # системно на ПОДКЛЮЧЕНИИ — тогда переопределяем «готов» на реальный диагноз.
+    out["transport"] = await _transport_summary(pool, owner_id)
+    out["error_class"] = classify_errors(out.get("recent_errors", []))
+    try:
+        if out["verdict"].get("ok"):
+            tv = _transport_verdict(out["error_class"]["class"], out["transport"])
+            if tv:
+                out["verdict"] = tv
     except Exception:
         pass
     return out

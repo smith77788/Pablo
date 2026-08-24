@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import os
 
-from services.fleet_doctor import compute_funnel, verdict
+from services.fleet_doctor import (compute_funnel, verdict, classify_errors,
+                                   _transport_verdict)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -59,6 +60,32 @@ def test_none_trust_defaults_to_full():
 def test_verdicts_for_empty_and_inactive():
     assert verdict(compute_funnel([]))["key"] == "no_accounts"
     assert verdict(compute_funnel([_acc(is_active=False)]))["key"] == "all_inactive"
+
+
+def test_classify_errors_detects_transport_and_authdup():
+    # реальные тексты из диагностики пользователя
+    assert classify_errors([{"error": "системный сбой ПОДКЛЮЧЕНИЯ ... транспорт (сеть/прокси/CF-релей/IPv6)"}])["class"] == "transport"
+    assert classify_errors([{"error": "The authorization key was used under two different IP addresses"}])["class"] == "auth_dup"
+    assert classify_errors([])["class"] == "none"
+    assert classify_errors([{"error": ""}])["class"] == "none"
+
+
+def test_transport_verdict_overrides_green_funnel():
+    # воронка зелёная, но операции падают на подключении → вердикт НЕ «готов»
+    tv = _transport_verdict("transport", {"no_proxy": 8})
+    assert tv and tv["ok"] is False and tv["key"] == "transport_fail"
+    av = _transport_verdict("auth_dup", {"no_proxy": 8, "cf_relay_configured": False,
+                                         "ipv6_configured": False})
+    assert av and av["ok"] is False and "прокси" in av["text"]
+    assert _transport_verdict("none", {}) is None
+
+
+def test_diagnose_override_wired():
+    src = open(os.path.join(ROOT, "services", "fleet_doctor.py"), encoding="utf-8").read()
+    assert "_transport_verdict(out[\"error_class\"][\"class\"]" in src
+    assert "async def _transport_summary" in src
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "Транспорт (выход в сеть)" in html
 
 
 def test_endpoint_route_and_ui_wired():
