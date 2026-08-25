@@ -139,6 +139,17 @@ class NoteCb(CallbackData, prefix="note"):
     bot_id: int
 
 
+class SnoozeCb(CallbackData, prefix="snz"):
+    """Заглушить подсказку организма из самого уведомления.
+
+    action: mute — на период `code` (см. brain.SNOOZE_PRESETS); off — навсегда.
+    sid — id подсказки (vault_off, bans, gov_red …).
+    """
+    action: str
+    sid: str
+    code: str = ""
+
+
 class SwarmCb(CallbackData, prefix="sw"):
     action: str
     bot_id: int = 0

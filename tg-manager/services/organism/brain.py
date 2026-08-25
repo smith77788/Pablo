@@ -12,8 +12,45 @@ from __future__ import annotations
 
 _SEV = {"urgent": 0, "warn": 1, "opportunity": 2, "info": 3}
 
+# Периоды «заглушить», предлагаемые кнопками под нуджем. Порядок = порядок кнопок.
+SNOOZE_PRESETS: tuple[tuple[str, str, int], ...] = (
+    ("6h",  "6 часов",  6 * 3600),
+    ("24h", "сутки",    24 * 3600),
+    ("3d",  "3 дня",    3 * 24 * 3600),
+    ("7d",  "неделю",   7 * 24 * 3600),
+)
+_SNOOZE_BY_CODE = {code: (label, secs) for code, label, secs in SNOOZE_PRESETS}
 
-def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
+
+def snooze_seconds(code: str) -> int:
+    """Секунды по коду периода; 0 — код неизвестен (глушить не будем)."""
+    got = _SNOOZE_BY_CODE.get(str(code or ""))
+    return got[1] if got else 0
+
+
+def snooze_label(code: str) -> str:
+    got = _SNOOZE_BY_CODE.get(str(code or ""))
+    return got[0] if got else str(code or "")
+
+
+def active_snoozes(snoozed: dict | None, now: float) -> dict:
+    """Оставить только НЕ истёкшие глушилки {id: until_ts}.
+
+    Отдельная чистая функция, потому что протухшие записи надо отбрасывать и при
+    чтении (иначе подсказка молчала бы вечно), и при записи (иначе словарь растёт).
+    """
+    out: dict[str, float] = {}
+    for sid, until in (snoozed or {}).items():
+        try:
+            ts = float(until)
+        except (TypeError, ValueError):
+            continue
+        if ts > now:
+            out[str(sid)] = ts
+    return out
+
+
+def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None = None) -> list[dict]:
     fleet = snap.get("fleet") or {}
     ops = snap.get("ops") or {}
     graph = snap.get("graph") or {}
@@ -21,9 +58,14 @@ def build_suggestions(snap: dict, dismissed=()) -> list[dict]:
     goal = snap.get("goal")
     out: list[dict] = []
     dismissed = set(dismissed or ())
+    if now is None:
+        import time as _t
+        now = _t.time()
+    muted = active_snoozes(snoozed, now)
 
     def add(sid, sev, title, why, action):
-        if sid in dismissed:
+        # dismissed — отклонено навсегда; muted — заглушено до срока.
+        if sid in dismissed or sid in muted:
             return
         out.append({"id": sid, "severity": sev, "title": title,
                     "why": why, "action": action})
@@ -164,14 +206,44 @@ def narrative(snap: dict) -> str:
 
 async def pulse(pool, owner_id: int) -> dict:
     """Живой пульс: мир + повествование + цепочки действий (без отклонённых)."""
+    import time as _t
     from services.organism import world, spine
     snap = await world.snapshot(pool, owner_id)
     try:
         dismissed = await spine.state_get(pool, owner_id, "dismissed", []) or []
     except Exception:
         dismissed = []
+    try:
+        snoozed = await spine.state_get(pool, owner_id, SNOOZE_KEY, {}) or {}
+    except Exception:
+        snoozed = {}
     return {
         "narrative": narrative(snap),
         "snapshot": snap,
-        "suggestions": build_suggestions(snap, dismissed),
+        "suggestions": build_suggestions(snap, dismissed, snoozed, _t.time()),
     }
+
+
+SNOOZE_KEY = "snoozed"
+
+
+async def snooze(pool, owner_id: int, suggestion_id: str, code: str) -> float:
+    """Заглушить подсказку на период `code`. Возвращает unix-время окончания (0 — не вышло).
+
+    Протухшие записи выкидываем при каждой записи — словарь не растёт бесконечно.
+    """
+    import time as _t
+    from services.organism import spine
+    secs = snooze_seconds(code)
+    if not secs or not suggestion_id:
+        return 0.0
+    now = _t.time()
+    try:
+        cur = await spine.state_get(pool, owner_id, SNOOZE_KEY, {}) or {}
+    except Exception:
+        cur = {}
+    fresh = active_snoozes(cur, now)
+    until = now + secs
+    fresh[str(suggestion_id)] = until
+    await spine.state_set(pool, owner_id, SNOOZE_KEY, fresh)
+    return until

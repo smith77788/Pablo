@@ -62,6 +62,27 @@ async def _tick(pool, bot) -> int:
     return sent
 
 
+def _snooze_kb(suggestion_id: str):
+    """Кнопки «заглушить» прямо под нуджем.
+
+    Без них уведомление нечем выключить: оно повторяется каждые 6 часов, и
+    единственной альтернативой было отключить бота целиком. Периоды — из
+    brain.SNOOZE_PRESETS (один источник правды с обработчиком колбэка).
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import SnoozeCb
+    from services.organism import brain
+
+    kb = InlineKeyboardBuilder()
+    for code, label, _secs in brain.SNOOZE_PRESETS:
+        kb.button(text=f"🔕 {label}",
+                  callback_data=SnoozeCb(action="mute", sid=suggestion_id, code=code))
+    kb.button(text="🚫 Больше не напоминать",
+              callback_data=SnoozeCb(action="off", sid=suggestion_id, code="never"))
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
 async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | None = None) -> bool:
     """Проверить одного владельца и при необходимости толкнуть. notifier/now —
     seam для тестов. Возвращает True, если отправили нудж."""
@@ -84,7 +105,8 @@ async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | N
         if notifier:
             await notifier(owner_id, msg)
         else:
-            await bot.send_message(owner_id, msg, parse_mode="HTML")
+            await bot.send_message(owner_id, msg, parse_mode="HTML",
+                                   reply_markup=_snooze_kb(top["id"]))
     except Exception:
         log.debug("organism.runner: notify failed owner=%s", owner_id)
         return False
