@@ -167,11 +167,50 @@ async def _warm_entity(client: Any, peer: int | str,
             return await client.get_input_entity(peer)
 
 
+async def _claim(acc: dict | None) -> "tuple[int | None, bool]":
+    """Захватить аккаунт консоли под живую сессию. Возвращает (acc_id, занят?).
+
+    Консоль — такая же живая сессия, как операция: пользователь листает диалоги,
+    а аккаунт в этот момент может вести массовую операцию или прогрев. Без
+    захвата на одном auth-key оказывались две сессии → AUTH_KEY_DUPLICATED.
+
+    Захват делается ЗДЕСЬ, а не в account_manager: он не реентрантный, и если
+    захватывать в общем библиотечном слое, повторный захват изнутри уже
+    захваченной операции получил бы отказ. Правило: захватывает точка входа.
+
+    acc без id (служебные вызовы) — работаем как раньше, без захвата.
+    """
+    acc_id = int((acc or {}).get("id") or 0)
+    if not acc_id:
+        return None, False
+    from services import op_worker as _opw
+    if not await _opw.try_claim_account(acc_id):
+        return None, True
+    return acc_id, False
+
+
+async def _unclaim(acc_id: "int | None") -> None:
+    if not acc_id:
+        return
+    from services import op_worker as _opw
+    await _opw.release_accounts([int(acc_id)])
+
+
+_BUSY_RESULT = {
+    "ok": False,
+    "code": "busy",
+    "error": "⏳ Аккаунт занят другой операцией — попробуйте через минуту.",
+}
+
+
 async def list_dialogs(session_string: str, acc: dict | None,
                        limit: int = 40) -> dict[str, Any]:
     """Список диалогов аккаунта (последние `limit`). Только чтение."""
     from services.account_manager import _make_client
 
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
     client = _make_client(session_string, acc)
     out: list[dict] = []
     try:
@@ -213,6 +252,7 @@ async def list_dialogs(session_string: str, acc: dict | None,
             await client.disconnect()
         except Exception:
             pass
+        await _unclaim(_acc_id)
 
 
 async def get_history(session_string: str, acc: dict | None, peer: int | str,
@@ -220,6 +260,9 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
     """История одного диалога (последние `limit` сообщений, новые внизу)."""
     from services.account_manager import _make_client
 
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
     client = _make_client(session_string, acc)
     msgs: list[dict] = []
     try:
@@ -261,6 +304,7 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
             await client.disconnect()
         except Exception:
             pass
+        await _unclaim(_acc_id)
 
 
 async def send_text(session_string: str, acc: dict | None, peer: int | str,
@@ -276,6 +320,9 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
     if not text:
         return {"ok": False, "code": "empty", "error": "Пустое сообщение"}
 
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
     client = _make_client(session_string, acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -301,6 +348,7 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
             await client.disconnect()
         except Exception:
             pass
+        await _unclaim(_acc_id)
 
 
 async def send_file(session_string: str, acc: dict | None, peer: int | str,
@@ -317,6 +365,9 @@ async def send_file(session_string: str, acc: dict | None, peer: int | str,
     if not file_bytes:
         return {"ok": False, "code": "empty", "error": "Пустой файл"}
 
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
     client = _make_client(session_string, acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -341,6 +392,7 @@ async def send_file(session_string: str, acc: dict | None, peer: int | str,
             await client.disconnect()
         except Exception:
             pass
+        await _unclaim(_acc_id)
 
 
 def _to_ui_contact(c: dict) -> dict:
@@ -373,28 +425,36 @@ async def list_contacts(session_string: str, acc: dict | None) -> dict[str, Any]
     """
     from services import account_manager as am
 
+    # Сессию открывает account_manager, но точка входа — здесь, поэтому и захват
+    # здесь (см. докстринг _claim: захватывает вход, не библиотечный слой).
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
     try:
-        book = await am.get_contacts(session_string, acc)
-    except Exception as exc:
-        code, human = classify_error(str(exc))
-        log.warning("account_console.list_contacts acc=%s: %s", (acc or {}).get("id"), exc)
-        return {"ok": False, "code": code, "error": human}
+        try:
+            book = await am.get_contacts(session_string, acc)
+        except Exception as exc:
+            code, human = classify_error(str(exc))
+            log.warning("account_console.list_contacts acc=%s: %s", (acc or {}).get("id"), exc)
+            return {"ok": False, "code": code, "error": human}
 
-    # Диалоговые собеседники — дополнение. Их сбой НЕ роняет уже полученную книгу.
-    dialog_people: list[dict] = []
-    try:
-        dialog_people = await am.get_dialog_contacts(session_string, limit=300, _acc=acc)
-    except Exception:
-        log.debug("list_contacts: dialog harvest failed acc=%s", (acc or {}).get("id"))
+        # Диалоговые собеседники — дополнение. Их сбой НЕ роняет уже полученную книгу.
+        dialog_people: list[dict] = []
+        try:
+            dialog_people = await am.get_dialog_contacts(session_string, limit=300, _acc=acc)
+        except Exception:
+            log.debug("list_contacts: dialog harvest failed acc=%s", (acc or {}).get("id"))
 
-    # Слияние по user_id: адресная книга приоритетнее (там телефон/mutual), диалоги
-    # лишь ДОБАВЛЯЮТ недостающих — поэтому книга идёт первой и не перезатирается.
-    by_id: dict[Any, dict] = {}
-    for c in list(book) + dialog_people:
-        uid = c.get("user_id")
-        if uid is None or uid in by_id:
-            continue
-        by_id[uid] = c
-    out = [_to_ui_contact(c) for c in by_id.values()]
-    out.sort(key=lambda c: c["name"].lower())
-    return {"ok": True, "contacts": out}
+        # Слияние по user_id: адресная книга приоритетнее (там телефон/mutual), диалоги
+        # лишь ДОБАВЛЯЮТ недостающих — поэтому книга идёт первой и не перезатирается.
+        by_id: dict[Any, dict] = {}
+        for c in list(book) + dialog_people:
+            uid = c.get("user_id")
+            if uid is None or uid in by_id:
+                continue
+            by_id[uid] = c
+        out = [_to_ui_contact(c) for c in by_id.values()]
+        out.sort(key=lambda c: c["name"].lower())
+        return {"ok": True, "contacts": out}
+    finally:
+        await _unclaim(_acc_id)

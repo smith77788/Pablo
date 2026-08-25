@@ -311,3 +311,69 @@ def test_multiselect_group_send_reuses_safe_dm():
     assert "/api/miniapp/dm/adhoc_send" in body, "групповая отправка не через безопасный adhoc-путь"
     cont = _screen_body("s-acccontacts")
     assert "writeSelectedContacts()" in cont and 'id="accContBulk"' in cont
+
+
+# ─── Захват аккаунта: консоль — тоже живая сессия ─────────────────────────────
+
+def test_every_session_opening_console_fn_claims_account():
+    """Каждая функция консоли, открывающая живую сессию, обязана захватить
+    аккаунт и освободить его.
+
+    Консоль — ручное управление, но сессия такая же живая, как у операции:
+    пользователь листает диалоги, а аккаунт в этот момент может вести массовую
+    операцию или прогрев → две сессии на одном auth-key → AUTH_KEY_DUPLICATED.
+    """
+    import ast as _ast
+    import os as _os
+    path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                         "services", "account_console.py")
+    src = open(path, encoding="utf-8").read()
+    tree = _ast.parse(src)
+    lines = src.split("\n")
+    # Публичные функции модуля, которые реально ходят в сеть под аккаунтом.
+    session_fns = {"list_dialogs", "get_history", "send_text", "send_file", "list_contacts"}
+    seen = set()
+    for node in _ast.walk(tree):
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        if node.name not in session_fns:
+            continue
+        seen.add(node.name)
+        body = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        assert "_claim(acc)" in body, f"{node.name}: открывает сессию без захвата аккаунта"
+        assert "_BUSY_RESULT" in body, f"{node.name}: не отвечает честно, когда аккаунт занят"
+        assert "_unclaim(_acc_id)" in body, f"{node.name}: не освобождает аккаунт"
+    # Самопроверка измерителя: функции должны найтись, иначе тест зелёный впустую.
+    assert seen == session_fns, f"детектор не нашёл функции: {session_fns - seen}"
+
+
+def test_claim_lives_at_entry_point_not_in_library_layer():
+    """Захват не реентрантный: библиотечные функции, которые зовёт УЖЕ захвативший
+    вызывающий, захватывать не должны — иначе получат отказ сами у себя.
+
+    Правило не «account_manager никогда не захватывает»: там есть и собственная
+    фоновая точка входа (_check_all_sessions обходит флот и открывает сессии) —
+    ей захват как раз положен. Проверяем именно библиотечный слой, который зовёт
+    консоль после своего захвата.
+    """
+    import ast as _ast
+    import os as _os
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    path = _os.path.join(root, "services", "account_manager.py")
+    src = open(path, encoding="utf-8").read()
+    tree = _ast.parse(src)
+    lines = src.split("\n")
+    library_fns = {"get_contacts", "get_dialog_contacts"}
+    seen = set()
+    for node in _ast.walk(tree):
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        if node.name not in library_fns:
+            continue
+        seen.add(node.name)
+        body = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        assert "try_claim_account(" not in body, (
+            f"{node.name}: библиотечная функция начала захватывать аккаунт — "
+            f"вызов из уже захватившей консоли получит отказ"
+        )
+    assert seen == library_fns, f"детектор не нашёл функции: {library_fns - seen}"
