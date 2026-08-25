@@ -5491,231 +5491,242 @@ async def _exec_bulk_create_channels(
     if not acc:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
 
-    # ── Account health gate ───────────────────────────────────────────────────
-    acc_data = await _safe_fetchrow(
-            pool,
-        "SELECT added_at, trust_score FROM tg_accounts WHERE id=$1", acc["id"]
-    )
-    if acc_data:
-        added_at = acc_data["added_at"]
-        trust_score = float(acc_data["trust_score"] or 0.5)
-        if added_at:
-            age_days = (
-                datetime.now(timezone.utc) - added_at.replace(tzinfo=timezone.utc)
-            ).days
-            if age_days < _MIN_ACCOUNT_AGE_DAYS:
+    # Отказной захват: создание каналов идёт живой сессией аккаунта. Без захвата
+    # он мог параллельно вести другую операцию → две сессии на одном auth-key.
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "failed",
+                "reason": "Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
+
+    try:
+
+        # ── Account health gate ───────────────────────────────────────────────────
+        acc_data = await _safe_fetchrow(
+                pool,
+            "SELECT added_at, trust_score FROM tg_accounts WHERE id=$1", acc["id"]
+        )
+        if acc_data:
+            added_at = acc_data["added_at"]
+            trust_score = float(acc_data["trust_score"] or 0.5)
+            if added_at:
+                age_days = (
+                    datetime.now(timezone.utc) - added_at.replace(tzinfo=timezone.utc)
+                ).days
+                if age_days < _MIN_ACCOUNT_AGE_DAYS:
+                    return {
+                        "status": "failed",
+                        "reason": (
+                            f"Аккаунт добавлен {age_days} дн. назад — требуется минимум {_MIN_ACCOUNT_AGE_DAYS} дней. "
+                            "Сначала прогрейте аккаунт через раздел 🌱 Прогрев."
+                        ),
+                    }
+            if trust_score < _MIN_TRUST_SCORE:
                 return {
                     "status": "failed",
                     "reason": (
-                        f"Аккаунт добавлен {age_days} дн. назад — требуется минимум {_MIN_ACCOUNT_AGE_DAYS} дней. "
-                        "Сначала прогрейте аккаунт через раздел 🌱 Прогрев."
+                        f"Низкий trust_score аккаунта ({trust_score:.2f}). "
+                        "Требуется прогрев перед bulk-операциями."
                     ),
                 }
-        if trust_score < _MIN_TRUST_SCORE:
+
+        # ── Daily channel creation cap (soft warning only, не блокируем) ─────────
+        created_today = await _safe_fetchval(
+                pool,
+            """SELECT COUNT(*) FROM managed_channels
+               WHERE acc_id=$1 AND owner_id=$2
+                 AND added_at >= now() - INTERVAL '24 hours'""",
+            acc["id"],
+            owner_id,
+        )
+        if (created_today or 0) >= _MAX_CHANNELS_PER_DAY:
+            log.warning(
+                "op_worker bulk_channels: daily cap reached acc=%s created_today=%s requested=%s",
+                acc["id"],
+                created_today,
+                count,
+            )
             return {
                 "status": "failed",
                 "reason": (
-                    f"Низкий trust_score аккаунта ({trust_score:.2f}). "
-                    "Требуется прогрев перед bulk-операциями."
+                    f"Аккаунт уже создал {created_today} канал(ов) за последние 24ч. "
+                    f"Безопасный лимит: {_MAX_CHANNELS_PER_DAY}/день. "
+                    "Используйте другой аккаунт или подождите."
                 ),
             }
+        created_count = 0
+        failed_count = 0
 
-    # ── Daily channel creation cap (soft warning only, не блокируем) ─────────
-    created_today = await _safe_fetchval(
-            pool,
-        """SELECT COUNT(*) FROM managed_channels
-           WHERE acc_id=$1 AND owner_id=$2
-             AND added_at >= now() - INTERVAL '24 hours'""",
-        acc["id"],
-        owner_id,
-    )
-    if (created_today or 0) >= _MAX_CHANNELS_PER_DAY:
-        log.warning(
-            "op_worker bulk_channels: daily cap reached acc=%s created_today=%s requested=%s",
-            acc["id"],
-            created_today,
-            count,
-        )
-        return {
-            "status": "failed",
-            "reason": (
-                f"Аккаунт уже создал {created_today} канал(ов) за последние 24ч. "
-                f"Безопасный лимит: {_MAX_CHANNELS_PER_DAY}/день. "
-                "Используйте другой аккаунт или подождите."
-            ),
-        }
-    created_count = 0
-    failed_count = 0
+        for i in range(count):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "created": created_count,
+                    "failed": failed_count,
+                    "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+                }
 
-    for i in range(count):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "created": created_count,
-                "failed": failed_count,
-                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
-            }
-
-        num = i + 1
-        # Single-item creation (Factory) uses the title verbatim; only bulk runs
-        # get a "#N" suffix to keep names unique.
-        title = prefix if count == 1 else f"{prefix} #{num}"
-        if username_pattern:
-            username = f"{username_pattern}_{num}"
-        else:
-            username = ""
-
-        # Human-like typing delay
-        await session_simulator.typing_delay(title)
-
-        result = await account_manager.create_channel(
-            acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
-        )
-
-        # Handle flood wait
-        if result.get("error") and result.get("flood_wait"):
-            raw_flood = int(result["flood_wait"])
-            if raw_flood > 600:
-                # Flood wait too long to block the batch — skip this channel
-                log.warning(
-                    "op_worker bulk_channels: flood wait %ds too long — skipping",
-                    raw_flood,
-                )
+            num = i + 1
+            # Single-item creation (Factory) uses the title verbatim; only bulk runs
+            # get a "#N" suffix to keep names unique.
+            title = prefix if count == 1 else f"{prefix} #{num}"
+            if username_pattern:
+                username = f"{username_pattern}_{num}"
             else:
-                wait_time = raw_flood + 15
-                log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
-                await asyncio.sleep(wait_time)
-                result = await account_manager.create_channel(
-                    acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
-                )
+                username = ""
 
-        if (
-            isinstance(result, dict)
-            and result.get("channel_id")
-            and not result.get("error")
-        ):
-            ch_id = result["channel_id"]
-            # Save to managed_channels. Персистим access_hash, возвращённый
-            # create_channel: без него публикация (bulk_post_chans/mass_publish)
-            # вынуждена дорезолвивать peer лишними API-вызовами, а для приватного
-            # канала без username — рискует не найти entity. Импорт каналов тоже
-            # сохраняет access_hash — приводим создание к тому же контракту.
-            ch_type = result.get("type") or ("group" if is_group else "channel")
-            ch_hash = int(result.get("access_hash") or 0)
-            await _safe_execute(
-                    pool,
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
-                   VALUES($1,$2,$3,$4,$5,$6,$7)
-                   ON CONFLICT(owner_id, channel_id) DO UPDATE
-                   SET title=$4, access_hash=$6, type=$7""",
-                owner_id,
-                acc["id"],
-                ch_id,
-                title,
-                username or None,
-                ch_hash,
-                ch_type,
+            # Human-like typing delay
+            await session_simulator.typing_delay(title)
+
+            result = await account_manager.create_channel(
+                acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
             )
-            # Set username if pattern provided — 60-120s delay prevents geo-ban detection
-            if username:
-                await asyncio.sleep(random.uniform(30, 60))
-                err = await account_manager.set_channel_username(
-                    acc["session_str"], ch_id, username, _acc=acc
-                )
-                if err:
-                    log.info(
-                        "op_worker bulk_channels: username '%s' failed (%s), trying variants",
-                        username,
-                        err[:80],
+
+            # Handle flood wait
+            if result.get("error") and result.get("flood_wait"):
+                raw_flood = int(result["flood_wait"])
+                if raw_flood > 600:
+                    # Flood wait too long to block the batch — skip this channel
+                    log.warning(
+                        "op_worker bulk_channels: flood wait %ds too long — skipping",
+                        raw_flood,
                     )
-                    # Try up to 3 variants: add numeric suffix
-                    for suffix in (
-                        f"_{i + 1}",
-                        f"_{i + 1}x",
-                        f"_{i + 1}_{random.randint(10, 99)}",
-                    ):
-                        variant = username.rstrip("_") + suffix
-                        await asyncio.sleep(random.uniform(5, 10))
-                        err2 = await account_manager.set_channel_username(
-                            acc["session_str"], ch_id, variant, _acc=acc
-                        )
-                        if not err2:
-                            log.info(
-                                "op_worker bulk_channels: variant '%s' accepted",
-                                variant,
-                            )
-                            err = None
-                            break
+                else:
+                    wait_time = raw_flood + 15
+                    log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
+                    await asyncio.sleep(wait_time)
+                    result = await account_manager.create_channel(
+                        acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
+                    )
+
+            if (
+                isinstance(result, dict)
+                and result.get("channel_id")
+                and not result.get("error")
+            ):
+                ch_id = result["channel_id"]
+                # Save to managed_channels. Персистим access_hash, возвращённый
+                # create_channel: без него публикация (bulk_post_chans/mass_publish)
+                # вынуждена дорезолвивать peer лишними API-вызовами, а для приватного
+                # канала без username — рискует не найти entity. Импорт каналов тоже
+                # сохраняет access_hash — приводим создание к тому же контракту.
+                ch_type = result.get("type") or ("group" if is_group else "channel")
+                ch_hash = int(result.get("access_hash") or 0)
+                await _safe_execute(
+                        pool,
+                    """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+                       VALUES($1,$2,$3,$4,$5,$6,$7)
+                       ON CONFLICT(owner_id, channel_id) DO UPDATE
+                       SET title=$4, access_hash=$6, type=$7""",
+                    owner_id,
+                    acc["id"],
+                    ch_id,
+                    title,
+                    username or None,
+                    ch_hash,
+                    ch_type,
+                )
+                # Set username if pattern provided — 60-120s delay prevents geo-ban detection
+                if username:
+                    await asyncio.sleep(random.uniform(30, 60))
+                    err = await account_manager.set_channel_username(
+                        acc["session_str"], ch_id, username, _acc=acc
+                    )
                     if err:
                         log.info(
-                            "op_worker bulk_channels: all username variants failed, channel created without username"
+                            "op_worker bulk_channels: username '%s' failed (%s), trying variants",
+                            username,
+                            err[:80],
                         )
+                        # Try up to 3 variants: add numeric suffix
+                        for suffix in (
+                            f"_{i + 1}",
+                            f"_{i + 1}x",
+                            f"_{i + 1}_{random.randint(10, 99)}",
+                        ):
+                            variant = username.rstrip("_") + suffix
+                            await asyncio.sleep(random.uniform(5, 10))
+                            err2 = await account_manager.set_channel_username(
+                                acc["session_str"], ch_id, variant, _acc=acc
+                            )
+                            if not err2:
+                                log.info(
+                                    "op_worker bulk_channels: variant '%s' accepted",
+                                    variant,
+                                )
+                                err = None
+                                break
+                        if err:
+                            log.info(
+                                "op_worker bulk_channels: all username variants failed, channel created without username"
+                            )
 
-            await _safe_execute(
-                    pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-                op_id,
-                num,
-                f"{title}",
-                f"channel_id={ch_id}" + (f" @{username}" if username else ""),
-            )
-            created_count += 1
-        else:
-            err_msg = result if isinstance(result, str) else str(result)
-            await _safe_execute(
-                    pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                op_id,
-                num,
-                f"{title}",
-                err_msg[:200],
-            )
-            failed_count += 1
-
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-        )
-
-        if i < count - 1:
-            tod_factor = session_simulator.time_of_day_factor()
-            chaos = session_simulator.chaos_factor()
-            if i % 5 == 4:
-                cooldown = random.uniform(120, 240) * chaos * tod_factor
-                log.info(
-                    "op_worker bulk_channels: cooldown %.0fs after %d items",
-                    cooldown,
-                    i + 1,
+                await _safe_execute(
+                        pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                    op_id,
+                    num,
+                    f"{title}",
+                    f"channel_id={ch_id}" + (f" @{username}" if username else ""),
                 )
-                await asyncio.sleep(cooldown)
+                created_count += 1
             else:
-                delay = random.uniform(15, 30) * chaos * tod_factor
-                await asyncio.sleep(delay)
+                err_msg = result if isinstance(result, str) else str(result)
+                await _safe_execute(
+                        pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id,
+                    num,
+                    f"{title}",
+                    err_msg[:200],
+                )
+                failed_count += 1
 
-        # Progress update every 5 channels
-        if created_count > 0 and created_count % 5 == 0:
-            try:
-                await db.notify_if_enabled(
+            await _safe_execute(
                     pool,
-                    bot,
-                    owner_id,
-                    "op_complete",
-                    f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
-                    f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
-                )
-            except Exception:
-                log_exc_swallow(
-                    log,
-                    f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}",
-                )
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
 
-    _unit = "групп" if is_group else "каналов"
-    return {
-        "status": "done",
-        "created": created_count,
-        "failed": failed_count,
-        "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
-    }
+            if i < count - 1:
+                tod_factor = session_simulator.time_of_day_factor()
+                chaos = session_simulator.chaos_factor()
+                if i % 5 == 4:
+                    cooldown = random.uniform(120, 240) * chaos * tod_factor
+                    log.info(
+                        "op_worker bulk_channels: cooldown %.0fs after %d items",
+                        cooldown,
+                        i + 1,
+                    )
+                    await asyncio.sleep(cooldown)
+                else:
+                    delay = random.uniform(15, 30) * chaos * tod_factor
+                    await asyncio.sleep(delay)
+
+            # Progress update every 5 channels
+            if created_count > 0 and created_count % 5 == 0:
+                try:
+                    await db.notify_if_enabled(
+                        pool,
+                        bot,
+                        owner_id,
+                        "op_complete",
+                        f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
+                        f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log,
+                        f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}",
+                    )
+
+        _unit = "групп" if is_group else "каналов"
+        return {
+            "status": "done",
+            "created": created_count,
+            "failed": failed_count,
+            "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
+        }
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_bot_factory_multi(
@@ -5907,171 +5918,182 @@ async def _exec_bot_factory(
     if not acc:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для Bot Factory"}
 
-    created_count = 0
-    failed_count = 0
-    created_tokens: list[str] = []
+    # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
+    # мог параллельно вести другую операцию → две сессии на одном auth-key.
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "failed",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
 
-    for i in range(count):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": created_count,
-                "failed": failed_count,
-                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
-            }
+    try:
 
-        num = i + 1
-        display_name = f"{name_tpl} {num}" if count > 1 else name_tpl
-        username_base = f"{uname_tpl}{num}" if uname_tpl else f"bot{random.randint(10000, 99999)}"
-        if not username_base.endswith("bot"):
-            username_base = username_base + "bot"
+        created_count = 0
+        failed_count = 0
+        created_tokens: list[str] = []
 
-        await session_simulator.typing_delay(display_name)
+        for i in range(count):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": created_count,
+                    "failed": failed_count,
+                    "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+                }
 
-        result = await account_manager.create_bot_via_botfather(
-            acc["session_str"],
-            bot_display_name=display_name,
-            bot_username=username_base,
-            _acc=acc,
-        )
+            num = i + 1
+            display_name = f"{name_tpl} {num}" if count > 1 else name_tpl
+            username_base = f"{uname_tpl}{num}" if uname_tpl else f"bot{random.randint(10000, 99999)}"
+            if not username_base.endswith("bot"):
+                username_base = username_base + "bot"
 
-        if result.get("token"):
-            token = result["token"]
-            actual_uname = result.get("username", username_base)
-            created_tokens.append(token)
+            await session_simulator.typing_delay(display_name)
 
-            # Validate token and get bot_id
-            bot_id = 0
-            try:
-                import aiohttp as _aiohttp
-                async with _aiohttp.ClientSession() as _sess:
-                    async with _sess.get(
-                        f"https://api.telegram.org/bot{token}/getMe",
-                        timeout=_aiohttp.ClientTimeout(total=10),
-                    ) as _resp:
-                        data = await _resp.json()
-                        if data.get("ok"):
-                            bot_id = data["result"]["id"]
-                            actual_uname = data["result"].get("username", actual_uname)
-            except Exception:
-                log_exc_swallow(log, "_exec_bot_factory: getMe failed for token ***")
+            result = await account_manager.create_bot_via_botfather(
+                acc["session_str"],
+                bot_display_name=display_name,
+                bot_username=username_base,
+                _acc=acc,
+            )
 
-            # Save to managed_bots
-            try:
-                from services.token_vault import encrypt_token as _enc_tok_f
-                await pool.execute(
-                    """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
-                       VALUES($1,$2,$3,$4,$5,TRUE,$6)
-                       ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
-                    owner_id,
-                    _enc_tok_f(token),
-                    bot_id or 0,
-                    actual_uname,
+            if result.get("token"):
+                token = result["token"]
+                actual_uname = result.get("username", username_base)
+                created_tokens.append(token)
+
+                # Validate token and get bot_id
+                bot_id = 0
+                try:
+                    import aiohttp as _aiohttp
+                    async with _aiohttp.ClientSession() as _sess:
+                        async with _sess.get(
+                            f"https://api.telegram.org/bot{token}/getMe",
+                            timeout=_aiohttp.ClientTimeout(total=10),
+                        ) as _resp:
+                            data = await _resp.json()
+                            if data.get("ok"):
+                                bot_id = data["result"]["id"]
+                                actual_uname = data["result"].get("username", actual_uname)
+                except Exception:
+                    log_exc_swallow(log, "_exec_bot_factory: getMe failed for token ***")
+
+                # Save to managed_bots
+                try:
+                    from services.token_vault import encrypt_token as _enc_tok_f
+                    await pool.execute(
+                        """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
+                           VALUES($1,$2,$3,$4,$5,TRUE,$6)
+                           ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
+                        owner_id,
+                        _enc_tok_f(token),
+                        bot_id or 0,
+                        actual_uname,
+                        display_name,
+                        acc.get("id"),
+                    )
+                except Exception:
+                    log_exc_swallow(log, "_exec_bot_factory: managed_bots upsert failed")
+
+                await _safe_execute(
+                        pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)",
+                    op_id,
+                    num,
                     display_name,
-                    acc.get("id"),
+                    f"@{actual_uname}",
                 )
-            except Exception:
-                log_exc_swallow(log, "_exec_bot_factory: managed_bots upsert failed")
-
-            await _safe_execute(
-                    pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                "VALUES($1,$2,$3,'ok',$4)",
-                op_id,
-                num,
-                display_name,
-                f"@{actual_uname}",
-            )
-            created_count += 1
-            log.info(
-                "_exec_bot_factory op=%d: created @%s (bot_id=%s)",
-                op_id, actual_uname, bot_id,
-            )
-        else:
-            err_msg = result.get("error", "unknown error")[:200]
-            flood_wait = result.get("flood_wait")
-            if flood_wait:
-                wait_secs = int(flood_wait)
-                if wait_secs <= 600:
-                    log.info(
-                        "_exec_bot_factory: FloodWait %ds, sleeping...", wait_secs + 15
-                    )
-                    await asyncio.sleep(wait_secs + 15)
-                    # Retry once after flood wait
-                    result2 = await account_manager.create_bot_via_botfather(
-                        acc["session_str"],
-                        bot_display_name=display_name,
-                        bot_username=username_base,
-                        _acc=acc,
-                    )
-                    if result2.get("token"):
-                        token = result2["token"]
-                        actual_uname = result2.get("username", username_base)
-                        created_tokens.append(token)
-                        try:
-                            from services.token_vault import encrypt_token as _enc_tok_fr
-                            _retry_bot_id = int(token.split(":")[0]) if ":" in token else 0
-                            _enc_retry_tok = _enc_tok_fr(token)
-                            await pool.execute(
-                                """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
-                                   VALUES($1,$2,$3,$4,$5,TRUE,$6)
-                                   ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
-                                owner_id, _enc_retry_tok, _retry_bot_id, actual_uname, display_name,
-                                acc.get("id"),
-                            )
-                        except Exception as e:
-                            log_exc_swallow(log, f"bot_factory retry managed_bots upsert failed: {e}")
-                        created_count += 1
-                        await _safe_execute(
-                                pool,
-                            "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-                            op_id, num, display_name, f"@{actual_uname} (retry ok)",
-                        )
-                        await _safe_execute(
-                                pool,
-                            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-                        )
-                        await asyncio.sleep(random.uniform(30, 60))
-                        continue
-
-            failed_count += 1
-            await _safe_execute(
-                    pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                "VALUES($1,$2,$3,'error',$4)",
-                op_id,
-                num,
-                display_name,
-                err_msg,
-            )
-            log.warning(
-                "_exec_bot_factory op=%d: failed to create '%s': %s",
-                op_id, display_name, err_msg,
-            )
-
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-        )
-
-        if i < count - 1:
-            # Anti-flood: BotFather rate-limits bot creation aggressively
-            chaos = session_simulator.chaos_factor()
-            tod = session_simulator.time_of_day_factor()
-            if i % 3 == 2:
-                # Longer pause every 3 bots
-                pause = random.uniform(120, 240) * chaos * tod
+                created_count += 1
+                log.info(
+                    "_exec_bot_factory op=%d: created @%s (bot_id=%s)",
+                    op_id, actual_uname, bot_id,
+                )
             else:
-                pause = random.uniform(45, 90) * chaos * tod
-            await asyncio.sleep(pause)
+                err_msg = result.get("error", "unknown error")[:200]
+                flood_wait = result.get("flood_wait")
+                if flood_wait:
+                    wait_secs = int(flood_wait)
+                    if wait_secs <= 600:
+                        log.info(
+                            "_exec_bot_factory: FloodWait %ds, sleeping...", wait_secs + 15
+                        )
+                        await asyncio.sleep(wait_secs + 15)
+                        # Retry once after flood wait
+                        result2 = await account_manager.create_bot_via_botfather(
+                            acc["session_str"],
+                            bot_display_name=display_name,
+                            bot_username=username_base,
+                            _acc=acc,
+                        )
+                        if result2.get("token"):
+                            token = result2["token"]
+                            actual_uname = result2.get("username", username_base)
+                            created_tokens.append(token)
+                            try:
+                                from services.token_vault import encrypt_token as _enc_tok_fr
+                                _retry_bot_id = int(token.split(":")[0]) if ":" in token else 0
+                                _enc_retry_tok = _enc_tok_fr(token)
+                                await pool.execute(
+                                    """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active, acc_id)
+                                       VALUES($1,$2,$3,$4,$5,TRUE,$6)
+                                       ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE, acc_id=$6""",
+                                    owner_id, _enc_retry_tok, _retry_bot_id, actual_uname, display_name,
+                                    acc.get("id"),
+                                )
+                            except Exception as e:
+                                log_exc_swallow(log, f"bot_factory retry managed_bots upsert failed: {e}")
+                            created_count += 1
+                            await _safe_execute(
+                                    pool,
+                                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                                op_id, num, display_name, f"@{actual_uname} (retry ok)",
+                            )
+                            await _safe_execute(
+                                    pool,
+                                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                            )
+                            await asyncio.sleep(random.uniform(30, 60))
+                            continue
 
-    return {
-        "status": "done",
-        "ok": created_count,
-        "failed": failed_count,
-        "created_tokens": created_tokens[:10],
-        "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
-    }
+                failed_count += 1
+                await _safe_execute(
+                        pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id,
+                    num,
+                    display_name,
+                    err_msg,
+                )
+                log.warning(
+                    "_exec_bot_factory op=%d: failed to create '%s': %s",
+                    op_id, display_name, err_msg,
+                )
+
+            await _safe_execute(
+                    pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+
+            if i < count - 1:
+                # Anti-flood: BotFather rate-limits bot creation aggressively
+                chaos = session_simulator.chaos_factor()
+                tod = session_simulator.time_of_day_factor()
+                if i % 3 == 2:
+                    # Longer pause every 3 bots
+                    pause = random.uniform(120, 240) * chaos * tod
+                else:
+                    pause = random.uniform(45, 90) * chaos * tod
+                await asyncio.sleep(pause)
+
+        return {
+            "status": "done",
+            "ok": created_count,
+            "failed": failed_count,
+            "created_tokens": created_tokens[:10],
+            "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
+        }
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_strike(
@@ -6955,60 +6977,74 @@ async def _exec_bulk_edit_channels(
     if not accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
 
-    ok_total = 0
-    err_total = 0
-    step = 0
-    await _safe_execute(
-            pool,
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
-    )
+    # Отказной захват: массовое редактирование открывает живую сессию на каждом
+    # аккаунте через account_manager. Без захвата аккаунт мог одновременно вести
+    # другую операцию → две сессии на одном auth-key → AUTH_KEY_DUPLICATED.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    for acc in accounts:
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": ok_total,
-                "fail": err_total,
-                "summary": f"Отменено. Изменено: {ok_total}",
-            }
-        try:
-            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        except Exception as exc:
-            log.warning("_exec_bulk_edit_channels get_dialogs acc=%s: %s", acc.get("id"), exc)
-            err_total += 1
+    try:
+        ok_total = 0
+        err_total = 0
+        step = 0
+        await _safe_execute(
+                pool,
+            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
+        )
+
+        for acc in accounts:
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_total,
+                    "fail": err_total,
+                    "summary": f"Отменено. Изменено: {ok_total}",
+                }
+            try:
+                dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+            except Exception as exc:
+                log.warning("_exec_bulk_edit_channels get_dialogs acc=%s: %s", acc.get("id"), exc)
+                err_total += 1
+                await _safe_execute(
+                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
+
+            channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+            for ch in channels:
+                ch_id = ch["id"]
+                step += 1
+                try:
+                    if field == "title":
+                        ok = await account_manager.edit_channel_title(acc["session_str"], ch_id, value, _acc=acc)
+                    else:
+                        ok = await account_manager.edit_channel_about(acc["session_str"], ch_id, value, _acc=acc)
+                    if ok:
+                        ok_total += 1
+                    else:
+                        err_total += 1
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log_exc_swallow(log, "bulk_edit_channels ch=%s: %s", ch_id, exc)
+                    err_total += 1
+                await asyncio.sleep(2)
+
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            continue
 
-        channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
-        for ch in channels:
-            ch_id = ch["id"]
-            step += 1
-            try:
-                if field == "title":
-                    ok = await account_manager.edit_channel_title(acc["session_str"], ch_id, value, _acc=acc)
-                else:
-                    ok = await account_manager.edit_channel_about(acc["session_str"], ch_id, value, _acc=acc)
-                if ok:
-                    ok_total += 1
-                else:
-                    err_total += 1
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                log_exc_swallow(log, "bulk_edit_channels ch=%s: %s", ch_id, exc)
-                err_total += 1
-            await asyncio.sleep(2)
-
-        await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-
-    return {
-        "status": "done",
-        "ok": ok_total,
-        "fail": err_total,
-        "summary": f"✏️ Редактирование каналов ({field}): ✅ {ok_total} ❌ {err_total}",
-    }
+        return {
+            "status": "done",
+            "ok": ok_total,
+            "fail": err_total,
+            "summary": (f"✏️ Редактирование каналов ({field}): ✅ {ok_total} ❌ {err_total}"
+                        + (f" · пропущено занятых аккаунтов: {_busy}" if _busy else "")),
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_group_import_all(
@@ -8562,128 +8598,139 @@ async def _exec_deploy_network(
         return {"status": "failed", "summary": "⚠️ Связка: нет активного аккаунта с сессией"}
     acc = dict(arow)
 
-    node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
-    node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
-    created = wired = 0
-    manual: list[str] = []
-    for n in nodes:
-        if await _is_cancelled(pool, op_id):
-            return {"status": "cancelled", "created": created, "wired": wired,
-                    "summary": f"Отменено. Создано {created}, связано {wired}."}
-        if n.get("ref_id"):
-            continue
-        ntype = (n.get("node_type") or "").lower()
-        label = (n.get("label") or "").strip() or "Объект"
-        if ntype in ("channel", "group", "chat"):
-            try:
-                res = await account_manager.create_channel(
-                    acc["session_str"], label,
-                    megagroup=ntype in ("group", "chat"), _acc=acc)
-            except Exception as e:
-                manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
-                continue
-            ch_id = res.get("channel_id") if isinstance(res, dict) else None
-            if not ch_id or res.get("error"):
-                manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
-                continue
-            await _safe_execute(
-                pool,
-                "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type) "
-                "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id, channel_id) DO UPDATE "
-                "SET title=$4, access_hash=$6, type=$7",
-                owner_id, acc["id"], ch_id, label, res.get("username") or None,
-                int(res.get("access_hash") or 0),
-                res.get("type") or ("group" if ntype in ("group", "chat") else "channel"))
-            await _nb.update_node_status(pool, n["id"], "created", ref_id=ch_id)
-            node_ref[n["id"]] = ch_id
-            created += 1
-            await _governed_sleep(pool, owner_id, random.uniform(30, 60))
-        elif ntype in ("node", "community"):
-            # Нода-сообщество = форум-супергруппа + регистрация community_node.
-            try:
-                res = await account_manager.create_forum_supergroup(
-                    acc["session_str"], label, _acc=acc)
-            except Exception as e:
-                manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
-                continue
-            ch_id = res.get("channel_id") if isinstance(res, dict) else None
-            if not ch_id or res.get("error"):
-                manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
-                continue
-            from services import nodes_engine as _ne
-            cnode = await _ne.register_community_node(pool, owner_id, int(ch_id), label)
-            # Аккаунт-создатель = владелец супергруппы → пишем его админом ноды,
-            # чтобы назначение стаффа (community_set_staff) было кому промоутить.
-            try:
-                await _ne.add_node_member(pool, int(cnode["id"]), int(acc["id"]), "admin")
-            except Exception:
-                pass
-            await _nb.update_node_status(pool, n["id"], "created", ref_id=int(ch_id))
-            node_ref[n["id"]] = int(ch_id)
-            created += 1
-            await _governed_sleep(pool, owner_id, random.uniform(30, 60))
-        elif ntype == "bot":
-            manual.append(f"{label}: бота создайте через @BotFather (Manager Mode)")
-
-    # Рёбра: admin — назначить узел-источник администратором узла-канала;
-    # attach/link — прикрепить группу как чат обсуждений к каналу. Всё делает
-    # аккаунт-создатель (владелец созданных объектов). crosspost — нативного API
-    # нет, помечаем как ручной шаг.
-    for e in edges:
-        etype = (e.get("edge_type") or "").lower()
-        if await _is_cancelled(pool, op_id):
-            break
-        s_id, t_id = e.get("source_node_id"), e.get("target_node_id")
-        src_ref, dst_ref = node_ref.get(s_id), node_ref.get(t_id)
-        if etype == "admin":
-            if not dst_ref or not src_ref:
-                continue
-            try:
-                if await account_manager.promote_to_admin(
-                        acc["session_str"], dst_ref, int(src_ref), _acc=acc):
-                    wired += 1
-                    await _governed_sleep(pool, owner_id, random.uniform(10, 25))
-            except Exception as ex:
-                log.debug("_exec_deploy_network admin op=%d: %s", op_id, ex)
-        elif etype in ("attach", "link"):
-            if not src_ref or not dst_ref:
-                continue
-            # Канал = broadcast-узел, группа = megagroup-узел. Определяем по типу.
-            if node_type.get(s_id) in ("group", "chat") and node_type.get(t_id) == "channel":
-                channel_ref, group_ref = dst_ref, src_ref
-            else:
-                channel_ref, group_ref = src_ref, dst_ref
-            try:
-                if await account_manager.set_discussion_group(
-                        acc["session_str"], channel_ref, group_ref, _acc=acc):
-                    wired += 1
-                    await _governed_sleep(pool, owner_id, random.uniform(10, 25))
-            except Exception as ex:
-                log.debug("_exec_deploy_network attach op=%d: %s", op_id, ex)
-        elif etype == "crosspost":
-            # Нативного кросспоста нет — создаём правило пересылки src → dst.
-            # Запускается по требованию/расписанию (op crosspost_run).
-            if not src_ref or not dst_ref:
-                continue
-            await _safe_execute(
-                pool,
-                "INSERT INTO crosspost_links(owner_id, source_channel_id, target_channel_id, account_id) "
-                "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, source_channel_id, target_channel_id) "
-                "DO UPDATE SET enabled=TRUE, account_id=EXCLUDED.account_id",
-                owner_id, int(src_ref), int(dst_ref), acc["id"])
-            wired += 1
+    # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
+    # мог параллельно вести другую операцию → две сессии на одном auth-key.
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "failed",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
 
     try:
-        from services.organism import spine
-        await spine.emit(pool, owner_id, "network_deployed",
-                         {"instance_id": instance_id, "created": created, "wired": wired})
-    except Exception:
-        pass
-    parts = [f"🔗 Связка развёрнута: создано {created}, связано {wired}"]
-    if manual:
-        parts.append("Вручную: " + "; ".join(manual[:5]))
-    return {"status": "done", "created": created, "wired": wired,
-            "manual": manual, "summary": " · ".join(parts)}
+
+        node_ref: dict[int, int] = {n["id"]: n["ref_id"] for n in nodes if n.get("ref_id")}
+        node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
+        created = wired = 0
+        manual: list[str] = []
+        for n in nodes:
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "created": created, "wired": wired,
+                        "summary": f"Отменено. Создано {created}, связано {wired}."}
+            if n.get("ref_id"):
+                continue
+            ntype = (n.get("node_type") or "").lower()
+            label = (n.get("label") or "").strip() or "Объект"
+            if ntype in ("channel", "group", "chat"):
+                try:
+                    res = await account_manager.create_channel(
+                        acc["session_str"], label,
+                        megagroup=ntype in ("group", "chat"), _acc=acc)
+                except Exception as e:
+                    manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
+                    continue
+                ch_id = res.get("channel_id") if isinstance(res, dict) else None
+                if not ch_id or res.get("error"):
+                    manual.append(f"{label}: {str((res or {}).get('error') or 'не создан')[:60]}")
+                    continue
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type) "
+                    "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id, channel_id) DO UPDATE "
+                    "SET title=$4, access_hash=$6, type=$7",
+                    owner_id, acc["id"], ch_id, label, res.get("username") or None,
+                    int(res.get("access_hash") or 0),
+                    res.get("type") or ("group" if ntype in ("group", "chat") else "channel"))
+                await _nb.update_node_status(pool, n["id"], "created", ref_id=ch_id)
+                node_ref[n["id"]] = ch_id
+                created += 1
+                await _governed_sleep(pool, owner_id, random.uniform(30, 60))
+            elif ntype in ("node", "community"):
+                # Нода-сообщество = форум-супергруппа + регистрация community_node.
+                try:
+                    res = await account_manager.create_forum_supergroup(
+                        acc["session_str"], label, _acc=acc)
+                except Exception as e:
+                    manual.append(f"{label}: ошибка создания ноды ({str(e)[:60]})")
+                    continue
+                ch_id = res.get("channel_id") if isinstance(res, dict) else None
+                if not ch_id or res.get("error"):
+                    manual.append(f"{label}: {str((res or {}).get('error') or 'нода не создана')[:60]}")
+                    continue
+                from services import nodes_engine as _ne
+                cnode = await _ne.register_community_node(pool, owner_id, int(ch_id), label)
+                # Аккаунт-создатель = владелец супергруппы → пишем его админом ноды,
+                # чтобы назначение стаффа (community_set_staff) было кому промоутить.
+                try:
+                    await _ne.add_node_member(pool, int(cnode["id"]), int(acc["id"]), "admin")
+                except Exception:
+                    pass
+                await _nb.update_node_status(pool, n["id"], "created", ref_id=int(ch_id))
+                node_ref[n["id"]] = int(ch_id)
+                created += 1
+                await _governed_sleep(pool, owner_id, random.uniform(30, 60))
+            elif ntype == "bot":
+                manual.append(f"{label}: бота создайте через @BotFather (Manager Mode)")
+
+        # Рёбра: admin — назначить узел-источник администратором узла-канала;
+        # attach/link — прикрепить группу как чат обсуждений к каналу. Всё делает
+        # аккаунт-создатель (владелец созданных объектов). crosspost — нативного API
+        # нет, помечаем как ручной шаг.
+        for e in edges:
+            etype = (e.get("edge_type") or "").lower()
+            if await _is_cancelled(pool, op_id):
+                break
+            s_id, t_id = e.get("source_node_id"), e.get("target_node_id")
+            src_ref, dst_ref = node_ref.get(s_id), node_ref.get(t_id)
+            if etype == "admin":
+                if not dst_ref or not src_ref:
+                    continue
+                try:
+                    if await account_manager.promote_to_admin(
+                            acc["session_str"], dst_ref, int(src_ref), _acc=acc):
+                        wired += 1
+                        await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+                except Exception as ex:
+                    log.debug("_exec_deploy_network admin op=%d: %s", op_id, ex)
+            elif etype in ("attach", "link"):
+                if not src_ref or not dst_ref:
+                    continue
+                # Канал = broadcast-узел, группа = megagroup-узел. Определяем по типу.
+                if node_type.get(s_id) in ("group", "chat") and node_type.get(t_id) == "channel":
+                    channel_ref, group_ref = dst_ref, src_ref
+                else:
+                    channel_ref, group_ref = src_ref, dst_ref
+                try:
+                    if await account_manager.set_discussion_group(
+                            acc["session_str"], channel_ref, group_ref, _acc=acc):
+                        wired += 1
+                        await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+                except Exception as ex:
+                    log.debug("_exec_deploy_network attach op=%d: %s", op_id, ex)
+            elif etype == "crosspost":
+                # Нативного кросспоста нет — создаём правило пересылки src → dst.
+                # Запускается по требованию/расписанию (op crosspost_run).
+                if not src_ref or not dst_ref:
+                    continue
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO crosspost_links(owner_id, source_channel_id, target_channel_id, account_id) "
+                    "VALUES($1,$2,$3,$4) ON CONFLICT (owner_id, source_channel_id, target_channel_id) "
+                    "DO UPDATE SET enabled=TRUE, account_id=EXCLUDED.account_id",
+                    owner_id, int(src_ref), int(dst_ref), acc["id"])
+                wired += 1
+
+        try:
+            from services.organism import spine
+            await spine.emit(pool, owner_id, "network_deployed",
+                             {"instance_id": instance_id, "created": created, "wired": wired})
+        except Exception:
+            pass
+        parts = [f"🔗 Связка развёрнута: создано {created}, связано {wired}"]
+        if manual:
+            parts.append("Вручную: " + "; ".join(manual[:5]))
+        return {"status": "done", "created": created, "wired": wired,
+                "manual": manual, "summary": " · ".join(parts)}
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_community_add_channel(
@@ -8867,6 +8914,13 @@ async def _exec_crosspost_run(
                 "ORDER BY id LIMIT 1", owner_id)
         if not acc:
             continue
+        # Захват на КАЖДУЮ связку: аккаунт здесь свой у каждой ссылки, поэтому
+        # держим его ровно на время пересылки, а не на весь прогон.
+        if not await try_claim_account(int(acc["id"])):
+            log.info("_exec_crosspost_run: аккаунт %s занят — связка %s пропущена",
+                     acc["id"], lk.get("id"))
+            continue
+        _claimed_acc = int(acc["id"])
         try:
             res = await account_manager.forward_new_posts(
                 acc["session_str"], lk["source_channel_id"], lk["target_channel_id"],
@@ -8874,6 +8928,9 @@ async def _exec_crosspost_run(
         except Exception as e:
             log.debug("_exec_crosspost_run link=%s: %s", lk.get("id"), e)
             continue
+        finally:
+            # forward_new_posts закрывает сессию сам — держать аккаунт дольше незачем.
+            await release_accounts([_claimed_acc])
         fwd = int(res.get("forwarded") or 0)
         total_fwd += fwd
         runs += 1
