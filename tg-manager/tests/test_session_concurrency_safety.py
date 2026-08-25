@@ -230,6 +230,65 @@ def test_strike_handler_claims_atomically_not_check_then_mark():
     )
 
 
+def test_every_direct_session_executor_claims():
+    """Храповик на весь класс: любой исполнитель операции, который САМ открывает
+    Telethon-клиента, обязан захватить аккаунт.
+
+    Так были найдены 4 дыры (leave_all_chats, read_all_dialogs,
+    delete_private_dialogs, delete_contacts): они открывали живую сессию на
+    аккаунте, который в этот момент мог вести массовую операцию или прогрев.
+    Новый исполнитель не должен уметь повторить это молча.
+    """
+    import ast
+    path = os.path.join(ROOT, "services", "op_worker.py")
+    src = open(path, encoding="utf-8").read()
+    tree = ast.parse(src)
+    lines = src.split("\n")
+    claim_markers = ("try_claim_account", "_claim_available_accounts",
+                     "_claim_single_account")
+
+    checked, offenders = 0, []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith("_exec_"):
+            continue
+        body = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        if "_make_client(" not in body and "connect_client(" not in body:
+            continue                      # сессию открывает движок ниже — не наш случай
+        checked += 1
+        if not any(m in body for m in claim_markers):
+            offenders.append(node.name)
+
+    # Самопроверка измерителя: если исполнителей вдруг не нашлось, тест зелёный
+    # «просто так» — это сломанный детектор, а не чистый код.
+    assert checked >= 4, (
+        f"детектор нашёл всего {checked} исполнителей с прямым открытием сессии — "
+        f"похоже, сломан он, а не код"
+    )
+    assert not offenders, (
+        "исполнитель открывает живую сессию без захвата аккаунта "
+        f"(вторая сессия на одном auth-key → AUTH_KEY_DUPLICATED): {offenders}"
+    )
+
+
+def test_single_account_prologue_is_shared_not_copied():
+    """Пролог одиночных исполнителей — один на всех.
+
+    Он был скопирован в каждый, и во ВСЕХ копиях не хватало захвата: правка в
+    одном месте не чинила остальные. Теперь общий _claim_single_account.
+    """
+    src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+    assert "async def _claim_single_account(" in src
+    # старый скопированный пролог «достать аккаунт и сразу открыть клиента» —
+    # больше не повторяется по файлу
+    copies = src.count('return {"status": "failed", "summary": "⚠️ account_id не указан"}')
+    assert copies <= 1, (
+        f"пролог одиночного исполнителя снова размножен ({copies} копий) — "
+        f"захват опять разъедется по копиям"
+    )
+
+
 def test_release_is_scoped_to_own_lease():
     """Освобождение обязано скоупиться владельцем аренды: иначе реплика снимает
     защиту с живой сессии соседа."""

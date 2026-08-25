@@ -584,8 +584,50 @@ async def _claim_available_accounts(
 
 
 def is_account_in_use(acc_id: int) -> bool:
-    """Проверить занят ли аккаунт (non-async, читает snapshot)."""
+    """Проверить занят ли аккаунт (non-async, читает snapshot).
+
+    ВНИМАНИЕ: это снимок памяти ТОЛЬКО своего процесса и он не резервирует
+    аккаунт. Для «занять под живую сессию» — try_claim_account(s): проверка и
+    захват там неразделимы и видны другим репликам.
+    """
     return acc_id in _accounts_in_use
+
+
+async def _claim_single_account(
+    pool: asyncpg.Pool, owner_id: int, params: dict
+) -> "tuple[dict | None, dict | None]":
+    """Достать аккаунт одиночной операции и АТОМАРНО захватить его под сессию.
+
+    Возвращает (acc, None) при успехе либо (None, готовый результат-отказ) —
+    вызывающий сразу возвращает второй элемент. Освобождать обязан сам:
+    `await release_accounts([int(acc["id"])])` в finally.
+
+    Один пролог на все одиночные исполнители (выход из чатов, чтение диалогов,
+    удаление переписки/контактов): раньше он был скопирован в каждый, и во всех
+    копиях НЕ ХВАТАЛО захвата — операция открывала живую сессию на аккаунте,
+    который в этот момент мог вести массовую операцию или прогрев. Две сессии на
+    одном auth-key → AUTH_KEY_DUPLICATED.
+    """
+    account_id = params.get("account_id")
+    if not account_id:
+        return None, {"status": "failed", "summary": "⚠️ account_id не указан"}
+    try:
+        acc = await pool.fetchrow(
+            "SELECT *, (SELECT proxy_url FROM user_proxies up "
+            "WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 "
+            "AND is_active=TRUE AND session_str IS NOT NULL",
+            int(account_id), owner_id,
+        )
+    except Exception as exc:
+        return None, {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+    if not acc:
+        return None, {"status": "failed",
+                      "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
+    if not await try_claim_account(int(acc["id"])):
+        return None, {"status": "failed",
+                      "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    return dict(acc), None
 
 
 # ── Глобальный губернатор темпа ─────────────────────────────────────────────
@@ -11901,21 +11943,10 @@ async def _exec_leave_all_chats(
     """
     from services import account_manager
 
-    account_id = params.get("account_id")
-    if not account_id:
-        return {"status": "failed", "summary": "⚠️ account_id не указан"}
-
-    try:
-        acc = await pool.fetchrow(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
-            int(account_id), owner_id,
-        )
-    except Exception as exc:
-        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
-
-    if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
+    acc, err = await _claim_single_account(pool, owner_id, params)
+    if err:
+        return err
+    account_id = int(acc["id"])
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     left = 0
@@ -11946,6 +11977,7 @@ async def _exec_leave_all_chats(
             await client.disconnect()
         except Exception as e:
             log_exc_swallow(log, f"leave_all_chats: client disconnect failed for acc {account_id}: {e}")
+        await release_accounts([account_id])
 
     return {
         "status": "done",
@@ -11964,21 +11996,10 @@ async def _exec_read_all_dialogs(
     """
     from services import account_manager
 
-    account_id = params.get("account_id")
-    if not account_id:
-        return {"status": "failed", "summary": "⚠️ account_id не указан"}
-
-    try:
-        acc = await pool.fetchrow(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
-            int(account_id), owner_id,
-        )
-    except Exception as exc:
-        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
-
-    if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
+    acc, err = await _claim_single_account(pool, owner_id, params)
+    if err:
+        return err
+    account_id = int(acc["id"])
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     read = 0
@@ -12007,6 +12028,7 @@ async def _exec_read_all_dialogs(
             await client.disconnect()
         except Exception as e:
             log_exc_swallow(log, f"read_all_dialogs: client disconnect failed for acc {account_id}: {e}")
+        await release_accounts([account_id])
 
     return {
         "status": "done",
@@ -12025,21 +12047,10 @@ async def _exec_delete_private_dialogs(
     """
     from services import account_manager
 
-    account_id = params.get("account_id")
-    if not account_id:
-        return {"status": "failed", "summary": "⚠️ account_id не указан"}
-
-    try:
-        acc = await pool.fetchrow(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
-            int(account_id), owner_id,
-        )
-    except Exception as exc:
-        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
-
-    if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
+    acc, err = await _claim_single_account(pool, owner_id, params)
+    if err:
+        return err
+    account_id = int(acc["id"])
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     deleted = 0
@@ -12067,6 +12078,7 @@ async def _exec_delete_private_dialogs(
             await client.disconnect()
         except Exception as e:
             log_exc_swallow(log, f"delete_private_dialogs: client disconnect failed for acc {account_id}: {e}")
+        await release_accounts([account_id])
 
     return {
         "status": "done",
@@ -12085,21 +12097,10 @@ async def _exec_delete_contacts(
     from services import account_manager
     from telethon.tl.functions.contacts import GetContactsRequest, DeleteContactsRequest
 
-    account_id = params.get("account_id")
-    if not account_id:
-        return {"status": "failed", "summary": "⚠️ account_id не указан"}
-
-    try:
-        acc = await pool.fetchrow(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
-            int(account_id), owner_id,
-        )
-    except Exception as exc:
-        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
-
-    if not acc:
-        return {"status": "failed", "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
+    acc, err = await _claim_single_account(pool, owner_id, params)
+    if err:
+        return err
+    account_id = int(acc["id"])
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     deleted = 0
@@ -12131,6 +12132,7 @@ async def _exec_delete_contacts(
             await client.disconnect()
         except Exception as e:
             log_exc_swallow(log, f"delete_contacts: client disconnect failed for acc {account_id}: {e}")
+        await release_accounts([account_id])
 
     return {
         "status": "done",
