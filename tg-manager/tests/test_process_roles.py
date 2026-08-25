@@ -70,9 +70,21 @@ def test_parallel_cap_survives_garbage_and_extremes():
 
 # ── роли процесса ─────────────────────────────────────────────────────────────
 
+def test_role_env_var_is_namespaced():
+    """Имя переменной обязано быть с префиксом.
+
+    Короткое «ROLE» — слишком общее: если оно уже задано в окружении под что-то
+    другое, ВСЕ фоновые задачи молча выключаются, и продукт выглядит зависшим.
+    Ровно эта ошибка была допущена и стоила аварии.
+    """
+    src = _src("main.py")
+    assert 'os.getenv("ROLE")' not in src, (
+        "вернулось общее имя ROLE — риск коллизии с чужой переменной окружения")
+
+
 def test_role_default_is_all_and_unknown_falls_back():
     src = _src("main.py")
-    assert '_ROLE = (os.getenv("ROLE") or "all")' in src, "роль по умолчанию не 'all'"
+    assert '_ROLE = (os.getenv("INFRAGRAM_ROLE") or "all")' in src, "роль по умолчанию не 'all'"
     assert '_VALID_ROLES = ("all", "web", "worker")' in src
     # неизвестная роль не роняет процесс, а честно предупреждает и работает как all
     i = src.index("_VALID_ROLES")
