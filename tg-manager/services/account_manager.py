@@ -2646,6 +2646,17 @@ async def check_account_status_full(
             "auth_error": False,
             "no_session": True,
         }
+    # Мьютекс сессии: если аккаунт СЕЙЧАС занят операцией/прогревом — НЕ открываем
+    # вторую сессию (это и есть AUTH_KEY_DUPLICATED). Занят = заведомо жив, поэтому
+    # честно докладываем 'active' без второго коннекта. budget=0: проверка не ждёт.
+    _skey = _session_key(session_string, _acc)
+    if not _try_acquire_session(_skey):
+        return {
+            "status": "active",
+            "reason": "Аккаунт сейчас занят операцией (сессия жива) — проверка отложена.",
+            "display_name": "",
+            "session_busy": True,
+        }
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -2816,6 +2827,17 @@ async def check_account_status_full(
             "reason": f"Нет данных: {err[:120]}",
             "display_name": "",
         }
+    finally:
+        # РАНЬШЕ клиент не отключался вовсе → утечка ЖИВОГО коннекта: сессия
+        # оставалась онлайн с IP проверки, а затем операция коннектила ту же сессию
+        # с другого IP → AUTH_KEY_DUPLICATED (безвозвратно). Теперь всегда рвём
+        # коннект и освобождаем мьютекс сессии.
+        try:
+            if client is not None and client.is_connected():
+                await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "check_account_status_full: disconnect")
+        _release_session(_skey)
 
 
 # ── Session Health Monitor (мониторинг сессий) ──────────────────────────────
