@@ -222,3 +222,31 @@ if os.path.isdir(_TERMUX_SITE) and _TERMUX_SITE not in sys.path:
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_mutex():
+    """Сброс процессного мьютекса сессий между тестами.
+
+    connect_client держит сессию до disconnect() возвращённого клиента (защита от
+    AUTH_KEY_DUPLICATED). Юнит-тесты часто получают мок-клиент и НЕ отключают его —
+    в реальном коде это делает finally вызывающего. Без сброса «зависший» захват из
+    одного теста заставил бы следующий ждать/падать SessionBusyError. Чистим до и
+    после каждого теста; account_manager импортируем лениво (может быть не нужен).
+    """
+    try:
+        from services import account_manager as _am
+        with _am._session_inuse_lock:
+            _am._session_inuse.clear()
+    except Exception:
+        pass
+    yield
+    try:
+        from services import account_manager as _am
+        with _am._session_inuse_lock:
+            _am._session_inuse.clear()
+    except Exception:
+        pass

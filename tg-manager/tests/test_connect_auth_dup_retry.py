@@ -50,9 +50,12 @@ def test_retries_then_succeeds(monkeypatch):
 
     async def fake_connect(client, acc, action_type):
         state["connect"] += 1
-        if state["connect"] <= 2:          # первые 2 попытки — дубликат
+        # Первая попытка — дубликат, второй (после одного короткого ретрая) — успех.
+        # С процессным мьютексом сессии НАШ двойной коннект исключён, поэтому
+        # оставлен ОДИН короткий ретрай на случай мгновенного внешнего пересечения.
+        if state["connect"] <= 1:
             raise AuthKeyDuplicatedError()
-        return                              # 3-я успешна
+        return
 
     monkeypatch.setattr(am, "_make_client", fake_make)
     monkeypatch.setattr(am, "_connect_and_track", fake_connect)
@@ -60,10 +63,10 @@ def test_retries_then_succeeds(monkeypatch):
 
     client = _run(am.connect_client("sess", {"id": 1}))
     assert isinstance(client, _FakeClient)
-    assert state["connect"] == 3                  # 2 провала + успех
-    assert state["make"] == 3                      # новый клиент на каждую попытку
-    # 2 провала → 2 паузы = первые два значения бэк-оффа (успех до исчерпания).
-    assert sleeps == list(am._AUTH_DUP_BACKOFF[:2])
+    assert state["connect"] == 2                   # 1 провал + успех
+    assert state["make"] == 2                       # новый клиент на каждую попытку
+    # 1 провал → 1 пауза = первый (единственный) элемент бэк-оффа.
+    assert sleeps == list(am._AUTH_DUP_BACKOFF[:1])
 
 
 def test_succeeds_first_try_no_sleep(monkeypatch):

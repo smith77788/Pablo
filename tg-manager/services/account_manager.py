@@ -12,7 +12,10 @@ Usage:
 
 from __future__ import annotations
 import asyncio
+import hashlib
 import importlib
+import inspect
+import threading
 from datetime import datetime, timezone, timedelta
 import logging
 import random
@@ -148,7 +151,111 @@ _CONNECT_TIMEOUT = 30
 # таймаута фоновой проверки (≤30с): если монитор УЖЕ был подключён к сессии на
 # момент захвата операцией (проверка стартовала до in_operation-гейта), операция
 # переждёт её завершение и подключится, а не упадёт.
-_AUTH_DUP_BACKOFF = (3.0, 8.0, 18.0)
+# С процессным мьютексом сессии (ниже) НАШ двойной коннект исключён, поэтому
+# оставшийся AUTH_KEY_DUPLICATED — почти всегда внешний/необратимый (сессия
+# используется вне системы или ключ уже отозван). Долгий бэк-офф лишь растягивал
+# заведомо провальную операцию (в жалобе — op #132 на ~10 мин из-за 29с × N).
+# Оставляем ОДИН короткий ретрай на случай настоящего мгновенного пересечения.
+_AUTH_DUP_BACKOFF = (5.0,)
+
+# ── Процессный мьютекс на СЕССИЮ (защита от AUTH_KEY_DUPLICATED) ──────────────
+# Корень «навсегда мёртвых» аккаунтов: одна и та же сессия коннектится из ДВУХ
+# мест одновременно (операция + фоновый цикл/веб-валидация/другая операция) —
+# Telegram видит ключ с двух IP и ОТЗЫВАЕТ его безвозвратно. Арбитр операций
+# (op_worker.try_claim_account) закрывает лишь пересечение операция↔операция;
+# фоновые прогрев/мониторы/валидация импорта коннектятся мимо него. Этот мьютекс
+# — единый порог для ЛЮБОГО подключения: одну сессию в один момент держит ровно
+# один коннект. Ключ — по самой сессии (то, что видит Telegram), поэтому работает
+# независимо от подсистемы и от наличия account_id. Потокобезопасен (threading.Lock),
+# т.к. подключения идут из разных event-loop (бот и aiohttp-веб).
+_session_inuse_lock = threading.Lock()
+_session_inuse: dict[str, float] = {}   # session_key -> момент захвата (для авто-сброса)
+# Если release потерялся (краш таски/утечка) — авто-освобождение, чтобы сессия не
+# залипла навсегда. Больше самого долгого удержания коннекта на операцию.
+_SESSION_INUSE_STALE_S = 300.0
+# Сколько операция ждёт освобождения сессии другим коннектом, прежде чем сдаться
+# (транзиентный скип, НЕ смерть). Диагностика/валидация ждут 0 — падают сразу.
+_SESSION_ACQUIRE_WAIT_S = 25.0
+
+
+class SessionBusyError(ConnectionError):
+    """Сессия уже держится другим подключением — временно недоступна.
+
+    Наследник ConnectionError, чтобы вызывающий код классифицировал её как
+    сетевую/транспортную проблему (кулдаун + повтор), а НЕ как смерть аккаунта:
+    занятость проходит, как только другой коннект освободит сессию.
+    """
+
+
+def _session_key(session_string: str, device: dict | None) -> str:
+    """Стабильный ключ подключения по САМОЙ сессии (её и видит Telegram).
+
+    Хеш session_string сериализует одну и ту же сессию во всех подсистемах.
+    Без сессии (логин по номеру) сериализовать нечего — пустой ключ = без мьютекса.
+    """
+    if session_string:
+        return "s:" + hashlib.sha256(session_string.encode("utf-8", "ignore")).hexdigest()[:32]
+    d = device or {}
+    if d.get("id"):
+        return "a:" + str(d["id"])
+    return ""
+
+
+def _try_acquire_session(key: str) -> bool:
+    if not key:
+        return True
+    now = time.time()
+    with _session_inuse_lock:
+        held = _session_inuse.get(key)
+        if held is not None and (now - held) < _SESSION_INUSE_STALE_S:
+            return False
+        _session_inuse[key] = now
+        return True
+
+
+def _release_session(key: str) -> None:
+    if not key:
+        return
+    with _session_inuse_lock:
+        _session_inuse.pop(key, None)
+
+
+def _bind_session_release(client, key: str) -> None:
+    """Освободить сессию РОВНО когда возвращённый клиент отключится.
+
+    Оборачиваем disconnect() клиента: релиз наступает по фактическому разрыву
+    (span connect→use→disconnect держит мьютекс). Если клиент без disconnect —
+    релизим сразу (нечего дожидаться); если caller не отключится — авто-сброс по
+    _SESSION_INUSE_STALE_S подстрахует.
+    """
+    if not key or client is None:
+        _release_session(key)
+        return
+    _orig = getattr(client, "disconnect", None)
+    _state = {"released": False}
+
+    def _do_release():
+        if not _state["released"]:
+            _state["released"] = True
+            _release_session(key)
+
+    if _orig is None:
+        _do_release()
+        return
+
+    async def _wrapped(*a, **k):
+        try:
+            r = _orig(*a, **k)
+            if inspect.isawaitable(r):
+                r = await r
+            return r
+        finally:
+            _do_release()
+
+    try:
+        client.disconnect = _wrapped  # type: ignore[assignment]
+    except Exception:
+        _do_release()
 # Прогрев кэша участников для резолва инвайтера при автовыдаче админки. Недавно
 # вступившие идут первыми в ChannelParticipantsRecent, поэтому потолок умеренный —
 # он ограничивает и время, и нагрузку на больших каналах (fail-open при промахе).
@@ -1061,14 +1168,30 @@ async def connect_client(session_string: str = "", device: dict | None = None,
     # retry_auth_dup=False: они НЕ захватывают аккаунт, поэтому ретраить конфликт
     # бессмысленно (фоновый коннект никуда не денется), а 29с-ожидание вешает
     # HTTP-запрос до таймаута шлюза. Такие вызовы падают быстро.
+    # Процессный мьютекс на сессию: одну сессию в один момент держит ровно один
+    # коннект (иначе — AUTH_KEY_DUPLICATED навсегда). Ждём освобождения ограниченно;
+    # не дождались → SessionBusyError (транзиентный скип), а НЕ смерть аккаунта.
+    _skey = _session_key(session_string, device)
+    _wait_budget = _SESSION_ACQUIRE_WAIT_S if retry_auth_dup else 0.0
+    _waited = 0.0
+    while not _try_acquire_session(_skey):
+        if _waited >= _wait_budget:
+            raise SessionBusyError(
+                f"acc={(device or {}).get('id')}: сессия занята другим подключением "
+                f"(ожидание {_wait_budget:.0f}с исчерпано) — повтор позже")
+        await asyncio.sleep(min(2.5, _wait_budget - _waited) or 2.5)
+        _waited += 2.5
+
     _backoff = _AUTH_DUP_BACKOFF if retry_auth_dup else ()
     last_dup: Exception | None = None
     _force_direct_retry = False  # после duplicated на безпроксёвом транспорте
-    for _attempt in range(len(_backoff) + 1):
+    try:
+      for _attempt in range(len(_backoff) + 1):
         client = _make_client(session_string, device, low_risk=low_risk,
                               _force_direct=_force_direct_retry)
         try:
             await _connect_and_track(client, device, action_type)
+            _bind_session_release(client, _skey)
             return client
         except AuthKeyDuplicatedError as e:
             last_dup = e
@@ -1116,11 +1239,17 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             client = _make_client(session_string, device, low_risk=low_risk,
                                   _no_pool=True, _force_direct=True)
             await _connect_and_track(client, device, action_type)
+            _bind_session_release(client, _skey)
             return client
-    # Теоретически недостижимо (цикл либо возвращает, либо пробрасывает).
-    if last_dup:
+      # Теоретически недостижимо (цикл либо возвращает, либо пробрасывает).
+      if last_dup:
         raise last_dup
-    raise RuntimeError("connect_client: не удалось подключиться")
+      raise RuntimeError("connect_client: не удалось подключиться")
+    except BaseException:
+        # НИ ОДНОГО живого клиента не вернули → освобождаем сессию сейчас
+        # (успешный возврат освобождает её через обёртку disconnect).
+        _release_session(_skey)
+        raise
 
 
 async def start_login(
