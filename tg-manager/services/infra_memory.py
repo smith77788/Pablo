@@ -43,6 +43,13 @@ class _AccountActionRecord:
         0.0  # скользящее среднее времени выполнения (сек на элемент)
     )
     duration_samples: int = 0  # количество измерений duration
+    # Сколько успехов/провалов уже УЛЕТЕЛО в БД. Нужно, чтобы флашить ПРИРОСТ,
+    # а не абсолют: при двух репликах перезапись абсолютом («successes =
+    # EXCLUDED.successes») затирает инкременты соседа. В том же запросе метки
+    # времени сливались через GREATEST — счётчики были единственным местом,
+    # где слияния не было.
+    flushed_successes: int = 0
+    flushed_failures: int = 0
 
     @property
     def total(self) -> int:
@@ -75,6 +82,8 @@ class _ProxyRecord:
     avg_latency_ms: float = 0.0
     last_success_at: float = 0.0
     last_failure_at: float = 0.0
+    flushed_successes: int = 0      # см. одноимённые поля у _AccountActionRecord
+    flushed_failures: int = 0
 
     @property
     def success_rate(self) -> float:
@@ -356,8 +365,11 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        $7, $8, NOW())
                    ON CONFLICT (account_id, action_type)
                    DO UPDATE SET
-                       successes = EXCLUDED.successes,
-                       failures = EXCLUDED.failures,
+                       -- ПРИБАВЛЯЕМ прирост, а не перезаписываем абсолютом:
+                       -- иначе вторая реплика затирает инкременты первой.
+                       -- $3/$4 здесь — дельта с прошлого флаша.
+                       successes = infra_memory_accounts.successes + EXCLUDED.successes,
+                       failures = infra_memory_accounts.failures + EXCLUDED.failures,
                        last_success_at = GREATEST(infra_memory_accounts.last_success_at, EXCLUDED.last_success_at),
                        last_failure_at = GREATEST(infra_memory_accounts.last_failure_at, EXCLUDED.last_failure_at),
                        last_errors = EXCLUDED.last_errors,
@@ -368,16 +380,21 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        updated_at = NOW()""",
                 rec.account_id,
                 rec.action_type,
-                rec.successes,
-                rec.failures,
+                max(0, rec.successes - rec.flushed_successes),
+                max(0, rec.failures - rec.flushed_failures),
                 rec.last_success_at if rec.last_success_at > 0 else None,
                 rec.last_failure_at if rec.last_failure_at > 0 else None,
                 rec.last_errors,
                 rec.avg_duration_s if rec.avg_duration_s > 0 else 0.0,
             )
+            # Прирост записан — фиксируем отметку. БЕЗ этого следующий флаш
+            # прибавил бы те же значения ещё раз и счётчики бы раздувались.
+            rec.flushed_successes = rec.successes
+            rec.flushed_failures = rec.failures
         except Exception as e:
             log.warning("infra_memory flush account %s/%s: %s", key[0], key[1], e)
             _dirty_account_keys.add(key)  # вернуть в dirty для повтора
+            # Отметку НЕ двигаем: при повторе прирост уйдёт целиком.
 
     # Прокси
     dirty_proxies = list(_dirty_proxy_keys)
@@ -396,20 +413,23 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        to_timestamp($6), to_timestamp($7), NOW())
                    ON CONFLICT (proxy_url, action_type)
                    DO UPDATE SET
-                       successes = EXCLUDED.successes,
-                       failures = EXCLUDED.failures,
+                       -- Прирост, а не абсолют (см. infra_memory_accounts).
+                       successes = infra_memory_proxies.successes + EXCLUDED.successes,
+                       failures = infra_memory_proxies.failures + EXCLUDED.failures,
                        avg_latency_ms = EXCLUDED.avg_latency_ms,
                        last_success_at = GREATEST(infra_memory_proxies.last_success_at, EXCLUDED.last_success_at),
                        last_failure_at = GREATEST(infra_memory_proxies.last_failure_at, EXCLUDED.last_failure_at),
                        updated_at = NOW()""",
                 rec.proxy_url,
                 rec.action_type,
-                rec.successes,
-                rec.failures,
+                max(0, rec.successes - rec.flushed_successes),
+                max(0, rec.failures - rec.flushed_failures),
                 rec.avg_latency_ms,
                 rec.last_success_at if rec.last_success_at > 0 else None,
                 rec.last_failure_at if rec.last_failure_at > 0 else None,
             )
+            rec.flushed_successes = rec.successes      # см. account-ветку выше
+            rec.flushed_failures = rec.failures
         except Exception as e:
             log.warning("infra_memory flush proxy %s/%s: %s", key[0], key[1], e)
             _dirty_proxy_keys.add(key)
@@ -461,6 +481,10 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
                 avg_duration_s=avg_dur,
                 # duration только для успешных; если avg есть — инициализируем как successes
                 duration_samples=successes if avg_dur > 0 else 0,
+                # Загруженное из БД уже ТАМ записано. Без этой отметки первый же
+                # флаш прибавил бы весь абсолют поверх — счётчики бы удвоились.
+                flushed_successes=successes,
+                flushed_failures=failures,
             )
             _account_memory[key] = rec
             loaded += 1
@@ -508,6 +532,10 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
                 last_errors=list(row["last_errors"] or []),
                 avg_duration_s=avg_dur,
                 duration_samples=successes if avg_dur > 0 else 0,
+                # Загруженное уже в БД — без отметки первый флаш прибавил бы
+                # абсолют поверх себя и счётчики удвоились бы на каждом рестарте.
+                flushed_successes=successes,
+                flushed_failures=row["failures"] or 0,
             )
             _account_memory[key] = rec
             loaded += 1
@@ -540,6 +568,9 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
                 avg_latency_ms=float(row["avg_latency_ms"] or 0),
                 last_success_at=float(row["last_success_ts"] or 0),
                 last_failure_at=float(row["last_failure_ts"] or 0),
+                # Загруженное уже в БД — иначе первый флаш удвоит счётчики.
+                flushed_successes=row["successes"] or 0,
+                flushed_failures=row["failures"] or 0,
             )
             _proxy_memory[key] = rec
             loaded_proxies += 1
