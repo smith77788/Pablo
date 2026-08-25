@@ -47,8 +47,72 @@ def set_notify_new_users(enabled: bool) -> None:
     global _NOTIFY_NEW_USERS
     _NOTIFY_NEW_USERS = bool(enabled)
 
-# Пользователи, вошедшие через ADMIN_SECRET в текущей сессии бота
+# Пользователи, вошедшие через ADMIN_SECRET.
+#
+# Это КЭШ строк platform_admin_sessions, а не источник правды (находка аудита
+# №3). Источник — БД: от этого множества зависит решение о доступе, и пока оно
+# жило только в памяти, вход в боте не давал доступа в мини-аппе (другой
+# процесс), доступ не истекал вовсе и терялся при перезапуске.
+#
+# Читается синхронно (_is_admin вызывается из 62 мест — делать его async
+# значило бы переписать пол-бота), поэтому запись идёт СКВОЗЬ: grant пишет в БД
+# и сразу в кэш, а фоновое обновление подтягивает чужие входы.
 _session_admins: set[int] = set()
+
+# Срок сессии. Дефолт 30 дней: сегодня доступ живёт до перезапуска процесса
+# (на практике недели), поэтому более короткий срок выкинул бы вошедших раньше,
+# чем это происходит сейчас. Главное — что срок вообще ПОЯВИЛСЯ и настраивается.
+_ADMIN_SESSION_TTL_H = 24 * 30
+try:
+    _ADMIN_SESSION_TTL_H = max(1, int(os.getenv("ADMIN_SESSION_TTL_HOURS", "") or _ADMIN_SESSION_TTL_H))
+except (TypeError, ValueError):
+    pass
+
+
+async def grant_session_admin(pool, uid: int) -> None:
+    """Выдать сессионный доступ: в БД (для всех процессов) и в локальный кэш."""
+    _session_admins.add(int(uid))
+    if pool is None:
+        return
+    try:
+        await pool.execute(
+            """INSERT INTO platform_admin_sessions(user_id, granted_at, expires_at)
+               VALUES($1, now(), now() + make_interval(hours => $2))
+               ON CONFLICT (user_id) DO UPDATE
+               SET granted_at = now(), expires_at = EXCLUDED.expires_at""",
+            int(uid), _ADMIN_SESSION_TTL_H,
+        )
+    except Exception as exc:
+        # Fail-open по кэшу: в ЭТОМ процессе доступ уже выдан, но остальные его
+        # не увидят — это заметно в логе, а не молча.
+        log.warning("grant_session_admin: не записал сессию uid=%s: %s", uid, exc)
+
+
+async def refresh_session_admins(pool) -> int:
+    """Подтянуть живые сессии из БД в кэш процесса. Возвращает их число.
+
+    Заменяет множество целиком: так истёкшие и отозванные уходят сами, без
+    отдельной логики удаления.
+    """
+    if pool is None:
+        return len(_session_admins)
+    try:
+        rows = await pool.fetch(
+            "SELECT user_id FROM platform_admin_sessions WHERE expires_at > now()")
+    except Exception as exc:
+        log.debug("refresh_session_admins: %s", exc)
+        return len(_session_admins)   # fail-open: держим прошлый кэш
+    fresh = {int(r["user_id"]) for r in rows}
+    _session_admins.clear()
+    _session_admins.update(fresh)
+    return len(fresh)
+
+
+async def run_session_admin_refresh(pool) -> None:
+    """Фоновое обновление кэша: вход в одном процессе виден остальным."""
+    while True:
+        await refresh_session_admins(pool)
+        await asyncio.sleep(60)
 
 
 def _is_admin(uid: int) -> bool:
@@ -278,9 +342,11 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
 
 
 @router.message(F.text.func(lambda t: bool(ADMIN_SECRET) and t == ADMIN_SECRET))
-async def cmd_admin_secret(message: Message) -> None:
-    # Секретная фраза совпала — даём сессионный доступ без проверки ADMIN_IDS
-    _session_admins.add(message.from_user.id)
+async def cmd_admin_secret(message: Message, pool: asyncpg.Pool = None) -> None:
+    # Секретная фраза совпала — даём сессионный доступ без проверки ADMIN_IDS.
+    # Пишем СКВОЗЬ в БД: иначе доступ виден только этому процессу (в мини-аппе
+    # или на другой реплике человек остался бы не-админом) и не истекал бы.
+    await grant_session_admin(pool, message.from_user.id)
     try:
         await message.delete()
     except Exception:

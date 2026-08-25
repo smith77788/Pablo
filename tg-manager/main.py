@@ -734,6 +734,10 @@ async def main() -> None:
         )
         # payment_webhook already started via _web_resilient above (no stagger)
         asyncio.create_task(_resilient("task_registry", task_registry.run_cleanup_loop))
+        # Сессии админки живут в БД (schema_v181); процесс держит лишь кэш —
+        # обновляем, чтобы вход в одном процессе был виден остальным.
+        from bot.handlers.admin import run_session_admin_refresh
+        asyncio.create_task(_resilient("session_admin_refresh", run_session_admin_refresh, pool))
         # proxy_scraper (бесплатный публичный пул) УДАЛЁН: пул нестабилен и блокировал
         # работу. Транспорт — прокси пользователя или прямой host-IP; CF/IPv6 opt-in.
         asyncio.create_task(_resilient("activity_logger", activity_logger.run, pool))
