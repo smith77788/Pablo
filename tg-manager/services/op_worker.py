@@ -79,8 +79,24 @@ async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "
 
 _POLL_INTERVAL = 10  # секунд между проверками очереди
 _STALE_RUNNING_TIMEOUT_MIN = 60  # операции в running > N минут → reset в pending
-_MAX_PARALLEL = 8  # максимум параллельных операций глобально
-_MAX_PARALLEL_PER_OWNER = 3  # максимум на одного владельца (далее в коде)
+
+
+def _int_env(name: str, default: int, lo: int, hi: int) -> int:
+    """Целое из окружения с зажимом в разумные границы (мусор → default)."""
+    try:
+        return max(lo, min(int(os.getenv(name, "").strip() or default), hi))
+    except (TypeError, ValueError):
+        return default
+
+
+# Потолок параллельных операций ЭТОГО процесса (находка аудита №2).
+# Раньше 8 было жёстко зашито и означало ёмкость ВСЕЙ платформы: все клиенты
+# делили восемь слотов, и добавить мощности было нечем. Теперь это настройка
+# воркера — подняв её или запустив вторую реплику воркера (ROLE=worker), ёмкость
+# растёт. Дефолт прежний, чтобы поведение без настройки не изменилось.
+_MAX_PARALLEL = _int_env("OP_MAX_PARALLEL", 8, 1, 256)
+# Максимум на одного владельца — чтобы один клиент не занял весь воркер.
+_MAX_PARALLEL_PER_OWNER = _int_env("OP_MAX_PARALLEL_PER_OWNER", 3, 1, 64)
 _MIN_ACCOUNTS_PER_OP = 1     # честный дележ флота: минимум аккаунтов на операцию
 
 # Реестр аккаунтов, занятых активными операциями op_worker.

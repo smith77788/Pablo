@@ -173,6 +173,19 @@ configure_root_logger(
 )
 log = get_logger(__name__)
 
+# ── Роль процесса (находка аудита №2) ────────────────────────────────────────
+# Один образ — разные процессы. По умолчанию «all»: ровно текущее поведение,
+# чтобы включение ролей было ОСОЗНАННЫМ шагом, а не сюрпризом при деплое.
+#   all    — бот + HTTP + все фоновые циклы (как сейчас)
+#   web    — бот + HTTP, без фоновых циклов
+#   worker — только фоновые циклы (операции, флот), без приёма апдейтов
+_VALID_ROLES = ("all", "web", "worker")
+_ROLE = (os.getenv("ROLE") or "all").strip().lower()
+if _ROLE not in _VALID_ROLES:
+    log.warning("ROLE=%r неизвестна — работаю как 'all'. Допустимо: %s",
+                _ROLE, ", ".join(_VALID_ROLES))
+    _ROLE = "all"
+
 
 async def _global_error_handler(event: ErrorEvent) -> None:
     """Catch any unhandled exception and show it to the user."""
@@ -595,7 +608,19 @@ async def main() -> None:
         """Wrap a background service factory with auto-restart on crash.
         fn(*args) is called fresh each restart so the coroutine is never reused.
         Stagger startup so all services don't hit DB simultaneously.
+
+        РОЛЬ ПРОЦЕССА (находка аудита №2). Сейчас бот, HTTP-API на 500+ маршрутов
+        и ~49 фоновых циклов делят один интерпретатор и один GIL: потолок
+        массовых операций общий на всех клиентов, а сбой в фоне роняет и бота.
+        `ROLE` позволяет запустить тот же образ разными процессами:
+            all    — всё в одном (ЗНАЧЕНИЕ ПО УМОЛЧАНИЮ, поведение как раньше);
+            web    — только HTTP и бот, без фоновых циклов;
+            worker — только фоновые циклы, без обслуживания Telegram-апдейтов.
+        Гейт стоит ЗДЕСЬ, в одной точке, а не в 49 местах создания задач.
         """
+        if _ROLE == "web":
+            log.debug("ROLE=web: фоновый сервис %s не запускается", name)
+            return
         nonlocal _svc_stagger_index
         _svc_stagger_index += 1
         delay = _svc_stagger_index * 2  # 2s gap between each service
@@ -810,6 +835,14 @@ async def main() -> None:
                     await bot.delete_webhook()
                 except Exception:
                     pass
+        elif _ROLE == "worker":
+            # Воркер НЕ забирает апдейты: два процесса на одном getUpdates
+            # отбирали бы их друг у друга (Telegram отдаёт апдейт ровно одному),
+            # и бот отвечал бы через раз. Держим процесс живым — работу делают
+            # фоновые циклы.
+            log.info("ROLE=worker: поллинг не запускаю, работают фоновые циклы")
+            while True:
+                await asyncio.sleep(3600)
         else:
             await dp.start_polling(
                 bot,
