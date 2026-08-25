@@ -14536,7 +14536,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             from services import op_worker as _opw
-            status = _opw._circuit_breaker_status(uid)
+            # Общее состояние из БД: роль web не запускает операции, и в её
+            # памяти счётчик всегда пуст — читая кэш, мини-апп показывал бы
+            # «всё в порядке», пока воркер стоит на паузе.
+            status = await _opw.circuit_breaker_status(uid)
             return _json_resp(status)
         except Exception as e:
             return _err(str(e), 500)

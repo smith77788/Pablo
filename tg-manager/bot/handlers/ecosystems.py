@@ -1335,11 +1335,21 @@ async def cb_eco_dna_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(EcoCb.filter(F.action == "eco_snooze"))
-async def cb_eco_snooze(callback: CallbackQuery, callback_data: EcoCb) -> None:
+async def cb_eco_snooze(callback: CallbackQuery, callback_data: EcoCb,
+                        pool: asyncpg.Pool) -> None:
     from services import ecosystem_copilot as _ec
 
     hours = callback_data.page or 1
-    _ec.snooze_ecosystem_alerts(callback.from_user.id, float(hours))
+    # В БД, а не только в памяти: цикл уведомлений живёт в другом процессе
+    # (роль worker) и заглушку из памяти бота не видит — раньше кнопка отвечала
+    # «отложено», а уведомления продолжали идти.
+    try:
+        await _ec.snooze_ecosystem_alerts_db(pool, callback.from_user.id, float(hours))
+    except Exception as e:
+        log.warning('handler error in cb_eco_snooze: %s', e)
+        await callback.answer(
+            "Не удалось сохранить паузу — попробуйте ещё раз", show_alert=True)
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Снять снуз", callback_data=EcoCb(action="eco_snooze_clear"))
@@ -1354,10 +1364,14 @@ async def cb_eco_snooze(callback: CallbackQuery, callback_data: EcoCb) -> None:
 
 
 @router.callback_query(EcoCb.filter(F.action == "eco_snooze_clear"))
-async def cb_eco_snooze_clear(callback: CallbackQuery) -> None:
+async def cb_eco_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     from services import ecosystem_copilot as _ec
 
-    _ec._snooze_until.pop(callback.from_user.id, None)
+    # Снимать тоже в БД: иначе «возобновлены» останется словом в этом процессе.
+    try:
+        await _ec.clear_snooze_db(pool, callback.from_user.id)
+    except Exception as e:
+        log.warning('handler error in cb_eco_snooze_clear: %s', e)
     await callback.answer("✅ Уведомления возобновлены", show_alert=False)
 
     kb = InlineKeyboardBuilder()

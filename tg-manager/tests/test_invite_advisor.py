@@ -261,9 +261,9 @@ def test_ui_renders_advice_and_card():
 
 def test_open_circuit_breaker_is_surfaced(monkeypatch):
     from services import op_worker
-    monkeypatch.setattr(op_worker, "_circuit_breaker_status",
-                        lambda uid: {"status": "open", "failures": 3,
-                                     "cooldown_remaining_s": 900})
+    async def _open(uid):
+        return {"status": "open", "failures": 3, "cooldown_remaining_s": 900}
+    monkeypatch.setattr(op_worker, "circuit_breaker_status", _open)
     res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
     pause = [a for a in _sev(res, "danger") if "пауз" in a["title"].lower()]
     assert pause, (
@@ -279,8 +279,9 @@ def test_open_circuit_breaker_is_surfaced(monkeypatch):
 
 def test_closed_breaker_is_silent(monkeypatch):
     from services import op_worker
-    monkeypatch.setattr(op_worker, "_circuit_breaker_status",
-                        lambda uid: {"status": "closed", "failures": 0})
+    async def _closed(uid):
+        return {"status": "closed", "failures": 0}
+    monkeypatch.setattr(op_worker, "circuit_breaker_status", _closed)
     res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
     assert not [a for a in res["advice"] if "пауз" in a["title"].lower()]
 

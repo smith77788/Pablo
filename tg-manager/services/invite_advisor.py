@@ -62,8 +62,11 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     # становится видимой первым же пунктом разбора.
     checked.append("пауза после сбоев")
     try:
-        from services.op_worker import _circuit_breaker_status
-        cb = _circuit_breaker_status(int(owner_id))
+        # ОБЩЕЕ состояние (БД): разбор запрашивается из мини-аппа, а он может
+        # обслуживаться процессом, который операций не запускал — в его памяти
+        # предохранитель всегда «закрыт», и пауза осталась бы невидимой.
+        from services.op_worker import circuit_breaker_status
+        cb = await circuit_breaker_status(int(owner_id))
         if cb.get("status") == "open":
             mins = max(1, int(cb.get("cooldown_remaining_s") or 0) // 60)
             advice.append({

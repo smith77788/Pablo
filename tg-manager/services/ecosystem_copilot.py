@@ -23,14 +23,71 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
-# ── Snooze (аналогично infra_copilot) ────────────────────────────────────────
-_snooze_until: dict[int, float] = {}
+# ── Snooze ────────────────────────────────────────────────────────────────────
+# ЗАЧЕМ ЧЕРЕЗ БД. Заглушка хранилась ТОЛЬКО в этом словаре, а фоновый цикл
+# читает её здесь же. Кнопку «😴 24ч» нажимают в боте — то есть в процессе,
+# который обрабатывает апдейты; цикл же живёт в процессе-воркере (роль worker) и
+# в его памяти словарь всегда пуст. Итог: бот отвечал «Уведомления отложены на
+# 24ч», а уведомления продолжали приходить как ни в чём не бывало. Перезапуск
+# сбрасывал заглушку даже в одном процессе.
+#
+# Теперь срок лежит в platform_settings (как у infra_copilot), а цикл
+# перечитывает его каждый круг — заглушка работает и переживает рестарт.
+_snooze_until: dict[int, float] = {}   # кэш процесса; истина — platform_settings
+_SNOOZE_PREFIX = "eco_snooze_"
 
 
-def snooze_ecosystem_alerts(owner_id: int, hours: float) -> None:
+def snooze_ecosystem_alerts(owner_id: int, hours: float) -> float:
+    """Заглушить в ПАМЯТИ процесса. Срок (unix) — для записи в БД."""
     import time
 
-    _snooze_until[owner_id] = time.time() + hours * 3600
+    exp = time.time() + hours * 3600
+    _snooze_until[owner_id] = exp
+    return exp
+
+
+async def snooze_ecosystem_alerts_db(pool: asyncpg.Pool, owner_id: int,
+                                     hours: float) -> float:
+    """Заглушить НАДЁЖНО: и в памяти, и в БД (переживает рестарт и роли)."""
+    from database import db as _db
+
+    exp = snooze_ecosystem_alerts(owner_id, hours)
+    await _db.set_platform_setting(pool, f"{_SNOOZE_PREFIX}{owner_id}", str(exp))
+    return exp
+
+
+async def clear_snooze_db(pool: asyncpg.Pool, owner_id: int) -> None:
+    """Снять заглушку везде: иначе «Возобновить» сработало бы только локально."""
+    from database import db as _db
+
+    _snooze_until.pop(owner_id, None)
+    await _db.set_platform_setting(pool, f"{_SNOOZE_PREFIX}{owner_id}", "0")
+
+
+async def reload_snoozes_from_db(pool: asyncpg.Pool) -> None:
+    """Подтянуть заглушки из БД (вызывается циклом на каждом круге)."""
+    import time
+
+    try:
+        rows = await pool.fetch(
+            "SELECT key, value FROM platform_settings WHERE key LIKE $1",
+            f"{_SNOOZE_PREFIX}%")
+    except Exception as e:
+        # Молчание БД не должно превращаться в шквал уведомлений: оставляем то,
+        # что уже знаем, и просто не обновляемся в этот круг.
+        log.debug("ecosystem_copilot.reload_snoozes_from_db: %s", e)
+        return
+    now = time.time()
+    for row in rows:
+        try:
+            owner_id = int(str(row["key"])[len(_SNOOZE_PREFIX):])
+            exp = float(row["value"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if exp > now:
+            _snooze_until[owner_id] = exp
+        else:
+            _snooze_until.pop(owner_id, None)
 
 
 def is_snoozed(owner_id: int) -> bool:
@@ -145,6 +202,9 @@ async def run_ecosystem_copilot_loop(pool: asyncpg.Pool, bot) -> None:
 
     while True:
         try:
+            # Заглушку ставят в ДРУГОМ процессе (бот), поэтому её надо перечитать,
+            # иначе «отложено на 24ч» ничего не откладывает.
+            await reload_snoozes_from_db(pool)
             owner_ids = await pool.fetch(
                 "SELECT DISTINCT owner_id FROM ecosystems WHERE status='active'",
             )
