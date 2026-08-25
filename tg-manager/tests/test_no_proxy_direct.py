@@ -43,6 +43,36 @@ def test_free_pool_removed_no_pool_transport(monkeypatch):
     assert not hasattr(am, "_get_pool_proxy_url")        # функция удалена
 
 
+def test_global_relay_does_not_hijack_direct_under_allow_direct(monkeypatch):
+    # Требование оператора: без прокси → РЕАЛЬНЫЙ host-IP. Глобальный CF_RELAY_URL
+    # (общий edge-IP пула) НЕ подменяет прямой выход под allow_direct (дефолт) —
+    # иначе логин/операция разъезжаются по IP → AUTH_KEY_DUPLICATED.
+    monkeypatch.setattr(am, "_IPV6_SUBNET", "")
+    monkeypatch.setattr(am, "CF_RELAY_URL", "wss://relay.example/ws")
+    client = am._make_client("", {"id": 10, "phone": "+70000000010",
+                                  "proxy_policy": "allow_direct"})
+    assert getattr(client, "_infragram_transport", None) == "direct"
+
+
+def test_global_relay_used_only_under_strict(monkeypatch):
+    # Под strict host-IP запрещён осознанно → глобальный релей допустим (не 'direct').
+    monkeypatch.setattr(am, "_IPV6_SUBNET", "")
+    monkeypatch.setattr(am, "CF_RELAY_URL", "wss://relay.example/ws")
+    client = am._make_client("", {"id": 11, "phone": "+70000000011",
+                                  "proxy_policy": "strict"})
+    assert getattr(client, "_infragram_transport", None) == "relay"
+
+
+def test_per_account_relay_honored_under_allow_direct(monkeypatch):
+    # Явно назначенный аккаунту relay (выбор пользователя/пула) honored всегда.
+    monkeypatch.setattr(am, "_IPV6_SUBNET", "")
+    monkeypatch.setattr(am, "CF_RELAY_URL", "")
+    client = am._make_client("", {"id": 12, "phone": "+70000000012",
+                                  "proxy_policy": "allow_direct",
+                                  "cf_relay_url": "wss://acc-relay.example/ws"})
+    assert getattr(client, "_infragram_transport", None) == "relay"
+
+
 def test_bound_proxy_untouched(monkeypatch):
     # Аккаунт с назначенным прокси всегда идёт через него.
     _no_transport_env(monkeypatch)

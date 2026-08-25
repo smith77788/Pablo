@@ -22,9 +22,10 @@ def _read(rel: str) -> str:
 def test_per_account_relay_used_in_make_client():
     am = _read("services/account_manager.py")
     seg = am[am.index("Выбор транспорта"):am.index("_client = TelegramClient")]
-    # приоритет пер-аккаунтного relay над глобальным env
+    # приоритет пер-аккаунтного relay над глобальным env; глобальный CF_RELAY_URL
+    # под allow_direct НЕ подменяет прямой реальный IP (только под strict)
     assert 'device.get("cf_relay_url")' in seg
-    assert "acc_relay or CF_RELAY_URL" in seg
+    assert 'acc_relay or (CF_RELAY_URL if _pol == "strict" else "")' in seg
     # колонка реально селектится в основных путях загрузки аккаунта
     assert "a.cf_relay_url" in _read("database/db.py")
     assert "a.cf_relay_url" in _read("services/op_worker.py")

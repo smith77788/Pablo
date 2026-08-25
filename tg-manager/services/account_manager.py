@@ -1017,7 +1017,14 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     acc_relay = ""
     if device:
         acc_relay = str(device.get("cf_relay_url") or "").strip()
-    relay_url = acc_relay or CF_RELAY_URL
+    # Требование оператора (повторено трижды): БЕЗ прокси аккаунт работает на РЕАЛЬНОМ
+    # host-IP. Глобальный CF_RELAY_URL — это ОБЩИЙ edge-IP пула (не реальный адрес
+    # аккаунта) и потенциальный разъезд IP логин↔операция → AUTH_KEY_DUPLICATED.
+    # Поэтому глобальный релей НЕ подменяет прямой выход под allow_direct (дефолт);
+    # он включается лишь под strict (там host-IP запрещён осознанно). ПЕР-АККАУНТНЫЙ
+    # cf_relay_url (явно назначенный пользователем/пулом) honored всегда — это выбор.
+    _pol = _effective_proxy_policy(d)
+    relay_url = acc_relay or (CF_RELAY_URL if _pol == "strict" else "")
 
     # local_addr/use_ipv6 — привязка исходящего сокета к своему IPv6 аккаунта.
     local_addr = None
