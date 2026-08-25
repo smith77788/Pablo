@@ -4074,545 +4074,558 @@ async def _exec_global_presence_channel(
     if not acc_ids:
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
-    accounts_rows = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=acc_ids, respect_cooldown=False
-    )
-    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
+    # Отказной захват всего пула: дальше аккаунты выбираются из него по ходу
+    # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts_rows) - len(claimed_ids)
+    accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
 
-    created_count = 0
-    failed_count = 0
-    total = len(targets)
-    _gp_eco_id: int | None = None  # lazily loaded from plan
-    await _safe_execute(
-            pool,
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
-    )
+    try:
 
-    for i, target in enumerate(targets):
-        if await _is_cancelled(pool, op_id):
-            await _safe_execute(
-                    pool,
-                "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
-                plan_id,
-            )
-            return {
-                "status": "cancelled",
-                "created": created_count,
-                "failed": failed_count,
-                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
-            }
+        accounts_rows = await resource_selector.select_all_active(
+            pool, owner_id, include_ids=acc_ids, respect_cooldown=False
+        )
+        acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
-        is_group = (target.get("asset_type") or asset_type) == "group"
+        created_count = 0
+        failed_count = 0
+        total = len(targets)
+        _gp_eco_id: int | None = None  # lazily loaded from plan
+        await _safe_execute(
+                pool,
+            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+        )
 
-        acc_id = target["selected_account_id"]
-        acc = acc_by_id.get(acc_id)
-
-        if not acc:
-            await _safe_execute(
-                    pool,
-                "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                "Аккаунт недоступен",
-                target["id"],
-            )
-            failed_count += 1
-            await _safe_execute(
-                    pool,
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-            )
-            continue
-
-        # ── Единый гейт здоровья аккаунта перед постом ──
-        # trust_score — лишь одна ось; is_account_quarantined сводит весь риск-пульс
-        # (restriction_events + acc_status + flood + trust + health). Без него
-        # постили бы с зафлуженного/ограниченного аккаунта → риск бана (класс #7/#2).
-        # fail-open: при ошибке проверки аккаунт НЕ блокируется.
-        trust_score = acc.get("trust_score") or 0.5
-        _quarantined = await _infra_mem.is_account_quarantined(pool, acc["id"])
-        if trust_score < 0.3 or _quarantined:
-            log.warning(
-                "op_worker gp_%s: skipping account %s (trust=%.2f, quarantined=%s)",
-                "group" if is_group else "channel",
-                acc["phone"],
-                trust_score,
-                _quarantined,
-            )
-            # Альтернатива: приемлемый trust И не под карантином.
-            alt_acc = None
-            for a in accounts_rows:
-                if a["id"] == acc_id or (a.get("trust_score") or 0.5) < 0.5:
-                    continue
-                if await _infra_mem.is_account_quarantined(pool, a["id"]):
-                    continue
-                alt_acc = dict(a)
-                log.info(
-                    "op_worker gp: switching to account %s with trust=%.2f",
-                    a["phone"],
-                    a.get("trust_score"),
+        for i, target in enumerate(targets):
+            if await _is_cancelled(pool, op_id):
+                await _safe_execute(
+                        pool,
+                    "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
+                    plan_id,
                 )
-                break
+                return {
+                    "status": "cancelled",
+                    "created": created_count,
+                    "failed": failed_count,
+                    "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+                }
 
-            if not alt_acc:
-                _reason = (
-                    "Аккаунт под карантином (риск-пульс), запасных нет"
-                    if _quarantined
-                    else f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})"
-                )
+            is_group = (target.get("asset_type") or asset_type) == "group"
+
+            acc_id = target["selected_account_id"]
+            acc = acc_by_id.get(acc_id)
+
+            if not acc:
                 await _safe_execute(
                         pool,
                     "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                    _reason,
+                    "Аккаунт недоступен",
                     target["id"],
                 )
                 failed_count += 1
                 await _safe_execute(
                         pool,
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
-                    op_id,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
                 continue
 
-            acc = alt_acc
-
-        # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
-        claimed = await _safe_execute(
-                pool,
-            "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-            target["id"],
-        )
-        if claimed == "UPDATE 0":
-            log.info(
-                "op_worker gp: target %d already claimed by another worker, skipping",
-                target["id"],
-            )
-            continue
-
-        title = (
-            target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
-        )
-
-        # Описание: пустое = немедленный spam-сигнал для Telegram. Приоритет у
-        # сгенерированного (planned_about) — оно уникально для объекта и уже
-        # показано пользователю в предпросмотре. Запасной вариант — прежняя
-        # общая строка: она одинакова на всю сеть, поэтому только как fallback
-        # для планов, собранных до генератора.
-        _geo_label = (target.get("city") or target.get("country") or "").strip()
-        _about = (target.get("planned_about") or "").strip()
-        if not _about:
-            if is_group:
-                _about = f"Группа для общения и обмена информацией.{(' ' + _geo_label) if _geo_label else ''}"
-            else:
-                _about = f"Актуальные новости и обновления.{(' ' + _geo_label) if _geo_label else ''}"
-
-        # ── Умная задержка перед созданием ──
-        await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
-
-        t0_gp = time.monotonic()
-        result = await account_manager.create_channel(
-            acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc
-        )
-
-        if result.get("error") and result.get("flood_wait"):
-            raw_flood = int(result["flood_wait"])
-            if raw_flood > 600:
-                # Flood wait too long to block the batch — skip this target and continue
+            # ── Единый гейт здоровья аккаунта перед постом ──
+            # trust_score — лишь одна ось; is_account_quarantined сводит весь риск-пульс
+            # (restriction_events + acc_status + flood + trust + health). Без него
+            # постили бы с зафлуженного/ограниченного аккаунта → риск бана (класс #7/#2).
+            # fail-open: при ошибке проверки аккаунт НЕ блокируется.
+            trust_score = acc.get("trust_score") or 0.5
+            _quarantined = await _infra_mem.is_account_quarantined(pool, acc["id"])
+            if trust_score < 0.3 or _quarantined:
                 log.warning(
-                    "op_worker gp_%s: flood wait %ds too long for target %d — skipping",
+                    "op_worker gp_%s: skipping account %s (trust=%.2f, quarantined=%s)",
                     "group" if is_group else "channel",
-                    raw_flood,
-                    target["id"],
+                    acc["phone"],
+                    trust_score,
+                    _quarantined,
                 )
-            else:
-                wait_time = raw_flood + 15
-                log.info(
-                    "op_worker gp_%s: flood wait %ds for target %d",
-                    "group" if is_group else "channel",
-                    wait_time,
-                    target["id"],
-                )
-                await asyncio.sleep(wait_time)
-                result = await account_manager.create_channel(
-                    acc["session_str"],
-                    title,
-                    about=_about,
-                    megagroup=is_group,
-                    _acc=acc,
-                )
+                # Альтернатива: приемлемый trust И не под карантином.
+                alt_acc = None
+                for a in accounts_rows:
+                    if a["id"] == acc_id or (a.get("trust_score") or 0.5) < 0.5:
+                        continue
+                    if await _infra_mem.is_account_quarantined(pool, a["id"]):
+                        continue
+                    alt_acc = dict(a)
+                    log.info(
+                        "op_worker gp: switching to account %s with trust=%.2f",
+                        a["phone"],
+                        a.get("trust_score"),
+                    )
+                    break
 
-        if result.get("error"):
-            err_str = str(result["error"])
-            # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION ошибке
-            if "AUTH_KEY" in err_str or "SESSION_REVOKED" in err_str:
-                try:
-                    await pool.execute(
-                        """UPDATE tg_accounts
-                           SET is_active    = FALSE,
-                               acc_status   = 'session_expired',
-                               status_reason = $2
-                           WHERE id = $1 AND is_active = TRUE""",
-                        acc["id"],
-                        f"AUTH_KEY/SESSION dead (gp_channel): {err_str[:200]}",
+                if not alt_acc:
+                    _reason = (
+                        "Аккаунт под карантином (риск-пульс), запасных нет"
+                        if _quarantined
+                        else f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})"
                     )
-                    log.warning(
-                        "op_worker gp_channel: deactivated dead session account_id=%s",
-                        acc["id"],
+                    await _safe_execute(
+                            pool,
+                        "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
+                        _reason,
+                        target["id"],
                     )
-                except Exception as _dbe:
-                    log.warning("op_worker gp_channel: deactivate failed: %s", _dbe)
-            await _safe_execute(
+                    failed_count += 1
+                    await _safe_execute(
+                            pool,
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                        op_id,
+                    )
+                    continue
+
+                acc = alt_acc
+
+            # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
+            claimed = await _safe_execute(
                     pool,
-                "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                err_str[:500],
+                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
                 target["id"],
             )
-            failed_count += 1
+            if claimed == "UPDATE 0":
+                log.info(
+                    "op_worker gp: target %d already claimed by another worker, skipping",
+                    target["id"],
+                )
+                continue
+
+            title = (
+                target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
+            )
+
+            # Описание: пустое = немедленный spam-сигнал для Telegram. Приоритет у
+            # сгенерированного (planned_about) — оно уникально для объекта и уже
+            # показано пользователю в предпросмотре. Запасной вариант — прежняя
+            # общая строка: она одинакова на всю сеть, поэтому только как fallback
+            # для планов, собранных до генератора.
+            _geo_label = (target.get("city") or target.get("country") or "").strip()
+            _about = (target.get("planned_about") or "").strip()
+            if not _about:
+                if is_group:
+                    _about = f"Группа для общения и обмена информацией.{(' ' + _geo_label) if _geo_label else ''}"
+                else:
+                    _about = f"Актуальные новости и обновления.{(' ' + _geo_label) if _geo_label else ''}"
+
+            # ── Умная задержка перед созданием ──
+            await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
+
+            t0_gp = time.monotonic()
+            result = await account_manager.create_channel(
+                acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc
+            )
+
+            if result.get("error") and result.get("flood_wait"):
+                raw_flood = int(result["flood_wait"])
+                if raw_flood > 600:
+                    # Flood wait too long to block the batch — skip this target and continue
+                    log.warning(
+                        "op_worker gp_%s: flood wait %ds too long for target %d — skipping",
+                        "group" if is_group else "channel",
+                        raw_flood,
+                        target["id"],
+                    )
+                else:
+                    wait_time = raw_flood + 15
+                    log.info(
+                        "op_worker gp_%s: flood wait %ds for target %d",
+                        "group" if is_group else "channel",
+                        wait_time,
+                        target["id"],
+                    )
+                    await asyncio.sleep(wait_time)
+                    result = await account_manager.create_channel(
+                        acc["session_str"],
+                        title,
+                        about=_about,
+                        megagroup=is_group,
+                        _acc=acc,
+                    )
+
+            if result.get("error"):
+                err_str = str(result["error"])
+                # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION ошибке
+                if "AUTH_KEY" in err_str or "SESSION_REVOKED" in err_str:
+                    try:
+                        await pool.execute(
+                            """UPDATE tg_accounts
+                               SET is_active    = FALSE,
+                                   acc_status   = 'session_expired',
+                                   status_reason = $2
+                               WHERE id = $1 AND is_active = TRUE""",
+                            acc["id"],
+                            f"AUTH_KEY/SESSION dead (gp_channel): {err_str[:200]}",
+                        )
+                        log.warning(
+                            "op_worker gp_channel: deactivated dead session account_id=%s",
+                            acc["id"],
+                        )
+                    except Exception as _dbe:
+                        log.warning("op_worker gp_channel: deactivate failed: %s", _dbe)
+                await _safe_execute(
+                        pool,
+                    "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
+                    err_str[:500],
+                    target["id"],
+                )
+                failed_count += 1
+                _infra_mem.record_account_op(
+                    acc["id"],
+                    "global_presence_channel",
+                    success=False,
+                    error=err_str[:100],
+                )
+                await _audit(
+                    pool,
+                    owner_id,
+                    "gp_create_group" if is_group else "gp_create_channel",
+                    "flood_wait" if result.get("flood_wait") else "error",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=title[:100],
+                    error_msg=err_str[:200],
+                    flood_wait_s=int(result["flood_wait"])
+                    if result.get("flood_wait")
+                    else None,
+                )
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                await asyncio.sleep(
+                    random.uniform(10, 25) * session_simulator.chaos_factor()
+                )
+                continue
+
+            channel_id = result.get("channel_id")
+            channel_access_hash = result.get("access_hash", 0)
+
+            username_error = None
+            planned_username = target.get("planned_username")
+            # Какой username РЕАЛЬНО встал. Раньше в каталог писался planned_*
+            # независимо от исхода: при занятом имени канал уходил в managed_channels
+            # с username, которого у него нет, — ссылки из отчёта вели в никуда.
+            applied_username: str | None = None
+            if planned_username and channel_id:
+                # Пауза 90-180с перед установкой username — Telegram детектирует мгновенное
+                # присвоение username как автоматизацию и применяет geo-ban / shadow-ban
+                pause = random.uniform(90, 180) * session_simulator.chaos_factor()
+                log.info(
+                    "op_worker gp_channel: waiting %.0fs before assigning username '%s'",
+                    pause,
+                    planned_username,
+                )
+                await asyncio.sleep(pause)
+                err = await account_manager.set_channel_username(
+                    acc["session_str"], channel_id, planned_username, _acc=acc
+                )
+                if not err:
+                    applied_username = planned_username
+                if err:
+                    log.info(
+                        "op_worker gp_channel: username '%s' failed (%s), trying variants",
+                        planned_username,
+                        err[:80],
+                    )
+                    if "flood" in err.lower() or "FloodWait" in err:
+                        import re as _re
+
+                        m = _re.search(r"(\d+)", err)
+                        flood_wait = int(m.group(1)) + 5 if m else 60
+                        log.info(
+                            "op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait
+                        )
+                        await asyncio.sleep(flood_wait)
+                    from services.username_engine import generate_username_variants
+
+                    geo = {
+                        "country_code": target.get("country_code", ""),
+                        "city": target.get("city", ""),
+                        "city_slug": target.get("city_slug", ""),
+                    }
+                    # ── Расширенная генерация вариантов username ──
+                    from services.username_engine import slugify
+
+                    variants = generate_username_variants(planned_username, geo)
+
+                    # Добавляем город + случайное число
+                    city_slug = slugify(geo.get("city", ""))[:10] if geo else ""
+                    cc = slugify(geo.get("country_code", ""))[:3] if geo else ""
+                    for num in [10, 15, 20, 25, 30, 35, 40, 45, 50]:
+                        if city_slug:
+                            variants.append(f"{city_slug}_{num}")
+                        if cc and city_slug:
+                            variants.append(f"{cc}_{city_slug}{num}")
+                    # Случайные числовые суффиксы
+                    import random as _random
+
+                    for _ in range(12):
+                        variants.append(f"{planned_username}_{_random.randint(100, 999)}")
+
+                    # Дедупликация
+                    seen = {planned_username}
+                    final_variants = []
+                    for v in variants:
+                        if v not in seen and len(v) <= 32:
+                            seen.add(v)
+                            final_variants.append(v)
+
+                    success_variant = None
+                    for variant in final_variants[:8]:
+                        if variant == planned_username:
+                            continue  # уже пробовали
+                        await asyncio.sleep(random.uniform(5, 12))
+                        err2 = await account_manager.set_channel_username(
+                            acc["session_str"], channel_id, variant, _acc=acc
+                        )
+                        if not err2:
+                            log.info(
+                                "op_worker gp_channel: username variant '%s' accepted",
+                                variant,
+                            )
+                            success_variant = variant
+                            applied_username = variant
+                            err = None
+                            break
+                        log.info(
+                            "op_worker gp_channel: variant '%s' also failed: %s",
+                            variant,
+                            err2[:60],
+                        )
+                        # Flood wait handling — cap at 600s; longer waits abort variant loop
+                        if "FloodWait" in str(err2):
+                            m2 = _re.search(r"(\d+)", str(err2))
+                            fw = int(m2.group(1)) + 5 if m2 else 30
+                            if fw > 600:
+                                log.warning(
+                                    "op_worker gp_channel: FloodWait %ds for username exceeds cap, aborting variants",
+                                    fw,
+                                )
+                                break
+                            await asyncio.sleep(fw)
+                    username_error = err if not success_variant else None
+
+            # ── Аватар: канал без фото Telegram трактует как заготовку — хуже
+            # ранжируется и чаще ловит ограничения. Картинка детерминирована по
+            # avatar_seed, поэтому ставится ровно та, что была в предпросмотре.
+            avatar_ok = False
+            _avatar_seed = target.get("avatar_seed")
+            if _avatar_seed is not None and channel_id:
+                try:
+                    from services import avatar_factory
+
+                    _photo = await asyncio.to_thread(
+                        avatar_factory.generate_avatar,
+                        int(_avatar_seed),
+                        title,
+                        style=target.get("avatar_style") or None,
+                    )
+                    await asyncio.sleep(random.uniform(4, 11) * session_simulator.chaos_factor())
+                    _ph_err = await account_manager.set_channel_photo(
+                        acc["session_str"],
+                        channel_id,
+                        _photo,
+                        access_hash=int(channel_access_hash or 0),
+                        _acc=acc,
+                    )
+                    avatar_ok = not _ph_err
+                    if _ph_err:
+                        log.info(
+                            "op_worker gp: avatar not applied for target %d: %s",
+                            target["id"],
+                            _ph_err[:120],
+                        )
+                except Exception as _av_err:
+                    # Аватар — оформление, а не суть объекта: его сбой не должен
+                    # ронять уже созданный канал в 'failed'.
+                    log.warning("op_worker gp: avatar generation failed: %s", _av_err)
+
+            # ── Атомарная запись: обновить targets + вставить в managed_channels одной транзакцией.
+            # Если Telethon создал канал, но DB-запись падает, канал станет «призраком» без записи.
+            # Транзакция гарантирует: либо оба write успешны, либо оба откатываются.
+            # В каталог пишется ФАКТИЧЕСКИ вставший username (planned мог быть занят
+            # и заменён вариантом либо не примениться вовсе) и корректный тип: группы
+            # с type='channel' не попадали ни в один групповой фильтр.
+            async with pool.acquire() as _conn:
+                async with _conn.transaction():
+                    await _conn.execute(
+                        "UPDATE global_presence_targets "
+                        "SET status='done', result_asset_id=$1, final_username=$2, avatar_applied=$3 "
+                        "WHERE id=$4",
+                        channel_id,
+                        applied_username,
+                        avatar_ok,
+                        target["id"],
+                    )
+                    await _conn.execute(
+                        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+                           VALUES($1,$2,$3,$4,$5,$6,$7)
+                           ON CONFLICT(owner_id, channel_id) DO UPDATE
+                           SET title=$4, username=$5, access_hash=$6, type=$7""",
+                        owner_id,
+                        acc["id"],
+                        channel_id,
+                        title,
+                        applied_username,
+                        int(channel_access_hash or 0),
+                        "group" if is_group else "channel",
+                    )
+
             _infra_mem.record_account_op(
                 acc["id"],
                 "global_presence_channel",
-                success=False,
-                error=err_str[:100],
+                success=True,
+                duration_s=time.monotonic() - t0_gp,
             )
             await _audit(
                 pool,
                 owner_id,
                 "gp_create_group" if is_group else "gp_create_channel",
-                "flood_wait" if result.get("flood_wait") else "error",
+                "success",
                 operation_id=op_id,
                 account_id=acc["id"],
                 target=title[:100],
-                error_msg=err_str[:200],
-                flood_wait_s=int(result["flood_wait"])
-                if result.get("flood_wait")
-                else None,
+                duration_ms=int((time.monotonic() - t0_gp) * 1000),
+            )
+
+            # Публикуем начальный пост — пустой канал немедленно попадает в shadow ban.
+            # Любой пост делает канал "живым" для алгоритмов Telegram.
+            try:
+                _welcome_text = f"{'👥' if is_group else '📢'} {title}"
+                if _geo_label:
+                    _welcome_text += f"\n\n📍 {_geo_label}"
+                _post_delay = random.uniform(30, 60) * session_simulator.chaos_factor()
+                await asyncio.sleep(_post_delay)
+                await account_manager.post_to_channel(
+                    acc["session_str"],
+                    channel_id,
+                    _welcome_text,
+                    access_hash=channel_access_hash,
+                    _acc=dict(acc),
+                )
+                log.info(
+                    "op_worker gp_channel: initial post sent to channel_id=%s", channel_id
+                )
+            except Exception:
+                log_exc_swallow(log, f"initial post failed for channel_id={channel_id}")
+
+            # Link to ecosystem if one exists for this owner
+            try:
+                ecos = await pool.fetch(
+                    "SELECT id FROM ecosystems WHERE owner_id=$1 AND ecosystem_type='global_presence' AND status='active' ORDER BY created_at DESC LIMIT 1",
+                    owner_id,
+                )
+                if ecos and channel_id:
+                    from services import ecosystem_brain as _eb
+
+                    eco_id = ecos[0]["id"]
+                    obj_type = "group" if is_group else "channel"
+                    await _eb.add_member(pool, eco_id, owner_id, obj_type, channel_id)
+            except Exception as e:
+                log_exc_swallow(log, f"gp_channel ecosystem add_member failed for ch={channel_id}: {e}")
+
+            created_count += 1
+
+            # Add created channel to ecosystem
+            try:
+                if _gp_eco_id is None:
+                    _eco_row = await pool.fetchrow(
+                        "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
+                        plan_id,
+                    )
+                    _gp_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
+                if _gp_eco_id:
+                    from services import ecosystem_brain as _eb
+
+                    await _eb.add_member(pool, _gp_eco_id, owner_id, "channel", channel_id)
+                    await _eb.add_member(pool, _gp_eco_id, owner_id, "account", acc["id"])
+            except Exception as e:
+                log_exc_swallow(log, f"gp_channel ecosystem add_member to plan {plan_id} failed: {e}")
+
+            await _safe_execute(
+                    pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                op_id,
+                created_count + failed_count,
+                f"{target.get('city', '?')} → {title}",
+                f"channel_id={channel_id}"
+                + (f" | username_err={username_error}" if username_error else ""),
             )
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
-            await asyncio.sleep(
-                random.uniform(10, 25) * session_simulator.chaos_factor()
-            )
-            continue
 
-        channel_id = result.get("channel_id")
-        channel_access_hash = result.get("access_hash", 0)
+            if created_count > 0 and created_count % 10 == 0:
+                try:
+                    await db.notify_if_enabled(
+                        pool,
+                        bot,
+                        owner_id,
+                        "op_complete",
+                        f"🌍 <b>Создание каналов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
+                        f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log,
+                        f"Сбой отправки прогресса создания каналов плана #{plan_id} владельцу {owner_id}",
+                    )
 
-        username_error = None
-        planned_username = target.get("planned_username")
-        # Какой username РЕАЛЬНО встал. Раньше в каталог писался planned_*
-        # независимо от исхода: при занятом имени канал уходил в managed_channels
-        # с username, которого у него нет, — ссылки из отчёта вели в никуда.
-        applied_username: str | None = None
-        if planned_username and channel_id:
-            # Пауза 90-180с перед установкой username — Telegram детектирует мгновенное
-            # присвоение username как автоматизацию и применяет geo-ban / shadow-ban
-            pause = random.uniform(90, 180) * session_simulator.chaos_factor()
-            log.info(
-                "op_worker gp_channel: waiting %.0fs before assigning username '%s'",
-                pause,
-                planned_username,
-            )
-            await asyncio.sleep(pause)
-            err = await account_manager.set_channel_username(
-                acc["session_str"], channel_id, planned_username, _acc=acc
-            )
-            if not err:
-                applied_username = planned_username
-            if err:
-                log.info(
-                    "op_worker gp_channel: username '%s' failed (%s), trying variants",
-                    planned_username,
-                    err[:80],
-                )
-                if "flood" in err.lower() or "FloodWait" in err:
-                    import re as _re
+            if i < total - 1:
+                # ── Почитай daily rhythm и избегай ночных часов пиков ──
+                tod_factor = (
+                    session_simulator.time_of_day_factor()
+                )  # 2-5x at night, 0.75x at peak
+                chaos = session_simulator.chaos_factor()  # 0.7-1.3
+                jitter = session_simulator.chaos_factor(
+                    1.0, 0.1
+                )  # ±10% микро-шум (sync float)
 
-                    m = _re.search(r"(\d+)", err)
-                    flood_wait = int(m.group(1)) + 5 if m else 60
+                if i % 5 == 4:
+                    # Длинная пауза каждые 5 операций (имитация человеческого перерыва)
+                    cooldown = random.uniform(300, 600) * chaos * tod_factor * jitter
                     log.info(
-                        "op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait
+                        "op_worker gp_channel: cooldown %.0fs after %d items (tod_factor=%.2f)",
+                        cooldown,
+                        i + 1,
+                        tod_factor,
                     )
-                    await asyncio.sleep(flood_wait)
-                from services.username_engine import generate_username_variants
+                    await asyncio.sleep(cooldown)
+                else:
+                    # Короткая пауза между операциями
+                    delay = random.uniform(45, 90) * chaos * tod_factor * jitter
+                    await asyncio.sleep(delay)
 
-                geo = {
-                    "country_code": target.get("country_code", ""),
-                    "city": target.get("city", ""),
-                    "city_slug": target.get("city_slug", ""),
-                }
-                # ── Расширенная генерация вариантов username ──
-                from services.username_engine import slugify
-
-                variants = generate_username_variants(planned_username, geo)
-
-                # Добавляем город + случайное число
-                city_slug = slugify(geo.get("city", ""))[:10] if geo else ""
-                cc = slugify(geo.get("country_code", ""))[:3] if geo else ""
-                for num in [10, 15, 20, 25, 30, 35, 40, 45, 50]:
-                    if city_slug:
-                        variants.append(f"{city_slug}_{num}")
-                    if cc and city_slug:
-                        variants.append(f"{cc}_{city_slug}{num}")
-                # Случайные числовые суффиксы
-                import random as _random
-
-                for _ in range(12):
-                    variants.append(f"{planned_username}_{_random.randint(100, 999)}")
-
-                # Дедупликация
-                seen = {planned_username}
-                final_variants = []
-                for v in variants:
-                    if v not in seen and len(v) <= 32:
-                        seen.add(v)
-                        final_variants.append(v)
-
-                success_variant = None
-                for variant in final_variants[:8]:
-                    if variant == planned_username:
-                        continue  # уже пробовали
-                    await asyncio.sleep(random.uniform(5, 12))
-                    err2 = await account_manager.set_channel_username(
-                        acc["session_str"], channel_id, variant, _acc=acc
-                    )
-                    if not err2:
-                        log.info(
-                            "op_worker gp_channel: username variant '%s' accepted",
-                            variant,
-                        )
-                        success_variant = variant
-                        applied_username = variant
-                        err = None
-                        break
-                    log.info(
-                        "op_worker gp_channel: variant '%s' also failed: %s",
-                        variant,
-                        err2[:60],
-                    )
-                    # Flood wait handling — cap at 600s; longer waits abort variant loop
-                    if "FloodWait" in str(err2):
-                        m2 = _re.search(r"(\d+)", str(err2))
-                        fw = int(m2.group(1)) + 5 if m2 else 30
-                        if fw > 600:
-                            log.warning(
-                                "op_worker gp_channel: FloodWait %ds for username exceeds cap, aborting variants",
-                                fw,
-                            )
-                            break
-                        await asyncio.sleep(fw)
-                username_error = err if not success_variant else None
-
-        # ── Аватар: канал без фото Telegram трактует как заготовку — хуже
-        # ранжируется и чаще ловит ограничения. Картинка детерминирована по
-        # avatar_seed, поэтому ставится ровно та, что была в предпросмотре.
-        avatar_ok = False
-        _avatar_seed = target.get("avatar_seed")
-        if _avatar_seed is not None and channel_id:
-            try:
-                from services import avatar_factory
-
-                _photo = await asyncio.to_thread(
-                    avatar_factory.generate_avatar,
-                    int(_avatar_seed),
-                    title,
-                    style=target.get("avatar_style") or None,
-                )
-                await asyncio.sleep(random.uniform(4, 11) * session_simulator.chaos_factor())
-                _ph_err = await account_manager.set_channel_photo(
-                    acc["session_str"],
-                    channel_id,
-                    _photo,
-                    access_hash=int(channel_access_hash or 0),
-                    _acc=acc,
-                )
-                avatar_ok = not _ph_err
-                if _ph_err:
-                    log.info(
-                        "op_worker gp: avatar not applied for target %d: %s",
-                        target["id"],
-                        _ph_err[:120],
-                    )
-            except Exception as _av_err:
-                # Аватар — оформление, а не суть объекта: его сбой не должен
-                # ронять уже созданный канал в 'failed'.
-                log.warning("op_worker gp: avatar generation failed: %s", _av_err)
-
-        # ── Атомарная запись: обновить targets + вставить в managed_channels одной транзакцией.
-        # Если Telethon создал канал, но DB-запись падает, канал станет «призраком» без записи.
-        # Транзакция гарантирует: либо оба write успешны, либо оба откатываются.
-        # В каталог пишется ФАКТИЧЕСКИ вставший username (planned мог быть занят
-        # и заменён вариантом либо не примениться вовсе) и корректный тип: группы
-        # с type='channel' не попадали ни в один групповой фильтр.
-        async with pool.acquire() as _conn:
-            async with _conn.transaction():
-                await _conn.execute(
-                    "UPDATE global_presence_targets "
-                    "SET status='done', result_asset_id=$1, final_username=$2, avatar_applied=$3 "
-                    "WHERE id=$4",
-                    channel_id,
-                    applied_username,
-                    avatar_ok,
-                    target["id"],
-                )
-                await _conn.execute(
-                    """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
-                       VALUES($1,$2,$3,$4,$5,$6,$7)
-                       ON CONFLICT(owner_id, channel_id) DO UPDATE
-                       SET title=$4, username=$5, access_hash=$6, type=$7""",
-                    owner_id,
-                    acc["id"],
-                    channel_id,
-                    title,
-                    applied_username,
-                    int(channel_access_hash or 0),
-                    "group" if is_group else "channel",
-                )
-
-        _infra_mem.record_account_op(
-            acc["id"],
-            "global_presence_channel",
-            success=True,
-            duration_s=time.monotonic() - t0_gp,
-        )
-        await _audit(
-            pool,
-            owner_id,
-            "gp_create_group" if is_group else "gp_create_channel",
-            "success",
-            operation_id=op_id,
-            account_id=acc["id"],
-            target=title[:100],
-            duration_ms=int((time.monotonic() - t0_gp) * 1000),
-        )
-
-        # Публикуем начальный пост — пустой канал немедленно попадает в shadow ban.
-        # Любой пост делает канал "живым" для алгоритмов Telegram.
-        try:
-            _welcome_text = f"{'👥' if is_group else '📢'} {title}"
-            if _geo_label:
-                _welcome_text += f"\n\n📍 {_geo_label}"
-            _post_delay = random.uniform(30, 60) * session_simulator.chaos_factor()
-            await asyncio.sleep(_post_delay)
-            await account_manager.post_to_channel(
-                acc["session_str"],
-                channel_id,
-                _welcome_text,
-                access_hash=channel_access_hash,
-                _acc=dict(acc),
-            )
-            log.info(
-                "op_worker gp_channel: initial post sent to channel_id=%s", channel_id
-            )
-        except Exception:
-            log_exc_swallow(log, f"initial post failed for channel_id={channel_id}")
-
-        # Link to ecosystem if one exists for this owner
-        try:
-            ecos = await pool.fetch(
-                "SELECT id FROM ecosystems WHERE owner_id=$1 AND ecosystem_type='global_presence' AND status='active' ORDER BY created_at DESC LIMIT 1",
-                owner_id,
-            )
-            if ecos and channel_id:
-                from services import ecosystem_brain as _eb
-
-                eco_id = ecos[0]["id"]
-                obj_type = "group" if is_group else "channel"
-                await _eb.add_member(pool, eco_id, owner_id, obj_type, channel_id)
-        except Exception as e:
-            log_exc_swallow(log, f"gp_channel ecosystem add_member failed for ch={channel_id}: {e}")
-
-        created_count += 1
-
-        # Add created channel to ecosystem
-        try:
-            if _gp_eco_id is None:
-                _eco_row = await pool.fetchrow(
-                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
-                    plan_id,
-                )
-                _gp_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
-            if _gp_eco_id:
-                from services import ecosystem_brain as _eb
-
-                await _eb.add_member(pool, _gp_eco_id, owner_id, "channel", channel_id)
-                await _eb.add_member(pool, _gp_eco_id, owner_id, "account", acc["id"])
-        except Exception as e:
-            log_exc_swallow(log, f"gp_channel ecosystem add_member to plan {plan_id} failed: {e}")
-
-        await _safe_execute(
-                pool,
-            "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-            op_id,
-            created_count + failed_count,
-            f"{target.get('city', '?')} → {title}",
-            f"channel_id={channel_id}"
-            + (f" | username_err={username_error}" if username_error else ""),
+        final_status = (
+            "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
         )
         await _safe_execute(
                 pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
+            final_status,
+            plan_id,
         )
 
-        if created_count > 0 and created_count % 10 == 0:
-            try:
-                await db.notify_if_enabled(
-                    pool,
-                    bot,
-                    owner_id,
-                    "op_complete",
-                    f"🌍 <b>Создание каналов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
-                    f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
-                )
-            except Exception:
-                log_exc_swallow(
-                    log,
-                    f"Сбой отправки прогресса создания каналов плана #{plan_id} владельцу {owner_id}",
-                )
-
-        if i < total - 1:
-            # ── Почитай daily rhythm и избегай ночных часов пиков ──
-            tod_factor = (
-                session_simulator.time_of_day_factor()
-            )  # 2-5x at night, 0.75x at peak
-            chaos = session_simulator.chaos_factor()  # 0.7-1.3
-            jitter = session_simulator.chaos_factor(
-                1.0, 0.1
-            )  # ±10% микро-шум (sync float)
-
-            if i % 5 == 4:
-                # Длинная пауза каждые 5 операций (имитация человеческого перерыва)
-                cooldown = random.uniform(300, 600) * chaos * tod_factor * jitter
-                log.info(
-                    "op_worker gp_channel: cooldown %.0fs after %d items (tod_factor=%.2f)",
-                    cooldown,
-                    i + 1,
-                    tod_factor,
-                )
-                await asyncio.sleep(cooldown)
-            else:
-                # Короткая пауза между операциями
-                delay = random.uniform(45, 90) * chaos * tod_factor * jitter
-                await asyncio.sleep(delay)
-
-    final_status = (
-        "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
-    )
-    await _safe_execute(
-            pool,
-        "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
-        final_status,
-        plan_id,
-    )
-
-    _unit = "групп" if plan_is_group else "активов"
-    return {
-        "status": "done",
-        "created": created_count,
-        "failed": failed_count,
-        "plan_id": plan_id,
-        # «каналов» врало на планах со смешанной структурой (каналы + чаты)
-        # и на групповых планах — итог обязан совпадать с тем, что создано.
-        "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
-    }
+        _unit = "групп" if plan_is_group else "активов"
+        return {
+            "status": "done",
+            "created": created_count,
+            "failed": failed_count,
+            "plan_id": plan_id,
+            # «каналов» врало на планах со смешанной структурой (каналы + чаты)
+            # и на групповых планах — итог обязан совпадать с тем, что создано.
+            "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 # Пакетные действия над объектами проекта. Значение каждого вычисляется ДЛЯ
@@ -4711,281 +4724,294 @@ async def _exec_gp_bulk_apply(
     accounts_rows = await resource_selector.select_all_active(
         pool, owner_id, include_ids=acc_ids, respect_cooldown=False
     )
-    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
-    # Аллокатор для доназначения username: он обязан видеть все уже занятые
-    # имена владельца, иначе выдаст то, что у нас же и стоит.
-    allocator = None
-    uname_templates: list[str] = []
-    if action == "username":
-        from database import db as _db
+    # Отказной захват всего пула: дальше аккаунты выбираются из него по ходу
+    # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts_rows) - len(claimed_ids)
+    accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
 
-        allocator = UsernameAllocator(
-            taken=await _db.get_taken_usernames(pool, owner_id), seed=seed_shift or None
-        )
-        raw_pool = plan.get("username_pool")
-        if raw_pool:
-            try:
-                import json as _json
+    try:
+        acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
-                uname_templates = (
-                    raw_pool if isinstance(raw_pool, list) else _json.loads(raw_pool)
-                )
-            except Exception:
-                uname_templates = []
+        # Аллокатор для доназначения username: он обязан видеть все уже занятые
+        # имена владельца, иначе выдаст то, что у нас же и стоит.
+        allocator = None
+        uname_templates: list[str] = []
+        if action == "username":
+            from database import db as _db
 
-    await _safe_execute(
-        pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2",
-        len(targets), op_id,
-    )
-
-    counters = {"about": 0, "avatar": 0, "post": 0, "pin": 0, "admin": 0, "username": 0}
-    failed = skipped = 0
-
-    for target in targets:
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": sum(counters.values()),
-                "fail": failed,
-                "summary": f"Отменено. Применено: {sum(counters.values())}, ошибок: {failed}",
-            }
-
-        acc = acc_by_id.get(target["selected_account_id"])
-        if not acc or not acc.get("session_str"):
-            skipped += 1
-            await _safe_execute(
-                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            allocator = UsernameAllocator(
+                taken=await _db.get_taken_usernames(pool, owner_id), seed=seed_shift or None
             )
-            continue
-
-        # Единый гейт здоровья: правка оформления — тоже действие от лица
-        # аккаунта, и с зафлуженного/ограниченного её делать нельзя.
-        if await _infra_mem.is_account_quarantined(pool, acc["id"]):
-            skipped += 1
-            await _safe_execute(
-                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-            )
-            continue
-
-        channel_id = target["result_asset_id"]
-        access_hash = int(target.get("access_hash") or 0)
-        title = target.get("planned_name") or ""
-        item_failed = False
-
-        if action in ("about", "both"):
-            if about_template:
-                # Шаблон разворачивается ДЛЯ КАЖДОГО объекта: «Новости
-                # {{CITY_GEN}}» даёт свой текст в каждом городе, а не один
-                # общий на всю сеть.
-                new_about = render_pattern(about_template, dict(target))[:255]
-            else:
-                new_about = (target.get("planned_about") or "").strip()
-            if new_about:
+            raw_pool = plan.get("username_pool")
+            if raw_pool:
                 try:
-                    ok = await account_manager.edit_channel_about(
-                        acc["session_str"], channel_id, new_about, _acc=acc
+                    import json as _json
+
+                    uname_templates = (
+                        raw_pool if isinstance(raw_pool, list) else _json.loads(raw_pool)
                     )
-                    if ok:
-                        counters["about"] += 1
-                        await _safe_execute(
-                            pool,
-                            "UPDATE global_presence_targets SET planned_about=$1 WHERE id=$2",
-                            new_about,
-                            target["id"],
+                except Exception:
+                    uname_templates = []
+
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2",
+            len(targets), op_id,
+        )
+
+        counters = {"about": 0, "avatar": 0, "post": 0, "pin": 0, "admin": 0, "username": 0}
+        failed = skipped = 0
+
+        for target in targets:
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": sum(counters.values()),
+                    "fail": failed,
+                    "summary": f"Отменено. Применено: {sum(counters.values())}, ошибок: {failed}",
+                }
+
+            acc = acc_by_id.get(target["selected_account_id"])
+            if not acc or not acc.get("session_str"):
+                skipped += 1
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
+
+            # Единый гейт здоровья: правка оформления — тоже действие от лица
+            # аккаунта, и с зафлуженного/ограниченного её делать нельзя.
+            if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+                skipped += 1
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
+
+            channel_id = target["result_asset_id"]
+            access_hash = int(target.get("access_hash") or 0)
+            title = target.get("planned_name") or ""
+            item_failed = False
+
+            if action in ("about", "both"):
+                if about_template:
+                    # Шаблон разворачивается ДЛЯ КАЖДОГО объекта: «Новости
+                    # {{CITY_GEN}}» даёт свой текст в каждом городе, а не один
+                    # общий на всю сеть.
+                    new_about = render_pattern(about_template, dict(target))[:255]
+                else:
+                    new_about = (target.get("planned_about") or "").strip()
+                if new_about:
+                    try:
+                        ok = await account_manager.edit_channel_about(
+                            acc["session_str"], channel_id, new_about, _acc=acc
+                        )
+                        if ok:
+                            counters["about"] += 1
+                            await _safe_execute(
+                                pool,
+                                "UPDATE global_presence_targets SET planned_about=$1 WHERE id=$2",
+                                new_about,
+                                target["id"],
+                            )
+                        else:
+                            item_failed = True
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        log_exc_swallow(log, f"gp_bulk_apply about target={target['id']}: {exc}")
+                        item_failed = True
+                    await asyncio.sleep(random.uniform(3, 8) * session_simulator.chaos_factor())
+
+            if action in ("avatar", "both"):
+                base_seed = target.get("avatar_seed")
+                if base_seed is None:
+                    # У целей из планов до генератора seed'а нет — выводим его из
+                    # id, чтобы перерисовка оставалась воспроизводимой.
+                    base_seed = target["id"] * 2654435761 % (2**31)
+                try:
+                    photo = await asyncio.to_thread(
+                        avatar_factory.generate_avatar,
+                        int(base_seed) + seed_shift,
+                        title,
+                        style=target.get("avatar_style") or avatar_style,
+                    )
+                    ph_err = await account_manager.set_channel_photo(
+                        acc["session_str"], channel_id, photo, access_hash=access_hash, _acc=acc
+                    )
+                    if ph_err:
+                        item_failed = True
+                        log.info(
+                            "gp_bulk_apply: аватар не применён target=%s: %s",
+                            target["id"], ph_err[:120],
                         )
                     else:
-                        item_failed = True
+                        counters["avatar"] += 1
+                        await _safe_execute(
+                            pool,
+                            "UPDATE global_presence_targets SET avatar_applied=TRUE WHERE id=$1",
+                            target["id"],
+                        )
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    log_exc_swallow(log, f"gp_bulk_apply about target={target['id']}: {exc}")
+                    log_exc_swallow(log, f"gp_bulk_apply avatar target={target['id']}: {exc}")
                     item_failed = True
-                await asyncio.sleep(random.uniform(3, 8) * session_simulator.chaos_factor())
+                await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
 
-        if action in ("avatar", "both"):
-            base_seed = target.get("avatar_seed")
-            if base_seed is None:
-                # У целей из планов до генератора seed'а нет — выводим его из
-                # id, чтобы перерисовка оставалась воспроизводимой.
-                base_seed = target["id"] * 2654435761 % (2**31)
-            try:
-                photo = await asyncio.to_thread(
-                    avatar_factory.generate_avatar,
-                    int(base_seed) + seed_shift,
-                    title,
-                    style=target.get("avatar_style") or avatar_style,
-                )
-                ph_err = await account_manager.set_channel_photo(
-                    acc["session_str"], channel_id, photo, access_hash=access_hash, _acc=acc
-                )
-                if ph_err:
-                    item_failed = True
-                    log.info(
-                        "gp_bulk_apply: аватар не применён target=%s: %s",
-                        target["id"], ph_err[:120],
-                    )
+            if action == "post_pin":
+                # Пост тоже индивидуален: одинаковый текст в 800 каналах — прямой
+                # спам-сигнал, ровно то, ради чего существует генератор.
+                text = render_pattern(post_template, dict(target)).strip() if post_template else ""
+                if not text:
+                    text = (target.get("planned_about") or title).strip()
+                if not text:
+                    skipped += 1
                 else:
-                    counters["avatar"] += 1
-                    await _safe_execute(
-                        pool,
-                        "UPDATE global_presence_targets SET avatar_applied=TRUE WHERE id=$1",
-                        target["id"],
-                    )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                log_exc_swallow(log, f"gp_bulk_apply avatar target={target['id']}: {exc}")
-                item_failed = True
-            await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
-
-        if action == "post_pin":
-            # Пост тоже индивидуален: одинаковый текст в 800 каналах — прямой
-            # спам-сигнал, ровно то, ради чего существует генератор.
-            text = render_pattern(post_template, dict(target)).strip() if post_template else ""
-            if not text:
-                text = (target.get("planned_about") or title).strip()
-            if not text:
-                skipped += 1
-            else:
-                try:
-                    res = await account_manager.post_to_channel(
-                        acc["session_str"],
-                        channel_id,
-                        text[:4000],
-                        access_hash=access_hash,
-                        username=target.get("final_username") or "",
-                        _acc=acc,
-                    )
-                    if isinstance(res, dict) and res.get("error"):
-                        item_failed = True
-                        log.info(
-                            "gp_bulk_apply: пост не отправлен target=%s: %s",
-                            target["id"], str(res["error"])[:120],
-                        )
-                    else:
-                        counters["post"] += 1
-                        await asyncio.sleep(
-                            random.uniform(3, 7) * session_simulator.chaos_factor()
-                        )
-                        pin = await account_manager.pin_last_channel_post(
+                    try:
+                        res = await account_manager.post_to_channel(
                             acc["session_str"],
                             channel_id,
+                            text[:4000],
                             access_hash=access_hash,
                             username=target.get("final_username") or "",
                             _acc=acc,
                         )
-                        # Пост опубликован, закреп не удался — это НЕ провал
-                        # элемента: контент на месте, счётчики разные.
-                        if isinstance(pin, dict) and not pin.get("error"):
-                            counters["pin"] += 1
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    log_exc_swallow(log, f"gp_bulk_apply post target={target['id']}: {exc}")
-                    item_failed = True
-                await asyncio.sleep(random.uniform(20, 45) * session_simulator.chaos_factor())
-
-        if action == "admin":
-            try:
-                ok = await account_manager.promote_to_admin(
-                    acc["session_str"],
-                    channel_id,
-                    int(admin_user_id),
-                    _acc=acc,
-                    access_hash=access_hash,
-                    post_messages=True,
-                    invite_users=True,
-                    pin_messages=True,
-                )
-                if ok:
-                    counters["admin"] += 1
-                else:
-                    item_failed = True
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                log_exc_swallow(log, f"gp_bulk_apply admin target={target['id']}: {exc}")
-                item_failed = True
-            await asyncio.sleep(random.uniform(5, 12) * session_simulator.chaos_factor())
-
-        if action == "username":
-            ctx = {
-                "city": target.get("city_slug") or "",
-                "city_slug": target.get("city_slug") or "",
-                "country": target.get("country") or "",
-                "country_code": target.get("country_code") or "",
-                "region": target.get("region") or "",
-                "role": target.get("role") or "",
-                "index": target["id"],
-            }
-            candidate = allocator.allocate(uname_templates, ctx) if allocator else None
-            if not candidate:
-                skipped += 1
-            else:
-                try:
-                    err = await account_manager.set_channel_username(
-                        acc["session_str"], channel_id, candidate, _acc=acc
-                    )
-                    if err:
+                        if isinstance(res, dict) and res.get("error"):
+                            item_failed = True
+                            log.info(
+                                "gp_bulk_apply: пост не отправлен target=%s: %s",
+                                target["id"], str(res["error"])[:120],
+                            )
+                        else:
+                            counters["post"] += 1
+                            await asyncio.sleep(
+                                random.uniform(3, 7) * session_simulator.chaos_factor()
+                            )
+                            pin = await account_manager.pin_last_channel_post(
+                                acc["session_str"],
+                                channel_id,
+                                access_hash=access_hash,
+                                username=target.get("final_username") or "",
+                                _acc=acc,
+                            )
+                            # Пост опубликован, закреп не удался — это НЕ провал
+                            # элемента: контент на месте, счётчики разные.
+                            if isinstance(pin, dict) and not pin.get("error"):
+                                counters["pin"] += 1
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        log_exc_swallow(log, f"gp_bulk_apply post target={target['id']}: {exc}")
                         item_failed = True
-                        # Имя занято кем-то снаружи — резервируем, чтобы
-                        # следующим объектам оно не предлагалось повторно.
-                        allocator.reserve(candidate)
-                        log.info(
-                            "gp_bulk_apply: username '%s' не встал target=%s: %s",
-                            candidate, target["id"], err[:120],
-                        )
+                    await asyncio.sleep(random.uniform(20, 45) * session_simulator.chaos_factor())
+
+            if action == "admin":
+                try:
+                    ok = await account_manager.promote_to_admin(
+                        acc["session_str"],
+                        channel_id,
+                        int(admin_user_id),
+                        _acc=acc,
+                        access_hash=access_hash,
+                        post_messages=True,
+                        invite_users=True,
+                        pin_messages=True,
+                    )
+                    if ok:
+                        counters["admin"] += 1
                     else:
-                        counters["username"] += 1
-                        async with pool.acquire() as _c:
-                            async with _c.transaction():
-                                await _c.execute(
-                                    "UPDATE global_presence_targets "
-                                    "SET final_username=$1 WHERE id=$2",
-                                    candidate, target["id"],
-                                )
-                                await _c.execute(
-                                    "UPDATE managed_channels SET username=$1 "
-                                    " WHERE owner_id=$2 AND channel_id=$3",
-                                    candidate, owner_id, channel_id,
-                                )
+                        item_failed = True
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    log_exc_swallow(log, f"gp_bulk_apply username target={target['id']}: {exc}")
+                    log_exc_swallow(log, f"gp_bulk_apply admin target={target['id']}: {exc}")
                     item_failed = True
-                # Присвоение username — самое чувствительное к темпу действие:
-                # Telegram трактует частые UpdateUsername как автоматизацию.
-                await asyncio.sleep(random.uniform(90, 180) * session_simulator.chaos_factor())
+                await asyncio.sleep(random.uniform(5, 12) * session_simulator.chaos_factor())
 
-        if item_failed:
-            failed += 1
-        await _safe_execute(
-            pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-        )
+            if action == "username":
+                ctx = {
+                    "city": target.get("city_slug") or "",
+                    "city_slug": target.get("city_slug") or "",
+                    "country": target.get("country") or "",
+                    "country_code": target.get("country_code") or "",
+                    "region": target.get("region") or "",
+                    "role": target.get("role") or "",
+                    "index": target["id"],
+                }
+                candidate = allocator.allocate(uname_templates, ctx) if allocator else None
+                if not candidate:
+                    skipped += 1
+                else:
+                    try:
+                        err = await account_manager.set_channel_username(
+                            acc["session_str"], channel_id, candidate, _acc=acc
+                        )
+                        if err:
+                            item_failed = True
+                            # Имя занято кем-то снаружи — резервируем, чтобы
+                            # следующим объектам оно не предлагалось повторно.
+                            allocator.reserve(candidate)
+                            log.info(
+                                "gp_bulk_apply: username '%s' не встал target=%s: %s",
+                                candidate, target["id"], err[:120],
+                            )
+                        else:
+                            counters["username"] += 1
+                            async with pool.acquire() as _c:
+                                async with _c.transaction():
+                                    await _c.execute(
+                                        "UPDATE global_presence_targets "
+                                        "SET final_username=$1 WHERE id=$2",
+                                        candidate, target["id"],
+                                    )
+                                    await _c.execute(
+                                        "UPDATE managed_channels SET username=$1 "
+                                        " WHERE owner_id=$2 AND channel_id=$3",
+                                        candidate, owner_id, channel_id,
+                                    )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        log_exc_swallow(log, f"gp_bulk_apply username target={target['id']}: {exc}")
+                        item_failed = True
+                    # Присвоение username — самое чувствительное к темпу действие:
+                    # Telegram трактует частые UpdateUsername как автоматизацию.
+                    await asyncio.sleep(random.uniform(90, 180) * session_simulator.chaos_factor())
 
-    labels = {
-        "about": "описаний", "avatar": "аватаров", "post": "постов",
-        "pin": "закреплено", "admin": "назначений", "username": "username",
-    }
-    parts = [f"{labels[k]}: {v}" for k, v in counters.items() if v]
-    if not parts:
-        parts.append("применено: 0")
-    if skipped:
-        # Пропуски показываем отдельно от ошибок: «аккаунт в карантине» — это
-        # не сбой применения, и смешивать их в одном счётчике нечестно.
-        parts.append(f"пропущено: {skipped}")
-    if failed:
-        parts.append(f"ошибок: {failed}")
+            if item_failed:
+                failed += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
 
-    return {
-        "status": "done",
-        "ok": sum(counters.values()),
-        "fail": failed,
-        "plan_id": plan_id,
-        "summary": "🧰 Пакетное применение — " + ", ".join(parts),
-    }
+        labels = {
+            "about": "описаний", "avatar": "аватаров", "post": "постов",
+            "pin": "закреплено", "admin": "назначений", "username": "username",
+        }
+        parts = [f"{labels[k]}: {v}" for k, v in counters.items() if v]
+        if not parts:
+            parts.append("применено: 0")
+        if skipped:
+            # Пропуски показываем отдельно от ошибок: «аккаунт в карантине» — это
+            # не сбой применения, и смешивать их в одном счётчике нечестно.
+            parts.append(f"пропущено: {skipped}")
+        if failed:
+            parts.append(f"ошибок: {failed}")
+
+        return {
+            "status": "done",
+            "ok": sum(counters.values()),
+            "fail": failed,
+            "plan_id": plan_id,
+            "summary": "🧰 Пакетное применение — " + ", ".join(parts),
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 
@@ -5036,256 +5062,269 @@ async def _exec_global_presence_bot(
         )
         return {"status": "failed", "reason": "no active accounts found"}
 
-    # Build lookup by id for per-target account assignment (mirrors _exec_global_presence_channel)
-    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
-    # Fallback list for round-robin when target has no selected_account_id
-    accounts_list = list(accounts_rows)
+    # Отказной захват всего пула: дальше аккаунты выбираются из него по ходу
+    # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts_rows) - len(claimed_ids)
+    accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
 
-    targets = await _safe_fetch(
-            pool,
-        "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
-        plan_id,
-    )
-    if not targets:
-        await _safe_execute(
+    try:
+
+        # Build lookup by id for per-target account assignment (mirrors _exec_global_presence_channel)
+        acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
+        # Fallback list for round-robin when target has no selected_account_id
+        accounts_list = list(accounts_rows)
+
+        targets = await _safe_fetch(
                 pool,
-            "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
+            "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
             plan_id,
         )
-        return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
-
-    await _safe_execute(
-            pool,
-        "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1",
-        plan_id,
-    )
-
-    created_count = 0
-    failed_count = 0
-    acc_rr_idx = 0  # round-robin index for fallback only
-    total = len(targets)
-    _gp_bot_eco_id: int | None = None  # lazily loaded from plan
-    await _safe_execute(
-            pool,
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
-    )
-
-    for i, target in enumerate(targets):
-        if await _is_cancelled(pool, op_id):
+        if not targets:
             await _safe_execute(
                     pool,
-                "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
+                "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
                 plan_id,
             )
-            return {
-                "status": "cancelled",
-                "created": created_count,
-                "failed": failed_count,
-                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
-            }
+            return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
 
-        # Use per-target assigned account; fall back to round-robin if not set
-        acc_id = target["selected_account_id"]
-        acc = acc_by_id.get(acc_id) if acc_id else None
-        if not acc:
-            acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
-            acc_rr_idx += 1
-
-        bot_name = target["planned_name"] or f"Bot {i + 1}"
-        bot_username = (target["planned_username"] or "").lstrip("@")
-        # Ensure bot username ends with _bot
-        if bot_username and not bot_username.lower().endswith("bot"):
-            bot_username = bot_username + "_bot"
-
-        # Atomic claim: skip if already claimed by another worker
-        claimed = await _safe_execute(
+        await _safe_execute(
                 pool,
-            "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
-            target["id"],
-        )
-        if claimed == "UPDATE 0":
-            log.info(
-                "op_worker gp_bot: target %d already claimed, skipping", target["id"]
-            )
-            continue
-        await session_simulator.typing_delay(bot_name)
-
-        t0_gp_bot = time.monotonic()
-        result = await account_manager.create_bot_via_botfather(
-            acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
+            "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1",
+            plan_id,
         )
 
-        # BotFather flood_wait — ждём указанное время и пробуем другим аккаунтом
-        if result.get("error") and result.get("flood_wait"):
-            wait_s = int(result["flood_wait"]) + random.randint(30, 60)
-            log.info(
-                "op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying",
-                wait_s,
-            )
-            await _safe_execute(
+        created_count = 0
+        failed_count = 0
+        acc_rr_idx = 0  # round-robin index for fallback only
+        total = len(targets)
+        _gp_bot_eco_id: int | None = None  # lazily loaded from plan
+        await _safe_execute(
+                pool,
+            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+        )
+
+        for i, target in enumerate(targets):
+            if await _is_cancelled(pool, op_id):
+                await _safe_execute(
+                        pool,
+                    "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
+                    plan_id,
+                )
+                return {
+                    "status": "cancelled",
+                    "created": created_count,
+                    "failed": failed_count,
+                    "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+                }
+
+            # Use per-target assigned account; fall back to round-robin if not set
+            acc_id = target["selected_account_id"]
+            acc = acc_by_id.get(acc_id) if acc_id else None
+            if not acc:
+                acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+                acc_rr_idx += 1
+
+            bot_name = target["planned_name"] or f"Bot {i + 1}"
+            bot_username = (target["planned_username"] or "").lstrip("@")
+            # Ensure bot username ends with _bot
+            if bot_username and not bot_username.lower().endswith("bot"):
+                bot_username = bot_username + "_bot"
+
+            # Atomic claim: skip if already claimed by another worker
+            claimed = await _safe_execute(
                     pool,
-                "UPDATE global_presence_targets SET status='pending' WHERE id=$1",
+                "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
                 target["id"],
             )
-            await asyncio.sleep(wait_s)
-            # Switch to next account for retry (use round-robin index over accounts_list)
-            acc_rr_idx += 1
-            acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+            if claimed == "UPDATE 0":
+                log.info(
+                    "op_worker gp_bot: target %d already claimed, skipping", target["id"]
+                )
+                continue
+            await session_simulator.typing_delay(bot_name)
+
+            t0_gp_bot = time.monotonic()
             result = await account_manager.create_bot_via_botfather(
-                acc["session_str"],
-                bot_name,
-                bot_username or f"geo_{i + 1}_bot",
-                _acc=acc,
+                acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
             )
 
-        if result.get("error"):
-            _gp_bot_err = str(result["error"])
-            if _is_dead_session_error(_gp_bot_err):
-                try:
-                    await pool.execute(
-                        """UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',
-                               status_reason=$2 WHERE id=$1 AND is_active=TRUE""",
-                        acc["id"], f"Dead session (gp_bot): {_gp_bot_err[:180]}",
+            # BotFather flood_wait — ждём указанное время и пробуем другим аккаунтом
+            if result.get("error") and result.get("flood_wait"):
+                wait_s = int(result["flood_wait"]) + random.randint(30, 60)
+                log.info(
+                    "op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying",
+                    wait_s,
+                )
+                await _safe_execute(
+                        pool,
+                    "UPDATE global_presence_targets SET status='pending' WHERE id=$1",
+                    target["id"],
+                )
+                await asyncio.sleep(wait_s)
+                # Switch to next account for retry (use round-robin index over accounts_list)
+                acc_rr_idx += 1
+                acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+                result = await account_manager.create_bot_via_botfather(
+                    acc["session_str"],
+                    bot_name,
+                    bot_username or f"geo_{i + 1}_bot",
+                    _acc=acc,
+                )
+
+            if result.get("error"):
+                _gp_bot_err = str(result["error"])
+                if _is_dead_session_error(_gp_bot_err):
+                    try:
+                        await pool.execute(
+                            """UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',
+                                   status_reason=$2 WHERE id=$1 AND is_active=TRUE""",
+                            acc["id"], f"Dead session (gp_bot): {_gp_bot_err[:180]}",
+                        )
+                        log.warning("op_worker gp_bot: deactivated dead session account_id=%s", acc["id"])
+                    except Exception as _dbe:
+                        log.warning("op_worker gp_bot: deactivate failed: %s", _dbe)
+                await _safe_execute(
+                        pool,
+                    "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
+                    _gp_bot_err[:500],
+                    target["id"],
+                )
+                failed_count += 1
+                _infra_mem.record_account_op(
+                    acc["id"],
+                    "global_presence_bot",
+                    success=False,
+                    error=_gp_bot_err[:100],
+                )
+                await _audit(
+                    pool,
+                    owner_id,
+                    "gp_create_bot",
+                    "error",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=bot_name[:100],
+                    error_msg=_gp_bot_err[:200],
+                )
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                await asyncio.sleep(random.uniform(30, 60))
+                continue
+
+            token = result.get("token", "")
+            actual_username = result.get("username", bot_username)
+
+            # Save bot to managed_bots (token format: "{bot_id}:{hash}")
+            try:
+                from database import db as _db
+
+                if token and ":" in token:
+                    bot_id_int = int(token.split(":")[0])
+                    await _db.add_bot(
+                        pool, token, bot_id_int, actual_username, bot_name, owner_id, bot=bot
                     )
-                    log.warning("op_worker gp_bot: deactivated dead session account_id=%s", acc["id"])
-                except Exception as _dbe:
-                    log.warning("op_worker gp_bot: deactivate failed: %s", _dbe)
+            except Exception as e:
+                log.warning("op_worker gp_bot: managed_bots insert failed: %s", e)
+
             await _safe_execute(
                     pool,
-                "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                _gp_bot_err[:500],
-                target["id"],
+                "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
             )
-            failed_count += 1
             _infra_mem.record_account_op(
                 acc["id"],
                 "global_presence_bot",
-                success=False,
-                error=_gp_bot_err[:100],
+                success=True,
+                duration_s=time.monotonic() - t0_gp_bot,
             )
             await _audit(
                 pool,
                 owner_id,
                 "gp_create_bot",
-                "error",
+                "success",
                 operation_id=op_id,
                 account_id=acc["id"],
-                target=bot_name[:100],
-                error_msg=_gp_bot_err[:200],
+                target=(actual_username or bot_name)[:100],
+                duration_ms=int((time.monotonic() - t0_gp_bot) * 1000),
+            )
+
+            # Add created bot to ecosystem
+            try:
+                if _gp_bot_eco_id is None:
+                    _eco_row = await pool.fetchrow(
+                        "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
+                        plan_id,
+                    )
+                    _gp_bot_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
+                if _gp_bot_eco_id and token and ":" in token:
+                    from services import ecosystem_brain as _eb
+
+                    _bot_id_for_eco = int(token.split(":")[0])
+                    await _eb.add_member(
+                        pool, _gp_bot_eco_id, owner_id, "bot", _bot_id_for_eco
+                    )
+                    await _eb.add_member(
+                        pool, _gp_bot_eco_id, owner_id, "account", acc["id"]
+                    )
+            except Exception as e:
+                log_exc_swallow(log, f"gp_bot ecosystem add_member to plan {plan_id} failed: {e}")
+
+            await _safe_execute(
+                    pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                op_id,
+                created_count + failed_count + 1,
+                f"{target.get('city', '?')} → @{actual_username}",
+                f"bot created: @{actual_username}",
             )
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
-            await asyncio.sleep(random.uniform(30, 60))
-            continue
+            created_count += 1
 
-        token = result.get("token", "")
-        actual_username = result.get("username", bot_username)
+            if created_count % 5 == 0:
+                try:
+                    await db.notify_if_enabled(
+                        pool,
+                        bot,
+                        owner_id,
+                        "op_complete",
+                        f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
+                        f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log,
+                        f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}",
+                    )
 
-        # Save bot to managed_bots (token format: "{bot_id}:{hash}")
-        try:
-            from database import db as _db
+            # Humanized delay between BotFather interactions
+            await asyncio.sleep(random.uniform(60, 120) * session_simulator.chaos_factor())
 
-            if token and ":" in token:
-                bot_id_int = int(token.split(":")[0])
-                await _db.add_bot(
-                    pool, token, bot_id_int, actual_username, bot_name, owner_id, bot=bot
-                )
-        except Exception as e:
-            log.warning("op_worker gp_bot: managed_bots insert failed: %s", e)
-
-        await _safe_execute(
-                pool,
-            "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
-        )
-        _infra_mem.record_account_op(
-            acc["id"],
-            "global_presence_bot",
-            success=True,
-            duration_s=time.monotonic() - t0_gp_bot,
-        )
-        await _audit(
-            pool,
-            owner_id,
-            "gp_create_bot",
-            "success",
-            operation_id=op_id,
-            account_id=acc["id"],
-            target=(actual_username or bot_name)[:100],
-            duration_ms=int((time.monotonic() - t0_gp_bot) * 1000),
-        )
-
-        # Add created bot to ecosystem
-        try:
-            if _gp_bot_eco_id is None:
-                _eco_row = await pool.fetchrow(
-                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
-                    plan_id,
-                )
-                _gp_bot_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
-            if _gp_bot_eco_id and token and ":" in token:
-                from services import ecosystem_brain as _eb
-
-                _bot_id_for_eco = int(token.split(":")[0])
-                await _eb.add_member(
-                    pool, _gp_bot_eco_id, owner_id, "bot", _bot_id_for_eco
-                )
-                await _eb.add_member(
-                    pool, _gp_bot_eco_id, owner_id, "account", acc["id"]
-                )
-        except Exception as e:
-            log_exc_swallow(log, f"gp_bot ecosystem add_member to plan {plan_id} failed: {e}")
-
-        await _safe_execute(
-                pool,
-            "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-            op_id,
-            created_count + failed_count + 1,
-            f"{target.get('city', '?')} → @{actual_username}",
-            f"bot created: @{actual_username}",
+        final_status = (
+            "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
         )
         await _safe_execute(
                 pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
+            final_status,
+            plan_id,
         )
-        created_count += 1
-
-        if created_count % 5 == 0:
-            try:
-                await db.notify_if_enabled(
-                    pool,
-                    bot,
-                    owner_id,
-                    "op_complete",
-                    f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
-                    f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
-                )
-            except Exception:
-                log_exc_swallow(
-                    log,
-                    f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}",
-                )
-
-        # Humanized delay between BotFather interactions
-        await asyncio.sleep(random.uniform(60, 120) * session_simulator.chaos_factor())
-
-    final_status = (
-        "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
-    )
-    await _safe_execute(
-            pool,
-        "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
-        final_status,
-        plan_id,
-    )
-    return {
-        "status": "done",
-        "created": created_count,
-        "failed": failed_count,
-        "plan_id": plan_id,
-        "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
-    }
+        return {
+            "status": "done",
+            "created": created_count,
+            "failed": failed_count,
+            "plan_id": plan_id,
+            "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 _MIN_ACCOUNT_AGE_DAYS = 14  # минимальный возраст аккаунта в системе для bulk-операций
@@ -11378,202 +11417,215 @@ async def _exec_niche_growth_post(
     if not session_str:
         return {"status": "failed", "reason": "Аккаунт без сессии"}
 
-    # Генерируем ключевые слова для ниши (+ гео, если задан)
+    # Отказной захват всего пула: дальше аккаунты выбираются из него по ходу
+    # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
+
     try:
-        keywords = await niche_searcher.generate_keywords(search_description)
-        log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
-    except Exception as exc:
-        log.warning("niche_growth_post: keyword gen failed: %s", exc)
-        keywords = [search_description]
 
-    # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
-    # исключаем, чтобы повторные запуски не заходили и не постили повторно в
-    # те же группы (лишний риск спам-флага без дополнительного охвата).
-    try:
-        prior_rows = await pool.fetch(
-            "SELECT group_id FROM niche_growth_targets WHERE owner_id=$1", owner_id
-        )
-        exclude_ids = {int(r["group_id"]) for r in prior_rows}
-    except Exception as e:
-        log.warning('prior groups query failed: %s', e)
-        exclude_ids = set()
+        # Генерируем ключевые слова для ниши (+ гео, если задан)
+        try:
+            keywords = await niche_searcher.generate_keywords(search_description)
+            log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
+        except Exception as exc:
+            log.warning("niche_growth_post: keyword gen failed: %s", exc)
+            keywords = [search_description]
 
-    # Ищем группы
-    try:
-        groups = await niche_searcher.search_niche_groups(
-            session_str,
-            keywords,
-            min_members=50,
-            max_per_keyword=5,
-            exclude_ids=exclude_ids,
-            _acc=search_acc,
-        )
-    except Exception as exc:
-        log.warning("niche_growth_post: group search failed: %s", exc)
-        return {
-            "status": "failed",
-            "reason": f"Поиск групп не удался: {exc}",
-            "summary": "❌ Не удалось найти группы в нише",
-        }
+        # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
+        # исключаем, чтобы повторные запуски не заходили и не постили повторно в
+        # те же группы (лишний риск спам-флага без дополнительного охвата).
+        try:
+            prior_rows = await pool.fetch(
+                "SELECT group_id FROM niche_growth_targets WHERE owner_id=$1", owner_id
+            )
+            exclude_ids = {int(r["group_id"]) for r in prior_rows}
+        except Exception as e:
+            log.warning('prior groups query failed: %s', e)
+            exclude_ids = set()
 
-    if not groups:
-        # Correct total_items down from the submitted placeholder (bot handler
-        # submits total_items=50 regardless of the real 5-group cap) so the
-        # progress bar doesn't show a misleading "0/50" when nothing was found.
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET total_items=0 WHERE id=$1", op_id
-        )
-        return {
-            "status": "done",
-            "ok": 0,
-            "fail": 0,
-            "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить описание.",
-        }
-
-    # Перемешиваем и берём только безопасный лимит
-    random.shuffle(groups)
-    groups = groups[:max_groups]
-    total = len(groups)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
-
-    ok_count = 0
-    err_count = 0
-    acc_idx = 0
-
-    for idx, grp in enumerate(groups):
-        if await _is_cancelled(pool, op_id):
+        # Ищем группы
+        try:
+            groups = await niche_searcher.search_niche_groups(
+                session_str,
+                keywords,
+                min_members=50,
+                max_per_keyword=5,
+                exclude_ids=exclude_ids,
+                _acc=search_acc,
+            )
+        except Exception as exc:
+            log.warning("niche_growth_post: group search failed: %s", exc)
             return {
-                "status": "cancelled",
-                "ok": ok_count,
-                "fail": err_count,
-                "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+                "status": "failed",
+                "reason": f"Поиск групп не удался: {exc}",
+                "summary": "❌ Не удалось найти группы в нише",
             }
 
-        # Round-robin по аккаунтам
-        acc = accounts[acc_idx % len(accounts)]
-        acc_idx += 1
-
-        join_ref = grp.get("join_ref", "")
-        grp_id = grp.get("id", 0)
-        grp_title = grp.get("title", "")
-        username = grp.get("username", "")
-        access_hash = grp.get("access_hash", 0)
-
-        # Шаг 1: Вступить в группу
-        try:
-            join_result = await account_manager.join_channel(
-                acc["session_str"], join_ref, _acc=acc
+        if not groups:
+            # Correct total_items down from the submitted placeholder (bot handler
+            # submits total_items=50 regardless of the real 5-group cap) so the
+            # progress bar doesn't show a misleading "0/50" when nothing was found.
+            await _safe_execute(
+                    pool,
+                "UPDATE operation_queue SET total_items=0 WHERE id=$1", op_id
             )
-            if "error" in join_result and not join_result.get("already_member"):
-                log.info(
-                    "niche_growth_post: join failed grp=%s: %s",
-                    join_ref, join_result.get("error"),
+            return {
+                "status": "done",
+                "ok": 0,
+                "fail": 0,
+                "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить описание.",
+            }
+
+        # Перемешиваем и берём только безопасный лимит
+        random.shuffle(groups)
+        groups = groups[:max_groups]
+        total = len(groups)
+        await _safe_execute(
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+        ok_count = 0
+        err_count = 0
+        acc_idx = 0
+
+        for idx, grp in enumerate(groups):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "fail": err_count,
+                    "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+                }
+
+            # Round-robin по аккаунтам
+            acc = accounts[acc_idx % len(accounts)]
+            acc_idx += 1
+
+            join_ref = grp.get("join_ref", "")
+            grp_id = grp.get("id", 0)
+            grp_title = grp.get("title", "")
+            username = grp.get("username", "")
+            access_hash = grp.get("access_hash", 0)
+
+            # Шаг 1: Вступить в группу
+            try:
+                join_result = await account_manager.join_channel(
+                    acc["session_str"], join_ref, _acc=acc
                 )
-                err_count += 1
-                await pool.execute(
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-                )
-                continue
-        except Exception as exc:
-            exc_str = str(exc).lower()
-            if "floodwait" in exc_str or "flood" in exc_str:
-                # При FloodWait останавливаем текущий аккаунт
-                log.warning("niche_growth_post: FloodWait on join grp=%s: %s", join_ref, exc)
+                if "error" in join_result and not join_result.get("already_member"):
+                    log.info(
+                        "niche_growth_post: join failed grp=%s: %s",
+                        join_ref, join_result.get("error"),
+                    )
+                    err_count += 1
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    )
+                    continue
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                if "floodwait" in exc_str or "flood" in exc_str:
+                    # При FloodWait останавливаем текущий аккаунт
+                    log.warning("niche_growth_post: FloodWait on join grp=%s: %s", join_ref, exc)
+                    err_count += 1
+                    await _safe_execute(
+                            pool,
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    )
+                    # Большая пауза при флуде — переключиться на следующий аккаунт
+                    await asyncio.sleep(random.uniform(300, 600))
+                    continue
+                log.warning("niche_growth_post: join exc grp=%s: %s", join_ref, exc)
                 err_count += 1
                 await _safe_execute(
                         pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
-                # Большая пауза при флуде — переключиться на следующий аккаунт
-                await asyncio.sleep(random.uniform(300, 600))
                 continue
-            log.warning("niche_growth_post: join exc grp=%s: %s", join_ref, exc)
-            err_count += 1
+
+            # Запоминаем группу как уже посещённую — чтобы будущие запуски Growth
+            # Agent для этого владельца не заходили и не постили сюда повторно.
+            if grp_id:
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
+                    "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
+                    owner_id, grp_id, grp_title,
+                )
+
+            # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
+            join_to_post_delay = random.uniform(180, 480)
+            log.debug("niche_growth_post: waiting %.0fs before posting to grp=%s", join_to_post_delay, join_ref)
+            await asyncio.sleep(join_to_post_delay)
+
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "fail": err_count,
+                    "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+                }
+
+            # Шаг 2: Опубликовать текст (свой spintax-вариант на эту группу)
+            try:
+                _promo = _expand_spintax(promo_text)
+                post_result = await account_manager.post_to_channel(
+                    acc["session_str"],
+                    grp_id,
+                    _promo,
+                    access_hash=access_hash,
+                    username=username,
+                    _acc=acc,
+                )
+                if "error" in post_result:
+                    log.info(
+                        "niche_growth_post: post failed grp=%s title=%r: %s",
+                        join_ref, grp_title, post_result.get("error"),
+                    )
+                    err_count += 1
+                else:
+                    ok_count += 1
+                    log.info(
+                        "niche_growth_post: posted to grp=%s title=%r msg_id=%s",
+                        join_ref, grp_title, post_result.get("msg_id"),
+                    )
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                if "floodwait" in exc_str or "flood" in exc_str:
+                    log.warning("niche_growth_post: FloodWait on post grp=%s: %s", join_ref, exc)
+                    await asyncio.sleep(random.uniform(300, 600))
+                else:
+                    log.warning("niche_growth_post: post exc grp=%s: %s", join_ref, exc)
+                err_count += 1
+
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
-            continue
 
-        # Запоминаем группу как уже посещённую — чтобы будущие запуски Growth
-        # Agent для этого владельца не заходили и не постили сюда повторно.
-        if grp_id:
-            await _safe_execute(
-                pool,
-                "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
-                "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
-                owner_id, grp_id, grp_title,
-            )
-
-        # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
-        join_to_post_delay = random.uniform(180, 480)
-        log.debug("niche_growth_post: waiting %.0fs before posting to grp=%s", join_to_post_delay, join_ref)
-        await asyncio.sleep(join_to_post_delay)
-
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": ok_count,
-                "fail": err_count,
-                "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
-            }
-
-        # Шаг 2: Опубликовать текст (свой spintax-вариант на эту группу)
-        try:
-            _promo = _expand_spintax(promo_text)
-            post_result = await account_manager.post_to_channel(
-                acc["session_str"],
-                grp_id,
-                _promo,
-                access_hash=access_hash,
-                username=username,
-                _acc=acc,
-            )
-            if "error" in post_result:
-                log.info(
-                    "niche_growth_post: post failed grp=%s title=%r: %s",
-                    join_ref, grp_title, post_result.get("error"),
+            # Пауза между группами: 10-20 минут (критично для безопасности)
+            if idx < total - 1:
+                between_groups_delay = random.uniform(600, 1200)
+                log.debug(
+                    "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
+                    between_groups_delay, idx + 1, total,
                 )
-                err_count += 1
-            else:
-                ok_count += 1
-                log.info(
-                    "niche_growth_post: posted to grp=%s title=%r msg_id=%s",
-                    join_ref, grp_title, post_result.get("msg_id"),
-                )
-        except Exception as exc:
-            exc_str = str(exc).lower()
-            if "floodwait" in exc_str or "flood" in exc_str:
-                log.warning("niche_growth_post: FloodWait on post grp=%s: %s", join_ref, exc)
-                await asyncio.sleep(random.uniform(300, 600))
-            else:
-                log.warning("niche_growth_post: post exc grp=%s: %s", join_ref, exc)
-            err_count += 1
+                await asyncio.sleep(between_groups_delay)
 
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-        )
-
-        # Пауза между группами: 10-20 минут (критично для безопасности)
-        if idx < total - 1:
-            between_groups_delay = random.uniform(600, 1200)
-            log.debug(
-                "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
-                between_groups_delay, idx + 1, total,
-            )
-            await asyncio.sleep(between_groups_delay)
-
-    summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
-    return {
-        "status": "done",
-        "ok": ok_count,
-        "fail": err_count,
-        "groups_found": total,
-        "summary": summary,
-    }
+        summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
+        return {
+            "status": "done",
+            "ok": ok_count,
+            "fail": err_count,
+            "groups_found": total,
+            "summary": summary,
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 # ── Mini App handlers ─────────────────────────────────────────────────────────

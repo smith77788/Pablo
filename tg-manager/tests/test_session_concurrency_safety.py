@@ -307,3 +307,44 @@ def test_strike_claims_atomically_and_works_only_on_claimed():
     assert "await _opw.mark_accounts_in_use(_claimed_ids)" not in body
     # страйк работает только с реально захваченными сессиями
     assert "plan.accounts = [a for a in plan.accounts" in body
+
+
+def test_all_session_executors_claim_no_exceptions():
+    """Финальный храповик: НИ ОДИН исполнитель операции не работает сессией
+    аккаунта без захвата. Покрытие 100% — новые исключения заводить нельзя.
+
+    Ловит и тех, кто клиента не создаёт сам, а делегирует в account_manager
+    (create_channel, promote_to_admin, post_to_channel, join_channel …): именно
+    так 14 дыр пережили первую волну правок.
+    """
+    import ast
+    path = os.path.join(ROOT, "services", "op_worker.py")
+    src = open(path, encoding="utf-8").read()
+    tree = ast.parse(src)
+    lines = src.split("\n")
+    claim_markers = ("try_claim_account", "try_claim_accounts",
+                     "_claim_available_accounts", "_claim_single_account")
+    checked, offenders = 0, []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith("_exec_"):
+            continue
+        body = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        if "session_str" not in body:
+            continue
+        if not any(k in body for k in ("account_manager.", "_make_client(", "connect_client(")):
+            continue
+        # аккаунты приходят параметром → захватил вызывающий (напр. _exec_bulk_join_inner)
+        if "accounts" in [a.arg for a in node.args.args]:
+            continue
+        checked += 1
+        if not any(m in body for m in claim_markers):
+            offenders.append(node.name)
+    assert checked >= 30, (
+        f"детектор нашёл всего {checked} исполнителей — сломан он, а не код"
+    )
+    assert not offenders, (
+        "исполнитель работает сессией аккаунта без захвата "
+        f"(две сессии на одном auth-key → AUTH_KEY_DUPLICATED): {offenders}"
+    )
