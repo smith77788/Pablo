@@ -7396,29 +7396,41 @@ async def _exec_pin_last_post(
         return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
 
-    await _safe_execute(pool, "UPDATE operation_queue SET total_items=1 WHERE id=$1", op_id)
+    # Отказной захват: операция работает живой сессией этого аккаунта.
+    # Без захвата он мог параллельно вести другую операцию (две сессии на
+    # одном auth-key → AUTH_KEY_DUPLICATED).
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "failed",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
 
     try:
-        result = await account_manager.pin_last_channel_post(
-            acc["session_str"], channel_ref, access_hash=access_hash, _acc=acc)
-    except asyncio.CancelledError:
-        raise
-    except Exception as _pin_exc:
-        log.warning("_exec_pin_last_post acc=%s: %s", acc.get("id"), _pin_exc)
-        result = {"error": str(_pin_exc)[:120]}
 
-    await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
+        await _safe_execute(pool, "UPDATE operation_queue SET total_items=1 WHERE id=$1", op_id)
 
-    if "pinned_msg_id" in result:
+        try:
+            result = await account_manager.pin_last_channel_post(
+                acc["session_str"], channel_ref, access_hash=access_hash, _acc=acc)
+        except asyncio.CancelledError:
+            raise
+        except Exception as _pin_exc:
+            log.warning("_exec_pin_last_post acc=%s: %s", acc.get("id"), _pin_exc)
+            result = {"error": str(_pin_exc)[:120]}
+
+        await _safe_execute(pool, "UPDATE operation_queue SET done_items=1 WHERE id=$1", op_id)
+
+        if "pinned_msg_id" in result:
+            return {
+                "status": "done", "ok": 1, "failed": 0,
+                "summary": f"\U0001F4CC Закреплён пост msg_id={result['pinned_msg_id']}",
+            }
         return {
-            "status": "done", "ok": 1, "failed": 0,
-            "summary": f"\U0001F4CC Закреплён пост msg_id={result['pinned_msg_id']}",
+            "status": "failed", "ok": 0, "failed": 1,
+            "reason": result.get("error", "ошибка"),
+            "summary": f"❌ {_html.escape(str(result.get('error', 'ошибка'))[:120])}",
         }
-    return {
-        "status": "failed", "ok": 0, "failed": 1,
-        "reason": result.get("error", "ошибка"),
-        "summary": f"❌ {_html.escape(str(result.get('error', 'ошибка'))[:120])}",
-    }
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_bulk_post_to_channel(
@@ -8795,21 +8807,32 @@ async def _exec_community_liven(
         return {"status": "failed",
                 "summary": "⚠️ Оживление: бот не смог создать ссылку (нужен админ с правом приглашать)"}
     joined = 0
+    busy = 0
     for acc in (accs or []):
         if await _is_cancelled(pool, op_id):
             break
+        # Захват на КАЖДЫЙ аккаунт: вступает он своей живой сессией. Занятый
+        # пропускаем, а не открываем на нём вторую сессию (AUTH_KEY_DUPLICATED).
+        if not await try_claim_account(int(acc["id"])):
+            busy += 1
+            continue
+        _claimed_acc = int(acc["id"])
         try:
             res = await account_manager.join_channel(
                 acc["session_str"], invite_link, _acc=dict(acc))
         except Exception as e:
             log.debug("_exec_community_liven join op=%d acc=%s: %s", op_id, acc["id"], e)
             continue
+        finally:
+            # join_channel закрывает сессию сам — держать аккаунт дольше незачем.
+            await release_accounts([_claimed_acc])
         if isinstance(res, dict) and not res.get("error"):
             await nodes_engine.add_node_member(pool, node_id, int(acc["id"]), "member")
             joined += 1
             await _governed_sleep(pool, owner_id, random.uniform(20, 45))
     return {"status": "done", "joined": joined,
-            "summary": f"🏛 Оживление ноды: вступило {joined} аккаунтов флота"}
+            "summary": (f"🏛 Оживление ноды: вступило {joined} аккаунтов флота"
+                        + (f" · пропущено занятых: {busy}" if busy else ""))}
 
 
 async def _exec_community_set_staff(
@@ -8849,29 +8872,41 @@ async def _exec_community_set_staff(
             owner_id)
     if not owner_acc:
         return {"status": "failed", "summary": "⚠️ Роли: нет аккаунта-промоутера"}
-    chat_id = int(node["tg_chat_id"])
-    promoted = 0
-    for aid in acc_ids:
-        if await _is_cancelled(pool, op_id):
-            break
-        target = await _safe_fetchrow(
-            pool, "SELECT tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, owner_id)
-        uid_tg = target["tg_user_id"] if target else None
-        if not uid_tg:
-            continue
-        try:
-            ok = await account_manager.promote_to_admin(
-                owner_acc["session_str"], chat_id, int(uid_tg), _acc=dict(owner_acc),
-                ban_users=True, delete_messages=True, pin_messages=True,
-                add_admins=(role == "admin"))
-            if ok:
-                await nodes_engine.add_node_member(pool, node_id, aid, role)
-                promoted += 1
-                await _governed_sleep(pool, owner_id, random.uniform(10, 25))
-        except Exception as e:
-            log.debug("_exec_community_set_staff op=%d acc=%s: %s", op_id, aid, e)
-    return {"status": "done", "promoted": promoted,
-            "summary": f"🛡 Роли ноды: назначено {promoted} ({role})"}
+
+    # Отказной захват: операция работает живой сессией этого аккаунта.
+    # Без захвата он мог параллельно вести другую операцию (две сессии на
+    # одном auth-key → AUTH_KEY_DUPLICATED).
+    if not await try_claim_account(int(owner_acc["id"])):
+        return {"status": "failed",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(owner_acc["id"])
+
+    try:
+        chat_id = int(node["tg_chat_id"])
+        promoted = 0
+        for aid in acc_ids:
+            if await _is_cancelled(pool, op_id):
+                break
+            target = await _safe_fetchrow(
+                pool, "SELECT tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, owner_id)
+            uid_tg = target["tg_user_id"] if target else None
+            if not uid_tg:
+                continue
+            try:
+                ok = await account_manager.promote_to_admin(
+                    owner_acc["session_str"], chat_id, int(uid_tg), _acc=dict(owner_acc),
+                    ban_users=True, delete_messages=True, pin_messages=True,
+                    add_admins=(role == "admin"))
+                if ok:
+                    await nodes_engine.add_node_member(pool, node_id, aid, role)
+                    promoted += 1
+                    await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+            except Exception as e:
+                log.debug("_exec_community_set_staff op=%d acc=%s: %s", op_id, aid, e)
+        return {"status": "done", "promoted": promoted,
+                "summary": f"🛡 Роли ноды: назначено {promoted} ({role})"}
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_crosspost_run(
@@ -8974,46 +9009,58 @@ async def _exec_promote_all_admins(
     if not accounts:
         return {"status": "done", "ok": 0, "fail": 0, "summary": "👑 Нет других аккаунтов для назначения"}
 
-    n = len(accounts)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+    # Отказной захват: операция работает живой сессией этого аккаунта.
+    # Без захвата он мог параллельно вести другую операцию (две сессии на
+    # одном auth-key → AUTH_KEY_DUPLICATED).
+    if not await try_claim_account(int(owner_acc["id"])):
+        return {"status": "failed",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(owner_acc["id"])
 
-    ok_count = 0
-    fail_count = 0
+    try:
 
-    for idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": ok_count,
-                "fail": fail_count,
-                "summary": f"Отменено. Назначено: {ok_count}/{n}",
-            }
-        try:
-            ok = await account_manager.promote_to_admin(
-                owner_acc["session_str"], channel_id, acc["tg_user_id"], _acc=dict(owner_acc)
-            )
-            if ok:
-                ok_count += 1
-            else:
-                fail_count += 1
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log.warning("_exec_promote_all_admins op=%d acc=%s: %s", op_id, acc.get("id"), exc)
-            fail_count += 1
-
+        n = len(accounts)
         await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-        if idx < n - 1:
-            await asyncio.sleep(2)
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
-    summary = (
-        f"👑 Назначение администраторов канала\n"
-        f"✅ Успешно: {ok_count}/{n}"
-        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-    )
-    return {"status": "done", "ok": ok_count, "fail": fail_count, "total": n, "summary": summary}
+        ok_count = 0
+        fail_count = 0
+
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "fail": fail_count,
+                    "summary": f"Отменено. Назначено: {ok_count}/{n}",
+                }
+            try:
+                ok = await account_manager.promote_to_admin(
+                    owner_acc["session_str"], channel_id, acc["tg_user_id"], _acc=dict(owner_acc)
+                )
+                if ok:
+                    ok_count += 1
+                else:
+                    fail_count += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("_exec_promote_all_admins op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+                fail_count += 1
+
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < n - 1:
+                await asyncio.sleep(2)
+
+        summary = (
+            f"👑 Назначение администраторов канала\n"
+            f"✅ Успешно: {ok_count}/{n}"
+            + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+        )
+        return {"status": "done", "ok": ok_count, "fail": fail_count, "total": n, "summary": summary}
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 # ── Накрутка: просмотры, реакции, сторис ─────────────────────────────────────

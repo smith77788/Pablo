@@ -6,6 +6,21 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+def _func_src(path: str, name: str) -> str:
+    """Тело функции по границам AST.
+
+    Раньше резали окном фиксированной длины (`ow[i:i+2600]`): любая вставка
+    внутрь функции выталкивала проверяемое за границу, и тест падал на исправном
+    коде. Границы AST от длины тела не зависят.
+    """
+    import ast
+    src = open(path, encoding="utf-8").read()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(src.split("\n")[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"{name} не найдена в {path}")
+
+
 
 def test_schema_defines_community_tables():
     sql = open(os.path.join(ROOT, "schema_v177.sql"), encoding="utf-8").read()
@@ -119,12 +134,11 @@ def test_liven_and_staff_ops_and_schema():
     assert "async def _exec_community_set_staff" in ow
     # оживление = вступление флота по инвайт-ссылке (работает и для приватных
     # нод) + запись участником; роли = промоут владельцем/админом ноды
-    li = ow.index("async def _exec_community_liven")
-    liven = ow[li:li + 2600]
+    _owp = os.path.join(ROOT, "services", "op_worker.py")
+    liven = _func_src(_owp, "_exec_community_liven")
     assert "create_chat_invite_link" in liven and "join_channel(" in liven
     assert "add_node_member" in liven
-    si = ow.index("async def _exec_community_set_staff")
-    staff = ow[si:si + 2800]
+    staff = _func_src(_owp, "_exec_community_set_staff")
     assert "promote_to_admin" in staff
     assert "role='admin'" in staff   # промоутер — админ-член ноды (владелец)
 
