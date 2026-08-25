@@ -3015,21 +3015,36 @@ async def set_ipv6_subnet(pool, owner_id: int, subnet: str) -> str:
     return subnet
 
 
-async def get_ipv6_subnet(pool, owner_id: int | None) -> str:
-    """IPv6-подсеть владельца из settings_json (или '' если не задана)."""
+async def get_ipv6_subnet_or_raise(pool, owner_id: int | None) -> str:
+    """IPv6-подсеть владельца ('' — не задана). Сбой чтения ПРОБРАСЫВАЕТ.
+
+    Нужна там, где «не задана» и «не смогли прочитать» — разные вещи. Транспорт
+    аккаунта именно такой случай: приняв сбой БД за «подсети нет», процесс уводит
+    аккаунт напрямую с host-IP, тогда как другой процесс ходит с его IPv6. Одна
+    сессия с двух адресов — AUTH_KEY_DUPLICATED, то есть мёртвый аккаунт.
+    """
     if not owner_id:
         return ""
     import json as _json
-    try:
-        raw = await pool.fetchval(
-            "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
-    except Exception:
-        return ""
+    raw = await pool.fetchval(
+        "SELECT settings_json FROM platform_users WHERE user_id=$1", owner_id)
     if not raw:
         return ""
     try:
         data = raw if isinstance(raw, dict) else _json.loads(raw)
-        return ((data or {}).get("ipv6_subnet") or "").strip()
+    except Exception:
+        return ""      # битый JSON — это «не задана», а не сбой чтения
+    return ((data or {}).get("ipv6_subnet") or "").strip()
+
+
+async def get_ipv6_subnet(pool, owner_id: int | None) -> str:
+    """IPv6-подсеть владельца из settings_json (или '' если не задана).
+
+    Мягкий вариант: сбой чтения тоже даёт ''. Для решений о транспорте берите
+    `get_ipv6_subnet_or_raise` — там разница принципиальна.
+    """
+    try:
+        return await get_ipv6_subnet_or_raise(pool, owner_id)
     except Exception:
         return ""
 

@@ -1979,6 +1979,18 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             try:
                 from services import account_manager as _am
                 _am.set_owner_proxy_policy(owner_id, await db.get_proxy_policy(pool, owner_id))
+                # И IPv6-подсеть — по тем же причинам, но цена ошибки выше.
+                # Кэш подсети заполняется ТОЛЬКО при сохранении настройки, то есть
+                # в процессе, обслужившем запрос мини-аппа. Воркер о ней не знает
+                # и уводит аккаунт НАПРЯМУЮ с host-IP, тогда как одиночные вызовы
+                # (они читают подсеть из БД) идут с IPv6 аккаунта. Одна сессия с
+                # двух адресов — это AUTH_KEY_DUPLICATED, то есть мёртвый аккаунт,
+                # а снаружи «операция ничего не делает».
+                # ..._or_raise: сбой чтения НЕ должен выглядеть как «подсети нет» —
+                # иначе он же и уведёт аккаунт напрямую. Не прочитали — оставляем
+                # кэш как есть.
+                _am.set_owner_ipv6_subnet(
+                    owner_id, await db.get_ipv6_subnet_or_raise(pool, owner_id))
             except Exception:
                 log_exc_swallow(log, f"prime proxy_policy op#{op_id}")
 
