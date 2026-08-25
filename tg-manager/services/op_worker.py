@@ -902,8 +902,24 @@ def _is_dead_session_error(error_text: str) -> bool:
     # ВРЕМЕННЫЙ конфликт, а не мёртвая сессия — исключаем, чтобы аккаунт не
     # деактивировался (is_active=FALSE) из-за кратковременного пересечения IP.
     if _is_session_conflict_error(error_text):
+        # Конфликт двух IP — считаем ОТДЕЛЬНО: это ранний сигнал, что где-то
+        # нарушен захват аккаунта (находка №1), а не гибель сессии.
+        try:
+            from services import metrics as _m
+            _m.inc("infragram_session_deaths_total", {"kind": "auth_key_conflict"})
+        except Exception:
+            pass
         return False
-    return bool(_DEAD_SESSION_PATTERNS.search(error_text))
+    dead = bool(_DEAD_SESSION_PATTERNS.search(error_text))
+    if dead:
+        # Метрика (аудит №6): смерть сессии — самая дорогая потеря продукта,
+        # и до сих пор она нигде не считалась.
+        try:
+            from services import metrics as _m
+            _m.inc("infragram_session_deaths_total", {"kind": "dead_session"})
+        except Exception:
+            pass
+    return dead
 
 
 async def _record_network_isolation(
@@ -1754,6 +1770,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     op_id = row["id"]
     owner_id = row["owner_id"]
     op_type = row["op_type"]
+    _t_started = time.monotonic()      # метрика длительности операции (аудит №6)
     params = (
         row["params"]
         if isinstance(row["params"], dict)
@@ -2165,6 +2182,16 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _err_text,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
+            # Метрики (аудит №6): доля успеха и длительность по типу операции —
+            # без них о деградации узнавали из жалобы клиента, а не с графика.
+            try:
+                from services import metrics as _m
+                _m.inc("infragram_operations_total",
+                       {"op_type": op_type, "status": _final_status})
+                _m.observe("infragram_operation_seconds",
+                           time.monotonic() - _t_started, {"op_type": op_type})
+            except Exception:
+                pass
             # Событие в шину организма: операция завершена (память + реакция мозга).
             try:
                 from services.organism import spine

@@ -679,6 +679,14 @@ async def record_flood(
     operation_id: Optional[int] = None,
 ) -> float:
     """Record a FloodWait event. Returns the actual cooldown seconds applied."""
+    # Метрика (аудит №6): всплеск флудов — самый ранний признак, что флот
+    # перегрет. Раньше это было видно только вычитыванием логов постфактум.
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_flood_events_total", {"kind": "flood_wait",
+                                                "action": str(action_type)})
+    except Exception:
+        pass
     state = get_account_state(account_id)
     now = time.monotonic()
 
@@ -828,6 +836,12 @@ async def record_peer_flood(
     cooldown_seconds: int = 48 * 3600,
 ) -> float:
     """Isolate outbound workflows for an account after a peer flood penalty."""
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_flood_events_total", {"kind": "peer_flood",
+                                                "action": str(action_type)})
+    except Exception:
+        pass
     applied = await record_flood(
         pool=pool,
         account_id=account_id,

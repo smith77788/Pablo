@@ -7058,6 +7058,19 @@ async def monitor_pool_health(pool: asyncpg.Pool) -> dict:
         _pool_stats["idle_connections"] = pool.get_idle_size()
         _pool_stats["active_connections"] = pool.get_size() - pool.get_idle_size()
         _pool_stats["last_check"] = time.time()
+        # Метрика (аудит №6): насыщение пула. 20 соединений делят все фоновые
+        # циклы и весь HTTP; когда active упирается в total, тормозит ВСЁ сразу,
+        # и раньше это было невидимо до жалобы.
+        try:
+            from services import metrics as _m
+            _m.gauge("infragram_db_pool_connections",
+                     _pool_stats["total_connections"], {"state": "total"})
+            _m.gauge("infragram_db_pool_connections",
+                     _pool_stats["active_connections"], {"state": "active"})
+            _m.gauge("infragram_db_pool_connections",
+                     _pool_stats["idle_connections"], {"state": "idle"})
+        except Exception:
+            pass
         
         # Check for connection errors
         try:

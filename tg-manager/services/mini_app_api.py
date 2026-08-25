@@ -18212,6 +18212,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     app.router.add_get("/api/miniapp/config", miniapp_config)
 
+    async def prom_metrics(request: web.Request) -> web.Response:
+        """Метрики процесса в формате Prometheus (находка аудита №6).
+
+        Без авторизации намеренно: это стандартный scrape-endpoint, и он не
+        отдаёт ни пользовательских данных, ни секретов — только счётчики
+        операций, флудов, смертей сессий и насыщения пула. Закрывать его надо
+        на уровне сети (внутренний порт/файрвол), а не токеном, иначе ни один
+        сборщик его не прочитает.
+        """
+        from services import metrics as _m
+        return web.Response(text=_m.render(),
+                            content_type="text/plain", charset="utf-8")
+
+    app.router.add_get("/metrics", prom_metrics)
+
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
     _index_path = os.path.join(_static_dir, "index.html")
     # Сжатый мини-апп в памяти: {"key": (mtime, size), "body": bytes}.
