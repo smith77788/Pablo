@@ -7079,51 +7079,64 @@ async def _exec_group_import_all(
     if not accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
 
-    total_imported = 0
-    errors: list[str] = []
-    n = len(accounts)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+    # Отказной захват: каждый аккаунт работает своей живой сессией. Без захвата
+    # он мог параллельно вести другую операцию → две сессии на одном auth-key.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    for idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "imported": total_imported,
-                "summary": f"Отменено. Импортировано: {total_imported}",
-            }
-        try:
-            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
-            groups = [
-                d for d in dialogs
-                if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
-            ]
-            if groups:
-                # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
-                # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
-                # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
-                # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
-                await add_managed_channels(pool, owner_id, acc["id"], groups)
-                total_imported += len(groups)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log.warning("_exec_group_import_all acc=%s: %s", acc.get("id"), exc)
-            acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
-            errors.append(f"• {acc_label}: {str(exc)[:60]}")
+    try:
 
+        total_imported = 0
+        errors: list[str] = []
+        n = len(accounts)
         await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-        if idx < n - 1:
-            await asyncio.sleep(2)
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
-    err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
-    return {
-        "status": "done",
-        "imported": total_imported,
-        "accounts": n,
-        "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{err_hint}",
-    }
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "imported": total_imported,
+                    "summary": f"Отменено. Импортировано: {total_imported}",
+                }
+            try:
+                dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+                groups = [
+                    d for d in dialogs
+                    if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+                ]
+                if groups:
+                    # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
+                    # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
+                    # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
+                    # ВСЕ ранее сохранённые каналы/группы аккаунта перед вставкой этого среза.
+                    await add_managed_channels(pool, owner_id, acc["id"], groups)
+                    total_imported += len(groups)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("_exec_group_import_all acc=%s: %s", acc.get("id"), exc)
+                acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
+                errors.append(f"• {acc_label}: {str(exc)[:60]}")
+
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < n - 1:
+                await asyncio.sleep(2)
+
+        err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
+        return {
+            "status": "done",
+            "imported": total_imported,
+            "accounts": n,
+            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{err_hint}",
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_group_announce(
@@ -7151,65 +7164,75 @@ async def _exec_group_announce(
         return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
 
-    # Риск-пульс: аккаунт под недавним серьёзным ограничением — рассылка объявлений
-    # с него = быстрый бан. Останавливаем ради защиты (снимется автоматически, когда
-    # ограничение устареет). fail-open: ошибка проверки не блокирует операцию.
+    # Отказной захват: объявление рассылается живой сессией этого аккаунта.
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "failed",
+                "reason": "Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
+
     try:
-        if await _infra_mem.is_account_quarantined(pool, acc["id"]):
-            return {"status": "failed", "reason": "Аккаунт под риск-пульсом (недавнее "
-                    "ограничение) — рассылка остановлена для защиты от бана. Повторите позже."}
-    except Exception:
-        log_exc_swallow(log, f"group_announce op={op_id}: quarantine check failed")
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-    groups = [
-        d for d in dialogs
-        if d.get("type") in ("megagroup", "supergroup", "group", "chat")
-    ]
-    if not groups:
-        return {"status": "done", "ok": 0, "fail": 0, "summary": "Нет групп у аккаунта"}
-
-    total = len(groups)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
-
-    ok_count = 0
-    err_count = 0
-    for idx, grp in enumerate(groups):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": ok_count,
-                "fail": err_count,
-                "summary": f"Отменено. Отправлено: {ok_count}/{total}",
-            }
-        access_hash = grp.get("access_hash", 0) or 0
-        _ann = _expand_spintax(text)  # свой вариант объявления в эту группу
+        # Риск-пульс: аккаунт под недавним серьёзным ограничением — рассылка объявлений
+        # с него = быстрый бан. Останавливаем ради защиты (снимется автоматически, когда
+        # ограничение устареет). fail-open: ошибка проверки не блокирует операцию.
         try:
-            result = await account_manager.post_to_channel(
-                acc["session_str"], grp["id"], _ann, access_hash=access_hash, _acc=acc
-            )
-            if "error" in result or result.get("banned"):
-                err_count += 1
-            else:
-                ok_count += 1
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log_exc_swallow(log, "group_announce: post_to_channel grp=%s: %s", grp.get("id"), exc)
-            err_count += 1
+            if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+                return {"status": "failed", "reason": "Аккаунт под риск-пульсом (недавнее "
+                        "ограничение) — рассылка остановлена для защиты от бана. Повторите позже."}
+        except Exception:
+            log_exc_swallow(log, f"group_announce op={op_id}: quarantine check failed")
 
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+        groups = [
+            d for d in dialogs
+            if d.get("type") in ("megagroup", "supergroup", "group", "chat")
+        ]
+        if not groups:
+            return {"status": "done", "ok": 0, "fail": 0, "summary": "Нет групп у аккаунта"}
+
+        total = len(groups)
         await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-        if idx < total - 1:
-            await asyncio.sleep(3)
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
 
-    return {
-        "status": "done",
-        "ok": ok_count,
-        "fail": err_count,
-        "summary": f"📢 Объявление: ✅ {ok_count} ❌ {err_count} из {total} групп",
-    }
+        ok_count = 0
+        err_count = 0
+        for idx, grp in enumerate(groups):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "fail": err_count,
+                    "summary": f"Отменено. Отправлено: {ok_count}/{total}",
+                }
+            access_hash = grp.get("access_hash", 0) or 0
+            _ann = _expand_spintax(text)  # свой вариант объявления в эту группу
+            try:
+                result = await account_manager.post_to_channel(
+                    acc["session_str"], grp["id"], _ann, access_hash=access_hash, _acc=acc
+                )
+                if "error" in result or result.get("banned"):
+                    err_count += 1
+                else:
+                    ok_count += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, "group_announce: post_to_channel grp=%s: %s", grp.get("id"), exc)
+                err_count += 1
+
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < total - 1:
+                await asyncio.sleep(3)
+
+        return {
+            "status": "done",
+            "ok": ok_count,
+            "fail": err_count,
+            "summary": f"📢 Объявление: ✅ {ok_count} ❌ {err_count} из {total} групп",
+        }
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_bulk_dm_adhoc(
@@ -7274,99 +7297,112 @@ async def _exec_bulk_dm_adhoc(
     except Exception:
         log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: quarantine check failed")
 
-    total = len(usernames)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+    # Отказной захват — ПОСЛЕ фильтра карантина: нет смысла занимать аккаунты,
+    # которые тут же отбросим. Каждый работает своей живой сессией.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(active_accounts) - len(claimed_ids)
+    active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
 
-    ok_count = 0
-    err_count = 0
-    flood_wait_total = 0.0
+    try:
 
-    for i, username in enumerate(usernames):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": ok_count,
-                "fail": err_count,
-                "summary": f"Отменено. Отправлено: {ok_count}/{total}",
-            }
+        total = len(usernames)
+        await _safe_execute(
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
 
-        if not active_accounts:
-            err_count += 1
+        ok_count = 0
+        err_count = 0
+        flood_wait_total = 0.0
+
+        for i, username in enumerate(usernames):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "fail": err_count,
+                    "summary": f"Отменено. Отправлено: {ok_count}/{total}",
+                }
+
+            if not active_accounts:
+                err_count += 1
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
+
+            acc = active_accounts[i % len(active_accounts)]
+            _msg = _expand_spintax(text)  # свой вариант текста этому получателю
+
+            try:
+                if media_bytes is not None:
+                    # Медиа с подписью — уникализируем под каждого (анти-детект).
+                    _sent = await account_manager.send_media_via_account(
+                        acc["session_str"], username, caption=_msg, _acc=acc,
+                        media_bytes=media_bytes, media_filename=media_filename,
+                        uniquify=True)
+                    result = {"ok": True} if _sent else {"error": "media send failed"}
+                else:
+                    result = await account_manager.send_dm(
+                        acc["session_str"], username, _msg, _acc=acc
+                    )
+
+                if result.get("banned"):
+                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk_dm_adhoc")
+                    await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc")
+                    active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                    err_count += 1
+                    log.info("bulk_dm_adhoc: account %s banned, removed from pool", acc["id"])
+                elif result.get("flood_wait"):
+                    fw = result.get("flood_wait", 0)
+                    flood_wait_total += fw
+                    err_count += 1
+                    log.info("bulk_dm_adhoc: flood_wait %ss for @%s", fw, username)
+                elif result.get("ok"):
+                    ok_count += 1
+                else:
+                    err_count += 1
+                    log.warning(
+                        "bulk_dm_adhoc: failed @%s: %s", username, result.get("error", "unknown")
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, "bulk_dm_adhoc: send_dm @%s: %s", username, exc)
+                err_count += 1
+
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
-            continue
 
-        acc = active_accounts[i % len(active_accounts)]
-        _msg = _expand_spintax(text)  # свой вариант текста этому получателю
+            # adaptive delay: базовый темп под губернатором + накопленный flood-wait
+            # (flood мандатный — не масштабируем).
+            wait = await _governed_delay(pool, owner_id, delay) + min(flood_wait_total, 30.0)
+            flood_wait_total = max(0.0, flood_wait_total - delay)
+            if i < total - 1:
+                await asyncio.sleep(wait)
 
-        try:
-            if media_bytes is not None:
-                # Медиа с подписью — уникализируем под каждого (анти-детект).
-                _sent = await account_manager.send_media_via_account(
-                    acc["session_str"], username, caption=_msg, _acc=acc,
-                    media_bytes=media_bytes, media_filename=media_filename,
-                    uniquify=True)
-                result = {"ok": True} if _sent else {"error": "media send failed"}
-            else:
-                result = await account_manager.send_dm(
-                    acc["session_str"], username, _msg, _acc=acc
-                )
+        # Медиа-файл больше не нужен — удаляем (диск контейнера эфемерный, но не
+        # копим мусор при многих отправках).
+        if media_path:
+            try:
+                import os as _os
+                _os.unlink(media_path)
+            except Exception:
+                pass
 
-            if result.get("banned"):
-                await _db.deactivate_account(pool, acc["id"], "banned detected in bulk_dm_adhoc")
-                await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc")
-                active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
-                err_count += 1
-                log.info("bulk_dm_adhoc: account %s banned, removed from pool", acc["id"])
-            elif result.get("flood_wait"):
-                fw = result.get("flood_wait", 0)
-                flood_wait_total += fw
-                err_count += 1
-                log.info("bulk_dm_adhoc: flood_wait %ss for @%s", fw, username)
-            elif result.get("ok"):
-                ok_count += 1
-            else:
-                err_count += 1
-                log.warning(
-                    "bulk_dm_adhoc: failed @%s: %s", username, result.get("error", "unknown")
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log_exc_swallow(log, "bulk_dm_adhoc: send_dm @%s: %s", username, exc)
-            err_count += 1
-
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-        )
-
-        # adaptive delay: базовый темп под губернатором + накопленный flood-wait
-        # (flood мандатный — не масштабируем).
-        wait = await _governed_delay(pool, owner_id, delay) + min(flood_wait_total, 30.0)
-        flood_wait_total = max(0.0, flood_wait_total - delay)
-        if i < total - 1:
-            await asyncio.sleep(wait)
-
-    # Медиа-файл больше не нужен — удаляем (диск контейнера эфемерный, но не
-    # копим мусор при многих отправках).
-    if media_path:
-        try:
-            import os as _os
-            _os.unlink(media_path)
-        except Exception:
-            pass
-
-    _quar_note = f" · 🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс)" if _skipped_quar else ""
-    return {
-        "status": "done",
-        "ok": ok_count,
-        "fail": err_count,
-        "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей{_quar_note}",
-    }
+        _quar_note = f" · 🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс)" if _skipped_quar else ""
+        return {
+            "status": "done",
+            "ok": ok_count,
+            "fail": err_count,
+            "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей{_quar_note}",
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_pin_last_post(
@@ -7490,127 +7526,140 @@ async def _exec_bulk_post_to_channel(
     except Exception:
         log_exc_swallow(log, f"bulk_post_to_channel op={op_id}: quarantine check failed")
 
-    ok_list: list[str] = []
-    err_list: list[str] = []
-    attempt = 0
+    # Отказной захват — ПОСЛЕ фильтра карантина: нет смысла занимать аккаунты,
+    # которые тут же отбросим. Каждый работает своей живой сессией.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    for idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": len(ok_list),
-                "failed": len(err_list),
-                "summary": f"Отменено. Опубликовано: {len(ok_list)}, ошибок: {len(err_list)}",
-            }
+    try:
 
-        label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
-        _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
-        try:
-            result = await account_manager.post_to_channel(
-                acc["session_str"],
-                channel_ref,
-                _body,
-                access_hash=bulk_access_hash,
-                _acc=acc,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as _post_exc:
-            log.warning("_exec_bulk_post_to_channel acc=%s: %s", acc.get("id"), _post_exc)
-            err_list.append(f"❌ {label}: {_html.escape(str(_post_exc)[:60])}")
+        ok_list: list[str] = []
+        err_list: list[str] = []
+        attempt = 0
+
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": len(ok_list),
+                    "failed": len(err_list),
+                    "summary": f"Отменено. Опубликовано: {len(ok_list)}, ошибок: {len(err_list)}",
+                }
+
+            label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+            _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
+            try:
+                result = await account_manager.post_to_channel(
+                    acc["session_str"],
+                    channel_ref,
+                    _body,
+                    access_hash=bulk_access_hash,
+                    _acc=acc,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as _post_exc:
+                log.warning("_exec_bulk_post_to_channel acc=%s: %s", acc.get("id"), _post_exc)
+                err_list.append(f"❌ {label}: {_html.escape(str(_post_exc)[:60])}")
+                await _safe_execute(
+                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
+            if result.get("banned"):
+                await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                await _on_account_banned(pool, owner_id, acc["id"], "bulk_op")
+                err_list.append(f"❌ {label}: забанен")
+            elif result.get("flood_wait"):
+                err_list.append(f"⏳ {label}: flood_wait, пропущен")
+            elif "msg_id" in result:
+                ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
+                # Сигнал активности канала (last_post_at) — когда известен numeric id.
+                if chat_id:
+                    try:
+                        await pool.execute(
+                            "UPDATE managed_channels SET last_post_at=now() "
+                            "WHERE owner_id=$1 AND channel_id=$2",
+                            owner_id, int(chat_id),
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "bulk_post: last_post_at update")
+            else:
+                err_str = result.get("error", "ошибка")
+                if _is_dead_session_error(err_str):
+                    try:
+                        await pool.execute(
+                            "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',"
+                            " status_reason=$2 WHERE id=$1 AND is_active=TRUE",
+                            acc["id"], f"Dead session (bulk_post): {err_str[:160]}",
+                        )
+                    except Exception as e:
+                        log_exc_swallow(log, f"bulk_post: dead session deactivate failed for acc {acc['id']}: {e}")
+                err_list.append(f"❌ {label}: {_html.escape(err_str[:60])}")
+
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            continue
-        if result.get("banned"):
-            await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
-            await _on_account_banned(pool, owner_id, acc["id"], "bulk_op")
-            err_list.append(f"❌ {label}: забанен")
-        elif result.get("flood_wait"):
-            err_list.append(f"⏳ {label}: flood_wait, пропущен")
-        elif "msg_id" in result:
-            ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
-            # Сигнал активности канала (last_post_at) — когда известен numeric id.
-            if chat_id:
+
+            if chat_id and message_id:
                 try:
-                    await pool.execute(
-                        "UPDATE managed_channels SET last_post_at=now() "
-                        "WHERE owner_id=$1 AND channel_id=$2",
-                        owner_id, int(chat_id),
-                    )
-                except Exception:
-                    log_exc_swallow(log, "bulk_post: last_post_at update")
-        else:
-            err_str = result.get("error", "ошибка")
-            if _is_dead_session_error(err_str):
-                try:
-                    await pool.execute(
-                        "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',"
-                        " status_reason=$2 WHERE id=$1 AND is_active=TRUE",
-                        acc["id"], f"Dead session (bulk_post): {err_str[:160]}",
+                    await bot.edit_message_text(
+                        _progress_text(
+                            "Публикую посты...",
+                            idx + 1, total, len(ok_list), len(err_list),
+                        ),
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        parse_mode="HTML",
                     )
                 except Exception as e:
-                    log_exc_swallow(log, f"bulk_post: dead session deactivate failed for acc {acc['id']}: {e}")
-            err_list.append(f"❌ {label}: {_html.escape(err_str[:60])}")
+                    log_exc_swallow(log, f"bulk_post progress message edit failed: {e}")
 
-        await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = result.get("flood_wait", 0) or 0
+            await asyncio.sleep(max(backoff(attempt), flood))
+
+        lines = (
+            [f"\U0001f4e4 <b>Публикация в {_html.escape(channel_ref)}</b>\n"]
+            + ok_list
+            + err_list
+        )
+        if _skipped_quar:
+            lines.append(f"🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс, защита от бана)")
+        final_text = "\n".join(lines)
 
         if chat_id and message_id:
             try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from bot.callbacks import BmCb
+
+                kb = InlineKeyboardBuilder()
+                kb.button(
+                    text="\U0001f4cb Детали операции",
+                    callback_data=BmCb(action="op_detail", op_id=op_id),
+                )
                 await bot.edit_message_text(
-                    _progress_text(
-                        "Публикую посты...",
-                        idx + 1, total, len(ok_list), len(err_list),
-                    ),
+                    final_text,
                     chat_id=chat_id,
                     message_id=message_id,
                     parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
                 )
             except Exception as e:
-                log_exc_swallow(log, f"bulk_post progress message edit failed: {e}")
+                log_exc_swallow(log, f"bulk_post final message edit failed: {e}")
 
-        if attempt >= 4:
-            attempt = 0
-        else:
-            attempt += 1
-        flood = result.get("flood_wait", 0) or 0
-        await asyncio.sleep(max(backoff(attempt), flood))
-
-    lines = (
-        [f"\U0001f4e4 <b>Публикация в {_html.escape(channel_ref)}</b>\n"]
-        + ok_list
-        + err_list
-    )
-    if _skipped_quar:
-        lines.append(f"🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс, защита от бана)")
-    final_text = "\n".join(lines)
-
-    if chat_id and message_id:
-        try:
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb
-
-            kb = InlineKeyboardBuilder()
-            kb.button(
-                text="\U0001f4cb Детали операции",
-                callback_data=BmCb(action="op_detail", op_id=op_id),
-            )
-            await bot.edit_message_text(
-                final_text,
-                chat_id=chat_id,
-                message_id=message_id,
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
-            )
-        except Exception as e:
-            log_exc_swallow(log, f"bulk_post final message edit failed: {e}")
-
-    return {
-        "status": "done",
-        "ok": len(ok_list),
-        "failed": len(err_list),
-        "summary": final_text[:500],
-    }
+        return {
+            "status": "done",
+            "ok": len(ok_list),
+            "failed": len(err_list),
+            "summary": final_text[:500],
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_bulk_update_profile(
@@ -7644,110 +7693,122 @@ async def _exec_bulk_update_profile(
     if not accounts:
         return {"status": "failed", "reason": "Аккаунты не найдены или неактивны"}
 
-    total = len(accounts)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+    # Отказной захват: каждый аккаунт работает своей живой сессией.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    ok_list: list[str] = []
-    err_list: list[str] = []
-    attempt = 0
+    try:
 
-    for i, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": len(ok_list),
-                "failed": len(err_list),
-                "summary": f"Отменено. Обновлено: {len(ok_list)}, ошибок: {len(err_list)}",
-            }
-
-        label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
-        actual_value = f"{value}{i + 1}" if field == "username" else value
-
-        try:
-            if field == "username":
-                result = await account_manager.update_account_username(
-                    acc["session_str"], actual_value, _acc=acc
-                )
-                if isinstance(result, dict) and result.get("banned"):
-                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
-                    err_list.append(f"❌ {label}: забанен")
-                elif isinstance(result, dict) and result.get("flood_wait"):
-                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                elif result and not isinstance(result, dict):
-                    err_list.append(f"❌ {label}: {_html.escape(str(result)[:50])}")
-                else:
-                    ok_list.append(f"✅ {label}: @{_html.escape(actual_value)}")
-            else:
-                result = await account_manager.update_profile(
-                    acc["session_str"], **{field: value}, _acc=acc
-                )
-                if isinstance(result, dict) and result.get("banned"):
-                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
-                    err_list.append(f"❌ {label}: забанен")
-                elif isinstance(result, dict) and result.get("flood_wait"):
-                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                elif result:
-                    ok_list.append(f"✅ {label}")
-                else:
-                    err_list.append(f"❌ {label}: ошибка")
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            err_list.append(f"❌ {label}: {str(e)[:50]}")
-
+        total = len(accounts)
         await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+        ok_list: list[str] = []
+        err_list: list[str] = []
+        attempt = 0
+
+        for i, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": len(ok_list),
+                    "failed": len(err_list),
+                    "summary": f"Отменено. Обновлено: {len(ok_list)}, ошибок: {len(err_list)}",
+                }
+
+            label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+            actual_value = f"{value}{i + 1}" if field == "username" else value
+
+            try:
+                if field == "username":
+                    result = await account_manager.update_account_username(
+                        acc["session_str"], actual_value, _acc=acc
+                    )
+                    if isinstance(result, dict) and result.get("banned"):
+                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        err_list.append(f"❌ {label}: забанен")
+                    elif isinstance(result, dict) and result.get("flood_wait"):
+                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                    elif result and not isinstance(result, dict):
+                        err_list.append(f"❌ {label}: {_html.escape(str(result)[:50])}")
+                    else:
+                        ok_list.append(f"✅ {label}: @{_html.escape(actual_value)}")
+                else:
+                    result = await account_manager.update_profile(
+                        acc["session_str"], **{field: value}, _acc=acc
+                    )
+                    if isinstance(result, dict) and result.get("banned"):
+                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        err_list.append(f"❌ {label}: забанен")
+                    elif isinstance(result, dict) and result.get("flood_wait"):
+                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                    elif result:
+                        ok_list.append(f"✅ {label}")
+                    else:
+                        err_list.append(f"❌ {label}: ошибка")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                err_list.append(f"❌ {label}: {str(e)[:50]}")
+
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+            if chat_id and message_id:
+                try:
+                    await bot.edit_message_text(
+                        _progress_text(
+                            "Обновляю профили...",
+                            i + 1, total, len(ok_list), len(err_list),
+                        ),
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    log_exc_swallow(log, f"bulk_update_profile progress message edit failed: {e}")
+
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            await asyncio.sleep(backoff(attempt, base=2.0, cap=30.0))
+
+        lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
+        final_text = "\n".join(lines)
 
         if chat_id and message_id:
             try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from bot.callbacks import BmCb
+
+                kb = InlineKeyboardBuilder()
+                kb.button(
+                    text="\U0001f4cb Детали операции",
+                    callback_data=BmCb(action="op_detail", op_id=op_id),
+                )
                 await bot.edit_message_text(
-                    _progress_text(
-                        "Обновляю профили...",
-                        i + 1, total, len(ok_list), len(err_list),
-                    ),
+                    final_text,
                     chat_id=chat_id,
                     message_id=message_id,
                     parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
                 )
             except Exception as e:
-                log_exc_swallow(log, f"bulk_update_profile progress message edit failed: {e}")
+                log_exc_swallow(log, f"bulk_update_profile final message edit failed: {e}")
 
-        if attempt >= 4:
-            attempt = 0
-        else:
-            attempt += 1
-        await asyncio.sleep(backoff(attempt, base=2.0, cap=30.0))
-
-    lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
-    final_text = "\n".join(lines)
-
-    if chat_id and message_id:
-        try:
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb
-
-            kb = InlineKeyboardBuilder()
-            kb.button(
-                text="\U0001f4cb Детали операции",
-                callback_data=BmCb(action="op_detail", op_id=op_id),
-            )
-            await bot.edit_message_text(
-                final_text,
-                chat_id=chat_id,
-                message_id=message_id,
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
-            )
-        except Exception as e:
-            log_exc_swallow(log, f"bulk_update_profile final message edit failed: {e}")
-
-    return {
-        "status": "done",
-        "ok": len(ok_list),
-        "failed": len(err_list),
-        "summary": final_text[:500],
-    }
+        return {
+            "status": "done",
+            "ok": len(ok_list),
+            "failed": len(err_list),
+            "summary": final_text[:500],
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_bulk_chan_exec(
@@ -7957,96 +8018,106 @@ async def _exec_bulk_post_chans(
         return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
 
-    # Риск-пульс: аккаунт под недавним серьёзным ограничением — публикация с него
-    # = быстрый бан. Останавливаем ради защиты (снимется автоматически). fail-open.
+    # Отказной захват: постинг идёт живой сессией этого аккаунта.
+    if not await try_claim_account(int(acc["id"])):
+        return {"status": "failed",
+                "reason": "Аккаунт занят другой операцией — попробуйте позже"}
+    _claimed_acc = int(acc["id"])
+
     try:
-        if await _infra_mem.is_account_quarantined(pool, acc_id):
-            return {"status": "failed", "reason": "Аккаунт под риск-пульсом (недавнее "
-                    "ограничение) — публикация остановлена для защиты от бана. Повторите позже."}
-    except Exception:
-        log_exc_swallow(log, f"bulk_post_chans op={op_id}: quarantine check failed")
 
-    # Fetch channels with access_hash and username from DB
-    ch_rows = await _safe_fetch(
-            pool,
-        "SELECT id, channel_id, access_hash, username FROM managed_channels "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        owner_id, channel_ids,
-    )
-    channels = [dict(r) for r in ch_rows]
-    if not channels:
-        return {"status": "failed", "reason": "Каналы не найдены в БД"}
-
-    total = len(channels)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
-
-    ok_count = 0
-    err_count = 0
-    attempt = 0
-    last_result: dict = {}
-
-    for idx, ch in enumerate(channels):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "ok": ok_count,
-                "fail": err_count,
-                "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
-            }
-
-        ch_id = ch["channel_id"]
-        access_hash = ch.get("access_hash", 0) or 0
-        ch_username = ch.get("username") or ""
-        _body = _expand_spintax(text)  # свой вариант текста в этот канал
+        # Риск-пульс: аккаунт под недавним серьёзным ограничением — публикация с него
+        # = быстрый бан. Останавливаем ради защиты (снимется автоматически). fail-open.
         try:
-            last_result = await account_manager.post_to_channel(
-                acc["session_str"], ch_id, _body,
-                access_hash=access_hash, username=ch_username, _acc=acc
-            )
-            if last_result.get("banned"):
-                await _db.deactivate_account(pool, acc_id, "banned detected in bulk_post_chans")
-                err_count += 1
-            elif "error" in last_result:
-                err_count += 1
-            else:
-                ok_count += 1
-                # Persist resolved access_hash for future fast-path
-                _rhash = last_result.get("resolved_access_hash", 0)
-                if _rhash and not access_hash:
-                    try:
-                        await pool.execute(
-                            "UPDATE managed_channels SET access_hash=$1 "
-                            "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
-                            _rhash, owner_id, int(ch_id),
-                        )
-                    except Exception as e:
-                        log_exc_swallow(log, f"bulk_post_chans: persist access_hash failed for ch={ch_id}: {e}")
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log_exc_swallow(log, "_exec_bulk_post_chans ch=%s: %s", ch_id, exc)
-            err_count += 1
-            last_result = {}
+            if await _infra_mem.is_account_quarantined(pool, acc_id):
+                return {"status": "failed", "reason": "Аккаунт под риск-пульсом (недавнее "
+                        "ограничение) — публикация остановлена для защиты от бана. Повторите позже."}
+        except Exception:
+            log_exc_swallow(log, f"bulk_post_chans op={op_id}: quarantine check failed")
 
-        await _safe_execute(
+        # Fetch channels with access_hash and username from DB
+        ch_rows = await _safe_fetch(
                 pool,
-            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            "SELECT id, channel_id, access_hash, username FROM managed_channels "
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            owner_id, channel_ids,
         )
+        channels = [dict(r) for r in ch_rows]
+        if not channels:
+            return {"status": "failed", "reason": "Каналы не найдены в БД"}
 
-        if attempt >= 4:
-            attempt = 0
-        else:
-            attempt += 1
-        flood = last_result.get("flood_wait", 0) or 0
-        await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
+        total = len(channels)
+        await _safe_execute(
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
 
-    return {
-        "status": "done",
-        "ok": ok_count,
-        "fail": err_count,
-        "summary": f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}",
-    }
+        ok_count = 0
+        err_count = 0
+        attempt = 0
+        last_result: dict = {}
+
+        for idx, ch in enumerate(channels):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "fail": err_count,
+                    "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+                }
+
+            ch_id = ch["channel_id"]
+            access_hash = ch.get("access_hash", 0) or 0
+            ch_username = ch.get("username") or ""
+            _body = _expand_spintax(text)  # свой вариант текста в этот канал
+            try:
+                last_result = await account_manager.post_to_channel(
+                    acc["session_str"], ch_id, _body,
+                    access_hash=access_hash, username=ch_username, _acc=acc
+                )
+                if last_result.get("banned"):
+                    await _db.deactivate_account(pool, acc_id, "banned detected in bulk_post_chans")
+                    err_count += 1
+                elif "error" in last_result:
+                    err_count += 1
+                else:
+                    ok_count += 1
+                    # Persist resolved access_hash for future fast-path
+                    _rhash = last_result.get("resolved_access_hash", 0)
+                    if _rhash and not access_hash:
+                        try:
+                            await pool.execute(
+                                "UPDATE managed_channels SET access_hash=$1 "
+                                "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
+                                _rhash, owner_id, int(ch_id),
+                            )
+                        except Exception as e:
+                            log_exc_swallow(log, f"bulk_post_chans: persist access_hash failed for ch={ch_id}: {e}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, "_exec_bulk_post_chans ch=%s: %s", ch_id, exc)
+                err_count += 1
+                last_result = {}
+
+            await _safe_execute(
+                    pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = last_result.get("flood_wait", 0) or 0
+            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
+
+        return {
+            "status": "done",
+            "ok": ok_count,
+            "fail": err_count,
+            "summary": f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}",
+        }
+    finally:
+        await release_accounts([_claimed_acc])
 
 
 async def _exec_channel_import_all(
@@ -8083,49 +8154,62 @@ async def _exec_channel_import_all(
     if not accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов с сессией"}
 
-    n = len(accounts)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+    # Отказной захват: каждый аккаунт работает своей живой сессией. Без захвата
+    # он мог параллельно вести другую операцию → две сессии на одном auth-key.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    total_imported = 0
-    errors: list[str] = []
+    try:
 
-    for idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "imported": total_imported,
-                "summary": f"Отменено. Импортировано: {total_imported} каналов из {idx}/{n} аккаунтов",
-            }
-        try:
-            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
-            channels = [d for d in dialogs if d.get("type") in _CHANNEL_TYPES]
-            if channels:
-                # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
-                # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
-                # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
-                # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
-                await add_managed_channels(pool, owner_id, acc["id"], channels)
-                total_imported += len(channels)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log.warning("_exec_channel_import_all acc=%s: %s", acc.get("id"), exc)
-            acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
-            errors.append(f"• {acc_label}: {str(exc)[:60]}")
-
+        n = len(accounts)
         await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-        if idx < n - 1:
-            await session_simulator.short_pause(1.5, 3.0)
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
-    err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
-    return {
-        "status": "done",
-        "imported": total_imported,
-        "accounts": n,
-        "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{err_hint}",
-    }
+        total_imported = 0
+        errors: list[str] = []
+
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "imported": total_imported,
+                    "summary": f"Отменено. Импортировано: {total_imported} каналов из {idx}/{n} аккаунтов",
+                }
+            try:
+                dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+                channels = [d for d in dialogs if d.get("type") in _CHANNEL_TYPES]
+                if channels:
+                    # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
+                    # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
+                    # срез при >200 диалогов у аккаунта. upsert_managed_channels() удалила бы
+                    # ВСЕ ранее сохранённые каналы аккаунта перед вставкой этого среза.
+                    await add_managed_channels(pool, owner_id, acc["id"], channels)
+                    total_imported += len(channels)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("_exec_channel_import_all acc=%s: %s", acc.get("id"), exc)
+                acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
+                errors.append(f"• {acc_label}: {str(exc)[:60]}")
+
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < n - 1:
+                await session_simulator.short_pause(1.5, 3.0)
+
+        err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
+        return {
+            "status": "done",
+            "imported": total_imported,
+            "accounts": n,
+            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{err_hint}",
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_channel_add(
@@ -8432,70 +8516,100 @@ async def _exec_scan_owned_resources(
     if not accounts:
         return {"status": "failed", "reason": "Нет аккаунтов для сканирования"}
 
-    n = len(accounts)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+    # Отказной захват: каждый аккаунт работает своей живой сессией.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    chan_limit = await get_channel_limit(pool, owner_id)
-    current_count = await _safe_fetchval(
-            pool,
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-    ) or 0
-    slots_remaining = chan_limit - int(current_count)
+    try:
 
-    total_imported = 0
-    dead_acc_ids: list[int] = []
-    acc_lines: list[str] = []
+        n = len(accounts)
+        await _safe_execute(
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
-    for idx, acc in enumerate(accounts):
-        if await _is_cancelled(pool, op_id):
-            return {
-                "status": "cancelled",
-                "scanned": idx,
-                "imported": total_imported,
-                "summary": f"Отменено. Просканировано: {idx}/{n}, импортировано: {total_imported}",
-            }
+        chan_limit = await get_channel_limit(pool, owner_id)
+        current_count = await _safe_fetchval(
+                pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+        ) or 0
+        slots_remaining = chan_limit - int(current_count)
 
-        acc_id = acc["id"]
-        label = (
-            acc.get("first_name") or acc.get("username") or acc.get("phone") or f"ID {acc_id}"
-        )
-        _lines_before = len(acc_lines)
+        total_imported = 0
+        dead_acc_ids: list[int] = []
+        acc_lines: list[str] = []
 
-        try:
-            session_str = acc.get("session_str") or ""
-            result = await account_manager.scan_owned_assets(
-                session_str, _acc=acc
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "scanned": idx,
+                    "imported": total_imported,
+                    "summary": f"Отменено. Просканировано: {idx}/{n}, импортировано: {total_imported}",
+                }
+
+            acc_id = acc["id"]
+            label = (
+                acc.get("first_name") or acc.get("username") or acc.get("phone") or f"ID {acc_id}"
             )
-            err = result.get("error")
-            owned = result.get("channels", []) + result.get("groups", [])
+            _lines_before = len(acc_lines)
 
-            if owned:
-                if slots_remaining <= 0:
-                    acc_lines.append(f"⛔️ {label}: лимит каналов исчерпан")
-                else:
-                    to_import = owned[:slots_remaining]
-                    # add_managed_channels — НЕ upsert_managed_channels(): to_import — срез
-                    # owned, обрезанный по остатку квоты подписки (slots_remaining), а не
-                    # полный список ресурсов аккаунта. upsert_managed_channels() удалила бы
-                    # ВСЕ ранее сохранённые каналы аккаунта, если квота урезала to_import
-                    # относительно того, что уже было импортировано раньше (например, при
-                    # повторном скане после понижения тарифа или когда квоту уже выбрали
-                    # другие аккаунты раньше в этом же цикле).
-                    imported = await _db.add_managed_channels(pool, owner_id, acc_id, to_import)
-                    total_imported += imported
-                    slots_remaining -= imported
-                    skipped = len(owned) - len(to_import)
-                    extra = f", пропущено {skipped} (лимит)" if skipped else ""
-                    acc_lines.append(f"✅ {label}: {len(to_import)} ресурсов ({imported} новых{extra})")
-            elif err:
-                err_low = err.lower()
-                is_dead = any(
-                    x in err_low
-                    for x in ("auth", "session", "unauthorized", "key is not registered",
-                              "registered in the system", "authkey", "auth_key")
+            try:
+                session_str = acc.get("session_str") or ""
+                result = await account_manager.scan_owned_assets(
+                    session_str, _acc=acc
                 )
-                if is_dead:
+                err = result.get("error")
+                owned = result.get("channels", []) + result.get("groups", [])
+
+                if owned:
+                    if slots_remaining <= 0:
+                        acc_lines.append(f"⛔️ {label}: лимит каналов исчерпан")
+                    else:
+                        to_import = owned[:slots_remaining]
+                        # add_managed_channels — НЕ upsert_managed_channels(): to_import — срез
+                        # owned, обрезанный по остатку квоты подписки (slots_remaining), а не
+                        # полный список ресурсов аккаунта. upsert_managed_channels() удалила бы
+                        # ВСЕ ранее сохранённые каналы аккаунта, если квота урезала to_import
+                        # относительно того, что уже было импортировано раньше (например, при
+                        # повторном скане после понижения тарифа или когда квоту уже выбрали
+                        # другие аккаунты раньше в этом же цикле).
+                        imported = await _db.add_managed_channels(pool, owner_id, acc_id, to_import)
+                        total_imported += imported
+                        slots_remaining -= imported
+                        skipped = len(owned) - len(to_import)
+                        extra = f", пропущено {skipped} (лимит)" if skipped else ""
+                        acc_lines.append(f"✅ {label}: {len(to_import)} ресурсов ({imported} новых{extra})")
+                elif err:
+                    err_low = err.lower()
+                    is_dead = any(
+                        x in err_low
+                        for x in ("auth", "session", "unauthorized", "key is not registered",
+                                  "registered in the system", "authkey", "auth_key")
+                    )
+                    if is_dead:
+                        dead_acc_ids.append(acc_id)
+                        try:
+                            await pool.execute(
+                                "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
+                            )
+                        except Exception as e:
+                            log.warning("scan_owned_resources: deactivate dead acc %s failed: %s", acc_id, e)
+                        acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
+                    elif "flood" in err_low:
+                        acc_lines.append(f"⏳ {label}: FloodWait")
+                    else:
+                        acc_lines.append(f"❌ {label}: {err[:80]}")
+                else:
+                    acc_lines.append(f"ℹ️ {label}: нет каналов/групп с правами admin/creator")
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                exc_s = str(exc).lower()
+                if any(x in exc_s for x in ("auth", "key is not registered", "registered in the system")):
                     dead_acc_ids.append(acc_id)
                     try:
                         await pool.execute(
@@ -8504,73 +8618,55 @@ async def _exec_scan_owned_resources(
                     except Exception as e:
                         log.warning("scan_owned_resources: deactivate dead acc %s failed: %s", acc_id, e)
                     acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
-                elif "flood" in err_low:
-                    acc_lines.append(f"⏳ {label}: FloodWait")
                 else:
-                    acc_lines.append(f"❌ {label}: {err[:80]}")
-            else:
-                acc_lines.append(f"ℹ️ {label}: нет каналов/групп с правами admin/creator")
+                    acc_lines.append(f"❌ {label}: {str(exc)[:60]}")
 
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            exc_s = str(exc).lower()
-            if any(x in exc_s for x in ("auth", "key is not registered", "registered in the system")):
-                dead_acc_ids.append(acc_id)
-                try:
-                    await pool.execute(
-                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
-                    )
-                except Exception as e:
-                    log.warning("scan_owned_resources: deactivate dead acc %s failed: %s", acc_id, e)
-                acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
-            else:
-                acc_lines.append(f"❌ {label}: {str(exc)[:60]}")
+            # Per-account запись в лог операции — раньше acc_lines с детальным
+            # результатом по каждому аккаунту НИКУДА не шли (сводка их не включает),
+            # т.е. вся детализация вычислялась и терялась. Теперь она видна в секции
+            # «📋 Лог» деталей операции. Статус бейджа выводим по эмодзи-префиксу.
+            if len(acc_lines) > _lines_before:
+                _line = acc_lines[-1]
+                if _line.startswith("✅"):
+                    _lstatus = "ok"
+                elif _line.startswith(("⛔️", "ℹ️")):
+                    _lstatus = "skip"
+                else:
+                    _lstatus = "error"
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,$4,$5)",
+                    op_id, idx + 1, str(label)[:64], _lstatus, _line[:200],
+                )
 
-        # Per-account запись в лог операции — раньше acc_lines с детальным
-        # результатом по каждому аккаунту НИКУДА не шли (сводка их не включает),
-        # т.е. вся детализация вычислялась и терялась. Теперь она видна в секции
-        # «📋 Лог» деталей операции. Статус бейджа выводим по эмодзи-префиксу.
-        if len(acc_lines) > _lines_before:
-            _line = acc_lines[-1]
-            if _line.startswith("✅"):
-                _lstatus = "ok"
-            elif _line.startswith(("⛔️", "ℹ️")):
-                _lstatus = "skip"
-            else:
-                _lstatus = "error"
             await _safe_execute(
-                pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                "VALUES($1,$2,$3,$4,$5)",
-                op_id, idx + 1, str(label)[:64], _lstatus, _line[:200],
-            )
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
-        await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        dead_count = len(dead_acc_ids)
+        dead_note = f"\n🔑 Мёртвых сессий: {dead_count}" if dead_count else ""
+        # Показываем детализацию по аккаунтам прямо в сводке (до 10 строк, остальное —
+        # в секции «📋 Лог»). Раньше acc_lines собирались, но нигде не отображались.
+        detail = ""
+        if acc_lines:
+            shown = acc_lines[:10]
+            detail = "\n\n" + "\n".join(shown)
+            if len(acc_lines) > len(shown):
+                detail += f"\n… ещё {len(acc_lines) - len(shown)} (см. лог операции)"
+        summary = (
+            f"🔎 Просканировано {n} аккаунтов\n"
+            f"📡 Импортировано новых ресурсов: {total_imported}{dead_note}{detail}"
+        )
 
-    dead_count = len(dead_acc_ids)
-    dead_note = f"\n🔑 Мёртвых сессий: {dead_count}" if dead_count else ""
-    # Показываем детализацию по аккаунтам прямо в сводке (до 10 строк, остальное —
-    # в секции «📋 Лог»). Раньше acc_lines собирались, но нигде не отображались.
-    detail = ""
-    if acc_lines:
-        shown = acc_lines[:10]
-        detail = "\n\n" + "\n".join(shown)
-        if len(acc_lines) > len(shown):
-            detail += f"\n… ещё {len(acc_lines) - len(shown)} (см. лог операции)"
-    summary = (
-        f"🔎 Просканировано {n} аккаунтов\n"
-        f"📡 Импортировано новых ресурсов: {total_imported}{dead_note}{detail}"
-    )
-
-    return {
-        "status": "done",
-        "scanned": n,
-        "imported": total_imported,
-        "dead": dead_count,
-        "summary": summary,
-    }
+        return {
+            "status": "done",
+            "scanned": n,
+            "imported": total_imported,
+            "dead": dead_count,
+            "summary": summary,
+        }
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_deploy_network(
@@ -9462,60 +9558,73 @@ async def _exec_boost_subscribers(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
-    accounts, skipped_premium = await _premium_filter_accounts(pool, op_id, accounts, premium_only)
-    if not accounts:
-        return {
-            "status": "failed",
-            "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
-        }
-    # Риск-пульс: вступление с флагнутого аккаунта = быстрый бан. Отсеиваем (fail-open).
-    accounts, skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
-    if skipped_premium or skipped_quar:
-        # total_items учитывало все выбранные аккаунты; часть отсеяна фильтрами
-        # (Premium/риск-пульс) — подгоняем, иначе прогресс-бар не дойдёт до 100%.
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
-        )
+    # Отказной захват: каждый аккаунт работает своей живой сессией. Без захвата
+    # он мог параллельно вести другую операцию → две сессии на одном auth-key.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    ok_count, fail_count = 0, 0
-    total = len(accounts)
+    try:
 
-    for idx, acc in enumerate(accounts, 1):
-        if await _is_cancelled(pool, op_id):
-            break
-        try:
-            res = await account_manager.join_channel(acc["session_str"], target, _acc=dict(acc))
-            if res.get("error"):
+        accounts, skipped_premium = await _premium_filter_accounts(pool, op_id, accounts, premium_only)
+        if not accounts:
+            return {
+                "status": "failed",
+                "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
+            }
+        # Риск-пульс: вступление с флагнутого аккаунта = быстрый бан. Отсеиваем (fail-open).
+        accounts, skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+        if skipped_premium or skipped_quar:
+            # total_items учитывало все выбранные аккаунты; часть отсеяна фильтрами
+            # (Premium/риск-пульс) — подгоняем, иначе прогресс-бар не дойдёт до 100%.
+            await _safe_execute(
+                    pool,
+                "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
+            )
+
+        ok_count, fail_count = 0, 0
+        total = len(accounts)
+
+        for idx, acc in enumerate(accounts, 1):
+            if await _is_cancelled(pool, op_id):
+                break
+            try:
+                res = await account_manager.join_channel(acc["session_str"], target, _acc=dict(acc))
+                if res.get("error"):
+                    fail_count += 1
+                    await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                        op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    )
+                else:
+                    ok_count += 1
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                        op_id, idx, f"acc#{acc['id']}",
+                    )
+            except Exception as exc:
+                log.warning("boost_subscribers op=%d acc=%s: %s", op_id, acc.get("id"), exc)
                 fail_count += 1
-                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
-                )
-            else:
-                ok_count += 1
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
-                )
-        except Exception as exc:
-            log.warning("boost_subscribers op=%d acc=%s: %s", op_id, acc.get("id"), exc)
-            fail_count += 1
 
-        await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-        if idx < total:
-            await asyncio.sleep(random.uniform(3.0, 7.0))
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < total:
+                await asyncio.sleep(random.uniform(3.0, 7.0))
 
-    summary = (
-        f"👥 Подписчики/участники: {target}\n"
-        f"✅ Вступили: {ok_count}/{total}"
-        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-        + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
-        + (f"\n🛡 Пропущено (риск-пульс): {skipped_quar}" if skipped_quar else "")
-    )
-    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+        summary = (
+            f"👥 Подписчики/участники: {target}\n"
+            f"✅ Вступили: {ok_count}/{total}"
+            + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+            + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
+            + (f"\n🛡 Пропущено (риск-пульс): {skipped_quar}" if skipped_quar else "")
+        )
+        return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+    finally:
+        await release_accounts(claimed_ids)
 
 
 async def _exec_boost_bot_starts(
@@ -9540,61 +9649,74 @@ async def _exec_boost_bot_starts(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
-    accounts, skipped_premium = await _premium_filter_accounts(pool, op_id, accounts, premium_only)
-    if not accounts:
-        return {
-            "status": "failed",
-            "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
-        }
-    # Риск-пульс: /start с флагнутого аккаунта = риск бана. Отсеиваем (fail-open).
-    accounts, skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
-    if skipped_premium or skipped_quar:
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
-        )
+    # Отказной захват: каждый аккаунт работает своей живой сессией. Без захвата
+    # он мог параллельно вести другую операцию → две сессии на одном auth-key.
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
+    _busy = len(accounts) - len(claimed_ids)
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
-    ok_count, fail_count = 0, 0
-    total = len(accounts)
+    try:
 
-    for idx, acc in enumerate(accounts, 1):
-        if await _is_cancelled(pool, op_id):
-            break
-        try:
-            res = await account_manager.send_bot_start(
-                acc["session_str"], bot_username, payload, _acc=dict(acc)
+        accounts, skipped_premium = await _premium_filter_accounts(pool, op_id, accounts, premium_only)
+        if not accounts:
+            return {
+                "status": "failed",
+                "summary": f"⚠️ Нет Premium-аккаунтов среди выбранных ({skipped_premium} пропущено)",
+            }
+        # Риск-пульс: /start с флагнутого аккаунта = риск бана. Отсеиваем (fail-open).
+        accounts, skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
+        if skipped_premium or skipped_quar:
+            await _safe_execute(
+                    pool,
+                "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
             )
-            if res.get("error"):
+
+        ok_count, fail_count = 0, 0
+        total = len(accounts)
+
+        for idx, acc in enumerate(accounts, 1):
+            if await _is_cancelled(pool, op_id):
+                break
+            try:
+                res = await account_manager.send_bot_start(
+                    acc["session_str"], bot_username, payload, _acc=dict(acc)
+                )
+                if res.get("error"):
+                    fail_count += 1
+                    await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                        op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    )
+                else:
+                    ok_count += 1
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                        op_id, idx, f"acc#{acc['id']}",
+                    )
+            except Exception as exc:
+                log.warning("boost_bot_starts op=%d acc=%s: %s", op_id, acc.get("id"), exc)
                 fail_count += 1
-                await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
-                )
-            else:
-                ok_count += 1
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
-                )
-        except Exception as exc:
-            log.warning("boost_bot_starts op=%d acc=%s: %s", op_id, acc.get("id"), exc)
-            fail_count += 1
 
-        await _safe_execute(
-                pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-        if idx < total:
-            await asyncio.sleep(random.uniform(2.5, 6.0))
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < total:
+                await asyncio.sleep(random.uniform(2.5, 6.0))
 
-    summary = (
-        f"🚀 Старты в боте: @{bot_username}"
-        + (f" (payload: {payload})" if payload else "")
-        + f"\n✅ Стартов: {ok_count}/{total}"
-        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
-        + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
-        + (f"\n🛡 Пропущено (риск-пульс): {skipped_quar}" if skipped_quar else "")
-    )
-    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+        summary = (
+            f"🚀 Старты в боте: @{bot_username}"
+            + (f" (payload: {payload})" if payload else "")
+            + f"\n✅ Стартов: {ok_count}/{total}"
+            + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+            + (f"\n💎 Пропущено не-Premium: {skipped_premium}" if skipped_premium else "")
+            + (f"\n🛡 Пропущено (риск-пульс): {skipped_quar}" if skipped_quar else "")
+        )
+        return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+    finally:
+        await release_accounts(claimed_ids)
 
 
 # ── Инвайтер ──────────────────────────────────────────────────────────────────
