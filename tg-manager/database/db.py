@@ -119,6 +119,57 @@ def _has_sql_content(stmt: str) -> bool:
     return bool(stripped.strip())
 
 
+class _MigrationFileFailed(Exception):
+    """Оператор миграции упал — сигнал откатить ВЕСЬ файл (транзакция на файл)."""
+
+
+async def apply_migration_statements(conn, statements, label: str = "?"):
+    """Применить операторы ОДНОГО файла миграции: целиком или никак.
+
+    Возвращает (ok, error_count, last_error).
+
+    Транзакция на файл: сбой на пятом операторе из десяти откатывает и первые
+    четыре — схема не остаётся полуприменённой. Savepoint на КАЖДЫЙ оператор
+    обязателен: в Postgres упавший оператор переводит транзакцию в aborted, и без
+    savepoint безобидное «already exists» убивало бы весь остаток файла, то есть
+    идемпотентный повтор миграций перестал бы работать.
+
+    Отдельная функция, а не код внутри create_pool, чтобы тест на живой БД звал
+    ИМЕННО ЭТО, а не свою копию логики.
+    """
+    err_count = 0
+    last_error = None
+    try:
+        async with conn.transaction():
+            for stmt in statements:
+                try:
+                    async with conn.transaction():          # savepoint
+                        await conn.execute(stmt)
+                except Exception as exc:
+                    err = str(exc)
+                    # Идемпотентный повтор — не ошибка: savepoint откатан, идём дальше.
+                    if any(k in err.lower() for k in ("already exists", "duplicate key")):
+                        continue
+                    log.warning("Schema %s statement failed: %s | stmt: %.200s",
+                                label, exc, stmt)
+                    err_count += 1
+                    last_error = err[:500]
+                    raise _MigrationFileFailed(err)
+    except _MigrationFileFailed:
+        return False, err_count, last_error
+    return True, 0, None
+
+
+class SchemaMigrationError(RuntimeError):
+    """Критичная миграция не применилась — стартовать на такой схеме нельзя."""
+
+
+# После миграций этих таблиц обязано существовать: без них платформа не работает
+# (очередь операций, аудит, журнал), и «тихий» старт означает молча теряемые
+# события вместо честного падения.
+_CRITICAL_TABLES = ("activity_log", "operation_audit", "operation_queue")
+
+
 async def create_pool() -> asyncpg.Pool:
     """Create asyncpg connection pool and apply all schema migrations.
 
@@ -206,27 +257,10 @@ async def create_pool() -> asyncpg.Pool:
             # only OUTSIDE dollar-quoted blocks (DO $$ ... $$ blocks contain
             # their own semicolons that must not be split).
             statements = _split_sql_statements(sql)
-            file_ok = True
-            _err_count = 0
-            _last_error = None
-            for stmt in statements:
-                try:
-                    await conn.execute(stmt)
-                except Exception as exc:
-                    err = str(exc)
-                    # Ignore "already exists" — idempotent re-runs are fine
-                    if any(k in err.lower() for k in (
-                        "already exists", "duplicate key",
-                    )):
-                        continue
-                    log.warning(
-                        "Schema %s statement failed: %s | stmt: %.200s",
-                        os.path.basename(path), exc, stmt,
-                    )
-                    file_ok = False
-                    _err_count += 1
-                    _last_error = err[:500]
             _bn = os.path.basename(path)
+            # Транзакция на файл + savepoint на оператор — см. докстринг функции.
+            file_ok, _err_count, _last_error = await apply_migration_statements(
+                conn, statements, _bn)
             if file_ok:
                 applied += 1
             else:
@@ -256,8 +290,12 @@ async def create_pool() -> asyncpg.Pool:
             log.info("Schema migration: %d files OK, %d skipped (already applied), 0 with errors",
                      applied, skipped)
 
-        # Verify critical tables exist after migration — log ERROR if missing
-        _CRITICAL_TABLES = ["activity_log", "operation_audit", "operation_queue"]
+        # Критичные таблицы: раньше их отсутствие только ЛОГИРОВАЛОСЬ, и процесс
+        # спокойно стартовал на нерабочей схеме — операции и аудит молча
+        # проваливались, а причина тонула в логе. Теперь падаем на старте:
+        # супервизор перезапустит и ошибка будет видна сразу, а не через сутки
+        # по жалобе «операции ничего не делают».
+        _missing = []
         for tbl in _CRITICAL_TABLES:
             exists = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
@@ -265,11 +303,21 @@ async def create_pool() -> asyncpg.Pool:
                 tbl,
             )
             if not exists:
-                log.error(
-                    "CRITICAL: table '%s' missing after schema migration — "
-                    "events will be silently lost. Apply the relevant schema_vN.sql manually.",
-                    tbl,
-                )
+                _missing.append(tbl)
+        if _missing:
+            log.error(
+                "CRITICAL: после миграций нет таблиц %s — старт прерван. "
+                "Примените соответствующие schema_vN.sql вручную.", _missing)
+            raise SchemaMigrationError(
+                f"критичные таблицы отсутствуют после миграций: {', '.join(_missing)}")
+
+        # Опциональный строгий режим: любой файл с ошибкой роняет старт.
+        # По умолчанию ВЫКЛЮЧЕН — в базе 180 файлов, и включение по умолчанию
+        # заблокировало бы деплой из-за одного проблемного легаси-файла.
+        # Включать осознанно (SCHEMA_STRICT=1), когда список ошибок разобран.
+        if failed and os.getenv("SCHEMA_STRICT", "").strip().lower() in ("1", "true", "yes"):
+            raise SchemaMigrationError(
+                f"SCHEMA_STRICT: миграции с ошибками: {', '.join(failed_files[:30])}")
     return pool
 
 

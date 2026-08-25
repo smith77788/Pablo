@@ -18214,9 +18214,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
     _index_path = os.path.join(_static_dir, "index.html")
+    # Сжатый мини-апп в памяти: {"key": (mtime, size), "body": bytes}.
+    # Пересобирается сам, когда файл меняется (деплой) — ключ перестаёт совпадать.
+    _MINIAPP_GZ: dict = {}
     if os.path.isdir(_static_dir):
         async def serve_index(request: web.Request) -> web.Response:
-            return web.FileResponse(_index_path)
+            """Отдать мини-апп сжатым, с ETag на повторное открытие.
+
+            index.html — 1,2+ МБ, и отдавался КАЖДОМУ открытию целиком и без
+            сжатия. Пользователи открывают приложение с телефона по мобильной
+            сети — это худший случай для лишнего мегабайта. gzip сокращает
+            ~в 4,7 раза; сжимаем ОДИН раз в память (ключ — mtime+размер файла),
+            а не на каждый запрос: процесс один на всё, тратить его CPU на
+            повторное сжатие того же файла нельзя.
+            """
+            try:
+                st = os.stat(_index_path)
+            except OSError:
+                return web.FileResponse(_index_path)   # пусть aiohttp отдаст 404
+            key = (int(st.st_mtime), int(st.st_size))
+            etag = f'W/"{key[0]:x}-{key[1]:x}"'
+
+            # Повторное открытие: браузер прислал тот же ETag — тело не гоним.
+            if request.headers.get("If-None-Match") == etag:
+                return web.Response(status=304, headers={"ETag": etag})
+
+            cached = _MINIAPP_GZ.get("key") == key and _MINIAPP_GZ.get("body")
+            if not cached:
+                try:
+                    import gzip as _gzip
+                    with open(_index_path, "rb") as _f:
+                        _MINIAPP_GZ["body"] = _gzip.compress(_f.read(), 6)
+                    _MINIAPP_GZ["key"] = key
+                except OSError:
+                    return web.FileResponse(_index_path)
+
+            headers = {
+                "ETag": etag,
+                # Всегда перепроверять: мини-апп деплоится часто, а показывать
+                # устаревший интерфейс из кэша хуже, чем один запрос с 304.
+                "Cache-Control": "no-cache",
+            }
+            if "gzip" in (request.headers.get("Accept-Encoding") or ""):
+                headers["Content-Encoding"] = "gzip"
+                return web.Response(body=_MINIAPP_GZ["body"], headers=headers,
+                                    content_type="text/html", charset="utf-8")
+            return web.FileResponse(_index_path, headers=headers)
+
         app.router.add_get("/miniapp", serve_index)
         app.router.add_get("/miniapp/", serve_index)
         app.router.add_static("/miniapp", _static_dir, show_index=False)
