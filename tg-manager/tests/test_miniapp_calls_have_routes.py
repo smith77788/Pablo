@@ -18,7 +18,9 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_HTML = os.path.join(ROOT, "mini_app", "index.html")
+_MINI_APP = os.path.join(ROOT, "mini_app")
+_HTML = os.path.join(_MINI_APP, "index.html")
+_SCREENS = os.path.join(_MINI_APP, "screens")
 _API = os.path.join(ROOT, "services", "mini_app_api.py")
 
 _ROUTE = re.compile(
@@ -44,17 +46,33 @@ def _matcher(template: str) -> re.Pattern:
     return re.compile("^" + body + "$")
 
 
-def _calls() -> list[tuple[str, str, int]]:
-    html = open(_HTML, encoding="utf-8").read()
+def _sources() -> list[tuple[str, str]]:
+    """(имя файла, текст) — index.html и вынесенные экраны screens/*.js.
+
+    Экраны вынесены в отдельные файлы и подключаются <script src>; проверка,
+    которая смотрит только в index.html, их вызовы просто не увидит.
+    """
+    out = [("index.html", open(_HTML, encoding="utf-8").read())]
+    if os.path.isdir(_SCREENS):
+        for fname in sorted(os.listdir(_SCREENS)):
+            if fname.endswith(".js"):
+                out.append((f"screens/{fname}",
+                            open(os.path.join(_SCREENS, fname),
+                                 encoding="utf-8").read()))
+    return out
+
+
+def _calls() -> list[tuple[str, str, str, int]]:
     out = []
-    for m in _CALL.finditer(html):
-        raw = m.group(1)[1:-1]
-        mm = _METHOD.search(m.group(2) or "")
-        method = (mm.group(1) if mm else "GET").upper()
-        # `${...}` — подстановка значения: один сегмент пути.
-        path = re.sub(r"\$\{[^}]*\}", "X", raw).split("?")[0]
-        if path.startswith("/api/"):
-            out.append((path, method, html[:m.start()].count("\n") + 1))
+    for name, text in _sources():
+        for m in _CALL.finditer(text):
+            raw = m.group(1)[1:-1]
+            mm = _METHOD.search(m.group(2) or "")
+            method = (mm.group(1) if mm else "GET").upper()
+            # `${...}` — подстановка значения: один сегмент пути.
+            path = re.sub(r"\$\{[^}]*\}", "X", raw).split("?")[0]
+            if path.startswith("/api/"):
+                out.append((path, method, name, text[:m.start()].count("\n") + 1))
     return out
 
 
@@ -62,14 +80,14 @@ def _problems() -> list[str]:
     routes = _routes()
     pats = [(_matcher(t), t, ms) for t, ms in routes.items()]
     bad = []
-    for path, method, line in _calls():
+    for path, method, where, line in _calls():
         hit = [(t, ms) for rx, t, ms in pats if rx.match(path)]
         if not hit:
-            bad.append(f"index.html:{line}: {method} {path} — маршрута нет вовсе")
+            bad.append(f"{where}:{line}: {method} {path} — маршрута нет вовсе")
         elif not any(method in ms for _t, ms in hit):
             have = sorted(set().union(*[ms for _t, ms in hit]))
             bad.append(
-                f"index.html:{line}: {method} {path} — маршрут есть, "
+                f"{where}:{line}: {method} {path} — маршрут есть, "
                 f"но только на {', '.join(have)}")
     return sorted(set(bad))
 
@@ -88,6 +106,9 @@ def test_parser_sees_both_sides():
     routes, calls = _routes(), _calls()
     assert len(routes) > 300, f"разобрано всего {len(routes)} маршрутов"
     assert len(calls) > 200, f"разобрано всего {len(calls)} вызовов из мини-аппа"
+    assert any(w.startswith("screens/") for _p, _m, w, _l in calls), (
+        "вызовы из вынесенных экранов не попали в проверку — их маршруты "
+        "никто не проверяет")
 
 
 def test_matcher_handles_path_parameters():
