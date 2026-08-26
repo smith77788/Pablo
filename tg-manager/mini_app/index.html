@@ -7,29 +7,36 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
-  --bg:var(--tg-theme-bg-color,#0a0f16);
-  --bg2:var(--tg-theme-secondary-bg-color,#121924);
-  --text:var(--tg-theme-text-color,#f0f4f8);
-  --hint:var(--tg-theme-hint-color,#6b7d94);
+  /* Мягче для глаз: фон чуть приподнят от чёрного, текст не чисто-белый
+     (#f0f4f8 «светился» на тёмном → #dce4ee). Фирменный teal сохранён. */
+  --bg:var(--tg-theme-bg-color,#0c1016);
+  --bg2:var(--tg-theme-secondary-bg-color,#151d29);
+  --bg3:#1a2432;
+  --text:var(--tg-theme-text-color,#dce4ee);
+  --hint:var(--tg-theme-hint-color,#7a8ba1);
   --accent:#2dd4bf;
   --accent-2:#14b8a6;
   --accent-3:#0d9488;
   --btn:linear-gradient(135deg,#2dd4bf 0%,#14b8a6 50%,#0ea5a4 100%);
   --btn-solid:#14b8a6;
   --btn-text:#041a17;
-  --sep:rgba(255,255,255,.07);
+  --sep:rgba(255,255,255,.06);
   --border:rgba(255,255,255,.08);
-  --shadow:0 1px 3px rgba(0,0,0,.3),0 4px 12px rgba(0,0,0,.15);
-  --shadow-lg:0 8px 32px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.2);
-  --shadow-glow:0 0 20px rgba(45,212,191,.2),0 4px 16px rgba(45,212,191,.1);
-  --glow:0 4px 18px rgba(45,212,191,.28);
-  --bg-input:rgba(255,255,255,.04);--border-input:rgba(255,255,255,.10);--bg-select:rgba(18,25,36,.96);
+  --border-strong:rgba(255,255,255,.12);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.26);
+  --shadow-lg:0 10px 34px rgba(0,0,0,.44),0 2px 8px rgba(0,0,0,.22);
+  --shadow-glow:0 0 22px rgba(45,212,191,.18),0 6px 18px rgba(45,212,191,.1);
+  --glow:0 6px 20px rgba(45,212,191,.30);
+  --bg-input:rgba(255,255,255,.04);--border-input:rgba(255,255,255,.10);--bg-select:rgba(21,29,41,.97);
   --bg-blue-16:rgba(59,130,246,.14);--bg-green-16:rgba(34,197,94,.14);--bg-purple-16:rgba(168,85,247,.14);--bg-yellow-16:rgba(245,158,11,.14);--bg-red-16:rgba(239,68,68,.14);--bg-violet-16:rgba(139,92,246,.14);--bg-red-18:rgba(239,68,68,.16);
   --green:#34d399;--orange:#fbbf24;--purple:#c084fc;--red:#f87171;--blue:#60a5fa;--teal:#2dd4bf;--purple-light:#a78bfa;
+  /* Палитра иконок модулей: приглушённые оттенки, ничего не «кричит». */
+  --c-teal:#2dd4bf;--c-blue:#5b9dff;--c-violet:#a78bfa;--c-amber:#f4b860;
+  --c-rose:#f78ba3;--c-emerald:#4ade80;--c-cyan:#38bdf8;--c-indigo:#818cf8;--c-pink:#f472b6;
   --tab-h:58px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
   --radius:14px;--radius-lg:18px;--radius-xl:24px;
-  --spring:cubic-bezier(.34,1.56,.64,1);--ease:cubic-bezier(.4,0,.2,1);
-  --glass:rgba(18,25,36,.75);--glass-border:rgba(255,255,255,.08);
+  --spring:cubic-bezier(.34,1.5,.6,1);--ease:cubic-bezier(.4,0,.2,1);
+  --glass:rgba(21,29,41,.78);--glass-border:rgba(255,255,255,.08);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI','Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
@@ -37,7 +44,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #content{flex:1;overflow:hidden;position:relative}
 
 /* ─── Screens ───────────────────────────────────────────────── */
-.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:none;background:var(--bg)}
+.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:none;background:radial-gradient(130% 52% at 100% -8%,rgba(45,212,191,.06),transparent 60%),radial-gradient(95% 42% at -12% 2%,rgba(91,157,255,.045),transparent 55%),var(--bg)}
 .screen.show{display:block;animation:fadeIn .2s var(--ease)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px)}
@@ -325,13 +332,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .trust-fill{height:100%;border-radius:3px;transition:width .5s}
 
 /* ─── Management tile grid ───────────────────────────────── */
-.mgmt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 16px 4px}
-.mgmt-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;transition:transform .2s var(--spring),box-shadow .2s var(--ease),border-color .2s;text-align:center;min-height:72px;justify-content:center;box-shadow:var(--shadow)}
-.mgmt-tile:active{transform:translateY(1px) scale(.94);box-shadow:var(--shadow-lg);border-color:rgba(45,212,191,.15)}
-.mgmt-tile-ico{font-size:22px;line-height:1;width:42px;height:42px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(145deg,rgba(45,212,191,.14),rgba(20,184,166,.06));color:var(--text);box-shadow:inset 0 0 0 1px rgba(45,212,191,.08)}
-.mgmt-tile-ico svg{width:22px;height:22px;display:block}
-.mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.88;line-height:1.2}
-.mgmt-tile-val{font-size:10px;color:var(--accent);font-weight:700;min-height:12px;line-height:1}
+.mgmt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 4px}
+.mgmt-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 7px 11px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease),border-color .2s,background .2s;text-align:center;min-height:78px;justify-content:center;box-shadow:var(--shadow)}
+.mgmt-tile:active{transform:translateY(1px) scale(.95);box-shadow:var(--shadow-lg);border-color:var(--border-strong);background:var(--bg3)}
+/* Иконочный чип: своя приглушённая заливка по currentColor (hue-класс задаёт цвет).
+   Работает и для SVG (перекрашивается), и для эмодзи (цветной чип позади глифа). */
+.mgmt-tile-ico{position:relative;font-size:21px;line-height:1;width:46px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:14px;color:var(--c-teal);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.mgmt-tile-ico::after{content:"";position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:.15;z-index:0}
+.mgmt-tile-ico svg{width:23px;height:23px;display:block;position:relative;z-index:1;stroke-width:1.85}
+.mgmt-tile-ico>*:not(svg){position:relative;z-index:1}
+.mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.9;line-height:1.22}
+.mgmt-tile-val{font-size:10px;color:var(--accent);font-weight:700;min-height:12px;line-height:1;font-variant-numeric:tabular-nums}
+/* Оттенки иконок модулей */
+.ico-teal{color:var(--c-teal)}.ico-blue{color:var(--c-blue)}.ico-violet{color:var(--c-violet)}
+.ico-amber{color:var(--c-amber)}.ico-rose{color:var(--c-rose)}.ico-emerald{color:var(--c-emerald)}
+.ico-cyan{color:var(--c-cyan)}.ico-indigo{color:var(--c-indigo)}.ico-pink{color:var(--c-pink)}
 
 /* ─── More screen status bar ─────────────────────────────── */
 .acc-status-bar{display:flex;gap:6px;padding:8px 16px 4px;flex-wrap:wrap}
@@ -478,8 +493,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .qa-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 16px 4px}
 .qa-tile{background:var(--bg2);border-radius:var(--radius-lg);padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;transition:transform .12s,opacity .12s;text-align:center}
 .qa-tile:active{transform:scale(.93);opacity:.7}
-.qa-tile-ico{font-size:22px;line-height:1;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;margin:0 auto;background:linear-gradient(145deg,rgba(91,141,239,.12),rgba(176,123,232,.08));color:var(--text)}
-.qa-tile-ico svg{width:22px;height:22px;display:block}
+.qa-tile-ico{position:relative;font-size:21px;line-height:1;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:13px;margin:0 auto;color:var(--c-teal)}
+.qa-tile-ico::after{content:"";position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:.15;z-index:0}
+.qa-tile-ico svg{width:23px;height:23px;display:block;position:relative;z-index:1;stroke-width:1.85}
+.qa-tile-ico>*:not(svg){position:relative;z-index:1}
 .qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2}
 .qa-tile-val{font-size:16px;font-weight:700;margin-top:1px}
 /* Copilot «Что делать дальше» */
@@ -525,7 +542,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .card{transition:transform .2s var(--spring),box-shadow .2s var(--ease)}
 .card:active{transform:translateY(1px) scale(.98);box-shadow:var(--shadow-lg)}
 .mgmt-tile:active,.qa-tile:active{box-shadow:var(--shadow-lg)}
-.mgmt-tile-ico,.qa-tile-ico{background:linear-gradient(145deg,rgba(45,212,191,.14),rgba(20,184,166,.06));box-shadow:inset 0 0 0 1px rgba(45,212,191,.08)}
+.mgmt-tile-ico,.qa-tile-ico{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
 .mgmt-tile-val{color:var(--accent)}
 .ava-teal{background:rgba(45,212,191,.14);color:var(--teal)}
 .ava-green{background:rgba(52,211,153,.14);color:var(--green)}
@@ -6408,6 +6425,14 @@ const _ICON_PATHS = {
   zap:'<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/>',
   atom:'<circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><ellipse cx="12" cy="12" rx="9" ry="4"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(120 12 12)"/>',
   link:'<path d="M9 15 15 9"/><path d="M11 6.5 13 4.5a4 4 0 0 1 6 6l-2 2M13 17.5l-2 2a4 4 0 0 1-6-6l2-2"/>',
+  drop:'<path d="M12 3s6 6.3 6 11a6 6 0 0 1-12 0c0-4.7 6-11 6-11Z"/>',
+  target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6" fill="currentColor" stroke="none"/>',
+  dice:'<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="15" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="9" cy="15" r="1.1" fill="currentColor" stroke="none"/>',
+  mask:'<path d="M4 5s3 1 8 1 8-1 8-1v7a8 8 0 0 1-16 0V5Z"/><path d="M8 10c1 1 3 1 4 0M12 10c1 1 3 1 4 0"/>',
+  trophy:'<path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M9 20h6M12 14v6"/>',
+  calendar:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>',
+  flame:'<path d="M12 3c1 3-1.5 4.5-1.5 7A2.5 2.5 0 0 0 13 12c0-1.3 1-2 1-2 1.5 2 3 3.4 3 6a5 5 0 0 1-10 0c0-3.3 5-4.3 5-13Z"/>',
+  community:'<path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/><circle cx="12" cy="12" r="2.3"/><path d="M12 7v2.7M8.5 14.5 12 12M15.5 14.5 12 12"/>',
 };
 const _EMOJI2ICON = {
   '🚀':'rocket','🌿':'leaf','🌱':'leaf','🔍':'search','🔬':'search','🔭':'search',
@@ -6418,16 +6443,50 @@ const _EMOJI2ICON = {
   '👻':'ghost','👥':'users','👤':'user','🏭':'building','🎭':'palette','🎨':'palette','🎁':'gift',
   '🌍':'globe','🌐':'globe','🕸':'network','🕸️':'network','⭐':'star','❤️':'heart','❤':'heart',
   '✅':'check','⚡':'zap','⚔️':'zap','⚔':'zap','⚛️':'atom','⚛':'atom','🐝':'activity','🔗':'link','🆕':'star',
+  '🏛':'community','🏛️':'community','💧':'drop','📇':'book','🎯':'target','🎲':'dice','🎭':'mask',
+  '🏆':'trophy','📅':'calendar','🔥':'flame','🌍️':'globe','📤':'send','📥':'send','💬':'mega','🔔':'activity',
 };
+// Цвет иконки по её типу — приглушённые оттенки, единая система (не «кричит»).
+const _ICON_HUE = {
+  rocket:'ico-amber', leaf:'ico-emerald', search:'ico-blue', phone:'ico-cyan', send:'ico-blue',
+  mega:'ico-amber', antenna:'ico-teal', gear:'ico-teal', activity:'ico-rose', trash:'ico-rose',
+  cpu:'ico-violet', robot:'ico-violet', shield:'ico-emerald', map:'ico-cyan', monitor:'ico-blue',
+  key:'ico-amber', refresh:'ico-indigo', shuffle:'ico-indigo', box:'ico-amber', edit:'ico-blue',
+  book:'ico-violet', clip:'ico-violet', chart:'ico-blue', trend:'ico-emerald', card:'ico-emerald',
+  ghost:'ico-violet', users:'ico-cyan', user:'ico-cyan', building:'ico-amber', health:'ico-rose',
+  palette:'ico-pink', gift:'ico-rose', globe:'ico-blue', network:'ico-pink', star:'ico-amber',
+  heart:'ico-rose', check:'ico-emerald', zap:'ico-amber', atom:'ico-cyan', link:'ico-indigo',
+  drop:'ico-cyan', target:'ico-rose', dice:'ico-violet', mask:'ico-violet', trophy:'ico-amber',
+  calendar:'ico-violet', flame:'ico-rose', community:'ico-pink'
+};
+const _HUE_LIST = ['ico-teal','ico-blue','ico-violet','ico-amber','ico-rose','ico-emerald','ico-cyan','ico-indigo','ico-pink'];
+const _hasHue = c => /\bico-(teal|blue|violet|amber|rose|emerald|cyan|indigo|pink)\b/.test(c);
+function _hueForStr(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return _HUE_LIST[h%_HUE_LIST.length]; }
 function modernizeIcons(root) {
   (root||document).querySelectorAll('.mgmt-tile-ico, .qa-tile-ico').forEach(el=>{
     if (el.dataset.svg) return;
     const t = (el.textContent||'').trim();
     if (t) el.dataset.emoji = t;  // сохраняем эмодзи (для бокового меню и др.)
     const name = _EMOJI2ICON[t];
-    if (name && _ICON_PATHS[name]) { el.innerHTML = _SVG(_ICON_PATHS[name]); el.dataset.svg='1'; }
+    if (name && _ICON_PATHS[name]) {
+      el.innerHTML = _SVG(_ICON_PATHS[name]);
+      if (!_hasHue(el.className)) el.classList.add(_ICON_HUE[name] || _hueForStr(name));
+      el.dataset.svg='1';
+    } else if (t && !_hasHue(el.className)) {
+      // Эмодзи без явной иконки — оставляем глиф, но красим чип по хешу, чтобы
+      // он всё равно выглядел частью единой системы (а не «сырым» квадратом).
+      el.classList.add(_hueForStr(t));
+    }
   });
 }
+// Глобальный проход: покрыть ВСЕ статичные модульные сетки (они уже в DOM,
+// даже если их экран скрыт), плюс подстраховка для динамически дорисованных.
+(function(){
+  function _all(){ try{ modernizeIcons(document); }catch(_){} }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _all);
+  else _all();
+  setTimeout(_all, 800); setTimeout(_all, 2500);
+})();
 
 // ── Категории действий на экране «Ещё» ──────────────────
 function buildMoreCategories() {
