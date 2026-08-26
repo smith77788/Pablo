@@ -70,3 +70,62 @@ def test_ban_risk_wired_into_account_monitor():
     check_src = inspect.getsource(am._check_ban_risk)
     assert "predict_ban_risk" in check_src
     assert "critical" in check_src  # уведомляем только на критический уровень
+    # Персистентный дедуп (переживает рестарт) вместо in-memory словаря —
+    # иначе один и тот же алерт слался заново после каждого перезапуска бота.
+    assert "notify_dedup_ok" in check_src
+    assert "_ban_risk_alerted" not in check_src
+
+
+class _Cand(dict):
+    pass
+
+
+class _FakePool:
+    def __init__(self, cand):
+        self._cand = cand
+
+    async def fetch(self, *a, **k):
+        return self._cand
+
+    async def execute(self, *a, **k):
+        return "OK"
+
+
+@pytest.mark.asyncio
+async def test_ban_risk_persistent_dedup_gates_alert(monkeypatch):
+    from services import account_monitor as am
+    from services import behavioral_engine as be
+    from database import db as _db
+
+    cand = [_Cand(id=42, owner_id=7, username="Evacorolevaab",
+                  first_name="", phone="")]
+
+    async def _pred(pool, acc_id):
+        return {"risk_level": "critical", "risk_score": 70,
+                "reasons": ["High failure rate: 100%", "Account status: cooldown"]}
+
+    monkeypatch.setattr(be, "predict_ban_risk", _pred)
+
+    sent = []
+
+    async def _notify(pool, bot, uid, pref, text, **k):
+        sent.append((uid, pref, text))
+
+    monkeypatch.setattr(_db, "notify_if_enabled", _notify)
+
+    # 1) Дедуп разрешает → алерт уходит.
+    async def _ok(pool, uid, key, cd):
+        assert key == "ban_risk:42"
+        return True
+    monkeypatch.setattr(_db, "notify_dedup_ok", _ok)
+    await am._check_ban_risk(_FakePool(cand), bot=object())
+    assert len(sent) == 1 and sent[0][1] == "restriction"
+
+    # 2) Дедуп запрещает (уже слали в окне, в т.ч. до рестарта) → тишина.
+    sent.clear()
+
+    async def _blocked(pool, uid, key, cd):
+        return False
+    monkeypatch.setattr(_db, "notify_dedup_ok", _blocked)
+    await am._check_ban_risk(_FakePool(cand), bot=object())
+    assert sent == [], "повторный алерт должен подавляться персистентным дедупом"

@@ -4002,6 +4002,41 @@ def _cleanup_notify_cooldown() -> None:
         _notify_cooldown.pop(k, None)
 
 
+async def notify_dedup_ok(pool, user_id: int, key: str, cooldown_s: int) -> bool:
+    """ПЕРСИСТЕНТНЫЙ анти-спам для повторяющихся уведомлений.
+
+    True (и фиксирует момент), только если для (user_id, key) прошло ≥ cooldown_s
+    с прошлого раза. В отличие от in-memory rate-limit в notify_if_enabled, это
+    переживает РЕСТАРТ процесса — иначе один и тот же алерт (напр. «критический
+    риск бана» по аккаунту) присылался заново после каждого перезапуска бота,
+    заваливая владельца (жалоба: одинаковые уведомления каждые несколько минут).
+
+    Атомарно через INSERT .. ON CONFLICT .. DO UPDATE .. WHERE .. RETURNING:
+    первая вставка и «прошёл кулдаун» → есть строка (True); свежая запись в окне →
+    WHERE не выполняется, 0 строк (False). Fail-open: любой сбой БД → True (не
+    глушим потенциально важное из-за инфраструктурной ошибки)."""
+    try:
+        await pool.execute(
+            "CREATE TABLE IF NOT EXISTS notification_dedup ("
+            "  user_id BIGINT NOT NULL,"
+            "  dedup_key TEXT NOT NULL,"
+            "  last_sent TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+            "  PRIMARY KEY(user_id, dedup_key))"
+        )
+        row = await pool.fetchrow(
+            "INSERT INTO notification_dedup(user_id, dedup_key, last_sent) "
+            "VALUES($1, $2, NOW()) "
+            "ON CONFLICT(user_id, dedup_key) DO UPDATE SET last_sent = NOW() "
+            "  WHERE notification_dedup.last_sent < NOW() - ($3 * INTERVAL '1 second') "
+            "RETURNING user_id",
+            int(user_id), str(key), int(cooldown_s),
+        )
+        return row is not None
+    except Exception as exc:
+        log.debug("notify_dedup_ok fail-open (%s): %s", key, exc)
+        return True
+
+
 async def notify_if_enabled(
     pool: asyncpg.Pool,
     bot,

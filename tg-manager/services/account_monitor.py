@@ -126,10 +126,11 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
         )
 
 
-# In-memory cooldown for ban-risk alerts: account_id → last_alert_ts
-# (не переживает рестарт, не шарится между воркерами — как остальные дедупы здесь)
-_ban_risk_alerted: dict[int, float] = {}
-_BAN_RISK_ALERT_COOLDOWN = 21600  # 6h между алертами по одному аккаунту
+# Персистентный дедуп (БД) переживает РЕСТАРТ бота — раньше in-memory кулдаун
+# сбрасывался при каждом перезапуске, и один и тот же алерт «риск бана» слался
+# заново каждые несколько минут (жалоба на назойливые уведомления). 24ч на
+# аккаунт: совет в самом алерте — пауза 24–48ч, поэтому чаще раза в сутки незачем.
+_BAN_RISK_ALERT_COOLDOWN = 86400  # 24h между алертами по одному аккаунту
 
 
 async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -156,10 +157,7 @@ async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
         log.debug("ban_risk_check: candidate query failed: %s", e)
         return
 
-    now = time.time()
     for acc in cand:
-        if now - _ban_risk_alerted.get(acc["id"], 0) < _BAN_RISK_ALERT_COOLDOWN:
-            continue
         try:
             pred = await behavioral_engine.predict_ban_risk(pool, acc["id"])
         except Exception:
@@ -167,7 +165,11 @@ async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
             continue
         if pred.get("risk_level") != "critical":
             continue
-        _ban_risk_alerted[acc["id"]] = now
+        # Персистентный дедуп (переживает рестарт): не чаще раза в 24ч на аккаунт.
+        if not await db.notify_dedup_ok(
+            pool, acc["owner_id"], f"ban_risk:{acc['id']}", _BAN_RISK_ALERT_COOLDOWN
+        ):
+            continue
         label = acc["username"] or acc["first_name"] or acc["phone"] or str(acc["id"])
         reasons = "; ".join(pred.get("reasons", [])[:3]) or "аномальная активность"
         await db.notify_if_enabled(
@@ -179,7 +181,10 @@ async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
             f"Аккаунт: <b>{label}</b>\n"
             f"Risk score: <b>{pred.get('risk_score', 0)}/100</b>\n"
             f"Причины: {reasons}\n\n"
-            f"Остановите операции через этот аккаунт на 24–48ч и проверьте его вручную.",
+            f"Остановите операции через этот аккаунт на 24–48ч и проверьте его вручную.\n\n"
+            f"<i>Отключить эти уведомления: Настройки → Уведомления → «⚠️ Критические "
+            f"ошибки (флуд/ограничения)».</i>",
+            dedup_key=f"ban_risk:{acc['id']}",
         )
         log.warning(
             "account_monitor: ban risk CRITICAL acc=%d owner=%d score=%s",
