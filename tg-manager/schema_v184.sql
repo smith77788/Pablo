@@ -17,14 +17,19 @@
 --    запись о поданной апелляции терялась молча (log.debug), и статус узнать
 --    было невозможно — `get_appeal_status` всегда отвечал ошибкой.
 
+-- Ключ — keyword_id/bot_id, как во ВСЕЙ остальной подсистеме рейтинга
+-- (tracked_keywords, search_rankings, search_change_events). `ranking_engine`
+-- пытался жить на собственной модели «владелец + канал», которой в схеме нет
+-- никогда не было, — из-за этого он не работал целиком, а не только здесь.
 CREATE TABLE IF NOT EXISTS ranking_alerts (
     id            SERIAL PRIMARY KEY,
     owner_id      BIGINT NOT NULL,
-    channel_id    BIGINT NOT NULL,
-    keyword       TEXT NOT NULL,
+    keyword_id    INTEGER REFERENCES tracked_keywords(id) ON DELETE CASCADE,
+    bot_id        BIGINT,
+    keyword       TEXT NOT NULL,      -- копия для показа: ключ могут удалить
     old_position  INTEGER,
     new_position  INTEGER,
-    alert_type    TEXT NOT NULL,
+    alert_type    TEXT NOT NULL,      -- improved | dropped | entered | lost
     created_at    TIMESTAMPTZ DEFAULT NOW(),
     acknowledged  BOOLEAN DEFAULT FALSE
 );
@@ -35,6 +40,11 @@ CREATE INDEX IF NOT EXISTS idx_ranking_alerts_owner
 CREATE INDEX IF NOT EXISTS idx_ranking_alerts_pending
     ON ranking_alerts (owner_id)
     WHERE acknowledged = FALSE;
+
+-- Регион выдачи выбирают в форме добавления ключа, а хранить его было негде:
+-- экран показывал флаг, но всегда один и тот же.
+ALTER TABLE tracked_keywords
+    ADD COLUMN IF NOT EXISTS region TEXT NOT NULL DEFAULT 'ru';
 
 CREATE TABLE IF NOT EXISTS strike_appeals (
     -- id задаёт код: 'APPEAL-<account_id>-<UTC-время>' — человекочитаемый номер

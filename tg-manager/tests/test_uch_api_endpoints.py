@@ -1734,36 +1734,65 @@ class TestMiniAppAPIPureFunctions:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestRankingEngine:
-    """Tests for ranking_engine.py"""
+    """ranking_engine: контракт на модели «бот + ключевое слово».
+
+    Прежние тесты здесь проверяли модель «владелец + канал», которой в схеме нет
+    и не было: заглушка пула SQL не выполняет, поэтому они оставались зелёными,
+    пока раздел «Рейтинг» был мёртв целиком. Сквозная проверка на настоящей
+    схеме — tests/test_ranking_engine_real_schema_postgres.py.
+    """
 
     @pytest.mark.asyncio
     async def test_ranking_track(self):
         from services.ranking_engine import track_keyword
-        pool = FakePool(fetch_row={"id": 42})
-        result = await track_keyword(pool, 123, "telegram bot", channel_id=100)
+        pool = FakePool(fetch_val=1, fetch_row={"id": 42})
+        result = await track_keyword(pool, 123, "telegram bot", bot_id=100)
         assert result["ok"] is True
         assert result["id"] == 42
-        assert "INSERT" in pool._calls[0][1]
+        assert any("INSERT" in c[1] for c in pool._calls)
+
+    @pytest.mark.asyncio
+    async def test_ranking_track_checks_bot_ownership(self):
+        """Чужого бота нельзя прицепить в обход экрана."""
+        from services.ranking_engine import track_keyword
+        pool = FakePool(fetch_val=0)          # managed_bots: не ваш
+        result = await track_keyword(pool, 123, "telegram bot", bot_id=100)
+        assert result["ok"] is False
+        assert not any("INSERT" in c[1] for c in pool._calls), (
+            "запись не должна происходить, если бот чужой")
 
     @pytest.mark.asyncio
     async def test_ranking_record(self):
         from services.ranking_engine import record_position
-        pool = FakePool(fetch_val=5, execute_val="INSERT 0 1")
-        result = await record_position(pool, 123, 100, "telegram bot", 3)
+        pool = FakePool(fetch_val=5,
+                        fetch_row={"id": 1, "bot_id": 100, "keyword": "kw"},
+                        execute_val="INSERT 0 1")
+        result = await record_position(pool, 123, 1, 3)
         assert result["ok"] is True
-        assert result["current"] == 3
-        assert result["previous"] == 5
+        assert result["previous_position"] == 5
+        assert result["alert"] is None, (
+            "сдвиг на 2 позиции — дрожание выдачи, а не новость: такие "
+            "оповещения засоряют экран, и его перестают смотреть")
+
+    @pytest.mark.asyncio
+    async def test_ranking_record_alerts_on_a_real_move(self):
+        from services.ranking_engine import record_position
+        pool = FakePool(fetch_val=20,
+                        fetch_row={"id": 1, "bot_id": 100, "keyword": "kw"},
+                        execute_val="INSERT 0 1")
+        result = await record_position(pool, 123, 1, 4)
+        assert result["alert"] == "improved"
 
     @pytest.mark.asyncio
     async def test_ranking_history(self):
         from services.ranking_engine import get_position_history
         pool = FakePool(fetch_rows=[
-            {"position": 5, "previous_position": None, "checked_at": None, "metadata": "{}"},
-            {"position": 3, "previous_position": 5, "checked_at": None, "metadata": "{}"},
+            {"position": 3, "checked_at": None},
+            {"position": 5, "checked_at": None},
         ])
-        result = await get_position_history(pool, 123, 100, "telegram bot")
+        result = await get_position_history(pool, 123, 1)
         assert len(result) == 2
-        assert result[1]["position"] == 3
+        assert result[0]["position"] == 3
 
     @pytest.mark.asyncio
     async def test_ranking_stats(self):
@@ -1776,10 +1805,19 @@ class TestRankingEngine:
         assert "alerts_pending" in result
 
     @pytest.mark.asyncio
+    async def test_ranking_stats_survive_a_broken_part(self):
+        """Один упавший показатель не должен обнулять всю шапку экрана."""
+        from services.ranking_engine import get_ranking_stats
+        pool = FakePool(error=Exception("DB error"))
+        result = await get_ranking_stats(pool, 123)
+        assert result == {"total_tracked": 0, "total_checks": 0,
+                          "avg_position_7d": 0.0, "alerts_pending": 0}
+
+    @pytest.mark.asyncio
     async def test_ranking_track_error(self):
         from services.ranking_engine import track_keyword
         pool = FakePool(error=Exception("DB error"))
-        result = await track_keyword(pool, 123, "test")
+        result = await track_keyword(pool, 123, "test", bot_id=100)
         assert result["ok"] is False
         assert "error" in result
 

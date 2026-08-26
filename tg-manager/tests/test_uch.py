@@ -897,37 +897,58 @@ class TestMergeEngine:
 # ── Ranking Engine tests ──────────────────────────────────────────────────────
 
 class TestRankingEngine:
-    """Tests for ranking_engine.py"""
+    """ranking_engine на модели «бот + ключевое слово».
+
+    ПОЧЕМУ ЭТИ ТЕСТЫ ПЕРЕПИСАНЫ. Прежние работали по несуществующей модели
+    «владелец + канал» и были ЗЕЛЁНЫМИ, пока раздел «Рейтинг» был полностью
+    мёртв: заглушка пула не выполняет SQL, поэтому запрос к несуществующим
+    колонкам здесь «успешен». Сквозная проверка на настоящей схеме —
+    tests/test_ranking_engine_real_schema_postgres.py; здесь остаётся быстрая
+    проверка контракта и того, что запросы называют РЕАЛЬНЫЕ колонки.
+    """
 
     @pytest.mark.asyncio
     async def test_track_keyword(self):
         from services.ranking_engine import track_keyword
-        pool = FakePool(fetch_row={"id": 1})
-        result = await track_keyword(pool, 123, "telegram channels")
+        pool = FakePool(fetch_val=1, fetch_row={"id": 1})
+        result = await track_keyword(pool, 123, "telegram channels", bot_id=555)
         assert result["ok"] is True
         assert result["id"] == 1
+        sql = " ".join(c[1] for c in pool._calls)
+        assert "bot_id" in sql and "channel_id" not in sql, (
+            "запрос обязан идти по настоящей схеме (bot_id), а не по выдуманной")
 
     @pytest.mark.asyncio
-    async def test_record_position(self):
+    async def test_track_keyword_requires_a_bot(self):
+        """Без бота считать позицию не для кого — отказ обязан это назвать."""
+        from services.ranking_engine import track_keyword
+        pool = FakePool()
+        result = await track_keyword(pool, 123, "telegram channels")
+        assert result["ok"] is False and "бот" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_record_position_reports_previous(self):
         from services.ranking_engine import record_position
-        pool = FakePool(fetch_val=None, execute_val="INSERT 0 1")
-        result = await record_position(pool, 123, -100, "telegram channels", 5)
+        pool = FakePool(fetch_val=None,
+                        fetch_row={"id": 1, "bot_id": 555, "keyword": "kw"},
+                        execute_val="INSERT 0 1")
+        result = await record_position(pool, 123, 1, 5)
         assert result["ok"] is True
-        assert result["current"] == 5
-        assert result["previous"] is None
+        assert result["previous_position"] is None
+        assert result["alert"] == "entered", "первое появление в выдаче — событие"
 
     @pytest.mark.asyncio
     async def test_get_position_history(self):
         from services.ranking_engine import get_position_history
         rows = [
-            {"position": 1, "previous_position": None, "checked_at": "2024-01-01", "metadata": "{}"},
-            {"position": 3, "previous_position": 1, "checked_at": "2024-01-02", "metadata": "{}"},
+            {"position": 1, "checked_at": "2024-01-02"},
+            {"position": 3, "checked_at": "2024-01-01"},
         ]
         pool = FakePool(fetch_rows=rows)
-        result = await get_position_history(pool, 123, -100, "telegram channels")
-        assert len(result) == 2
-        assert result[0]["position"] == 1
-        assert result[1]["position"] == 3
+        result = await get_position_history(pool, 123, 1)
+        assert [r["position"] for r in result] == [1, 3]
+        sql = pool._calls[0][1]
+        assert "tk.owner_id" in sql, "история обязана быть ограничена владельцем"
 
     @pytest.mark.asyncio
     async def test_get_ranking_stats(self):

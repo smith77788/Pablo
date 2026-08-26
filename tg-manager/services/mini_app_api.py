@@ -17449,8 +17449,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             from services.ranking_engine import track_keyword
+            # Модель подсистемы — «бот + ключевое слово». Прежние channel_id и
+            # check_interval не существовали ни в схеме, ни в форме экрана.
             result = await track_keyword(pool, uid, data.get('keyword', ''),
-                                         data.get('channel_id'), data.get('check_interval', 3600))
+                                         data.get('bot_id'),
+                                         data.get('region') or 'ru')
+            if not result.get('ok'):
+                return _err(result.get('error') or 'Не удалось добавить', 400)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)
@@ -17461,7 +17466,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             from services.ranking_engine import untrack_keyword
-            result = await untrack_keyword(pool, uid, data.get('keyword', ''), data.get('channel_id'))
+            try:
+                kw_id = int(data.get('keyword_id') or data.get('id') or 0)
+            except (TypeError, ValueError):
+                return _err('Некорректный keyword_id', 400)
+            if not kw_id:
+                return _err('Укажите keyword_id', 400)
+            result = await untrack_keyword(pool, uid, kw_id)
+            if not result.get('ok'):
+                return _err('Ключевое слово не найдено', 404)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)
@@ -17472,8 +17485,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             from services.ranking_engine import record_position
-            result = await record_position(pool, uid, data.get('channel_id', 0),
-                                           data.get('keyword', ''), data.get('position', 0))
+            try:
+                kw_id = int(data.get('keyword_id') or 0)
+            except (TypeError, ValueError):
+                return _err('Некорректный keyword_id', 400)
+            if not kw_id:
+                return _err('Укажите keyword_id', 400)
+            pos = data.get('position')
+            result = await record_position(pool, uid, kw_id,
+                                           int(pos) if pos is not None else None)
+            if not result.get('ok'):
+                return _err(result.get('error') or 'Не удалось записать', 400)
             return _json_resp(result)
         except Exception as e:
             return _err(str(e), 500)
@@ -17482,11 +17504,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            channel_id = int(request.match_info.get('channel_id', 0))
-            keyword = request.query.get('keyword', '')
-            days = int(request.query.get('days', 30))
+            kw_id = int(request.match_info.get('keyword_id', 0))
+            limit = max(1, min(int(request.query.get('limit', 30)), 365))
             from services.ranking_engine import get_position_history
-            history = await get_position_history(pool, uid, channel_id, keyword, days)
+            history = await get_position_history(pool, uid, kw_id, limit)
             return _json_resp({'history': history})
         except Exception as e:
             return _err(str(e), 500)
@@ -17512,37 +17533,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 500)
 
     async def ranking_overview(request: web.Request) -> web.Response:
-        """Свод для экрана «Рейтинг»: слитые отслеживаемые ключи + их последние
-        позиции (position/trend) + алерты. Фронт (loadRanking) звал bare
-        /api/miniapp/ranking, но такого маршрута не было → экран не грузил данные
-        (404). Собираем из готовых функций ranking_engine — без дублей.
-        trend = previous_position - position (положительный = рост позиции)."""
+        """Свод для экрана «Рейтинг»: ключи + последние позиции + оповещения.
+
+        Форма ответа — ровно та, что читает фронт (renderRankingList):
+        keyword, position, trend, region, bot_username, last_checked.
+        trend = предыдущая позиция минус текущая (положительный = рост).
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             from services.ranking_engine import (
                 get_tracked_keywords, get_all_positions, get_alerts)
             tracked = await get_tracked_keywords(pool, uid)
-            positions = await get_all_positions(pool, uid)
+            positions = {p["keyword_id"]: p for p in await get_all_positions(pool, uid)}
             alerts = await get_alerts(pool, uid)
-            # позиции по ключу (последняя на канал/ключ)
-            pos_by_kw = {}
-            for p in positions:
-                pos_by_kw[(p.get('keyword'), p.get('channel_id'))] = p
             keywords = []
             for k in tracked:
-                p = pos_by_kw.get((k.get('keyword'), k.get('channel_id')))
-                cur = p.get('position') if p else None
-                prev = p.get('previous_position') if p else None
-                trend = (prev - cur) if (cur is not None and prev) else 0
+                p = positions.get(k["id"]) or {}
+                cur, prev = p.get("position"), p.get("previous_position")
+                last = p.get("last_checked")
                 keywords.append({
-                    'keyword': k.get('keyword'),
-                    'channel_id': k.get('channel_id'),
-                    'position': cur,
-                    'trend': trend,
-                    'region': k.get('region') or 'ru',
+                    "id": k["id"],
+                    "keyword": k.get("keyword"),
+                    "bot_id": k.get("bot_id"),
+                    "bot_username": k.get("bot_username"),
+                    "position": cur,
+                    "trend": (prev - cur) if (cur is not None and prev is not None) else 0,
+                    "region": k.get("region") or "ru",
+                    "last_checked": last.isoformat() if last else None,
                 })
-            return _json_resp({'keywords': keywords, 'alerts': alerts})
+            return _json_resp({"keywords": keywords, "alerts": alerts})
         except Exception as e:
             log.exception("ranking_overview uid=%d", uid)
             return _err(str(e), 500)
@@ -17570,10 +17590,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/ranking/track", ranking_track)
     app.router.add_post("/api/miniapp/ranking/untrack", ranking_untrack)
     app.router.add_post("/api/miniapp/ranking/record", ranking_record)
-    app.router.add_get("/api/miniapp/ranking/history/{channel_id}", ranking_history)
+    app.router.add_get("/api/miniapp/ranking/history/{keyword_id}", ranking_history)
     app.router.add_get("/api/miniapp/ranking/positions", ranking_positions)
     app.router.add_get("/api/miniapp/ranking", ranking_overview)
     app.router.add_get("/api/miniapp/ranking/keywords", ranking_keywords)
+    # Фронт добавляет ключ POST-ом на этот же путь. Маршрута не было вовсе:
+    # кнопка «Добавить» отвечала 405, и экран нельзя было наполнить.
+    app.router.add_post("/api/miniapp/ranking/keywords", ranking_track)
     app.router.add_get("/api/miniapp/ranking/alerts", ranking_alerts)
     app.router.add_get("/api/miniapp/ranking/stats", ranking_stats)
 

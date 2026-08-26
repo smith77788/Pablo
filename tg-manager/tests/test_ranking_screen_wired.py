@@ -50,6 +50,7 @@ def test_ranking_bare_overview_route_exists():
     m = re.search(r"async def ranking_overview\(.*?\n(.*?)async def ", src, re.DOTALL)
     assert m, "ranking_overview handler not found"
     body = m.group(1)
-    assert "'keywords'" in body and "'alerts'" in body, (
-        "ranking_overview должен отдавать keywords и alerts (форма для loadRanking)"
-    )
+    # Кавычки — вопрос стиля, а не контракта: проверяем ИМЕНА полей ответа.
+    for field in ("keywords", "alerts"):
+        assert re.search(rf"""["']{field}["']\s*:""", body), (
+            f"ranking_overview должен отдавать {field} (форма для loadRanking)")
