@@ -324,9 +324,16 @@ class OperationRecoveryAction(RecoveryAction):
         try:
             pool = context.get("pool")
             if pool:
+                # Таблица называется operation_queue; `operations` не существует
+                # НИ В ОДНОЙ миграции — запрос падал всегда, и автоматическое
+                # восстановление зависшей операции не работало ни разу: она
+                # оставалась 'running' до сторожа (60 минут), занимая слот
+                # параллельности владельца. Колонок `error`/`updated_at` тут
+                # тоже нет — текст ошибки живёт в error_msg/last_error.
                 await pool.execute(
-                    """UPDATE operations 
-                       SET status = 'pending', error = NULL, updated_at = NOW()
+                    """UPDATE operation_queue
+                       SET status = 'pending', error_msg = NULL, last_error = NULL,
+                           started_at = NULL
                        WHERE id = $1 AND status = 'running'""",
                     op_id,
                 )

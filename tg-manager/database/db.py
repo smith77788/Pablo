@@ -4016,13 +4016,8 @@ async def notify_dedup_ok(pool, user_id: int, key: str, cooldown_s: int) -> bool
     WHERE не выполняется, 0 строк (False). Fail-open: любой сбой БД → True (не
     глушим потенциально важное из-за инфраструктурной ошибки)."""
     try:
-        await pool.execute(
-            "CREATE TABLE IF NOT EXISTS notification_dedup ("
-            "  user_id BIGINT NOT NULL,"
-            "  dedup_key TEXT NOT NULL,"
-            "  last_sent TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
-            "  PRIMARY KEY(user_id, dedup_key))"
-        )
+        # Таблицу заводит миграция (schema_v184), а не этот вызов: DDL на каждое
+        # уведомление — лишний рейс до базы и блокировка в горячем пути.
         row = await pool.fetchrow(
             "INSERT INTO notification_dedup(user_id, dedup_key, last_sent) "
             "VALUES($1, $2, NOW()) "

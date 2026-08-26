@@ -172,9 +172,8 @@ DB_BACKED: dict[str, str] = {
 
 # Расхождение реально стоит качества, но пока принято. СПИСОК НЕ ДОЛЖЕН РАСТИ.
 KNOWN_DIVERGENCE: dict[str, str] = {
-    "services/account_monitor.py:_ban_risk_alerted":
-        "дедуп уведомлений: N реплик → до N одинаковых предупреждений",
-    "services/account_monitor.py:_low_account_alerted": "то же: дедуп «мало аккаунтов»",
+    "services/account_monitor.py:_low_account_alerted":
+        "дедуп уведомлений «мало аккаунтов»: N реплик → до N одинаковых",
     "services/account_monitor.py:_session_expired_alerted": "то же: дедуп «сессия истекла»",
     "services/anomaly_detector.py:_last_anomaly_seen": "то же, дедуп аномалий",
     "services/op_worker.py:_alerted_stuck_ops": "то же, дедуп «операция зависла»",
