@@ -221,6 +221,73 @@ def test_no_unguarded_telegram_call_before_the_web_server():
     )
 
 
+def test_database_blip_does_not_burn_the_restart_budget():
+    """Короткая недоступность БД не должна валить процесс с первой попытки.
+
+    Без повторов процесс падает мгновенно, платформа перезапускает — и он падает
+    снова, пока база поднимается. Десять таких падений за секунды исчерпывают
+    restartPolicyMaxRetries=10, и сервис остаётся лежать до ручного деплоя,
+    хотя база вернулась через минуту.
+    """
+    src = _main_src()
+    assert "_create_pool_resilient" in src, "подключение к БД снова без повторов"
+    i = src.index("async def _create_pool_resilient")
+    body = src[i:i + 1800]
+    assert "for attempt in range" in body and "asyncio.sleep" in body, (
+        "повторов с паузой нет — блип базы снова будет тратить перезапуски")
+    assert "raise last" in body, (
+        "после исчерпания попыток нужно честно упасть: обслуживать запросы нечем")
+
+
+def test_startup_settings_do_not_kill_the_process():
+    """Чтение настроек с БД — не повод потерять весь продукт.
+
+    Эти вызовы стоят ДО старта веб-сервера; любой сбой в них раньше означал, что
+    мини-апп не поднимется вовсе.
+    """
+    import ast
+
+    src = _main_src()
+    tree = ast.parse(src)
+    lines = src.split("\n")
+    main_fn = next(n for n in ast.walk(tree)
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and n.name == "main")
+    web_start = next(i for i, l in enumerate(lines, 1)
+                     if "_web_resilient(" in l and "async def" not in l)
+    guarded = set()
+    for node in ast.walk(main_fn):
+        if isinstance(node, ast.Try):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Await):
+                    guarded.add(sub.lineno)
+    # Вложенные функции (_resilient, _web_resilient и т.п.) исполняются ПОЗЖЕ и
+    # каждая имеет свой присмотр — их тело к порядку старта отношения не имеет.
+    for node in ast.walk(main_fn):
+        if node is main_fn:
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            guarded.update(range(node.lineno, node.end_lineno + 1))
+    # Что разрешено оставить голым и почему.
+    ALLOWED = {
+        "_start_bootstrap_health_server",   # сама ловит свои ошибки
+        "_create_pool_resilient",           # повторяет и падает осознанно
+        "PostgresFSMStorage",               # create() глотает сбой DDL внутри
+    }
+    bad = []
+    for node in ast.walk(main_fn):
+        if not (isinstance(node, ast.Await) and node.lineno < web_start
+                and node.lineno not in guarded):
+            continue
+        text = lines[node.lineno - 1]
+        if any(a in text for a in ALLOWED):
+            continue
+        bad.append(f"main.py:{node.lineno}: {text.strip()[:80]}")
+    assert not bad, (
+        "голый await до старта HTTP-сервера — его сбой уронит мини-апп:\n  "
+        + "\n  ".join(bad))
+
+
 def test_polling_is_restarted_not_fatal():
     """Поллинг обязан перезапускаться, а не ронять процесс."""
     src = _main_src()

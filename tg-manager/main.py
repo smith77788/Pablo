@@ -309,6 +309,43 @@ async def _stop_bootstrap_health_server() -> None:
         _bootstrap_runner = None
 
 
+_POOL_ATTEMPTS = 6
+_POOL_BACKOFF = (2, 5, 10, 20, 30)      # паузы между попытками, сек
+
+
+async def _create_pool_resilient():
+    """Подключиться к БД, переживая КОРОТКУЮ её недоступность.
+
+    ЗАЧЕМ. Без повторов кратковременный сбой базы (перезапуск инстанса, смена
+    лидера, сетевой блип на деплое) валит процесс сразу. Платформа перезапускает
+    его — и он падает снова, потому что база всё ещё поднимается. Секунды таких
+    падений исчерпывают restartPolicyMaxRetries=10 из railway.json, после чего
+    сервис остаётся ЛЕЖАТЬ до ручного деплоя, хотя база вернулась через минуту.
+
+    Здесь мы тратим на ожидание около полутора минут (порт всё это время держит
+    bootstrap health-сервер, health-check платформы проходит). Если база не
+    вернулась и за это время — падаем честно: обслуживать запросы всё равно
+    нечем, и перезапуск процесса уместен.
+    """
+    last: Exception | None = None
+    for attempt in range(1, _POOL_ATTEMPTS + 1):
+        try:
+            return await create_pool()
+        except Exception as exc:
+            last = exc
+            if attempt >= _POOL_ATTEMPTS:
+                break
+            delay = _POOL_BACKOFF[min(attempt - 1, len(_POOL_BACKOFF) - 1)]
+            log.error(
+                "БД недоступна (%s) — попытка %d/%d, повтор через %dс. "
+                "Порт занят health-сервером, перезапуск процесса не тратится.",
+                exc, attempt, _POOL_ATTEMPTS, delay,
+            )
+            await asyncio.sleep(delay)
+    log.critical("БД недоступна после %d попыток — выходим: %s", _POOL_ATTEMPTS, last)
+    raise last  # type: ignore[misc]
+
+
 async def main() -> None:
     install_button_style_patch()
 
@@ -325,7 +362,7 @@ async def main() -> None:
     # «Application failed to respond» становится невозможным. Реальный сервер займёт
     # порт после готовности (bootstrap останавливается перед его стартом).
     await _start_bootstrap_health_server()
-    pool = await create_pool()
+    pool = await _create_pool_resilient()
     fsm_storage = await PostgresFSMStorage.create(pool)
     dp = Dispatcher(storage=fsm_storage)
     activity_log_middleware = UserActivityLogMiddleware()
@@ -453,9 +490,14 @@ async def main() -> None:
     from database import db as _db
     from bot.utils.subscription import set_free_mode
 
-    _fm = await _db.get_platform_setting(pool, "free_mode", "false")
-    set_free_mode(_fm == "true")
-    log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
+    # Под try, как соседние блоки настроек: до старта HTTP-сервера ещё далеко, и
+    # исключение здесь убивает процесс раньше, чем поднимется мини-апп.
+    try:
+        _fm = await _db.get_platform_setting(pool, "free_mode", "false")
+        set_free_mode(_fm == "true")
+        log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
+    except Exception:
+        log.warning("failed to load free_mode setting", exc_info=True)
 
     # Тумблер уведомлений о новых пользователях — восстанавливаем из БД
     try:
@@ -575,7 +617,12 @@ async def main() -> None:
 
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)
-    await op_worker.reset_stale_in_operation(pool)
+    # Тоже под try: разбор залипших флагов прошлого процесса полезен, но ради
+    # него нельзя терять весь продукт — аренды всё равно истекают сами по сроку.
+    try:
+        await op_worker.reset_stale_in_operation(pool)
+    except Exception:
+        log.warning("startup: не удалось снять залипшие in_operation", exc_info=True)
 
     # Финализируем «зависшие» парсер-раны (pending/running > 1ч): раньше сбой
     # client.connect() оставлял их в вечном 'pending' — чистим сироты при старте.

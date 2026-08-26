@@ -26,9 +26,14 @@ def test_bootstrap_helpers_exist():
 def test_bootstrap_starts_before_create_pool():
     src = _main_src()
     i_start = src.index("await _start_bootstrap_health_server()")
-    i_pool = src.index("pool = await create_pool()")
+    # Подключение к БД зовётся через обёртку с повторами (_create_pool_resilient)
+    # — привязываться к точному тексту вызова нельзя, иначе тест ломается на
+    # любой правке рядом. Ищем МЕСТО подключения в main(), какое бы имя ни было.
+    m = re.search(r"pool = await (?:create_pool|_create_pool_resilient)\(\)", src)
+    assert m, "в main() не найдено подключение к БД"
+    i_pool = m.start()
     i_stop = src.index("await _stop_bootstrap_health_server()")
-    # старт bootstrap ДО create_pool, стоп — ПОСЛЕ (перед реальным сервером)
+    # старт bootstrap ДО подключения к БД, стоп — ПОСЛЕ (перед реальным сервером)
     assert i_start < i_pool < i_stop
 
 
