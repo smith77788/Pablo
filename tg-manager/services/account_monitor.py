@@ -22,12 +22,7 @@ _MIN_ACCOUNTS = 2  # alert threshold
 _LOW_TRUST_THRESHOLD = 0.3  # trust_score below this triggers alert
 _STALE_RUNNING_HOURS = 3  # running ops older than this are considered stuck
 _ALERT_COOLDOWN = 86400  # 24h between repeated low-account alerts per owner
-
-# In-memory cooldown: owner_id → last_alert_ts
-_low_account_alerted: dict[int, float] = {}
-
-# In-memory cooldown for session_expired alerts: account_id → last_alert_ts
-_session_expired_alerted: dict[int, float] = {}
+_SESSION_EXPIRED_COOLDOWN = 86400  # 24h между алертами «сессия истекла» на аккаунт
 
 
 async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -45,14 +40,14 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
     if not rows:
         return
 
-    now = time.time()
     for row in rows:
         owner_id = row["owner_id"]
         active_count = row["active_count"]
-        last_sent = _low_account_alerted.get(owner_id, 0)
-        if now - last_sent < _ALERT_COOLDOWN:
+        # Персистентный дедуп (переживает рестарт): не чаще раза в 24ч на владельца.
+        if not await db.notify_dedup_ok(
+            pool, owner_id, "low_accounts", _ALERT_COOLDOWN
+        ):
             continue
-        _low_account_alerted[owner_id] = now
         await db.notify_if_enabled(
             pool,
             bot,
@@ -291,7 +286,6 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
         return
 
     log.info("account_monitor: dead-session check — %d accounts", len(accounts))
-    now = time.time()
 
     for acc in accounts:
         # Атомарный захват у арбитра op_worker ПЕРЕД коннектом: check_account_
@@ -377,10 +371,13 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
                     log, "account_monitor: failed to update dead acc=%d", acc["id"]
                 )
 
-            # Notify owner — deduplicated per 24h
-            last_sent = _session_expired_alerted.get(acc["id"], 0)
-            if now - last_sent >= _ALERT_COOLDOWN:
-                _session_expired_alerted[acc["id"]] = now
+            # Уведомление владельцу — персистентный дедуп (переживает рестарт),
+            # раз в 24ч на аккаунт. Раньше in-memory словарь сбрасывался при
+            # перезапуске и слал «сессия истекла» заново.
+            if await db.notify_dedup_ok(
+                pool, acc["owner_id"], f"sess_expired:{acc['id']}",
+                _SESSION_EXPIRED_COOLDOWN,
+            ):
                 label = acc.get("username") or acc.get("first_name") or acc.get("phone") or str(acc["id"])
                 await db.notify_if_enabled(
                     pool,
@@ -393,6 +390,7 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
                     "Telegram отклонил авторизацию — сессия мертва.\n"
                     "Аккаунт деактивирован автоматически.\n\n"
                     "Переимпортируйте сессию в разделе <b>Аккаунты</b>.",
+                    dedup_key=f"sess_expired:{acc['id']}",
                 )
                 log.warning(
                     "account_monitor: dead session acc=%d owner=%d status=%s",

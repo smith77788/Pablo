@@ -76,6 +76,34 @@ def test_ban_risk_wired_into_account_monitor():
     assert "_ban_risk_alerted" not in check_src
 
 
+def test_all_account_monitor_alert_dedups_are_persistent():
+    """Все алерт-дедупы account_monitor вынесены из памяти процесса (переживают
+    рестарт) — жалоба на назойливые уведомления после каждого перезапуска."""
+    from services import account_monitor as am
+
+    for fn in (am._check_and_alert, am._check_low_trust):
+        src = inspect.getsource(fn)
+        assert "_low_account_alerted" not in src
+        assert "_session_expired_alerted" not in src
+    low_src = inspect.getsource(am._check_and_alert)
+    assert "notify_dedup_ok" in low_src   # «мало аккаунтов» — персистентно
+    # in-memory словари удалены из модуля целиком
+    mod_src = inspect.getsource(am)
+    assert "_low_account_alerted: dict" not in mod_src
+    assert "_session_expired_alerted: dict" not in mod_src
+
+
+def test_anomaly_dedup_is_persistent_via_table():
+    """Дедуп аномалий берётся из anomaly_events (detected_at), а не из памяти."""
+    from services import anomaly_detector as ad
+
+    src = inspect.getsource(ad._should_record)
+    assert "anomaly_events" in src and "detected_at" in src
+    # in-memory словарь удалён как ГЛОБАЛ (упоминание в комментарии-объяснении ок)
+    assert not hasattr(ad, "_last_anomaly_seen")
+    assert "_last_anomaly_seen: dict" not in inspect.getsource(ad)
+
+
 class _Cand(dict):
     pass
 

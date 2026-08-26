@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,7 +32,7 @@ _TRUST_COLLAPSE_DROP = 0.20  # trust упал на 20% за 2ч → collapse
 
 # In-memory baseline per owner (обновляются каждый цикл)
 _baseline_cache: dict[int, dict[str, Any]] = {}
-_last_anomaly_seen: dict[str, float] = {}  # anomaly_type:owner_id → last_ts
+# Дедуп аномалий вынесен в БД (anomaly_events.detected_at) — переживает рестарт.
 
 
 @dataclass
@@ -445,15 +444,25 @@ async def _detect_latency_spike(pool: asyncpg.Pool, owner_id: int) -> list[Anoma
 
 
 async def _should_record(pool: asyncpg.Pool, anomaly: Anomaly) -> bool:
-    """Проверить, нет ли уже активной аномалии такого типа (дедупликация)."""
-    key = f"{anomaly.anomaly_type}:{anomaly.owner_id}"
-    now = time.time()
-    last = _last_anomaly_seen.get(key, 0)
-    # Дедупликация: не записывать одинаковую аномалию чаще раза в 30 минут
-    if now - last < 1800:
-        return False
-    _last_anomaly_seen[key] = now
-    return True
+    """Не записывать одинаковую аномалию чаще раза в 30 минут.
+
+    Дедуп берётся из САМОЙ таблицы anomaly_events (detected_at, есть индекс по
+    owner_id+anomaly_type) — переживает рестарт и общий для всех реплик. Раньше
+    держался in-memory словарём _last_anomaly_seen: сбрасывался при перезапуске и
+    расходился между процессами → одна аномалия писалась/слалась многократно.
+    Fail-open: сбой запроса → записываем (лучше дубль, чем потерять сигнал)."""
+    try:
+        recent = await pool.fetchval(
+            "SELECT 1 FROM anomaly_events "
+            "WHERE owner_id=$1 AND anomaly_type=$2 "
+            "  AND detected_at > NOW() - INTERVAL '30 minutes' "
+            "LIMIT 1",
+            anomaly.owner_id, anomaly.anomaly_type,
+        )
+        return recent is None
+    except Exception as exc:
+        log.debug("_should_record fail-open (%s): %s", anomaly.anomaly_type, exc)
+        return True
 
 
 async def _record_anomaly(pool: asyncpg.Pool, anomaly: Anomaly) -> None:
