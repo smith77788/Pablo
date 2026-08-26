@@ -129,6 +129,11 @@ async def resolve_conflict(pool, conflict_id: int, owner_id: int,
 
 
 async def compute_merge_confidence_improved(pool, owner_id: int, contact_a_id: int, contact_b_id: int) -> dict:
+    """НЕ ИСПОЛЬЗУЕТСЯ: продукт зовёт `detect_smart_duplicates` /
+    `compute_merge_confidence` (без суффикса). Эта «улучшенная» ветка —
+    параллельная реализация, на которую нет ни одной ссылки, кроме тестов.
+    Прежде чем развивать её, решите, какая из двух остаётся единственной:
+    две реализации одного правила расходятся молча."""
     row_a = await pool.fetchrow(
         '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
            FROM unified_contacts WHERE id=$1 AND owner_id=$2''', contact_a_id, owner_id)
@@ -142,8 +147,8 @@ async def compute_merge_confidence_improved(pool, owner_id: int, contact_a_id: i
     b = dict(row_b)
     base = compute_merge_confidence(a, b)
 
-    # Колонки source_type в contact_sources нет — запрос падал, и вся оценка
-    # схожести контактов вместе с ним: экран объединения не открывался. Источник
+    # Колонки source_type в contact_sources нет: этот запрос упал бы при первом
+    # же вызове (см. пометку в докстринге — ветка не подключена). Источник
     # контакта в этой схеме — АККАУНТ, через который его увидели (account_id).
     # Совпадение аккаунтов — тот же сигнал: одного человека видно с обеих сторон.
     sources_a = await pool.fetch(
@@ -178,6 +183,11 @@ async def compute_merge_confidence_improved(pool, owner_id: int, contact_a_id: i
 
 
 async def detect_smart_duplicates_improved(pool, owner_id: int) -> list:
+    """НЕ ИСПОЛЬЗУЕТСЯ: продукт зовёт `detect_smart_duplicates` /
+    `compute_merge_confidence` (без суффикса). Эта «улучшенная» ветка —
+    параллельная реализация, на которую нет ни одной ссылки, кроме тестов.
+    Прежде чем развивать её, решите, какая из двух остаётся единственной:
+    две реализации одного правила расходятся молча."""
     contacts = await pool.fetch(
         '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
            FROM unified_contacts WHERE owner_id=$1''', owner_id)
@@ -186,7 +196,7 @@ async def detect_smart_duplicates_improved(pool, owner_id: int) -> list:
 
     source_map = {}
     for c in contacts:
-        # См. compute_merge_confidence_improved: source_type не существует,
+        # См. compute_merge_confidence_improved: колонки source_type нет,
         # источник контакта — аккаунт, через который его увидели.
         sources = await pool.fetch(
             'SELECT account_id FROM contact_sources WHERE contact_id=$1', c['id'])
