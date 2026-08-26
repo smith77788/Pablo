@@ -44,6 +44,13 @@ _UPDATE = re.compile(
     r"\bUPDATE\s+(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?\s+SET\s+(.*?)"
     r"(?:\bWHERE\b|\bRETURNING\b|\bFROM\b|$)", re.I | re.S)
 _ASSIGN = re.compile(r"(?:^|,)\s*\"?([a-z_][a-z0-9_]*)\"?\s*=", re.I)
+# Только ПРОСТЫЕ однотабличные SELECT: где есть JOIN, псевдоним или выражение,
+# принадлежность колонки неоднозначна, и детектор начал бы врать.
+_SELECT = re.compile(
+    r"SELECT\s+(?!.*\bJOIN\b)(.*?)\s+FROM\s+(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?"
+    r"\s*(?:WHERE|ORDER|GROUP|LIMIT|$)", re.I | re.S)
+# Системные колонки Postgres есть у любой таблицы, но не в information_schema.
+_SYSTEM_COLUMNS = {"ctid", "xmin", "xmax", "cmin", "cmax", "tableoid", "oid"}
 
 _LOOP: "asyncio.AbstractEventLoop | None" = None
 
@@ -142,6 +149,8 @@ def unknown_columns(schema: set[str]) -> dict[str, list[str]]:
     bad: dict[str, list[str]] = {}
 
     def _note(table: str, col: str, where: str):
+        if col in _SYSTEM_COLUMNS:
+            return
         key = f"{table}.{col}"
         if key not in schema:
             bad.setdefault(key, []).append(where)
@@ -162,6 +171,17 @@ def unknown_columns(schema: set[str]) -> dict[str, list[str]]:
                 continue
             for a in _ASSIGN.finditer(_strip_parens(m.group(2))):
                 _note(table, a.group(1).lower(), where)
+        for m in _SELECT.finditer(sql):
+            select_list, table = m.group(1), m.group(2).lower()
+            if table not in tables:
+                continue
+            low = select_list.lower()
+            if "*" in select_list or "(" in select_list or " as " in low:
+                continue          # выражения и псевдонимы не разбираем
+            for raw in select_list.split(","):
+                col = raw.strip().strip('"').lower()
+                if re.fullmatch(r"[a-z_][a-z0-9_]*", col or ""):
+                    _note(table, col, where)
     return bad
 
 

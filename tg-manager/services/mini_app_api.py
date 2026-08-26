@@ -6894,8 +6894,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
         acc = await _safe_fetchrow(
             pool,
-            "SELECT id, phone, first_name, is_active, trust_score, created_at, "
-            "cooldown_until FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            # В tg_accounts колонка называется added_at; created_at нет, и запрос
+            # падал — _safe_fetchrow глотал ошибку, и карточка существующего
+            # аккаунта отвечала «Аккаунт не найден». Имя поля в ответе сохраняем.
+            "SELECT id, phone, first_name, is_active, trust_score, "
+            "added_at AS created_at, cooldown_until "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
             acc_id, uid,
         )
         if not acc:
@@ -15249,8 +15253,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         fmt = request.query.get("format", "csv")
         try:
             rows = await pool.fetch(
+                # Колонки err_cnt нет — экспорт падал всегда. Число неудачных
+                # попыток в этой схеме — retry_count.
                 """SELECT id, op_type, label, status, total_items, done_items,
-                          err_cnt, created_at, finished_at
+                          COALESCE(retry_count, 0) AS err_cnt, created_at, finished_at
                    FROM operation_queue WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 500""",
                 uid,
             )

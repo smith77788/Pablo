@@ -4606,7 +4606,10 @@ async def get_gift_transfer_report(
 async def get_operation_stats(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     """Получить полную статистику выполненной операции."""
     op = await pool.fetchrow(
-        "SELECT id, op_type, status, total_items, done_items, params, created_at, updated_at "
+        # updated_at в operation_queue нет — запрос падал, и статистика операции
+        # не открывалась вовсе. Ближайшее по смыслу — момент завершения.
+        "SELECT id, op_type, status, total_items, done_items, params, created_at, "
+        "finished_at, started_at "
         "FROM operation_queue WHERE id=$1 AND owner_id=$2",
         op_id,
         owner_id,
@@ -4632,10 +4635,14 @@ async def get_operation_stats(pool: asyncpg.Pool, owner_id: int, op_id: int) -> 
         "success": success_count,
         "errors": len(errors),
         "created_at": op["created_at"],
-        "updated_at": op["updated_at"],
-        "duration_seconds": (op["updated_at"] - op["created_at"]).total_seconds()
-        if op["updated_at"]
-        else 0,
+        # Имя поля в ответе оставляем прежним, значение берём из finished_at.
+        # Длительность считаем от СТАРТА, а не от постановки в очередь: операция
+        # может пролежать в очереди часы, и «выполнялась 4 часа» — это неправда.
+        "updated_at": op["finished_at"],
+        "duration_seconds": (
+            (op["finished_at"] - (op["started_at"] or op["created_at"])).total_seconds()
+            if op["finished_at"] else 0
+        ),
         "error_details": errors[:10],  # top 10 errors
     }
 

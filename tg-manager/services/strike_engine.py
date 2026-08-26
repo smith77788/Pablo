@@ -4438,7 +4438,9 @@ async def appeal_ban(
     # Получаем информацию об аккаунте
     try:
         acc_row = await pool.fetchrow(
-            "SELECT phone, email FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            # Колонки email в tg_accounts нет: запрос падал, и в теме письма не
+            # оказывалось номера аккаунта, за который подают апелляцию.
+            "SELECT phone FROM tg_accounts WHERE id=$1 AND owner_id=$2",
             account_id,
             owner_id,
         )

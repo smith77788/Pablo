@@ -252,7 +252,10 @@ class TestTrustEngine:
         from services.contacts_hub.trust_engine import compute_merge_confidence_improved
         pool = FakePool(
             fetch_row={"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-            fetch_rows=[{"source_type": "telegram"}, {"source_type": "phone"}],
+            # Источник контакта — АККАУНТ, через который его увидели
+            # (contact_sources.account_id). Колонки source_type в схеме нет: пока
+            # заглушка её изображала, тесты были зелёными на мёртвом запросе.
+            fetch_rows=[{"account_id": 11}, {"account_id": 22}],
             fetch_val=None
         )
         result = await compute_merge_confidence_improved(pool, 123, 1, 2)
@@ -269,7 +272,7 @@ class TestTrustEngine:
                 {"id": 1, "telegram_user_id": 1, "username": "alice", "first_name": "Alice", "last_name": "Smith", "phones": ["+111"], "company": "C1"},
                 {"id": 2, "telegram_user_id": 2, "username": "bob", "first_name": "Bob", "last_name": "Jones", "phones": ["+999"], "company": "C2"},
             ],
-            fetch_rows=[{"source_type": "telegram"}],
+            fetch_rows=[{"account_id": 11}],
             fetch_val=None
         )
         result = await compute_merge_confidence_improved(pool, 123, 1, 2)
@@ -289,9 +292,9 @@ class TestTrustEngine:
             {"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
             {"id": 2, "telegram_user_id": 123, "username": "ivan2", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
         ]
-        sources_map = {
-            1: [{"source_type": "telegram"}, {"source_type": "phone"}],
-            2: [{"source_type": "telegram"}, {"source_type": "phone"}],
+        sources_map = {   # см. выше: источник — account_id, а не source_type
+            1: [{"account_id": 11}, {"account_id": 22}],
+            2: [{"account_id": 11}, {"account_id": 22}],
         }
         class SmartPool(FakePool):
             def __init__(self, contacts, sources_map):

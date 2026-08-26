@@ -45,12 +45,21 @@ def _cancel_kb():
 
 
 async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.Record | None:
+    # api_id/api_hash — глобальная настройка приложения, в tg_accounts их нет;
+    # proxy_url живёт в user_proxies и приходит СОЕДИНЕНИЕМ по proxy_id. Запрос с
+    # этими колонками падал всегда, и «Проверка номеров» не работала ни разу.
+    # proxy_id и cf_relay_url нужны _make_client, чтобы выбрать транспорт: без них
+    # аккаунт с прокси ушёл бы напрямую (смена IP → AUTH_KEY_DUPLICATED).
     return await pool.fetchrow(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "AND session_str IS NOT NULL AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, a.owner_id, "
+        "a.proxy_id, a.cf_relay_url, p.proxy_url "
+        "FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+        "AND a.session_str IS NOT NULL "
+        "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+        "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1",
         owner_id,
     )
 

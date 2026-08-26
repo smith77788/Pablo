@@ -142,12 +142,16 @@ async def compute_merge_confidence_improved(pool, owner_id: int, contact_a_id: i
     b = dict(row_b)
     base = compute_merge_confidence(a, b)
 
+    # Колонки source_type в contact_sources нет — запрос падал, и вся оценка
+    # схожести контактов вместе с ним: экран объединения не открывался. Источник
+    # контакта в этой схеме — АККАУНТ, через который его увидели (account_id).
+    # Совпадение аккаунтов — тот же сигнал: одного человека видно с обеих сторон.
     sources_a = await pool.fetch(
-        'SELECT source_type FROM contact_sources WHERE contact_id=$1', contact_a_id)
+        'SELECT account_id FROM contact_sources WHERE contact_id=$1', contact_a_id)
     sources_b = await pool.fetch(
-        'SELECT source_type FROM contact_sources WHERE contact_id=$1', contact_b_id)
-    types_a = {s['source_type'] for s in sources_a}
-    types_b = {s['source_type'] for s in sources_b}
+        'SELECT account_id FROM contact_sources WHERE contact_id=$1', contact_b_id)
+    types_a = {s['account_id'] for s in sources_a if s['account_id'] is not None}
+    types_b = {s['account_id'] for s in sources_b if s['account_id'] is not None}
     overlap = types_a & types_b
     if len(overlap) >= 2:
         base['confidence'] = min(base['confidence'] + 0.1, 1.0)
@@ -182,9 +186,12 @@ async def detect_smart_duplicates_improved(pool, owner_id: int) -> list:
 
     source_map = {}
     for c in contacts:
+        # См. compute_merge_confidence_improved: source_type не существует,
+        # источник контакта — аккаунт, через который его увидели.
         sources = await pool.fetch(
-            'SELECT source_type FROM contact_sources WHERE contact_id=$1', c['id'])
-        source_map[c['id']] = {s['source_type'] for s in sources}
+            'SELECT account_id FROM contact_sources WHERE contact_id=$1', c['id'])
+        source_map[c['id']] = {s['account_id'] for s in sources
+                               if s['account_id'] is not None}
 
     duplicates = []
     seen_pairs = set()

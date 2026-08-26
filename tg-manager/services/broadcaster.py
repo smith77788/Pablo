@@ -803,8 +803,10 @@ async def get_broadcast_analytics(
         return {"ok": False, "error": "Broadcast not found"}
 
     delivery_log = await pool.fetch(
-        "SELECT user_id, sent_at FROM broadcast_delivery_log WHERE broadcast_id = $1 "
-        "ORDER BY sent_at LIMIT 1000",
+        # В broadcast_delivery_log колонка называется delivered_at; sent_at нет,
+        # и журнал доставки в отчёте падал вместе со всем отчётом.
+        "SELECT user_id, delivered_at AS sent_at FROM broadcast_delivery_log "
+        "WHERE broadcast_id = $1 ORDER BY delivered_at LIMIT 1000",
         broadcast_id,
     )
 
