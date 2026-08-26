@@ -93,7 +93,16 @@ async def execute_workflow(
         if not wf:
             return {"ok": False, "error": "Workflow not found"}
 
-        total_steps = len(wf.get("steps", [])) if wf.get("steps") else 0
+        # steps — jsonb; без кодека asyncpg отдаёт СТРОКУ, и len() считал бы
+        # символы: воркфлоу из двух шагов получал total_steps под сотню, а
+        # прогресс на экране — бессмыслицу.
+        _steps = wf.get("steps") or []
+        if isinstance(_steps, str):
+            try:
+                _steps = json.loads(_steps)
+            except Exception:
+                _steps = []
+        total_steps = len(_steps) if isinstance(_steps, list) else 0
         row = await pool.fetchrow(
             '''INSERT INTO workflow_runs
                (owner_id, workflow_id, status, input_data, current_step, total_steps, started_at)
@@ -125,6 +134,56 @@ async def get_workflow_status(
     except Exception as e:
         log.warning("get_workflow_status error: %s", e)
         return None
+
+
+async def _set_active(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                      active: bool) -> dict:
+    """Включить/выключить воркфлоу. Нет такого у владельца → LookupError.
+
+    Пауза — это `is_active`, ровно как в PATCH /workflows/{id}: два способа
+    нажать одну кнопку не должны означать разное.
+    """
+    res = await pool.execute(
+        "UPDATE workflow_definitions SET is_active=$1, updated_at=NOW() "
+        "WHERE id=$2 AND owner_id=$3", active, workflow_id, owner_id)
+    # asyncpg возвращает тег команды вида 'UPDATE 0' — ноль строк значит, что
+    # воркфлоу либо не существует, либо принадлежит другому владельцу. Разницу
+    # НЕ раскрываем: иначе по коду ответа можно перебирать чужие id.
+    if isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0":
+        raise LookupError("Воркфлоу не найден")
+    return {"active": active}
+
+
+async def pause_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -> dict:
+    """Поставить воркфлоу на паузу (POST /workflow/{id}/pause)."""
+    return await _set_active(pool, owner_id, workflow_id, False)
+
+
+async def resume_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -> dict:
+    """Снять воркфлоу с паузы (POST /workflow/{id}/resume)."""
+    return await _set_active(pool, owner_id, workflow_id, True)
+
+
+async def delete_workflow(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -> bool:
+    """Удалить воркфлоу. False — не найден у этого владельца (обработчик даст 404).
+
+    Незавершённые прогоны отменяем: строки workflow_runs ссылаются на
+    определение внешним ключом, и без этого удаление упало бы, а с ON DELETE
+    оставило бы «выполняющиеся» прогоны несуществующего воркфлоу.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE workflow_runs SET status='cancelled', finished_at=NOW() "
+                "WHERE workflow_id=$1 AND owner_id=$2 "
+                "AND status IN ('pending','running')", workflow_id, owner_id)
+            await conn.execute(
+                "UPDATE workflow_runs SET workflow_id=NULL "
+                "WHERE workflow_id=$1 AND owner_id=$2", workflow_id, owner_id)
+            res = await conn.execute(
+                "DELETE FROM workflow_definitions WHERE id=$1 AND owner_id=$2",
+                workflow_id, owner_id)
+    return not (isinstance(res, str) and res.rsplit(" ", 1)[-1] == "0")
 
 
 async def cancel_workflow(

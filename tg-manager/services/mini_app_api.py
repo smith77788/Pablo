@@ -17715,8 +17715,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err(f"Шаг {i+1}: action обязателен", 400)
         try:
             from services.workflow_engine import create_workflow
-            wf_id = await create_workflow(pool, uid, name, steps)
-            return _json_resp({"ok": True, "workflow_id": wf_id})
+            # ИМЕНОВАННЫЙ аргумент: позиционно steps попадал в description, и
+            # воркфлоу создавался пустым — шаги, которые только что проверили,
+            # молча терялись.
+            res = await create_workflow(pool, uid, name, steps=steps)
+            if not res.get("ok"):
+                return _err(str(res.get("error") or "Не удалось создать воркфлоу"), 500)
+            return _json_resp({"ok": True, "workflow_id": res.get("id")})
         except ValueError as e:
             return _err(str(e), 400)
         except Exception as exc:
