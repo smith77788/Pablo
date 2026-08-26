@@ -191,14 +191,81 @@ def _session_key(session_string: str, device: dict | None) -> str:
     """Стабильный ключ подключения по САМОЙ сессии (её и видит Telegram).
 
     Хеш session_string сериализует одну и ту же сессию во всех подсистемах.
-    Без сессии (логин по номеру) сериализовать нечего — пустой ключ = без мьютекса.
+    Ключ считается по РАСШИФРОВАННОЙ строке (decrypt_token — passthrough для
+    plaintext), чтобы шифротекст из БД и уже расшифрованная строка давали ОДИН
+    ключ: иначе connect_client (шифр) и raw-коннектор в _make_client (plaintext)
+    получили бы РАЗНЫЕ ключи и не исключали бы друг друга. Без сессии (логин по
+    номеру) сериализовать нечего — пустой ключ = без мьютекса.
     """
     if session_string:
+        try:
+            from services.token_vault import decrypt_token
+            session_string = decrypt_token(session_string) or session_string
+        except Exception:
+            pass
         return "s:" + hashlib.sha256(session_string.encode("utf-8", "ignore")).hexdigest()[:32]
     d = device or {}
     if d.get("id"):
         return "a:" + str(d["id"])
     return ""
+
+
+def _wrap_client_session_mutex(client, session_key: str):
+    """Обернуть connect/disconnect клиента процессным мьютексом сессии.
+
+    Для RAW-коннекторов (десятки функций делают _make_client(...).connect() мимо
+    connect_client): гарантирует, что одну сессию в момент держит ровно один живой
+    коннект — иначе фоновый прогрев/монитор/консоль и операция коннектят её с двух
+    IP → AUTH_KEY_DUPLICATED навсегда. connect_client управляет мьютексом сам и
+    сюда не попадает (_mutex_managed=True).
+
+    connect: захватываем мьютекс (budget 0 — не ждём); занято → SessionBusyError
+    (наследник ConnectionError: raw-коннектор трактует как сетевой сбой и
+    отступает, а не создаёт второй коннект). disconnect: освобождаем.
+    """
+    if client is None or not session_key:
+        return client
+    _orig_connect = getattr(client, "connect", None)
+    _orig_disconnect = getattr(client, "disconnect", None)
+    if _orig_connect is None:
+        return client
+    _st = {"held": False}
+
+    async def _connect(*a, **k):
+        if not _st["held"]:
+            if not _try_acquire_session(session_key):
+                raise SessionBusyError(
+                    "сессия занята другим подключением — повтор позже")
+            _st["held"] = True
+        try:
+            r = _orig_connect(*a, **k)
+            if inspect.isawaitable(r):
+                r = await r
+            return r
+        except BaseException:
+            if _st["held"]:
+                _st["held"] = False
+                _release_session(session_key)
+            raise
+
+    async def _disconnect(*a, **k):
+        try:
+            if _orig_disconnect is not None:
+                r = _orig_disconnect(*a, **k)
+                if inspect.isawaitable(r):
+                    r = await r
+                return r
+        finally:
+            if _st["held"]:
+                _st["held"] = False
+                _release_session(session_key)
+
+    try:
+        client.connect = _connect  # type: ignore[assignment]
+        client.disconnect = _disconnect  # type: ignore[assignment]
+    except Exception:
+        pass
+    return client
 
 
 def _try_acquire_session(key: str) -> bool:
@@ -966,7 +1033,8 @@ def generate_device_fingerprint(
 
 
 def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False,
-                 _no_pool: bool = False, _force_direct: bool = False):
+                 _no_pool: bool = False, _force_direct: bool = False,
+                 _mutex_managed: bool = False):
     """Создать TelegramClient с правильным fingerprint и транспортом.
 
     _no_pool=True — НЕ брать прокси из free-pool для безпроксёвого аккаунта, а идти
@@ -1127,6 +1195,16 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         _client._infragram_transport = _transport
     except Exception:
         pass
+    # RAW-коннекторы (десятки функций _make_client(...).connect() мимо
+    # connect_client) получают мьютекс сессии автоматически: одну сессию в момент
+    # держит ровно один живой коннект. connect_client управляет мьютексом сам
+    # (_mutex_managed=True) — его клиенты здесь не оборачиваются во избежание
+    # двойного захвата. session_string тут уже расшифрован — _session_key
+    # нормализует его к тому же ключу, что и у connect_client (шифр).
+    if not _mutex_managed:
+        _skey = _session_key(session_string, device)
+        if _skey:
+            _wrap_client_session_mutex(_client, _skey)
     return _client
 
 
@@ -1195,7 +1273,7 @@ async def connect_client(session_string: str = "", device: dict | None = None,
     try:
       for _attempt in range(len(_backoff) + 1):
         client = _make_client(session_string, device, low_risk=low_risk,
-                              _force_direct=_force_direct_retry)
+                              _force_direct=_force_direct_retry, _mutex_managed=True)
         try:
             await _connect_and_track(client, device, action_type)
             _bind_session_release(client, _skey)
@@ -1244,7 +1322,7 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             # _force_direct: минуем релей/IPv6/пул — идём стабильным host-IP,
             # иначе fallback снова уткнётся в тот же нерабочий релей.
             client = _make_client(session_string, device, low_risk=low_risk,
-                                  _no_pool=True, _force_direct=True)
+                                  _no_pool=True, _force_direct=True, _mutex_managed=True)
             await _connect_and_track(client, device, action_type)
             _bind_session_release(client, _skey)
             return client
@@ -2664,7 +2742,7 @@ async def check_account_status_full(
             "display_name": "",
             "session_busy": True,
         }
-    client = _make_client(session_string, _acc)
+    client = _make_client(session_string, _acc, _mutex_managed=True)  # мьютекс держим сами (выше)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)

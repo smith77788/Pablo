@@ -44,7 +44,7 @@ class _FakeClient:
 def _install(monkeypatch, policy, first_transport, direct_ok=True):
     calls = {"make_no_pool": [], "connect": 0}
 
-    def fake_make(session, device=None, low_risk=False, _no_pool=False, _force_direct=False):
+    def fake_make(session, device=None, low_risk=False, _no_pool=False, _force_direct=False, _mutex_managed=False):
         calls["make_no_pool"].append(_no_pool)
         # _force_direct/_no_pool → реально прямой транспорт (минуя релей/пул/IPv6).
         return _FakeClient("direct" if (_no_pool or _force_direct) else first_transport)

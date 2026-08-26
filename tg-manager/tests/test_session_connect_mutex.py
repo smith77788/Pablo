@@ -110,3 +110,50 @@ def test_busy_error_is_connection_error():
     # SessionBusyError — наследник ConnectionError: caller лечит как сеть (кулдаун+
     # повтор), НЕ как смерть аккаунта.
     assert issubclass(am.SessionBusyError, ConnectionError)
+
+
+def test_raw_make_client_connect_holds_mutex(monkeypatch):
+    # Централизованная защита: RAW-коннектор (_make_client(...).connect() мимо
+    # connect_client) тоже держит мьютекс — второй коннект той же сессии не проходит,
+    # пока первый не отключится. Закрывает десятки прямых callsite разом.
+    monkeypatch.setattr(am, "_IPV6_SUBNET", "")
+    monkeypatch.setattr(am, "CF_RELAY_URL", "")
+    dev = {"id": 1, "device_model": "x", "system_version": "x", "app_version": "x",
+           "lang_code": "en", "system_lang_code": "en", "proxy_policy": "allow_direct"}
+    sess = "RAWSESSION_" + "A" * 120
+
+    async def scenario():
+        c1 = am._make_client(sess, dev)
+        await c1.connect()                         # захватывает мьютекс сессии
+        c2 = am._make_client(sess, dev)
+        with pytest.raises(am.SessionBusyError):   # та же сессия занята → не коннектим
+            await c2.connect()
+        await c1.disconnect()                      # освобождает
+        c3 = am._make_client(sess, dev)
+        await c3.connect()                         # теперь свободно
+        await c3.disconnect()
+
+    _run(scenario())
+
+
+def test_connect_client_client_not_double_wrapped(monkeypatch):
+    # connect_client управляет мьютексом сам → его клиенты идут с _mutex_managed=True
+    # и НЕ оборачиваются повторно (иначе двойной захват → self-SessionBusyError).
+    monkeypatch.setattr(am, "_make_client", lambda *a, **k: _FakeClient())
+
+    seen = {}
+    _orig = am._make_client
+
+    def _spy(*a, **k):
+        seen["mutex_managed"] = k.get("_mutex_managed")
+        return _FakeClient()
+
+    monkeypatch.setattr(am, "_make_client", _spy)
+
+    async def ok(client, acc, action_type):
+        return
+
+    monkeypatch.setattr(am, "_connect_and_track", ok)
+    c = _run(am.connect_client("SESSX", {"id": 9}))
+    assert isinstance(c, _FakeClient)
+    assert seen.get("mutex_managed") is True
