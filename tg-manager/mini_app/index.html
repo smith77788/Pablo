@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Infragram</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!-- Telegram SDK грузим СВОЕЙ копией (тот же origin, что и приложение): у многих
+     операторов telegram.org/js/* заблокирован провайдером, хотя сам Telegram
+     работает — внешний скрипт не открывался и приложение висело пустым («не
+     грузится»). Локальная копия доступна всегда, раз страница уже пришла с нашего
+     сервера. Фолбэк на официальный CDN — в ранней сетке безопасности ниже. -->
+<script src="telegram-web-app.js"></script>
 <script>
 /* РАННЯЯ СЕТКА БЕЗОПАСНОСТИ — ставится ДО основного скрипта.
    Приложение целиком лежало в одном 766-килобайтном <script>, который начинался
@@ -51,13 +56,41 @@
          (ev && (ev.message || ev.error)) ? String(ev.message || ev.error) : 'Неизвестная ошибка');
   });
 
-  // Главный случай: SDK Telegram не загрузился.
+  // Главный случай: SDK Telegram не загрузился (локальная копия недоступна —
+  // например, старый деплой без файла). Прежде чем сдаться, ОДИН раз пробуем
+  // официальный CDN telegram.org и, если получилось, перезагружаем страницу —
+  // тогда блокирующий тег в <head> возьмёт SDK и приложение поднимется само.
+  // Счётчик в sessionStorage не даёт зациклиться, если оба источника недоступны.
   if (!(window.Telegram && window.Telegram.WebApp)) {
+    // Локальная копия SDK не открылась (обычно старый деплой без файла). Сразу
+    // объясняем пользователю — экран не должен быть пустым.
     show('Не загрузился Telegram SDK',
-         'Скрипт telegram.org/js/telegram-web-app.js не открылся — обычно это сеть, ' +
+         'Скрипт telegram-web-app.js не открылся — обычно это сеть, ' +
          'VPN, корпоративный прокси или блокировщик.\n\n' +
          'Что помогает: закрыть и открыть приложение заново, переключить сеть ' +
          '(Wi-Fi ↔ мобильный интернет) или открыть его на телефоне.');
+    // Параллельно ОДИН раз пробуем официальный CDN telegram.org; если открылся —
+    // перезагружаемся (блокирующий тег в <head> подхватит SDK и приложение
+    // поднимется). Счётчик в sessionStorage не даёт зациклиться, если оба
+    // источника недоступны (провайдер режет telegram.org). Весь блок в try/catch:
+    // в песочнице/без DOM-API он просто не выполняется, сообщение уже показано.
+    try {
+      var RK = '__sdk_cdn_try', tries = 0;
+      try { tries = parseInt(sessionStorage.getItem(RK) || '0', 10) || 0; } catch (_) {}
+      if (tries < 1) {
+        var sc = document.createElement('script');
+        sc.src = 'https://telegram.org/js/telegram-web-app.js?r=' + Date.now();
+        sc.onload = function () {
+          try { sessionStorage.setItem(RK, String(tries + 1)); } catch (_) {}
+          location.reload();
+        };
+        (document.head || document.documentElement).appendChild(sc);
+      } else {
+        try { sessionStorage.removeItem(RK); } catch (_) {}
+      }
+    } catch (_) { /* окружение без DOM-API — без авто-ретрая, но с сообщением */ }
+  } else {
+    try { sessionStorage.removeItem('__sdk_cdn_try'); } catch (_) {}  // взлетели — сброс
   }
 })();
 </script>
