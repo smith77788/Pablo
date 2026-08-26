@@ -2857,9 +2857,16 @@ async def check_account_status_full(
                 "НЕ деактивируем) — acc=%s", (_acc or {}).get("id"))
             return {
                 "status": "cooldown",
-                "reason": "Конфликт: сессия зашла с двух IP одновременно "
-                          "(AUTH_KEY_DUPLICATED). Аккаунт не деактивирован. Если "
-                          "повторяется на каждой проверке — сессию нужно перезалить.",
+                "reason": "Сессия этого аккаунта прямо сейчас используется с "
+                          "ДРУГОГО IP (AUTH_KEY_DUPLICATED). Аккаунт не "
+                          "деактивирован. Чаще всего это внешняя копия сессии: "
+                          "она осталась открытой на телефоне/в Telegram Desktop "
+                          "владельца, у прежнего хозяина аккаунта или в другой "
+                          "панели. Что делать: в самом аккаунте закрыть чужие "
+                          "сеансы (Настройки → Устройства → Завершить все другие "
+                          "сеансы) и перезалить сессию сюда. Если аккаунту "
+                          "назначен прокси — проверьте, что он живой: подключение "
+                          "с другого адреса даёт ту же ошибку.",
                 "display_name": "",
                 "session_conflict": True,
             }
@@ -2947,10 +2954,16 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
     # Fetch full account record including proxy info to avoid AUTH_KEY collision.
     # НЕ трогаем аккаунты, занятые активной операцией (in_operation): параллельный
     # коннект той же сессии проверкой здоровья и операцией = AUTH_KEY_DUPLICATED.
+    # cf_relay_url ОБЯЗАТЕЛЕН в выборке. Транспорт аккаунта выбирает _make_client
+    # по полям этого словаря; если релея тут нет, монитор пойдёт НАПРЯМУЮ с
+    # host-IP, тогда как операции того же аккаунта идут через релей. Одна сессия
+    # с двух адресов — это AUTH_KEY_DUPLICATED, то есть проверка здоровья сама
+    # создаёт ту поломку, которую ищет.
     accounts = await pool.fetch(
         """SELECT a.id, a.owner_id, a.session_str, a.phone, a.acc_status,
                   a.device_model, a.system_version, a.app_version,
-                  a.lang_code, a.system_lang_code,
+                  a.lang_code, a.system_lang_code, a.cf_relay_url,
+                  a.session_conflict_at,
                   a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
@@ -2986,7 +2999,36 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
             )
             new_status = result["status"]
             old_status = acc["acc_status"] or "active"
-            
+
+            # ── РАЗОВЫЙ конфликт сессии не паркует аккаунт ───────────────────
+            # AUTH_KEY_DUPLICATED значит «этот же ключ прямо сейчас используется
+            # с другого IP». Причина бывает внешняя и мимолётная: сессия ещё
+            # открыта на телефоне владельца, у прежнего хозяина, в соседней
+            # панели. Ставить за это cooldown с первого раза нельзя: один проход
+            # монитора так пометил ВЕСЬ свежий флот из 39 аккаунтов, а cooldown
+            # исключает аккаунт из прогрева и иммунитета. Первый конфликт
+            # запоминаем, статус не трогаем; парковка — только если он
+            # повторился, то есть устойчив.
+            if result.get("session_conflict"):
+                _seen_before = acc.get("session_conflict_at") is not None
+                await pool.execute(
+                    "UPDATE tg_accounts SET session_conflict_at = NOW() WHERE id=$1",
+                    acc["id"])
+                if not _seen_before:
+                    log.warning(
+                        "session_health: acc=%d конфликт сессии замечен ВПЕРВЫЕ — "
+                        "статус не меняем, проверим на следующем проходе", acc["id"])
+                    checked += 1
+                    continue
+                log.warning(
+                    "session_health: acc=%d конфликт сессии ПОВТОРЯЕТСЯ — "
+                    "ставим cooldown", acc["id"])
+            elif acc.get("session_conflict_at") is not None:
+                # Проверка прошла чисто — снимаем отметку, счёт начинается заново.
+                await pool.execute(
+                    "UPDATE tg_accounts SET session_conflict_at = NULL WHERE id=$1",
+                    acc["id"])
+
             # Update status if changed
             if new_status != old_status:
                 # set_status обогащает событие причиной; status_reason на самой

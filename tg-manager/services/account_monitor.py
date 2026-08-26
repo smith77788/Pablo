@@ -242,7 +242,12 @@ async def _heal_expired_cooldowns(pool: asyncpg.Pool) -> None:
                SET acc_status='active', status_reason=NULL
                WHERE acc_status='cooldown'
                  AND is_active=TRUE
-                 AND (cooldown_until IS NULL OR cooldown_until <= NOW())""",
+                 AND (cooldown_until IS NULL OR cooldown_until <= NOW())
+                 -- Кулдаун за УСТОЙЧИВЫЙ конфликт сессии не снимаем: иначе
+                 -- самолечение и проверка здоровья начнут перебрасывать статус
+                 -- туда-сюда, и оператор так и не увидит, что сессию надо
+                 -- перезалить. Отметку снимет первая же чистая проверка.
+                 AND session_conflict_at IS NULL""",
         )
         n = int(str(res).rsplit(" ", 1)[-1]) if str(res).rsplit(" ", 1)[-1].isdigit() else 0
         if n:
