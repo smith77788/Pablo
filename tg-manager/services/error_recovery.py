@@ -7,6 +7,12 @@ circuit breaker живёт в `op_worker._circuit_breaker_state`, повторы
 в `operation_bus` (`max_retries` в OP_REGISTRY). Прежде чем подключать, решите,
 какой из двух механизмов остаётся единственным: два контура повторов над одной
 очередью дадут двойной retry.
+
+Запросы трёх действий восстановления были написаны по ВООБРАЖАЕМОЙ схеме
+(таблица `operations`, колонки `needs_reauth`, `fail_count`, `updated_at` —
+ничего этого в базе нет) и исправлены на настоящую. Это ровно та ловушка, ради
+которой существует маркер выше: код выглядел рабочим, а выполниться не мог.
+Поведение зафиксировано в tests/test_error_recovery_real_schema_postgres.py.
 """
 
 from __future__ import annotations
