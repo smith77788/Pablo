@@ -5,6 +5,62 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Infragram</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+/* РАННЯЯ СЕТКА БЕЗОПАСНОСТИ — ставится ДО основного скрипта.
+   Приложение целиком лежало в одном 766-килобайтном <script>, который начинался
+   строкой `const tg = window.Telegram.WebApp;` без всякой защиты. Если внешний
+   SDK Telegram не загрузился — заблокирован, не открылся, отвалилась сеть, — то
+   `window.Telegram` не существует, строка бросает TypeError, и ВЕСЬ скрипт
+   умирает на третьей строке. Ни одной функции, ни одного запроса к API: страница
+   остаётся в стартовых скелетонах навсегда, и наружу это выглядит как «ничего не
+   грузится». Ошибка при этом видна только в консоли, которой у пользователя нет.
+   Здесь мы её показываем на экране и объясняем, что делать. */
+(function () {
+  var pending = null;
+  function show(title, detail) {
+    try {
+      var box = document.getElementById('fatal-boot');
+      if (!box) {
+        // Скрипт стоит в <head>: разметка ещё не разобрана, элемента нет.
+        // Запоминаем и показываем, как только тело страницы появится.
+        pending = [title, detail];
+        return;
+      }
+      box.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0c1016;' +
+        'color:#dce4ee;font:14px/1.55 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;' +
+        'padding:28px 22px;overflow:auto;display:block';
+      box.innerHTML =
+        '<div style="font-size:34px;margin-bottom:14px">⚠️</div>' +
+        '<div style="font-size:17px;font-weight:700;margin-bottom:10px">' + title + '</div>' +
+        '<div style="color:#7a8ba1;margin-bottom:18px;white-space:pre-wrap">' + detail + '</div>' +
+        '<button onclick="location.reload()" style="background:#2dd4bf;color:#06231f;' +
+        'border:0;border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;' +
+        'cursor:pointer">↻ Перезагрузить</button>';
+    } catch (_) { /* показать не смогли — хотя бы не мешаем */ }
+  }
+  window.__fatalBoot = show;
+  document.addEventListener('DOMContentLoaded', function () {
+    if (pending) { var p = pending; pending = null; show(p[0], p[1]); }
+  });
+
+  // Любая необработанная ошибка ДО того, как приложение встало на ноги, обязана
+  // быть видимой. Дальше основной скрипт ставит свои обработчики.
+  window.addEventListener('error', function (ev) {
+    if (window.__appBooted) return;      // приложение уже живо — не мешаем
+    show('Приложение не смогло запуститься',
+         (ev && (ev.message || ev.error)) ? String(ev.message || ev.error) : 'Неизвестная ошибка');
+  });
+
+  // Главный случай: SDK Telegram не загрузился.
+  if (!(window.Telegram && window.Telegram.WebApp)) {
+    show('Не загрузился Telegram SDK',
+         'Скрипт telegram.org/js/telegram-web-app.js не открылся — обычно это сеть, ' +
+         'VPN, корпоративный прокси или блокировщик.\n\n' +
+         'Что помогает: закрыть и открыть приложение заново, переключить сеть ' +
+         '(Wi-Fi ↔ мобильный интернет) или открыть его на телефоне.');
+  }
+})();
+</script>
 <style>
 :root{
   /* Мягче для глаз: фон чуть приподнят от чёрного, текст не чисто-белый
@@ -557,6 +613,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </style>
 </head>
 <body>
+<!-- Экран фатальной ошибки старта. Лежит в разметке СТАТИЧЕСКИ: если скрипт
+     упадёт на первых строках, создавать элементы уже некому. -->
+<div id="fatal-boot" style="display:none"></div>
 <!-- ══════════════════════ БОКОВАЯ НАВИГАЦИЯ ══════════════════════ -->
 <div id="navOverlay" onclick="closeDrawer()"></div>
 <nav id="navDrawer">
@@ -6132,8 +6191,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <script>
 'use strict';
-const tg = window.Telegram.WebApp;
-tg.ready(); tg.expand();
+// Заглушка вместо падения: без SDK приложение всё равно не сможет
+// авторизоваться (initData даёт только Telegram), но оно обязано ДОЙТИ до
+// показа внятного сообщения, а не умереть на этой строке вместе со всеми
+// остальными 766 килобайтами кода. Экран с объяснением уже показан ранним
+// обработчиком в <head>.
+const tg = (window.Telegram && window.Telegram.WebApp) || {
+  initData: '', initDataUnsafe: {},
+  ready() {}, expand() {}, close() {},
+  HapticFeedback: { impactOccurred() {}, notificationOccurred() {}, selectionChanged() {} },
+  MainButton: { show() {}, hide() {}, setText() {}, onClick() {} },
+  BackButton: { show() {}, hide() {}, onClick() {} },
+  openTelegramLink() {}, openLink() {}, showAlert() {}, showConfirm() {},
+};
+try { tg.ready(); tg.expand(); } catch (_) {}
 // Нативная кнопка «Назад» Telegram управляет навигацией по STACK
 try { tg.BackButton?.onClick(() => back()); } catch(_) {}
 
@@ -6178,7 +6249,10 @@ function forceRefresh() {
   if (u) document.getElementById('hUser').textContent =
     [u.first_name, u.last_name].filter(Boolean).join(' ') || ('@'+(u.username||'User'));
   try {
-    const r = await fetch('/api/miniapp/auth', {
+    // ВАЖНО: с таймаутом. Если этот запрос повиснет, boot() не дойдёт ни до
+    // loadHome(), ни до catch — экран останется в стартовых скелетонах, и
+    // пользователь увидит «вечную загрузку» без единого слова о причине.
+    const r = await fetchT('/api/miniapp/auth', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({initData: tg.initData || ''}),
     });
@@ -6190,6 +6264,8 @@ function forceRefresh() {
       if(cfg.period_discounts) window._periodDiscounts = cfg.period_discounts;
       rebuildPlanPrices();
     }).catch(()=>{});
+    // Приложение встало на ноги: ранний обработчик в <head> больше не нужен.
+    window.__appBooted = true;
     loadHome();
     openSSE();
     loadSub();
@@ -6206,6 +6282,28 @@ function forceRefresh() {
   }
 })();
 
+// ── Запрос с ТАЙМАУТОМ ─────────────────────────────────
+// Без него зависший бэкенд оставляет экран в скелетонах НАВСЕГДА: ни данных, ни
+// ошибки, ни объяснения. Снаружи это «приложение не загружается», и понять, что
+// именно сломалось, нельзя — ни пользователю, ни разработчику. Лучше честный
+// отказ через полминуты, чем вечное ожидание.
+const FETCH_TIMEOUT_MS = 30000;
+async function fetchT(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ac.signal });
+  } catch (e) {
+    // AbortError отличаем от обрыва сети: причины разные, и чинят их по-разному.
+    if (e && e.name === 'AbortError') {
+      throw new Error('Сервер не отвечает (' + Math.round(ms / 1000) + 'с). Попробуйте позже.');
+    }
+    throw new Error('Нет соединения с сервером');
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // ── Error helper ───────────────────────────────────────
 function errHtml(msg, retryFn) {
   const retry = retryFn ? `<button class="err-retry" onclick="${retryFn}">↺ Повторить</button>` : '';
@@ -6218,7 +6316,7 @@ async function _reAuth() {
   if (_reAuthPending) return;
   _reAuthPending = true;
   try {
-    const r = await fetch('/api/miniapp/auth', {
+    const r = await fetchT('/api/miniapp/auth', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({initData: tg.initData || ''}),
     });
@@ -6235,17 +6333,17 @@ async function api(path, opts={}) {
     ? {'Authorization':'Bearer '+TK, ...(opts.headers||{})}
     : {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})};
   try {
-    r = await fetch(path, { ...opts, headers: _hdr() });
-  } catch(_) {
-    throw new Error('Нет соединения с сервером');
+    r = await fetchT(path, { ...opts, headers: _hdr() });
+  } catch(e) {
+    throw new Error((e && e.message) || 'Нет соединения с сервером');
   }
   if (r.status === 401) {
     // Auto re-auth: token may have expired (2h lifetime)
     await _reAuth();
     // Retry once with new token
     try {
-      r = await fetch(path, { ...opts, headers: _hdr() });
-    } catch(_) { throw new Error('Нет соединения с сервером'); }
+      r = await fetchT(path, { ...opts, headers: _hdr() });
+    } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
     if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
   }
   if (!r.ok) {
