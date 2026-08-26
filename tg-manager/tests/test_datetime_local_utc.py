@@ -54,14 +54,19 @@ def test_broadcast_schedule_sends_utc():
 
 def test_broadcast_schedule_prefill_is_local():
     # предзаполнение поля — в ЛОКАЛЬНОМ времени, иначе дефолт съезжает
+    # Проверяем сами присваивания в поле, а не срез фиксированной длины вокруг
+    # его id: окно сдвигается вместе с кодом, и отрицательная проверка ниже
+    # («UTC сюда не кладём») молча выключилась бы, ничего не сообщив.
     html = _html()
-    i = html.find("'bs-datetime'")
-    assert i != -1
-    seg = html[max(0, i - 400): i + 200]
-    assert "toLocalInput(" in seg, "дефолт datetime-local должен ставиться toLocalInput"
-    assert "toISOString().slice(0,16)" not in seg, (
-        "toISOString() кладёт UTC в поле, показывающее локальное время"
-    )
+    assigns = re.findall(
+        r"document\.getElementById\('bs-datetime'\)\.value\s*=\s*([^;\n]+)", html)
+    assert assigns, "значение поля bs-datetime нигде не задаётся"
+    for expr in assigns:
+        assert "toLocalInput(" in expr, (
+            f"дефолт datetime-local должен ставиться toLocalInput, а не {expr.strip()!r}")
+        assert "toISOString" not in expr, (
+            "toISOString() кладёт UTC в поле, показывающее локальное время: "
+            f"{expr.strip()!r}")
 
 
 def test_crm_reminder_sends_utc():

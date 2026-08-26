@@ -42,12 +42,17 @@ async def test_overlap_needs_two_channels():
 def test_endpoint_reads_ecosystem_members_not_dead_table():
     """ecosystem_overlaps должен читать членов из ecosystem_members, а не из
     мёртвой ecosystem_channels — иначе overlap всегда пустой."""
+    import ast
     api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
     src = api.read_text(encoding="utf-8")
-    # локализуем регион эндпоинта overlaps
-    idx = src.find("async def ecosystem_overlaps")
-    assert idx != -1
-    region = src[idx: idx + 1500]
+    # Границы функции по AST, а не срез фиксированной длины: у отрицательного
+    # утверждения ниже сдвинувшееся окно означает «проверка молча выключилась».
+    region = None
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name == "ecosystem_overlaps":
+            region = "\n".join(src.split("\n")[node.lineno - 1:node.end_lineno])
+    assert region, "обработчик ecosystem_overlaps не найден"
     assert "ecosystem_members" in region
     assert "object_type='channel'" in region
     assert "FROM ecosystem_channels" not in region

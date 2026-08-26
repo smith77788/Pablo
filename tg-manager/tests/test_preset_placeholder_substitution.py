@@ -90,9 +90,16 @@ def test_both_handlers_substitute_before_apply():
     """
     root = pathlib.Path(__file__).resolve().parents[1]
 
+    import ast
     bots = (root / "bot" / "handlers" / "bots.py").read_text(encoding="utf-8")
-    start = bots.index("async def cb_pset_apply")
-    body = bots[start:start + 2500]
+    # Границы функции по AST: срез фиксированной длины сдвигается вместе с кодом,
+    # и отрицательная проверка ниже («сырой template не пишем») молча выключается.
+    body = None
+    for node in ast.walk(ast.parse(bots)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name == "cb_pset_apply":
+            body = "\n".join(bots.split("\n")[node.lineno - 1:node.end_lineno])
+    assert body, "cb_pset_apply не найден"
     assert "render_template" in body and "default_subs" in body, (
         "cb_pset_apply должен подставлять плейсхолдеры (render_template/default_subs)"
     )

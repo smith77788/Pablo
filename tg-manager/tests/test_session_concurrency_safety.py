@@ -19,6 +19,21 @@ import services.op_worker as ow
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+def _func_src(rel: str, name: str) -> str:
+    """Тело функции по границам AST, а не срез фиксированной длины.
+
+    Окно `src[i:i+3000]` молча перестаёт проверять, как только код сдвинулся: у
+    отрицательного утверждения («такого вызова тут больше нет») пустое окно
+    делает тест зелёным навсегда. Границы AST этого не допускают.
+    """
+    import ast
+    src = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(src.split("\n")[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"{name} не найдена в {rel}")
+
+
 
 @pytest.fixture(autouse=True)
 def _isolate():
@@ -292,16 +307,12 @@ def test_single_account_prologue_is_shared_not_copied():
 def test_release_is_scoped_to_own_lease():
     """Освобождение обязано скоупиться владельцем аренды: иначе реплика снимает
     защиту с живой сессии соседа."""
-    src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
-    i = src.index("async def _db_release(")
-    body = src[i:i + 900]
+    body = _func_src("services/op_worker.py", "_db_release")
     assert "op_lease_owner = $2" in body
 
 
 def test_strike_claims_atomically_and_works_only_on_claimed():
-    src = open(os.path.join(ROOT, "services", "strike_engine.py"), encoding="utf-8").read()
-    i = src.index("async def staggered_strike")
-    body = src[i:i + 3000]
+    body = _func_src("services/strike_engine.py", "staggered_strike")
     assert "try_claim_accounts" in body
     # больше не безусловный mark всех аккаунтов плана
     assert "await _opw.mark_accounts_in_use(_claimed_ids)" not in body
