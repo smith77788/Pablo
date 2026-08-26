@@ -103,11 +103,20 @@ def test_web_role_starts_no_background_loops():
 
 def test_worker_role_does_not_poll_telegram():
     """Два процесса на одном getUpdates отбирают апдейты друг у друга: Telegram
-    отдаёт апдейт ровно одному, и бот начал бы отвечать через раз."""
+    отдаёт апдейт ровно одному, и бот начал бы отвечать через раз.
+
+    Проверяем ПОРЯДОК ветвей, а не окно фиксированной длины: окно уже один раз
+    промахнулось, когда поллинг обернули в цикл перезапуска.
+    """
     src = _src("main.py")
-    i = src.index("await dp.start_polling(")
-    head = src[max(0, i - 900):i]
-    assert '_ROLE == "worker"' in head, "воркер не исключён из поллинга"
+    i_worker = src.index('_ROLE == "worker"')
+    i_poll = src.index("await dp.start_polling(")
+    assert i_worker < i_poll, (
+        "ветка воркера обязана стоять ДО поллинга — иначе воркер тоже начнёт "
+        "забирать апдейты и бот будет отвечать через раз")
+    between = src[i_worker:i_poll]
+    assert "else:" in between, (
+        "поллинг должен быть в ветке else относительно роли worker")
 
 
 def test_role_gate_is_in_one_place_not_scattered():

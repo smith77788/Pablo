@@ -164,6 +164,23 @@ class SchemaMigrationError(RuntimeError):
     """Критичная миграция не применилась — стартовать на такой схеме нельзя."""
 
 
+# Сколько раз повторить файл, который не смог взять блокировку. Пауза растёт
+# (2с, 4с, 6с) — за это время старый контейнер деплоя обычно уже завершается.
+_LOCK_RETRIES = 3
+
+
+def _is_lock_timeout(err: str | None) -> bool:
+    """Ошибка «не дождались блокировки», а не ошибка самой схемы.
+
+    Такую миграцию имеет смысл повторить: SQL корректен, просто таблица была
+    занята. Ошибку синтаксиса или несуществующую колонку повторять бессмысленно.
+    """
+    if not err:
+        return False
+    low = err.lower()
+    return "lock timeout" in low or "canceling statement due to lock timeout" in low
+
+
 # После миграций этих таблиц обязано существовать: без них платформа не работает
 # (очередь операций, аудит, журнал), и «тихий» старт означает молча теряемые
 # события вместо честного падения.
@@ -189,6 +206,29 @@ async def create_pool() -> asyncpg.Pool:
         **pool_config,
     )
     async with pool.acquire() as conn:
+        # ── ПОТОЛОК ОЖИДАНИЯ БЛОКИРОВКИ ──────────────────────────────────────
+        # Без него DDL миграции ждёт блокировку БЕСКОНЕЧНО, и это кладёт продукт
+        # целиком. Сценарий обычного деплоя: новый контейнер накатывает
+        # `ALTER TABLE tg_accounts ...`, а старый ещё жив и держит на этой
+        # таблице читающую транзакцию. ALTER встаёт в очередь за ACCESS
+        # EXCLUSIVE — и, что важнее, ВСЕ последующие читатели встают за ALTER.
+        # Итог: страница мини-аппа отдаётся (статика), а каждый запрос к данным
+        # висит до таймаута шлюза. Снаружи — «приложение не загружается».
+        #
+        # С lock_timeout DDL, не получивший блокировку за отведённое время,
+        # честно падает: файл откатывается, помечается неуспешным и повторяется
+        # ниже, а приложение ВСЁ РАВНО СТАРТУЕТ. Пропущенная миграция хуже
+        # аварии, но лучше замороженной базы, и она видна в schema_migrations.
+        _lock_timeout = (os.getenv("SCHEMA_LOCK_TIMEOUT") or "5s").strip()
+        if not re.fullmatch(r"\d{1,6}(ms|s|min)?", _lock_timeout):
+            log.warning("SCHEMA_LOCK_TIMEOUT=%r не похоже на интервал — беру 5s",
+                        _lock_timeout)
+            _lock_timeout = "5s"
+        try:
+            await conn.execute(f"SET lock_timeout = '{_lock_timeout}'")
+        except Exception as _lt_exc:
+            log.warning("не удалось задать lock_timeout: %s", _lt_exc)
+
         # Run all schema migration files in order — search both root and database/ subdir
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         db_dir = os.path.join(base_dir, "database")
@@ -261,6 +301,21 @@ async def create_pool() -> asyncpg.Pool:
             # Транзакция на файл + savepoint на оператор — см. докстринг функции.
             file_ok, _err_count, _last_error = await apply_migration_statements(
                 conn, statements, _bn)
+            # Не получили блокировку — это НЕ ошибка схемы, а занятая таблица
+            # (обычно старый контейнер, который вот-вот умрёт). Повторяем с
+            # паузой: за несколько секунд деплой почти всегда доигрывает.
+            _tries = 0
+            while (not file_ok and _tries < _LOCK_RETRIES
+                   and _is_lock_timeout(_last_error)):
+                _tries += 1
+                _pause = 2.0 * _tries
+                log.warning(
+                    "Schema %s: таблица занята другим соединением — повтор %d/%d "
+                    "через %.0fс (приложение стартует в любом случае)",
+                    _bn, _tries, _LOCK_RETRIES, _pause)
+                await asyncio.sleep(_pause)
+                file_ok, _err_count, _last_error = await apply_migration_statements(
+                    conn, statements, _bn)
             if file_ok:
                 applied += 1
             else:

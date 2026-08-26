@@ -466,11 +466,18 @@ async def main() -> None:
     except Exception:
         log.warning("failed to load notify_new_users setting", exc_info=True)
 
-    _gate_val = await _db.get_platform_setting(pool, "gate_enabled", "false")
-    set_gate_enabled(_gate_val == "true")
-    _gate_chs = await _db.get_subscription_gate_channels(pool)
-    set_gate_channels(_gate_chs)
-    log.info("Subscription gate on startup: %s (%d channels)", "ON" if _gate_val == "true" else "OFF", len(_gate_chs))
+    # Под try, как соседние блоки настроек: до старта HTTP-сервера ещё далеко, и
+    # исключение здесь убивает процесс ДО того, как мини-апп начнёт отвечать.
+    # Гейт подписки — не то, ради чего стоит терять весь продукт.
+    try:
+        _gate_val = await _db.get_platform_setting(pool, "gate_enabled", "false")
+        set_gate_enabled(_gate_val == "true")
+        _gate_chs = await _db.get_subscription_gate_channels(pool)
+        set_gate_channels(_gate_chs)
+        log.info("Subscription gate on startup: %s (%d channels)",
+                 "ON" if _gate_val == "true" else "OFF", len(_gate_chs))
+    except Exception:
+        log.warning("failed to load subscription gate settings", exc_info=True)
 
     # AI-ключи из БД (настраиваются из админ-панели) — приоритет над env.
     # Без них narrative/growth/ai-assistant/SEO-AI не работают.
@@ -583,9 +590,19 @@ async def main() -> None:
     asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 
     # Register bot commands (shows in Telegram "/" menu)
+    #
+    # ПОД TRY — И ЭТО ВАЖНО. Вызов ходит в api.telegram.org и стоит НА ПУТИ К
+    # СТАРТУ HTTP-СЕРВЕРА: мини-апп начинает отдаваться примерно на сотню строк
+    # ниже. Любая ошибка здесь — сетевой блип, 429, 5xx на стороне Telegram,
+    # временно недоступный токен — роняла ВЕСЬ процесс до того, как поднимется
+    # веб. Дальше restartPolicyMaxRetries=10 в railway.json: десять падений
+    # подряд, и платформа перестаёт перезапускать сервис. Снаружи это
+    # «приложение не загружается» — притом что с самим приложением всё в
+    # порядке, а меню команд — вещь косметическая и переустановится на
+    # следующем старте.
     from aiogram.types import BotCommand
 
-    await bot.set_my_commands(
+    _commands = (
         [
             BotCommand(command="start", description="Главное меню"),
             BotCommand(command="menu", description="🏠 Infragram OS"),
@@ -600,6 +617,15 @@ async def main() -> None:
             BotCommand(command="cancel", description="Отменить текущее действие"),
         ]
     )
+    try:
+        await bot.set_my_commands(_commands)
+    except Exception:
+        log.warning(
+            "не удалось зарегистрировать меню команд — продолжаем старт "
+            "(меню косметическое, переустановится на следующем запуске)",
+            exc_info=True,
+        )
+
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -852,14 +878,43 @@ async def main() -> None:
             while True:
                 await asyncio.sleep(3600)
         else:
-            await dp.start_polling(
-                bot,
-                pool=pool,
-                http=http,
-                drop_pending_updates=True,
-                polling_timeout=30,
-                allowed_updates=_allowed_updates,
-            )
+            # ПОЛЛИНГ ПЕРЕЗАПУСКАЕМ, А НЕ ПАДАЕМ ВМЕСТЕ С НИМ.
+            #
+            # Это был последний голый `await` в процессе: любая ошибка сети или
+            # ответ Telegram 429/5xx поднимала исключение и завершала процесс —
+            # ВМЕСТЕ с уже поднятым HTTP-сервером, то есть с мини-аппом и всем
+            # API. Дальше restartPolicyMaxRetries=10 (railway.json): десять
+            # падений подряд — и платформа перестаёт перезапускать сервис.
+            # Недоступность Telegram на пару минут превращалась в бессрочно
+            # лежащее приложение, хотя ни одна его часть не сломана.
+            #
+            # Все остальные подсистемы давно живут под присмотром (_resilient,
+            # _web_resilient); поллинг оставался единственным исключением.
+            _poll_fail = 0
+            while True:
+                try:
+                    await dp.start_polling(
+                        bot,
+                        pool=pool,
+                        http=http,
+                        drop_pending_updates=True,
+                        polling_timeout=30,
+                        allowed_updates=_allowed_updates,
+                    )
+                    _poll_fail = 0          # штатный выход — начинаем счёт заново
+                except asyncio.CancelledError:
+                    raise                    # остановка процесса — не сбой
+                except Exception as _pe:
+                    _poll_fail += 1
+                    # Пауза растёт до минуты: при недоступном Telegram не долбим
+                    # его в цикле, но и не ждём слишком долго после блипа.
+                    _delay = min(5 * _poll_fail, 60)
+                    log.error(
+                        "Поллинг Telegram упал (%s) — перезапуск через %dс "
+                        "(попытка %d). HTTP-сервер и мини-апп продолжают работать.",
+                        _pe, _delay, _poll_fail, exc_info=True,
+                    )
+                    await asyncio.sleep(_delay)
     finally:
         await pool.close()
         await http.close()
