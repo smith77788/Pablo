@@ -17,6 +17,7 @@
   --accent:#2dd4bf;
   --accent-2:#14b8a6;
   --accent-3:#0d9488;
+  --accent-soft:rgba(45,212,191,.13);
   --btn:linear-gradient(135deg,#2dd4bf 0%,#14b8a6 50%,#0ea5a4 100%);
   --btn-solid:#14b8a6;
   --btn-text:#041a17;
@@ -78,12 +79,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:var(--glass);backdrop-filter:saturate(150%) blur(20px);-webkit-backdrop-filter:saturate(150%) blur(20px);border-top:1px solid var(--glass-border);display:flex;z-index:100}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;user-select:none;transition:transform .15s var(--spring)}
 .tab:active{transform:scale(.88)}
-.tab-ico{font-size:22px;line-height:1;position:relative;color:var(--hint);transition:color .2s var(--ease),transform .2s var(--spring)}
-.tab-ico svg{width:24px;height:24px;display:block}
-.tab.on .tab-ico{color:var(--accent);transform:scale(1.08)}
-.tab-lbl{font-size:10px;color:var(--hint);font-weight:500;transition:color .2s}
+.tab-ico{font-size:22px;line-height:1;position:relative;color:var(--hint);display:flex;align-items:center;justify-content:center;padding:5px 15px;border-radius:13px;transition:color .2s var(--ease),background .2s var(--ease),transform .2s var(--spring)}
+.tab-ico svg{width:23px;height:23px;display:block}
+.tab.on .tab-ico{color:var(--accent);background:var(--accent-soft)}
+.tab:active .tab-ico{transform:scale(.9)}
+.tab-lbl{font-size:10px;color:var(--hint);font-weight:600;transition:color .2s}
 .tab.on .tab-lbl{color:var(--accent)}
-.tab.on .tab-ico::after{content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(45,212,191,.6)}
 
 /* ─── Section ────────────────────────────────────────────────── */
 .sec{padding:16px 16px 6px;font-size:11px;font-weight:700;color:var(--hint);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:6px}
