@@ -691,6 +691,14 @@ async def main() -> None:
         asyncio.create_task(
             _resilient("auto_responder", auto_responder.run, pool, http, bot)
         )
+        # WB Chat — аккаунтная автоматизация мессенджера Wildberries (по образцу
+        # Telegram-стека). Воркер операций стартует только при явном включении
+        # (WB_CHAT_WORKER_ENABLED) — до поставки реального протокола держим его
+        # выключенным, чтобы не крутить пустой цикл в проде.
+        import config as _cfg
+        if getattr(_cfg, "WB_CHAT_WORKER_ENABLED", False):
+            from services.wb_chat import op_worker as wb_op_worker
+            asyncio.create_task(_resilient("wb_chat_ops", wb_op_worker.run, pool))
         asyncio.create_task(_resilient("relay", relay_service.run, pool, http))
         asyncio.create_task(_resilient("funnel_runner", funnel_runner.run, pool, http))
         asyncio.create_task(_resilient("keyword_watcher", keyword_watcher.run, pool, bot))

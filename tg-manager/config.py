@@ -112,3 +112,25 @@ PLAN_PRICES_USD: dict[str, int] = {
 
 # Discount percentages by subscription period (months: discount%)
 PERIOD_DISCOUNTS: dict[int, int] = {1: 0, 3: 10, 6: 15, 12: 20}
+
+
+# ── WB Chat (аккаунтная автоматизация мессенджера Wildberries) ──────────────────
+# Второй канал — по образцу Telegram-стека: пользовательские аккаунты, сессии,
+# прокси, вход по номеру, очередь операций, массовые действия. У мессенджера WB
+# Chat пока нет публичного API/клиента протокола, поэтому транспорт абстрактный
+# (services/wb_chat/transport.py), а драйвер выбирается этой переменной.
+#
+# WB_CHAT_DRIVER:
+#   'mock' — встроенный драйвер в памяти (безопасен, для dev/тестов) — ПО УМОЛЧАНИЮ;
+#   'real' — боевой драйвер; до поставки протокола поднимает WBProtocolUnavailable.
+WB_CHAT_DRIVER: str = os.getenv("WB_CHAT_DRIVER", "mock").strip().lower()
+
+# Фоновый воркер операций WB. Включать только когда транспорт реально готов
+# ('real' с реализованным протоколом) ИЛИ для отладки на моке. По умолчанию
+# выключен, чтобы не крутить пустой цикл в проде до появления протокола.
+WB_CHAT_WORKER_ENABLED: bool = os.getenv(
+    "WB_CHAT_WORKER_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes", "on")
+
+# Дневной лимит действий на аккаунт (защита от банов за перебор).
+WB_CHAT_DAILY_BUDGET: int = int(os.getenv("WB_CHAT_DAILY_BUDGET", "50"))
