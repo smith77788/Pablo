@@ -79,3 +79,12 @@ CREATE TABLE IF NOT EXISTS notification_dedup (
 -- Чистка старых записей идёт по времени.
 CREATE INDEX IF NOT EXISTS idx_notification_dedup_sent
     ON notification_dedup (last_sent);
+
+-- 4) cf_worker_pool.fail_streak — дебаунс «воркер упал».
+--    Код уже написан на эту колонку и даже несёт запасную ветку с комментарием
+--    «колонка ещё не примигрировала». Миграции не появилось, поэтому запасная
+--    ветка работала ВСЕГДА: разовый сетевой блип сразу переводил воркер в
+--    'down', и аккаунты дёргались между воркерами каждый цикл — ровно то, от
+--    чего дебаунс и должен был защищать (скачок exit-IP → AUTH_KEY_DUPLICATED).
+ALTER TABLE cf_worker_pool
+    ADD COLUMN IF NOT EXISTS fail_streak INTEGER NOT NULL DEFAULT 0;

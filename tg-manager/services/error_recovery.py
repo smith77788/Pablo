@@ -244,11 +244,18 @@ class SessionRecoveryAction(RecoveryAction):
             # Mark account for re-auth
             pool = context.get("pool")
             if pool:
+                # Колонок `needs_reauth` и `updated_at` в tg_accounts нет —
+                # запрос падал всегда, и аккаунт с мёртвой сессией продолжал
+                # разбирать задачи, падая на каждой. Признак «сессия истекла»
+                # в этой схеме — acc_status, ровно как ставит монитор сессий.
                 await pool.execute(
-                    """UPDATE tg_accounts 
-                       SET needs_reauth = TRUE, updated_at = NOW()
+                    """UPDATE tg_accounts
+                       SET acc_status = 'session_expired',
+                           status_reason = $2,
+                           is_active = FALSE,
+                           status_checked_at = NOW()
                        WHERE id = $1""",
-                    account_id,
+                    account_id, str(error)[:300],
                 )
                 log.info(
                     "SessionRecovery: marked account %d for re-auth",
@@ -288,11 +295,16 @@ class ProxyRecoveryAction(RecoveryAction):
         try:
             pool = context.get("pool")
             if pool:
+                # Колонок `fail_count`, `last_error` и `updated_at` в
+                # user_proxies нет — запрос падал всегда, и счётчик сбоев
+                # прокси не рос ни разу. Настоящее имя — consecutive_failures,
+                # его же читает выбор прокси.
                 await pool.execute(
-                    """UPDATE user_proxies 
-                       SET fail_count = fail_count + 1, last_error = $1, updated_at = NOW()
-                       WHERE id = $2""",
-                    str(error)[:500],
+                    """UPDATE user_proxies
+                       SET consecutive_failures = COALESCE(consecutive_failures, 0) + 1,
+                           is_alive = FALSE,
+                           last_checked_at = NOW()
+                       WHERE id = $1""",
                     proxy_id,
                 )
                 return True

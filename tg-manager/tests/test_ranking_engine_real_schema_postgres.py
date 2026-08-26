@@ -76,6 +76,14 @@ def pool():
                                bot_id BIGINT NOT NULL,
                                position INTEGER,
                                checked_at TIMESTAMPTZ DEFAULT now())""")
+        # Заглушка: миграция трогает и эту таблицу (дебаунс CF-воркеров).
+        # Применяем файл ЦЕЛИКОМ, а не выборочно, — иначе проверялась бы не та
+        # миграция, что уезжает в прод.
+        await p.execute("""CREATE TABLE IF NOT EXISTS cf_worker_pool (
+                               id SERIAL PRIMARY KEY,
+                               owner_id BIGINT NOT NULL,
+                               worker_url TEXT NOT NULL,
+                               status TEXT DEFAULT 'active')""")
         # Ровно та миграция, что уезжает в прод (ranking_alerts + колонка region).
         with open(os.path.join(ROOT, "schema_v184.sql"), encoding="utf-8") as f:
             for chunk in f.read().split(";"):
@@ -91,7 +99,8 @@ def pool():
     p = _run(_mk())
     yield p
     for t in ("ranking_alerts", "search_rankings", "tracked_keywords",
-              "managed_bots", "strike_appeals", "notification_dedup"):
+              "managed_bots", "strike_appeals", "notification_dedup",
+              "cf_worker_pool"):
         _run(p.execute(f"DROP TABLE IF EXISTS {t} CASCADE"))
     _run(p.close())
 
