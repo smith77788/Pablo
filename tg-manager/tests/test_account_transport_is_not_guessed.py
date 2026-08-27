@@ -206,3 +206,45 @@ def test_operation_start_primes_the_map():
     assert called, (
         "op_worker не праймит карту транспорта — аккаунт с релеем уйдёт в "
         "операции напрямую, а одиночные вызовы через релей (AUTH_KEY_DUPLICATED)")
+
+
+def test_web_role_also_keeps_the_map_fresh():
+    """Под ROLE=web фоновые циклы не запускаются — карта обязана обновляться иначе.
+
+    Мини-апп и бот живут именно в этой роли и ходят к аккаунтам по собственным
+    выборкам. Если запустить обновление через гейтованный `_resilient`, карта в
+    вебе останется пустой, и аккаунт с релеем уйдёт напрямую.
+    """
+    src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+
+    starts: list[str] = []
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and n.args):
+            continue
+        f = n.func
+        name = f.id if isinstance(f, ast.Name) else (
+            f.attr if isinstance(f, ast.Attribute) else None)
+        if name not in ("_resilient", "_web_resilient"):
+            continue
+        if any(isinstance(a, ast.Name) and a.id == "run_transport_refresh_loop"
+               for a in n.args):
+            starts.append(name)
+
+    assert starts, "цикл обновления карты транспорта не запускается в main.py"
+    assert "_web_resilient" in starts, (
+        "цикл повешен на _resilient — он гейтуется ролью и под ROLE=web "
+        "не стартует, оставляя карту пустой там, где живут мини-апп и бот")
+
+
+def test_refresh_loop_survives_its_own_failure():
+    """Недоступность БД не должна ронять процесс — карта лишь страховка.
+
+    Но и молчать нельзя: рассинхрон транспорта снова стал бы невидимым.
+    """
+    body = _fn_src(os.path.join(ROOT, "services", "account_manager.py"),
+                   "run_transport_refresh_loop")
+    assert "while True" in body, "обновление разовое — карта устареет"
+    assert "except Exception" in body, "сбой чтения уронит процесс"
+    assert "log_exc_swallow" in body or "log." in body, "сбой обновления не виден в логах"
+    assert "CancelledError" in body, "цикл не отпустит остановку процесса"

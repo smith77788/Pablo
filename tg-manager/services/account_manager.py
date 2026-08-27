@@ -452,6 +452,34 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
     return len(_ACC_TRANSPORT)
 
 
+# Как часто веб-процесс перечитывает карту. Пять минут — компромисс: назначение
+# релея редкое событие, а запрос берёт только аккаунты с недефолтным выходом.
+_TRANSPORT_REFRESH_SEC = 300
+
+
+async def run_transport_refresh_loop(pool: Any, interval: int = _TRANSPORT_REFRESH_SEC) -> None:
+    """Держать карту транспорта свежей ВО ВСЕХ ролях процесса.
+
+    Прайминг на старте операции закрывает только массовые пути. Но в роли
+    INFRAGRAM_ROLE=web фоновые циклы не запускаются вовсе, а мини-апп и бот
+    ходят к аккаунтам по своим выборкам — и без карты уводят аккаунт с релеем
+    напрямую. Поэтому цикл вешается на негейтованный запуск.
+
+    Своя ошибка цикл не роняет: карта — страховка, и её недоступность не должна
+    останавливать процесс. Но и молчать нельзя — иначе рассинхрон транспорта
+    снова станет невидимым.
+    """
+    while True:
+        try:
+            n = await prime_account_transport(pool)
+            log.debug("карта транспорта обновлена: %d аккаунтов", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log_exc_swallow(log, "обновление карты транспорта аккаунтов")
+        await asyncio.sleep(interval)
+
+
 def _fill_transport_fields(device: dict[str, Any]) -> list[str]:
     """Добрать в словарь отсутствующие транспортные поля. Вернуть добранные.
 

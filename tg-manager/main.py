@@ -763,6 +763,16 @@ async def main() -> None:
         else:
             asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
 
+        # Карта транспорта аккаунтов (релей/прокси) — через _web_resilient, то
+        # есть ВО ВСЕХ ролях. Под ROLE=web фоновые циклы не запускаются вовсе, а
+        # мини-апп и бот ходят к аккаунтам по своим выборкам, где cf_relay_url
+        # почти нигде нет: без карты аккаунт с релеем уйдёт напрямую с host-IP,
+        # тогда как операции идут через релей. Два адреса на одну сессию — это
+        # AUTH_KEY_DUPLICATED, то есть мёртвый аккаунт.
+        from services.account_manager import run_transport_refresh_loop
+        asyncio.create_task(
+            _web_resilient("account_transport_map", run_transport_refresh_loop, pool))
+
         asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
         asyncio.create_task(
             _resilient("auto_responder", auto_responder.run, pool, http, bot)
