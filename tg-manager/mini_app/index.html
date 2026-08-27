@@ -6276,6 +6276,13 @@ function forceRefresh() {
   toast('🔄 Данные обновлены');
 }
 
+// Таймаут запросов объявлен ДО boot(): boot СИНХРОННО вызывает fetchT('/auth'),
+// а дефолт fetchT — ms=FETCH_TIMEOUT_MS. Если объявить его НИЖЕ boot (как было
+// после реструктуризации), const попадает в TDZ и boot падает на первой же
+// строке: «Cannot access 'FETCH_TIMEOUT_MS' before initialization» — весь запуск
+// умирает, авторизации нет, данные не грузятся (видны только статичные плитки).
+const FETCH_TIMEOUT_MS = 30000;
+
 // ── Boot ───────────────────────────────────────────────
 (async function boot() {
   const u = tg.initDataUnsafe?.user;
@@ -6320,7 +6327,6 @@ function forceRefresh() {
 // ошибки, ни объяснения. Снаружи это «приложение не загружается», и понять, что
 // именно сломалось, нельзя — ни пользователю, ни разработчику. Лучше честный
 // отказ через полминуты, чем вечное ожидание.
-const FETCH_TIMEOUT_MS = 30000;
 async function fetchT(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), ms);
