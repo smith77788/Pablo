@@ -3148,6 +3148,39 @@ async def get_proxy_policy(pool, owner_id: int | None) -> str:
         return normalize_policy(None)
 
 
+# ── ОДИН источник полей для построения Telethon-клиента ──────────────────────
+# Транспорт аккаунта (прокси / CF-релей / IPv6 / прямой выход) выбирает
+# `account_manager._make_client` ПО ПОЛЯМ переданного словаря. Если выборка не
+# содержит хотя бы одно из них, клиент пойдёт ДРУГИМ путём, чем остальные
+# подсистемы того же аккаунта. Одна сессия с двух адресов — это
+# AUTH_KEY_DUPLICATED, и Telegram отзывает ключ.
+#
+# Так и случилось: обе проверки здоровья писали свои SELECT-ы вручную и не
+# выбирали cf_relay_url. Аккаунты с назначенным релеем ходили в операциях через
+# edge-IP, а в проверке — напрямую с host-IP, и КАЖДАЯ проверка помечала их
+# конфликтом. Поэтому список полей теперь один на всех.
+TELETHON_ACC_COLS = (
+    "a.id, a.owner_id, a.session_str, a.phone, a.first_name, a.username, "
+    "a.acc_status, a.device_model, a.system_version, a.app_version, "
+    "a.lang_code, a.system_lang_code, a.cf_relay_url, a.proxy_id, "
+    "p.proxy_url, p.geo_country"
+)
+TELETHON_ACC_FROM = (
+    "FROM tg_accounts a "
+    "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE"
+)
+
+
+def telethon_accounts_query(where: str, extra_cols: str = "") -> str:
+    """SELECT для аккаунтов, из которых будет построен Telethon-клиент.
+
+    `where` — условия без слова WHERE. `extra_cols` — дополнительные колонки
+    (через запятую, с префиксом `a.`), если экрану нужно что-то сверх транспорта.
+    """
+    cols = TELETHON_ACC_COLS + (", " + extra_cols if extra_cols else "")
+    return f"SELECT {cols} {TELETHON_ACC_FROM} WHERE {where}"
+
+
 async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = None):
     """Fetch account dict with device fingerprint + proxy_url + owner proxy_policy
     for _make_client. Возвращает dict (не Record), чтобы можно было доложить

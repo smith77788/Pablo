@@ -67,6 +67,9 @@ def pool():
                                id SERIAL PRIMARY KEY,
                                owner_id BIGINT NOT NULL,
                                phone TEXT,
+                               first_name TEXT,
+                               username TEXT,
+                               last_real_check_at TIMESTAMPTZ,
                                session_str TEXT,
                                is_active BOOLEAN DEFAULT TRUE,
                                in_operation BOOLEAN DEFAULT FALSE,
@@ -227,6 +230,39 @@ def test_self_heal_does_not_flip_flop_a_persistent_conflict(pool):
         "обычный истёкший кулдаун обязан сниматься как раньше")
 
 
+
+def _calls_canonical_query(rel: str, func: str) -> bool:
+    """Вызывает ли функция общий построитель запроса — ПО AST, а не по тексту.
+
+    Подстрокой проверять нельзя: имя `telethon_accounts_query` встречается и в
+    комментарии рядом, и такая проверка остаётся зелёной, даже когда запрос
+    снова написан вручную. Один раз уже попалась.
+    """
+    src = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+    tree = ast.parse(src)
+    target = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func:
+            target = node
+    assert target is not None, f"{func} не найдена в {rel}"
+
+    # Имена, под которыми построитель мог быть импортирован (в т.ч. как _tq).
+    aliases = {"telethon_accounts_query"}
+    for node in ast.walk(target):
+        if isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                if a.name == "telethon_accounts_query":
+                    aliases.add(a.asname or a.name)
+    for node in ast.walk(target):
+        if isinstance(node, ast.Call):
+            fn = node.func
+            name = fn.id if isinstance(fn, ast.Name) else (
+                fn.attr if isinstance(fn, ast.Attribute) else None)
+            if name in aliases:
+                return True
+    return False
+
+
 # ── храповик на транспорт ────────────────────────────────────────────────────
 
 def test_monitor_selects_the_same_transport_fields_as_everyone_else():
@@ -245,7 +281,46 @@ def test_monitor_selects_the_same_transport_fields_as_everyone_else():
                 and node.name == "_check_all_sessions":
             body = "\n".join(lines[node.lineno - 1:node.end_lineno])
     assert body, "_check_all_sessions не найдена"
+    assert _calls_canonical_query("services/account_manager.py", "_check_all_sessions"), (
+        "монитор снова пишет свой SELECT — так и потерялся cf_relay_url. "
+        "Поля транспорта берутся из database.db.telethon_accounts_query()")
+
+    # И сам общий список обязан содержать всё, по чему выбирается транспорт.
+    from database.db import TELETHON_ACC_COLS
     for col in ("cf_relay_url", "proxy_id", "proxy_url", "owner_id"):
-        assert col in body, (
-            f"выборка монитора не содержит {col} — транспорт разъедется с "
-            "остальными путями, и проверка здоровья сама убьёт сессию")
+        assert col in TELETHON_ACC_COLS, (
+            f"в общем списке полей нет {col} — транспорт разъедется у ВСЕХ, "
+            "кто им пользуется")
+
+
+def test_the_frequent_monitor_uses_the_same_source():
+    """`_check_dead_sessions` бегает куда чаще шестичасовой проверки.
+
+    Его выборка тоже не содержала ни cf_relay_url, ни proxy_url — а он
+    коннектит живые сессии каждые несколько минут.
+    """
+    assert _calls_canonical_query("services/account_monitor.py", "_check_dead_sessions"), (
+        "частая проверка сессий снова строит клиента по своей неполной выборке")
+
+
+def test_incomplete_account_dict_is_reported_loudly(caplog):
+    """Неполный словарь аккаунта обязан быть ЗАМЕТЕН, а не молча менять транспорт.
+
+    Отличаем «поля нет в выборке» (ошибка вызывающего) от «поле пустое»
+    (релей просто не назначен) — второе законно и ругаться на него нельзя.
+    """
+    import logging
+    pytest.importorskip("telethon", reason="сборка клиента тянет telethon")
+    from services import account_manager as am
+
+    with caplog.at_level(logging.ERROR, logger="services.account_manager"):
+        am._make_client("", {"id": 1, "owner_id": 2})          # полей транспорта нет
+    assert any("транспорт" in r.message or "cf_relay_url" in r.getMessage()
+               for r in caplog.records), "пропуск полей никак не отмечен"
+
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="services.account_manager"):
+        am._make_client("", {"id": 1, "owner_id": 2,
+                             "cf_relay_url": "", "proxy_id": None})
+    assert not [r for r in caplog.records if "транспорт" in r.getMessage()], (
+        "пустые поля — это законное «релей не назначен», ругаться нельзя")

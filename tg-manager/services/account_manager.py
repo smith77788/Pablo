@@ -1072,6 +1072,26 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
 
     d = _normalize_device_profile(device)
 
+    # ── НЕПОЛНЫЙ СЛОВАРЬ АККАУНТА — МОЛЧАЛИВАЯ СМЕРТЬ СЕССИИ ─────────────────
+    # Транспорт выбирается ПО ПОЛЯМ этого словаря. Если вызывающий написал свой
+    # SELECT и забыл, скажем, cf_relay_url, клиент пойдёт НАПРЯМУЮ с host-IP,
+    # тогда как другие подсистемы того же аккаунта идут через релей. Одна сессия
+    # с двух адресов — AUTH_KEY_DUPLICATED, и Telegram отзывает ключ.
+    #
+    # Отличаем «поля НЕТ в выборке» от «поле пустое»: пустое — это законное «релей
+    # не назначен», а отсутствие ключа — ошибка вызывающего, и она обязана быть
+    # видимой. Не падаем: клиент всё равно нужен, но пишем, чей запрос чинить.
+    if device is not None:
+        _missing = [k for k in ("cf_relay_url", "proxy_id") if k not in device]
+        if _missing:
+            log.error(
+                "acc=%s: словарь аккаунта без полей транспорта %s — клиент может "
+                "пойти НЕ ТЕМ путём, чем остальные подсистемы (риск "
+                "AUTH_KEY_DUPLICATED). Берите поля из "
+                "database.db.telethon_accounts_query().",
+                device.get("id"), ", ".join(_missing),
+            )
+
     # Определяем прокси (может поднять ProxyIsolationError если политика требует
     # прокси, а его нет; low_risk-операции не блокируются)
     proxy = _resolve_client_proxy(d, low_risk=low_risk)
@@ -2959,16 +2979,14 @@ async def _check_all_sessions(pool: "asyncpg.Pool") -> None:
     # host-IP, тогда как операции того же аккаунта идут через релей. Одна сессия
     # с двух адресов — это AUTH_KEY_DUPLICATED, то есть проверка здоровья сама
     # создаёт ту поломку, которую ищет.
+    from database.db import telethon_accounts_query as _tq
+
     accounts = await pool.fetch(
-        """SELECT a.id, a.owner_id, a.session_str, a.phone, a.acc_status,
-                  a.device_model, a.system_version, a.app_version,
-                  a.lang_code, a.system_lang_code, a.cf_relay_url,
-                  a.session_conflict_at,
-                  a.proxy_id, p.proxy_url, p.geo_country
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.is_active = TRUE AND a.session_str IS NOT NULL
-             AND COALESCE(a.in_operation, FALSE) = FALSE"""
+        _tq(
+            """a.is_active = TRUE AND a.session_str IS NOT NULL
+               AND COALESCE(a.in_operation, FALSE) = FALSE""",
+            extra_cols="a.session_conflict_at",
+        )
     )
     if not accounts:
         return

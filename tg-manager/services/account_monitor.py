@@ -267,21 +267,26 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
     from services.account_manager import check_account_status_full, should_persist_account_status
 
     try:
+        # Поля транспорта берём из ОБЩЕГО списка (db.telethon_accounts_query):
+        # свой SELECT здесь не содержал cf_relay_url и proxy_url, поэтому
+        # проверка шла НАПРЯМУЮ с host-IP, пока операции того же аккаунта идут
+        # через релей. Одна сессия с двух адресов — AUTH_KEY_DUPLICATED, то есть
+        # проверка здоровья сама портила аккаунты, которые проверяет.
+        from database.db import telethon_accounts_query as _tq
+
         accounts = await pool.fetch(
-            """SELECT id, owner_id, session_str, phone, first_name, username,
-                      device_model, system_version, app_version, proxy_id, acc_status
-               FROM tg_accounts
-               WHERE is_active = TRUE
-                 AND session_str IS NOT NULL AND session_str != ''
-                 -- НЕ трогаем аккаунты, занятые операцией: параллельный коннект
-                 -- одной сессии монитором и операцией = AUTH_KEY_DUPLICATED.
-                 -- Особенно важно для СВЕЖЕГО флота (last_real_check_at IS NULL
-                 -- → монитор берёт его первым, ровно когда оператор запускает op).
-                 AND COALESCE(in_operation, FALSE) = FALSE
-                 AND (last_real_check_at IS NULL
-                      OR last_real_check_at < NOW() - INTERVAL '3 hours')
-               ORDER BY COALESCE(last_real_check_at, '2000-01-01') ASC
-               LIMIT 5""",
+            _tq(
+                """a.is_active = TRUE
+                   AND a.session_str IS NOT NULL AND a.session_str != ''
+                   -- НЕ трогаем аккаунты, занятые операцией: параллельный коннект
+                   -- одной сессии монитором и операцией = AUTH_KEY_DUPLICATED.
+                   -- Особенно важно для СВЕЖЕГО флота (last_real_check_at IS NULL
+                   -- → монитор берёт его первым, ровно когда оператор запускает op).
+                   AND COALESCE(a.in_operation, FALSE) = FALSE
+                   AND (a.last_real_check_at IS NULL
+                        OR a.last_real_check_at < NOW() - INTERVAL '3 hours')"""
+            )
+            + " ORDER BY COALESCE(a.last_real_check_at, '2000-01-01') ASC LIMIT 5",
         )
     except Exception as exc:
         log.debug("_check_dead_sessions: query error: %s", exc)
