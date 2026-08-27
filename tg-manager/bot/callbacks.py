@@ -774,3 +774,10 @@ class ManagedBotCb(CallbackData, prefix="mbot"):
     """Manager Mode — создание дочерних ботов в один тап (Telegram Managed Bots)."""
 
     action: str   # menu|new|cancel
+
+
+class AboutCb(CallbackData, prefix="about"):
+    """Экран «Что такое Infragram»: описание проекта для тех, кто спрашивает."""
+
+    action: str          # menu | sec | share
+    key: str = ""        # ключ раздела каталога

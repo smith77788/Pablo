@@ -162,6 +162,14 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
         )
         return
 
+    # about → описание проекта. Ссылку с этим параметром кладём в готовое
+    # сообщение «переслать знакомому»: получатель открывает описание сам.
+    if start_param == "about":
+        from bot.handlers.about import _send_intro as _about_intro
+
+        await _about_intro(message)
+        return
+
     # inv_XXXXXX → referral code (only for new users)
     if is_new and start_param.startswith("inv_"):
         try:

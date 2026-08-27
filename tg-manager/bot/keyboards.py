@@ -16,6 +16,7 @@ Usage:
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
+    AboutCb,
     BotCb,
     EditCb,
     AudCb,
@@ -78,9 +79,12 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
     kb.button(text="⚡ Активные задачи", callback_data=TaskCb(action="list"))
     kb.button(text="❓ Справка", callback_data=BotCb(action="help"))
+    # «Что за проект?» спрашивают чаще всего — кнопка отвечает за владельца и
+    # отдаёт готовый текст для пересылки.
+    kb.button(text="✨ Что умеет Infragram", callback_data=AboutCb(action="menu"))
     if is_admin:
         kb.button(text="⚙️ Админка", callback_data="adm:main")
-    kb.adjust(1, 2, 2, 1 if not is_admin else 2)
+    kb.adjust(1, 2, 2, 1, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
