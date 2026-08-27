@@ -6476,14 +6476,21 @@ function showOpComplete(op) {
   // тихий успех, только в новом месте.
   const body = (op.summary || op.error_msg || `${op.done || 0}/${op.total || 0}`)
     .toString().trim().split('\n').slice(0, 3).join('\n');
+  // Плашка исхода — точка действия, а не тупик: при ошибке даём ПОВТОР в один
+  // тап прямо здесь (без похода в «Операции» → меньше переходов). Кнопки со
+  // stopPropagation, чтобы не открывать детали случайно.
   el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()">×</span>
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
-    <div style="font-size:12px;color:var(--accent);margin-top:5px">Открыть детали →</div>`;
+    <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      ${ok ? '' : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`}
+      <span style="font-size:12px;color:var(--accent)">Открыть детали →</span>
+    </div>`;
   el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
   el.classList.add('show');
   clearTimeout(_opDoneTimer);
-  _opDoneTimer = setTimeout(hideOpDone, 12000);
+  // Ошибку с кнопкой держим дольше — успеть нажать «Повторить», а не гнать читать.
+  _opDoneTimer = setTimeout(hideOpDone, ok ? 12000 : 20000);
   try {
     const h = tg && tg.HapticFeedback;
     if (h) h.notificationOccurred(ok ? 'success' : 'error');
