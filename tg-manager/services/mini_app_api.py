@@ -282,7 +282,15 @@ def _json_resp(data: Any, status: int = 200) -> web.Response:
 
 
 def _err(msg: str, status: int = 400) -> web.Response:
-    return _json_resp({"error": msg}, status)
+    body = {"error": msg}
+    # Единый маркер пейволла: ЛЮБОЙ 403 «требуется подписка» помечаем, чтобы фронт
+    # показал экран апгрейда (ценность + 1 тап к оформлению) вместо сухого тоста —
+    # момент отказа доступа это лучшая точка конверсии. Один источник маркировки на
+    # все 20+ мест платного гейта (все ходят через _err).
+    if status == 403 and msg and "подписк" in str(msg).lower():
+        body["paywall"] = True
+        body["code"] = "subscription_required"
+    return _json_resp(body, status)
 
 
 # Единый нормализатор номера (мини-апп + бот) — принять «+7 932 726 5344» и т.п.
