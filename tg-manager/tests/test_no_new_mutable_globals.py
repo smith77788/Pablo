@@ -137,6 +137,9 @@ PROCESS_LOCAL: dict[str, str] = {
 CACHE: dict[str, str] = {
     "services/account_health.py:_health_cache": "здоровье аккаунта, пересчитывается",
     "services/account_manager.py:_GET_ME_CACHE": "get_me с TTL 5 мин",
+    "services/account_manager.py:_ACC_TRANSPORT": (
+        "релей/прокси аккаунта; истина в tg_accounts, авторитетно перечитывается "
+        "на старте операции — добирает поля, которых нет в выборке вызывающего"),
     "services/account_manager.py:_OWNER_IPV6_SUBNET": "праймится из БД на старте операции",
     "services/account_manager.py:_OWNER_PROXY_POLICY": "праймится из БД на старте операции",
     "services/account_manager.py:_proxy_stats": "статистика прокси; сводная — в infra_memory",

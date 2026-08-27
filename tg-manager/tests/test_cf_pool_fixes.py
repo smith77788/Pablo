@@ -24,7 +24,13 @@ def test_per_account_relay_used_in_make_client():
     seg = am[am.index("Выбор транспорта"):am.index("_client = TelegramClient")]
     # приоритет пер-аккаунтного relay над глобальным env; глобальный CF_RELAY_URL
     # под allow_direct НЕ подменяет прямой реальный IP (только под strict)
-    assert 'device.get("cf_relay_url")' in seg
+    #
+    # Читается `d`, а не исходный `device`: d — словарь ПОСЛЕ добора полей
+    # транспорта из карты (_ACC_TRANSPORT). Проверка именно на d, потому что
+    # чтение из device вернуло бы «релея нет» ровно для тех вызывающих, чья
+    # выборка cf_relay_url не берёт — а это почти все (см.
+    # tests/test_account_transport_is_not_guessed.py).
+    assert 'd.get("cf_relay_url")' in seg
     assert 'acc_relay or (CF_RELAY_URL if _pol == "strict" else "")' in seg
     # колонка реально селектится в основных путях загрузки аккаунта
     assert "a.cf_relay_url" in _read("database/db.py")

@@ -1991,6 +1991,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # кэш как есть.
                 _am.set_owner_ipv6_subnet(
                     owner_id, await db.get_ipv6_subnet_or_raise(pool, owner_id))
+                # И карту транспорта аккаунтов — по той же причине и с той же
+                # ценой ошибки. Массовые исполнители ходят по собственным
+                # выборкам, в которых почти нигде нет cf_relay_url: без карты
+                # аккаунт с релеем уйдёт в операции НАПРЯМУЮ, а одиночные вызовы
+                # (канонический запрос) — через релей. Два адреса на одну
+                # сессию — AUTH_KEY_DUPLICATED.
+                await _am.prime_account_transport(pool, owner_id)
             except Exception:
                 log_exc_swallow(log, f"prime proxy_policy op#{op_id}")
 

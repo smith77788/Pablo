@@ -366,6 +366,115 @@ def set_owner_ipv6_subnet(owner_id: int | None, subnet: str | None) -> None:
         _OWNER_IPV6_SUBNET.pop(int(owner_id), None)
 
 
+# ── ТРАНСПОРТ АККАУНТА: страховка от неполной выборки вызывающего ────────────
+# Транспорт выбирается ПО ПОЛЯМ словаря, который передали в _make_client. В коде
+# больше сотни собственных SELECT-ов к tg_accounts, и подавляющее большинство не
+# берёт cf_relay_url, а часть — и proxy_id. Такой словарь молча уводит аккаунт
+# НАПРЯМУЮ с host-IP, тогда как канонический путь (db.telethon_accounts_query)
+# ведёт тот же аккаунт через релей или назначенный прокси. Одна сессия с двух
+# адресов — AUTH_KEY_DUPLICATED, Telegram отзывает ключ, а снаружи это выглядит
+# как «аккаунты сами отваливаются».
+#
+# Переписать сотню запросов разом нельзя без риска, поэтому здесь — карта
+# acc_id → транспортные поля, которой _make_client ДОБИРАЕТ то, чего в словаре
+# НЕТ. Именно добирает: явно переданное значение (в том числе пустое — это
+# законное «релей не назначен») всегда сильнее кэша.
+_ACC_TRANSPORT: dict[int, dict[str, Any]] = {}
+
+# Ключи, которые умеет добирать кэш. Ровно те, от которых зависит выбор выхода.
+_TRANSPORT_KEYS = ("cf_relay_url", "proxy_id", "proxy_url")
+# owner_id в записи не добирается — он нужен приймингу, чтобы знать, чьи записи
+# он вправе считать устаревшими.
+_TRANSPORT_META = ("owner_id",)
+
+
+def set_account_transport(account_id: int | None, **fields: Any) -> None:
+    """Запомнить транспортные поля аккаунта (вызывать при их изменении в БД).
+
+    Кэш обязан меняться ВМЕСТЕ с базой: устаревшая запись уведёт аккаунт через
+    снятый релей — та же авария, только с другой стороны.
+    """
+    if account_id is None:
+        return
+    entry = _ACC_TRANSPORT.setdefault(int(account_id), {})
+    for k, v in fields.items():
+        if k in _TRANSPORT_KEYS:
+            entry[k] = v
+        elif k in _TRANSPORT_META and v is not None:
+            entry[k] = int(v)
+
+
+def forget_account_transport(account_id: int | None) -> None:
+    """Убрать аккаунт из карты — при удалении аккаунта."""
+    if account_id is not None:
+        _ACC_TRANSPORT.pop(int(account_id), None)
+
+
+async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int:
+    """Перечитать карту транспорта из БД. Возвращает число аккаунтов в карте.
+
+    Берём только аккаунты с НЕдефолтным выходом (есть релей или назначен
+    прокси): остальным добирать нечего — они и так идут напрямую.
+
+    Прайминг АВТОРИТЕТЕН для тех владельцев, которых перечитали: записи, не
+    подтверждённые свежей выборкой, удаляются. Иначе аккаунт, у которого релей
+    сняли, навсегда остался бы в памяти со старым релеем — и мы бы своими
+    руками воспроизвели ту же аварию, только с другой стороны. Поэтому запись
+    хранит owner_id: без него «чьи записи чистить» не ответить.
+
+    Ошибку НЕ проглатываем в «карта пуста»: пустая карта неотличима от «ни у
+    кого нет релея» и снова уводит аккаунты напрямую. Исключение уходит наверх,
+    прежняя карта остаётся.
+    """
+    where = "WHERE (a.cf_relay_url IS NOT NULL AND a.cf_relay_url <> '') OR a.proxy_id IS NOT NULL"
+    args: list[Any] = []
+    if owner_id is not None:
+        where = "WHERE a.owner_id = $1 AND ((a.cf_relay_url IS NOT NULL " \
+                "AND a.cf_relay_url <> '') OR a.proxy_id IS NOT NULL)"
+        args = [int(owner_id)]
+    rows = await pool.fetch(
+        "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url "
+        "FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+        + where, *args)
+
+    fresh = {int(r["id"]) for r in rows}
+    # Снимаем устаревшие записи — только по перечитанной области.
+    for acc_id in [k for k, v in _ACC_TRANSPORT.items()
+                   if k not in fresh
+                   and (owner_id is None or v.get("owner_id") == int(owner_id))]:
+        _ACC_TRANSPORT.pop(acc_id, None)
+
+    for r in rows:
+        set_account_transport(
+            r["id"], owner_id=r["owner_id"], cf_relay_url=r["cf_relay_url"],
+            proxy_id=r["proxy_id"], proxy_url=r["proxy_url"])
+    return len(_ACC_TRANSPORT)
+
+
+def _fill_transport_fields(device: dict[str, Any]) -> list[str]:
+    """Добрать в словарь отсутствующие транспортные поля. Вернуть добранные.
+
+    Только ОТСУТСТВУЮЩИЕ ключи: пустое значение в словаре — это ответ выборки
+    («релея нет»), и подменять его кэшем нельзя.
+    """
+    acc_id = device.get("id")
+    if acc_id is None:
+        return []
+    try:
+        cached = _ACC_TRANSPORT.get(int(acc_id))
+    except (TypeError, ValueError):
+        return []
+    if not cached:
+        return []
+    filled = []
+    for k in _TRANSPORT_KEYS:
+        if k not in device and k in cached:
+            device[k] = cached[k]
+            filled.append(k)
+    return filled
+
+
 def _account_ipv6(account_id: int, subnet_cidr: str) -> str | None:
     """Детерминированно вернуть УНИКАЛЬНЫЙ IPv6 аккаунта из подсети (или None).
 
@@ -1079,17 +1188,30 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # с двух адресов — AUTH_KEY_DUPLICATED, и Telegram отзывает ключ.
     #
     # Отличаем «поля НЕТ в выборке» от «поле пустое»: пустое — это законное «релей
-    # не назначен», а отсутствие ключа — ошибка вызывающего, и она обязана быть
-    # видимой. Не падаем: клиент всё равно нужен, но пишем, чей запрос чинить.
+    # не назначен», а отсутствие ключа — ошибка вызывающего.
+    #
+    # Сначала пробуем ДОБРАТЬ недостающее из карты транспорта (_ACC_TRANSPORT):
+    # переписать все собственные SELECT-ы разом нельзя, а ходить не тем выходом
+    # нельзя тем более. Что добрали — тем и пойдём; о чём не знаем — говорим
+    # вслух, с именем запроса, который надо чинить. Не падаем: клиент нужен.
     if device is not None:
-        _missing = [k for k in ("cf_relay_url", "proxy_id") if k not in device]
-        if _missing:
-            log.error(
-                "acc=%s: словарь аккаунта без полей транспорта %s — клиент может "
-                "пойти НЕ ТЕМ путём, чем остальные подсистемы (риск "
-                "AUTH_KEY_DUPLICATED). Берите поля из "
+        _missing = [k for k in ("cf_relay_url", "proxy_id") if k not in d]
+        _filled = _fill_transport_fields(d) if _missing else []
+        if _filled:
+            log.warning(
+                "acc=%s: словарь аккаунта без полей транспорта %s — добрали из "
+                "карты транспорта. Почините выборку: "
                 "database.db.telethon_accounts_query().",
-                device.get("id"), ", ".join(_missing),
+                d.get("id"), ", ".join(_filled),
+            )
+        _unknown = [k for k in _missing if k not in _filled]
+        if _unknown:
+            log.error(
+                "acc=%s: словарь аккаунта без полей транспорта %s, и в карте "
+                "транспорта аккаунта нет — клиент может пойти НЕ ТЕМ путём, чем "
+                "остальные подсистемы (риск AUTH_KEY_DUPLICATED). Берите поля из "
+                "database.db.telethon_accounts_query().",
+                d.get("id"), ", ".join(_unknown),
             )
 
     # Определяем прокси (может поднять ProxyIsolationError если политика требует
@@ -1102,9 +1224,12 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # Аккаунт со своим relay всегда ходит через него (стабильный exit → без рассинхрона IP).
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
     _transport = "bound" if has_bound_proxy else "direct"  # уточняется ниже по ветке
+    # Читаем из d, а не из device: d — это словарь ПОСЛЕ добора недостающих
+    # транспортных полей. Взять здесь исходный device значило бы пойти напрямую
+    # ровно в том случае, ради которого добор и делается.
     acc_relay = ""
     if device:
-        acc_relay = str(device.get("cf_relay_url") or "").strip()
+        acc_relay = str(d.get("cf_relay_url") or "").strip()
     # Требование оператора (повторено трижды): БЕЗ прокси аккаунт работает на РЕАЛЬНОМ
     # host-IP. Глобальный CF_RELAY_URL — это ОБЩИЙ edge-IP пула (не реальный адрес
     # аккаунта) и потенциальный разъезд IP логин↔операция → AUTH_KEY_DUPLICATED.
