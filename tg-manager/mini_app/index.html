@@ -681,6 +681,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
     </div>
+    <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
+    <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
     <!-- 🫀 Пульс организма: живой контекст + цепочки следующих действий -->
     <div id="organismPulse" style="margin:12px 16px 0"></div>
     <!-- Operation Progress -->
@@ -6510,6 +6512,7 @@ function renderOpProgress(items) {
       _hadOpProgress = false;
       try { loadNextActions(true); } catch(_) {}
       try { renderFrequent(); } catch(_) {}
+      try { loadOnboarding(); } catch(_) {}   // первое действие закрывает шаг чеклиста
     }
     return;
   }
@@ -6923,8 +6926,50 @@ async function loadHome() {
   } catch(e) {
     if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
+  loadOnboarding();
   loadOrganismPulse();
   renderFrequent();
+}
+
+// 🚀 Онбординг: чеклист активации новичка. Скрывается сам после активации, чтобы
+// не мозолить глаза ветеранам. Действия шагов — дип-линки в существующие потоки.
+const _ONBOARD_ACT = {
+  import_accounts: () => (typeof openAccImportModal==='function') && openAccImportModal(),
+  proxy:           () => (typeof openProxies==='function') && openProxies(),
+  invite:          () => (typeof openMassInvite==='function') && openMassInvite(),
+};
+function onboardStep(kind) { const f=_ONBOARD_ACT[kind]; if (f) f(); }
+async function loadOnboarding() {
+  const el = document.getElementById('onboardCard');
+  if (!el) return;
+  let d;
+  try { d = await api('/api/miniapp/onboarding'); }
+  catch(_) { el.style.display='none'; return; }   // fail-open: нет чеклиста ≠ блок экрана
+  if (!d || d.activated || !(d.steps||[]).length) { el.style.display='none'; el.innerHTML=''; return; }
+  const rows = (d.steps||[]).map(s => {
+    const mark = s.done ? '<span style="color:var(--green)">✓</span>'
+      : (s.id===d.next_step ? '<span style="color:var(--accent)">◆</span>' : '<span style="color:var(--hint)">○</span>');
+    const opt = s.optional ? ' <span style="font-size:11px;color:var(--hint)">(необязательно)</span>' : '';
+    const cta = s.done ? '' :
+      `<button class="btn btn-p" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="onboardStep('${s.action.kind}')">${esc(s.cta||'Открыть')} →</button>`;
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--sep)">
+      <div style="font-size:15px;line-height:1.4;width:16px;text-align:center;flex:0 0 auto">${mark}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;font-weight:600;${s.done?'opacity:.6':''}">${esc(s.title)}${opt}</div>
+        ${s.done?'':`<div style="font-size:12px;color:var(--hint);line-height:1.4;margin-top:2px">${esc(s.hint)}</div>`}
+      </div>
+      ${cta}
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;box-shadow:var(--shadow)">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:14px;font-weight:700">🚀 Быстрый старт</div>
+      <div style="font-size:12px;color:var(--hint);font-variant-numeric:tabular-nums">${d.done}/${d.total}</div>
+    </div>
+    <div style="font-size:12px;color:var(--hint);margin-top:2px">Пара шагов до первого результата — дальше система сама подскажет, что делать.</div>
+    ${rows}
+  </div>`;
+  el.style.display='block';
 }
 
 // 🫀 Пульс организма — единый живой контекст + цепочки следующих действий.
@@ -11268,6 +11313,7 @@ async function submitAccImport() {
       tg.HapticFeedback?.notificationOccurred('success');
       toast('✅ Добавлено аккаунтов: '+imp);
       if (typeof loadAccounts==='function') loadAccounts(); else if (typeof loadTab==='function') loadTab('accounts');
+      try { loadOnboarding(); } catch(_) {}   // закрывает шаг «Подключить аккаунты»
       if (!fail) setTimeout(closeAccImportModal, 900);
     } else {
       tg.HapticFeedback?.notificationOccurred('error');

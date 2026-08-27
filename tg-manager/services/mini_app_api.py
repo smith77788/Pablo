@@ -6525,6 +6525,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("organism_pulse uid=%s", uid)
             return _err(str(exc), 500)
 
+    async def onboarding_status(request: web.Request) -> web.Response:
+        """Чеклист активации новичка: 2–3 шага до первого результата, скрывается
+        сам, когда пользователь активирован. Read-only, fail-open (пустой при сбое —
+        лучше без чеклиста, чем блокировать домашний экран)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import onboarding
+            accounts = await _safe_fetchval(
+                pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 "
+                "AND session_str IS NOT NULL AND session_str <> ''", uid) or 0
+            with_proxy = await _safe_fetchval(
+                pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 "
+                "AND proxy_id IS NOT NULL", uid) or 0
+            proxies = await _safe_fetchval(
+                pool, "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid) or 0
+            ops_total = await _safe_fetchval(
+                pool, "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", uid) or 0
+            return _json_resp(onboarding.build_checklist(
+                accounts=accounts, accounts_with_proxy=with_proxy,
+                proxies=proxies, ops_total=ops_total))
+        except Exception:
+            log.exception("onboarding_status uid=%s", uid)
+            # fail-open: активированным считаем, чтобы не мешать (чеклист скрыт)
+            return _json_resp({"activated": True, "steps": [], "done": 0,
+                               "total": 0, "next_step": None})
+
     async def organism_digest(request: web.Request) -> web.Response:
         """Пульс-Дайджест: единый отчёт организма (флот/аудитория/рост/сеть/риски)
         с трендами неделя-к-неделе и приоритетными действиями. Read-only."""
@@ -14094,6 +14124,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/seo/analyze", seo_analyze)
     app.router.add_get("/api/miniapp/organism/pulse", organism_pulse)
     app.router.add_get("/api/miniapp/organism/digest", organism_digest)
+    app.router.add_get("/api/miniapp/onboarding", onboarding_status)
     app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
     app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
     app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
