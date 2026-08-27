@@ -253,7 +253,12 @@ async def _heal_expired_cooldowns(pool: asyncpg.Pool) -> None:
         if n:
             log.info("account_monitor: self-heal — снят истёкший кулдаун с %d аккаунтов", n)
     except Exception as exc:
-        log.debug("account_monitor: heal_expired_cooldowns error: %s", exc)
+        # НЕ debug: это единственный путь, которым аккаунт возвращается из
+        # кулдауна в строй. Если он молча падает (лаг миграции, недоступная БД),
+        # флот остаётся запаркованным, а в логах при обычном уровне — ни слова,
+        # и снаружи это выглядит как «аккаунты не работают без причины».
+        log.warning("account_monitor: самолечение кулдаунов не отработало — "
+                    "аккаунты останутся в 'cooldown': %s", exc, exc_info=True)
 
 
 async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:

@@ -589,6 +589,11 @@ async def main() -> None:
         # было, а get_account_for_telethon/_ACCOUNT_COLS её селектят → падал ВЕСЬ путь
         # загрузки аккаунта (синк контактов «column a.cf_relay_url does not exist»).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS cf_relay_url TEXT",
+        # Отметка конфликта сессии (schema_v185). Её читают ОБА монитора здоровья
+        # и пассивное самолечение кулдаунов — то есть при лаге миграции ломается
+        # ровно то, что возвращает флот в строй, и флот остаётся запаркованным.
+        # История с cf_relay_url выше показывает, что лаг здесь не гипотетический.
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS session_conflict_at TIMESTAMPTZ",
         # Профильные факты для риск-движка инвайтинга (schema_v160). Их читает
         # flood_engine.account_risk_factors в КАЖДОМ расчёте суточного лимита —
         # при лаге миграции запрос падал бы на каждом батче инвайта.
