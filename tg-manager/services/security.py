@@ -381,6 +381,19 @@ def security_middleware() -> Callable:
             if auth.startswith("Bearer "):
                 from services.mini_app_api import _get_uid
                 uid = _get_uid(request)
+            # Трассировка (аудит №6): каждый запрос бежит в своей задаче, контекст
+            # корреляции изолирован. Проставляем cid (+ user_id, если узнали) в
+            # начале — тогда ЛЮБАЯ строка лога, рождённая при обработке запроса,
+            # привязана к запросу и пользователю. Раньше корреляцию выставлял
+            # только апдейт-миддлварь бота; мини-апп — главная веб-поверхность —
+            # логировала без контекста, и аварию приходилось собирать вручную.
+            try:
+                from services.logger import (
+                    set_correlation_id, generate_correlation_id)
+                set_correlation_id(
+                    correlation_id=generate_correlation_id(), user_id=uid)
+            except Exception:
+                pass
             if not await check_rate_limit(request, uid):
                 return rate_limit_response(request, uid)
 

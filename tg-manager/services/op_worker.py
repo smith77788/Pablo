@@ -1886,6 +1886,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     op_id = row["id"]
     owner_id = row["owner_id"]
     op_type = row["op_type"]
+    # Трассировка (аудит №6): операция бежит в своей asyncio-задаче, поэтому
+    # контекст корреляции здесь изолирован. Проставляем его в НАЧАЛЕ — тогда
+    # каждая строка лога этой операции несёт cid/op_id/user_id, и разбор аварии
+    # («логи запуска как ты просил») перестаёт быть склейкой вручную. Инфра уже
+    # была (services.logger), но фоновые операции её не выставляли.
+    from services.logger import set_correlation_id, generate_correlation_id
+    set_correlation_id(
+        correlation_id=generate_correlation_id(),
+        user_id=owner_id,
+        op_id=f"op{op_id}",
+    )
     _t_started = time.monotonic()      # метрика длительности операции (аудит №6)
     params = (
         row["params"]

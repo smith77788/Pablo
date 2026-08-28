@@ -130,6 +130,100 @@ def test_no_unresolved_internal_imports():
     )
 
 
+def _internal_tops() -> set[str]:
+    """Верхнеуровневые пакеты/модули этого репозитория.
+
+    Импорт, начинающийся с одного из них, — наш; всё остальное внешнее.
+    """
+    tops: set[str] = set()
+    for entry in os.listdir(ROOT):
+        p = os.path.join(ROOT, entry)
+        if os.path.isdir(p):
+            if entry in _SKIP_DIRS:
+                continue
+            if any(f.endswith(".py") for f in os.listdir(p)):
+                tops.add(entry)
+        elif entry.endswith(".py"):
+            tops.add(entry[:-3])
+    return tops
+
+
+def _real_module_paths() -> set[str]:
+    """Все существующие модули И пакеты (по каталогам с __init__.py)."""
+    real: set[str] = set()
+    for dirpath, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        rel_dir = os.path.relpath(dirpath, ROOT).replace(os.sep, ".")
+        if "__init__.py" in files and rel_dir != ".":
+            real.add(rel_dir)
+        for fname in files:
+            if fname.endswith(".py"):
+                rel = os.path.relpath(os.path.join(dirpath, fname), ROOT)
+                rel = rel.replace(os.sep, ".")[:-3]
+                if rel.endswith(".__init__"):
+                    rel = rel[: -len(".__init__")]
+                real.add(rel)
+    return real
+
+
+def _unresolved_module_paths() -> list[str]:
+    """Импорты ВНУТРЕННЕГО модуля-пути, которого в репозитории нет.
+
+    Дополняет проверку выше: та ловит отсутствующее ИМЯ в существующем модуле,
+    а здесь — отсутствующий сам МОДУЛЬ. Разница критична для ленивого импорта:
+    `from services.<переименованный> import x` сейчас читается как «внешняя
+    библиотека, не наше дело» и молча проходит — landmine до нажатия кнопки.
+    """
+    tops = _internal_tops()
+    real = _real_module_paths()
+    bad: list[str] = []
+    for dirpath, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fname)
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+            try:
+                tree = ast.parse(open(path, encoding="utf-8", errors="ignore").read())
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                targets: list[str] = []
+                if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    targets = [node.module]
+                elif isinstance(node, ast.Import):
+                    targets = [a.name for a in node.names]
+                for mod in targets:
+                    if not mod or mod.split(".")[0] not in tops:
+                        continue          # внешняя библиотека — не наше дело
+                    if mod in real:
+                        continue
+                    bad.append(f"{rel}:{node.lineno}: import {mod}")
+    return sorted(bad)
+
+
+def test_no_unresolved_internal_module_paths():
+    bad = _unresolved_module_paths()
+    assert not bad, (
+        "импорт ссылается на внутренний модуль, которого нет:\n  "
+        + "\n  ".join(bad)
+        + "\n\nЛенивый импорт несуществующего модуля не виден при старте — он "
+          "взорвётся у пользователя (ModuleNotFoundError) на конкретном действии."
+    )
+
+
+def test_module_path_detector_finds_a_planted_break():
+    """Детектор обязан ловить пропажу самого модуля, а не только имени в нём."""
+    tops = _internal_tops()
+    assert "services" in tops, "карта верхнеуровневых пакетов пуста — проверять нечего"
+    real = _real_module_paths()
+    assert "services.account_manager" in real
+    # Несуществующий подмодуль под реальным пакетом — ровно тот случай, что
+    # раньше проходил как «внешний».
+    assert "services.this_module_does_not_exist" not in real
+
+
 def test_detector_finds_a_planted_break(tmp_path):
     """Детектор, который ничего не находит, — зелёный и бесполезный."""
     mods = {"pkg.mod": ({"real", "other"}, False)}
