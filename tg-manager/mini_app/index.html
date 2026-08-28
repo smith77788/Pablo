@@ -12992,7 +12992,7 @@ async function openQuickPost() {
   try {
     const d = await api('/api/miniapp/channels');
     const chs = d.channels||[];
-    if (!chs.length) { txt('quickPostChannels', empty('📢','Нет каналов','Добавьте каналы первым')); return; }
+    if (!chs.length) { txt('quickPostChannels', empty('📢','Нет каналов','Создайте канал в фабрике — и публикуйте прямо отсюда',{label:'📡 Фабрика каналов',fn:'openChannelFactory()'})); return; }
     txt('quickPostChannels', chs.map(c=>`
       <div class="row tap" onclick="toggleQpChannel(${c.id})">
         <div class="row-ico" id="qpc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
@@ -18823,7 +18823,7 @@ async function openNarrativeModal() {
   try {
     const d = await api('/api/miniapp/channels');
     const chs = d.channels||[];
-    if (!chs.length) { txt('nc-channels', empty('📢','Нет каналов','Добавьте каналы в разделе «Каналы»')); return; }
+    if (!chs.length) { txt('nc-channels', empty('📢','Нет каналов','Создайте канал в фабрике — тогда его можно добавить в связку',{label:'📡 Фабрика каналов',fn:'openChannelFactory()'})); return; }
     txt('nc-channels', chs.map(c=>`
       <div class="row tap" onclick="toggleNcChannel(${c.id})">
         <div class="row-ico" id="ncc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
