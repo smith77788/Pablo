@@ -417,7 +417,17 @@ def security_middleware() -> Callable:
         if "text/html" in ct:
             response.headers.setdefault(
                 "Content-Security-Policy",
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+                # img-src ОБЯЗАТЕЛЬНО перечисляет data: и blob: — без них QR-код
+                # входа в аккаунт (мини-апп получает его как data:image/png;base64
+                # и вставляет в <img>) молча блокируется браузером: код есть, но
+                # НЕ ВИДЕН. Без явного img-src он наследует default-src 'self', а
+                # 'self' не покрывает схему data:. blob: — для картинок из
+                # createObjectURL. connect-src 'self' — фетчи к нашему же /api.
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; "
+                "connect-src 'self'"
             )
 
         return response

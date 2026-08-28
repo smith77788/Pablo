@@ -57,3 +57,53 @@ async def test_http_exception_is_not_swallowed():
 
     with pytest.raises(web.HTTPNotFound):
         await mw(req, _404)
+
+
+def _csp_directives(csp: str) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for part in csp.split(";"):
+        toks = part.split()
+        if toks:
+            out[toks[0]] = toks[1:]
+    return out
+
+
+async def _html(request):
+    return web.Response(text="<html><body>ok</body></html>",
+                        content_type="text/html")
+
+
+@pytest.mark.asyncio
+async def test_csp_allows_data_uri_images_for_qr():
+    """QR-код входа приходит как data:image/png;base64 в <img>.
+
+    Без data: в img-src браузер молча блокирует картинку: код сгенерирован, но
+    НЕ ВИДЕН — ровно та жалоба, ради которой это правится. И это не наследование
+    от default-src: 'self' схему data: не покрывает, нужен явный img-src.
+    """
+    mw = security_middleware()
+    req = make_mocked_request("GET", "/miniapp/")
+    resp = await mw(req, _html)
+
+    csp = resp.headers.get("Content-Security-Policy", "")
+    assert csp, "CSP на HTML-ответе не выставлен"
+    directives = _csp_directives(csp)
+    assert "img-src" in directives, (
+        "нет явного img-src — img наследует default-src 'self', а 'self' не "
+        "покрывает data:, и QR-картинка блокируется")
+    assert "data:" in directives["img-src"], (
+        "data: не разрешён в img-src — QR-код не отобразится")
+
+
+@pytest.mark.asyncio
+async def test_csp_still_restricts_default_src():
+    """Послабление касается только картинок — общий периметр не трогаем."""
+    mw = security_middleware()
+    req = make_mocked_request("GET", "/miniapp/")
+    resp = await mw(req, _html)
+    directives = _csp_directives(resp.headers["Content-Security-Policy"])
+    assert directives.get("default-src") == ["'self'"], (
+        "default-src разошёлся с 'self' — послабление шире, чем нужно для QR")
+    # data: не должен утечь в script-src — иначе это дыра исполнения кода.
+    assert "data:" not in directives.get("script-src", []), (
+        "data: в script-src — это исполнение произвольного кода, не картинка")

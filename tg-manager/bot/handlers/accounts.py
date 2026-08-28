@@ -461,31 +461,37 @@ async def _show_accounts_menu(
             ),
         )
 
-    # Action buttons (1 per row)
-    if total < limit:
-        kb.row(
-            InlineKeyboardButton(
-                text="🔲 Добавить (QR-код)",
-                callback_data=AccCb(action="qr_login").pack(),
-            )
+    # Кнопки добавления показываем ВСЕГДА — это единственный путь подключить
+    # аккаунт, и прятать его нельзя. Раньше здесь стоял `if total < limit`, из-за
+    # чего на исчерпанном лимите (а для плана free лимит равен 0, то есть у
+    # любого пользователя free с уже привязанными аккаунтами `total < 0` всегда
+    # ложно) кнопки просто пропадали без единого слова — снаружи это «в боте
+    # больше нельзя подключить аккаунт». Лимит проверяет КАЖДЫЙ обработчик входа
+    # (add/qr_login/import_menu) и показывает понятный экран апгрейда — гейт от
+    # этого не страдает, а пользователь видит причину, а не пустоту.
+    kb.row(
+        InlineKeyboardButton(
+            text="🔲 Добавить (QR-код)",
+            callback_data=AccCb(action="qr_login").pack(),
         )
-        kb.row(
-            InlineKeyboardButton(
-                text="☎️ Добавить (номер)", callback_data=AccCb(action="add").pack()
-            )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="☎️ Добавить (номер)", callback_data=AccCb(action="add").pack()
         )
-        kb.row(
-            InlineKeyboardButton(
-                text="📥 Импорт сессии",
-                callback_data=AccCb(action="import_menu").pack(),
-            )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="📥 Импорт сессии",
+            callback_data=AccCb(action="import_menu").pack(),
         )
-        kb.row(
-            InlineKeyboardButton(
-                text="🤖 Авторег (SMS API)",
-                callback_data=AutoRegCb(action="menu").pack(),
-            )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="🤖 Авторег (SMS API)",
+            callback_data=AutoRegCb(action="menu").pack(),
         )
+    )
 
     if total > 0:
         kb.row(
@@ -744,6 +750,39 @@ async def cb_qr_login(
     await safe_answer(callback)
     await state.clear()
     user_id = callback.from_user.id
+
+    # QR-вход — такой же способ подключить аккаунт, как и по номеру, поэтому и
+    # гейт тот же. Раньше проверки лимита здесь не было вовсе: пока кнопка была
+    # скрыта на исчерпанном лимите, дыра не проявлялась, но теперь кнопка видна
+    # всегда — без этой проверки free-пользователь заводил бы аккаунты в обход
+    # платного лимита. Тексты и экран апгрейда — те же, что в cb_add_account.
+    if not _api_configured():
+        await callback.message.edit_text(
+            _api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup(),
+        )
+        return
+    plan, limit = await _get_account_limit(pool, user_id)
+    if limit == 0:
+        await callback.message.edit_text(
+            locked_text("Личные аккаунты Telegram", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=AccCb(action="menu")),
+        )
+        return
+    accounts = await db.get_tg_accounts(pool, user_id)
+    if len(accounts) >= limit:
+        limit_label = tariffs.format_limit(limit)
+        await callback.message.edit_text(
+            f"⚠️ Достигнут лимит аккаунтов для вашего плана "
+            f"(<b>{plan.upper()}</b>: {limit_label} аккаунт"
+            f"{'ов' if limit != 1 else ''}).\n\n"
+            f"Обновите подписку, чтобы добавить больше аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                _next_account_plan(plan), back_callback=AccCb(action="menu")),
+        )
+        return
 
     try:
         png = await start_qr_login(user_id)
