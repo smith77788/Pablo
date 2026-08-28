@@ -19465,19 +19465,39 @@ function ago(ts) {
   if(s<86400) return Math.floor(s/3600)+' ч назад';
   return Math.floor(s/86400)+' дн назад';
 }
+// Перезагрузка текущей корневой вкладки. Безопасно только когда стек пуст —
+// тогда видимый экран это ровно s-CUR, и loadTab(CUR) обновляет именно его.
+// На вложенных экранах (STACK>0) reload вкладки обновил бы не тот экран, поэтому
+// кнопку «Повторить» там не показываем (см. empty()).
+function reloadView() {
+  try {
+    if (typeof STACK !== 'undefined' && STACK.length) return;
+    if (typeof LOADED !== 'undefined') LOADED[CUR] = false;
+    loadTab(CUR);
+  } catch(_) {}
+}
 function empty(ico,txt2,sub,action) {
   // action: {label, fn} — кнопка-призыв к действию (как в топовых приложениях)
   //
   // Без действия экран становился тупиком: 192 из 207 вызовов не передавали
   // action, а 73 из них — это «Ошибка» с текстом исключения и НИ ОДНОЙ кнопки.
   // Пользователь упирался в текст ошибки и мог только закрыть мини-апп.
-  // Поэтому выход есть всегда: явный CTA, если его задали, иначе «Назад» —
-  // и только когда есть куда возвращаться (на корневом экране кнопка не нужна).
-  const btn = action
-    ? `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>`
-    : (typeof STACK !== 'undefined' && STACK.length > 1
-        ? `<button class="btn" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`
-        : '');
+  // Поэтому выход есть всегда: явный CTA, если его задали; для ошибок на корневом
+  // экране — «Повторить» (гарантированно рабочий reload вкладки); иначе «Назад» —
+  // и только когда есть куда возвращаться.
+  const atRoot = !(typeof STACK !== 'undefined' && STACK.length);
+  const isErr = ico === '⚠️';
+  let btn;
+  if (action) {
+    btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>`;
+  } else if (isErr && atRoot) {
+    // Ошибка загрузки корневой вкладки → один тап, чтобы повторить запрос.
+    btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="reloadView()">↻ Повторить</button>`;
+  } else if (typeof STACK !== 'undefined' && STACK.length > 1) {
+    btn = `<button class="btn" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`;
+  } else {
+    btn = '';
+  }
   return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}${btn}</div>`;
 }
 function txt(id, html) {
