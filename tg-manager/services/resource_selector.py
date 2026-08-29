@@ -190,7 +190,7 @@ async def select_all_active(
     rows = await pool.fetch(
         f"""SELECT a.id, a.owner_id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
                    a.device_model, a.system_version, a.app_version,
-                   a.lang_code, a.system_lang_code, a.proxy_id,
+                   a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url,
                    a.tags, a.pool, a.labels, a.warnings, a.project,
                    a.trust_score, a.cooldown_until,
                    COALESCE(a.acc_status, 'active') AS acc_status,

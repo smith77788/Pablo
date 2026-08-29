@@ -8924,17 +8924,19 @@ async def _exec_deploy_network(
     # Аккаунт-создатель: явный или первый живой с сессией.
     acc = None
     want_acc = params.get("account_id")
-    arow = await _safe_fetchrow(
-        pool,
-        "SELECT id, session_str, device_model, system_version, app_version, "
-        "lang_code, system_lang_code, proxy_id FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
-        "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
-        + ("AND id=$2 " if want_acc else "") + "ORDER BY id LIMIT 1",
-        *([owner_id, int(want_acc)] if want_acc else [owner_id]))
-    if not arow:
+    if want_acc:
+        # Оператор указал конкретный аккаунт — грузим ровно его (аккаунт уже
+        # выбран, флуд-выбор не нужен). Каноническая загрузка по id даёт полный
+        # транспорт (owner_id + cf_relay_url).
+        from database import db as _db
+        acc = await _db.get_account_for_telethon(pool, int(want_acc), owner_id)
+    else:
+        # Одна дверь: аккаунт не указан — берём через флуд-осознанный выбор,
+        # а не первый попавшийся по id (мимо кулдауна/мёртвых статусов).
+        from services import resource_selector as _rsel
+        acc = await _rsel.select_account(pool, owner_id, min_trust_score=0.0)
+    if not acc:
         return {"status": "failed", "summary": "⚠️ Связка: нет активного аккаунта с сессией"}
-    acc = dict(arow)
 
     # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
     # мог параллельно вести другую операцию → две сессии на одном auth-key.
@@ -9114,12 +9116,12 @@ async def _exec_community_liven(
         count = max(1, min(int(params.get("count") or 5), 50))
     except (TypeError, ValueError):
         count = 5
-    accs = await _safe_fetch(
-        pool, "SELECT id, session_str, device_model, system_version, app_version, "
-        "lang_code, system_lang_code, proxy_id FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
-        "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
-        "ORDER BY random() LIMIT $2", owner_id, count)
+    # Одна дверь к аккаунту (шаг №1 аудита): выбор через флуд-осознанный слой
+    # вместо сырого random() — не берём аккаунт в кулдауне/мёртвый по статусу и
+    # получаем полный транспорт (owner_id + cf_relay_url). min_trust=0.0 —
+    # порог доверия здесь не вводим, меняем только «какой аккаунт безопасно взять».
+    from services import resource_selector as _rsel
+    accs = await _rsel.select_accounts(pool, owner_id, count, min_trust_score=0.0)
     chat_id = int(node["tg_chat_id"])
     # Пригласительная ссылка через бота (он админ ноды) — так вступают и в
     # приватную только что созданную супергруппу (по id без access_hash нельзя).
@@ -9191,11 +9193,10 @@ async def _exec_community_set_staff(
         "WHERE m.node_id=$1 AND m.role='admin' AND a.is_active AND a.session_str IS NOT NULL "
         "ORDER BY m.joined_at LIMIT 1", node_id)
     if not owner_acc:
-        owner_acc = await _safe_fetchrow(
-            pool, "SELECT id, session_str, device_model, system_version, app_version, "
-            "lang_code, system_lang_code, proxy_id FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL ORDER BY id LIMIT 1",
-            owner_id)
+        # Одна дверь: фолбэк-промоутер — через флуд-осознанный выбор, а не первый
+        # попавшийся по id (не берём аккаунт в кулдауне/мёртвый по статусу).
+        from services import resource_selector as _rsel
+        owner_acc = await _rsel.select_account(pool, owner_id, min_trust_score=0.0)
     if not owner_acc:
         return {"status": "failed", "summary": "⚠️ Роли: нет аккаунта-промоутера"}
 
@@ -9267,12 +9268,10 @@ async def _exec_crosspost_run(
                 "WHERE id=$1 AND owner_id=$2 AND is_active AND session_str IS NOT NULL",
                 lk["account_id"], owner_id)
         if not acc:
-            acc = await _safe_fetchrow(
-                pool, "SELECT id, session_str, device_model, system_version, app_version, "
-                "lang_code, system_lang_code, proxy_id FROM tg_accounts "
-                "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
-                "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
-                "ORDER BY id LIMIT 1", owner_id)
+            # Одна дверь: фолбэк-аккаунт для связки — через флуд-осознанный выбор
+            # (не берём кулдаун/мёртвый по статусу), а не первый по id.
+            from services import resource_selector as _rsel
+            acc = await _rsel.select_account(pool, owner_id, min_trust_score=0.0)
         if not acc:
             continue
         # Захват на КАЖДУЮ связку: аккаунт здесь свой у каждой ссылки, поэтому

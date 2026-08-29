@@ -886,6 +886,11 @@ async def get_best_account(
         "a.is_active = TRUE",
         "a.session_str IS NOT NULL",
         "(a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
+        # Мёртвые по статусу не годятся для действия. Раньше исполнители несли
+        # этот фильтр каждый у себя (NOT IN banned/deactivated/session_expired);
+        # переносим его в умный слой, чтобы «одна дверь» была строго безопаснее
+        # сырого выбора, а не мягче.
+        "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired')",
         "a.id != ALL($2::bigint[])",
     ]
     params: list = [owner_id, exclude]
@@ -909,9 +914,9 @@ async def get_best_account(
 
     where = " AND ".join(conditions)
     rows = await pool.fetch(
-        f"""SELECT a.id, a.session_str, a.first_name, a.phone,
+        f"""SELECT a.id, a.owner_id, a.session_str, a.first_name, a.phone,
                    a.device_model, a.system_version, a.app_version,
-                   a.lang_code, a.system_lang_code, a.proxy_id,
+                   a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url,
                    a.trust_score, a.cooldown_until, a.tags, a.pool, a.last_used,
                    p.proxy_url, p.geo_country,
                    r.ban_probability AS physics_ban_probability

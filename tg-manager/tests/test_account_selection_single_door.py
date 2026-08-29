@@ -59,7 +59,10 @@ BASELINE = {
     'services/invite_preflight.py::id, phone, session_str',
     'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
-    'services/op_worker.py::id, session_str, device_model, system_version, app_version, ',
+    # МИГРИРОВАНО (шаг №1): 4 боевых ALL_ACTIVE-исполнителя
+    # (_exec_deploy_network / _exec_community_liven / _exec_community_set_staff /
+    # _exec_crosspost_run) переведены на resource_selector.select_account(s) —
+    # ключ 'id, session_str, device_model, system_version, app_version, ' удалён.
     'services/op_worker.py::id, session_str, first_name, phone, device_model, system_ver',
     'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',
 }
