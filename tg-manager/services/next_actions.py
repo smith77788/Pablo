@@ -125,6 +125,12 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
         "channels": _fv(
             pool, "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
         ),
+        "channels_silent": _fv(
+            pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 "
+            "AND last_post_at IS NOT NULL AND last_post_at < NOW() - INTERVAL '7 days'",
+            uid,
+        ),
         "ecosystems": _fv(
             pool, "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1", uid
         ),
@@ -354,6 +360,24 @@ def build_suggestions(state: dict) -> list[dict]:
         )
 
     # 9. Несколько каналов, но не объединены в экосистему.
+    # КОНТЕКСТ: каналы постили, но замолчали 7+ дн. — теряют охваты/вовлечённость.
+    # Только для «затихших» (last_post_at был), не для только что добавленных.
+    if state.get("channels_silent", 0) > 0:
+        n = state["channels_silent"]
+        s.append(
+            {
+                "id": "revive_silent_channels",
+                "priority": 55,
+                "icon": "🔔",
+                "title": f"{n} каналов замолчали на неделю",
+                "reason": "Каналы без новых постов теряют охваты и вовлечённость — "
+                "алгоритм реже показывает. Опубликуйте пост или включите автопостинг.",
+                "cta": "Открыть каналы",
+                "nav": None,
+                "fn": "openChannels",
+            }
+        )
+
     if state.get("channels", 0) >= 2 and state.get("ecosystems", 0) == 0:
         s.append(
             {

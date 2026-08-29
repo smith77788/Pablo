@@ -108,6 +108,16 @@ def test_single_channel_no_ecosystem_suggestion():
     assert "build_ecosystem" not in _ids(sugs)
 
 
+def test_silent_channels_suggest_revive():
+    sugs = build_suggestions(_base(channels=3, channels_silent=2))
+    r = next(s for s in sugs if s["id"] == "revive_silent_channels")
+    assert "2" in r["title"] and r["fn"] == "openChannels"
+
+
+def test_no_silent_channels_no_revive():
+    assert "revive_silent_channels" not in _ids(build_suggestions(_base(channels=3, channels_silent=0)))
+
+
 def test_accounts_but_empty_suggests_collect_audience():
     sugs = build_suggestions(
         _base(acc_active=2, bots=0, subscribers=0, parsed_recent=0, funnels=0, auto_rules=0)
