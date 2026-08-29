@@ -6474,6 +6474,21 @@ function hideOpDone() {
   if (el) el.classList.remove('show');
   clearTimeout(_opDoneTimer);
 }
+// Следующий логичный шаг после УСПЕШНОЙ операции — те же цепочки, что уже
+// валидированы Copilot'ом (engage_after_invite, warmup_after_register). Баннер
+// эфемерен и «здесь и сейчас» — не дублирует экранный Copilot, а ускоряет момент
+// максимальной вовлечённости (операция только что прошла). Ключи — реальные op_type.
+const _OP_NEXT = {
+  mass_invite:   {label:'📨 Написать приветствие', fn:'openBotBroadcast'},
+  auto_register: {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
+  reg_check:     {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
+  bot_factory:   {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
+};
+function _opNextBtn(op) {
+  const n = _OP_NEXT[op && op.op_type];
+  if (!n || typeof window[n.fn] !== 'function') return '';
+  return `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();${n.fn}()">${n.label}</button>`;
+}
 function showOpComplete(op) {
   const el = document.getElementById('opDone');
   if (!el || !op || !op.id) return;
@@ -6491,7 +6506,7 @@ function showOpComplete(op) {
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      ${ok ? '' : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`}
+      ${ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`}
       <span style="font-size:12px;color:var(--accent)">Открыть детали →</span>
     </div>`;
   el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
