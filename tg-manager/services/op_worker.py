@@ -9376,7 +9376,8 @@ async def _exec_promote_all_admins(
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx < n - 1:
-                await asyncio.sleep(2)
+                # межаккаунтный темп под губернатором (давление флота тормозит)
+                await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
         summary = (
             f"👑 Назначение администраторов канала\n"

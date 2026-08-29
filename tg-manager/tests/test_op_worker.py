@@ -413,3 +413,13 @@ def test_boost_flph_paces_are_governed():
         j = src.find("\nasync def ", i + 1)
         body = src[i: j if j != -1 else len(src)]
         assert "_governed_delay(pool, owner_id" in body, f"{fn}: межцелевая пауза не под губернатором"
+
+
+def test_promote_all_admins_is_governed():
+    """Назначение аккаунтов админами — межаккаунтный расход флота под губернатором."""
+    src = open("services/op_worker.py", encoding="utf-8").read()
+    i = src.find("async def _exec_promote_all_admins(")
+    assert i != -1
+    j = src.find("\nasync def ", i + 1)
+    body = src[i: j if j != -1 else len(src)]
+    assert "_governed_delay(pool, owner_id" in body, "promote_all_admins: пауза не под губернатором"
