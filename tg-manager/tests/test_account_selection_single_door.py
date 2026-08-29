@@ -9,11 +9,21 @@
 она не видна, пока аккаунт не улетит. Это тот же архитектурный шов, что и авария
 с транспортом: ум есть в центре, но десятки путей ходят мимо него.
 
-ПОЧЕМУ ЗАМОРОЗКА, А НЕ ПЕРЕПИСЫВАНИЕ. Мест — 33 (14 уникальных паттернов),
-переписать всё разом рискованно. Поэтому первый безопасный шаг: заморозить
-множество известных утечек. Новая утечка (в новом файле или новый паттерн
-выбора) роняет тест — распространяться дальше нельзя. По мере миграции запись
-удаляется из BASELINE, и множество сжимается («ratchet down»).
+ПОЧЕМУ ЗАМОРОЗКА, А НЕ ПЕРЕПИСЫВАНИЕ. Уникальных паттернов выбора — 26 (мест
+больше: один паттерн встречается во многих исполнителях), переписать всё разом
+рискованно. Поэтому первый безопасный шаг: заморозить множество известных
+утечек. Новая утечка (в новом файле или новый паттерн выбора) роняет тест —
+распространяться дальше нельзя. По мере миграции запись удаляется из BASELINE, и
+множество сжимается («ratchet down»). Уже мигрировано: 1 паттерн (4 боевых
+исполнителя op_worker), см. пометку в BASELINE.
+
+ОГРАНИЧЕНИЕ ДЕТЕКТОРА. Ловятся СТАТИЧЕСКИЕ SQL-строки (в т.ч. неявная склейка
+литералов — Python сворачивает её в одну константу). Запрос, собранный из
+переменных/ف-строк/`.format`, детектор не увидит — такие редки, но это честная
+граница, а не гарантия полноты. Часть замороженных мест уже фильтрует cooldown
+вручную (phone_checker) или это диагностика/показ (health_dashboard,
+infra_analytics, scan) — они в реестре как известные, но мигрировать их в первую
+очередь не обязательно.
 
 ЧТО СЧИТАЕТСЯ УТЕЧКОЙ. Выбор ИЗ МНОГИХ аккаунтов (не загрузка одного по id — там
 аккаунт уже выбран выше) с ГОЛОЙ колонкой session_str в проекции (то есть строим
@@ -48,22 +58,35 @@ _LEGIT = {
 # Замороженное множество известных утечек (файл::сигнатура проекции, ≤60 симв).
 # СЖИМАЕТСЯ по мере миграции — не растёт. Новый ключ = новая утечка = падение.
 BASELINE = {
+    'bot/handlers/audience_parser.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
     'bot/handlers/channel_factory.py::id, session_str, first_name, phone, device_model, system_ver',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',
+    'bot/handlers/channel_ops.py::a.id, a.tg_user_id, a.session_str, a.first_name, a.phone, a.',
+    'bot/handlers/global_search.py::id, session_str, device_model, system_version, app_version, ',
     'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',
     'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',
     'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',
+    'bot/handlers/phone_checker.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
     'bot/handlers/promo_platform.py::id, session_str, first_name, username, phone, proxy_id',
+    'services/ad_intelligence.py::id, session_str, device_model, system_version, app_version, ',
+    'services/geo_router.py::a.id, a.session_str, a.phone, a.first_name, a.device_model, ',
     'services/invite_preflight.py::id, phone, session_str',
+    'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
+    'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
+    'services/mini_app_api.py::id, session_str, device_model, system_version, app_version, ',
     'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
+    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',
+    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, p.pr',
     # МИГРИРОВАНО (шаг №1): 4 боевых ALL_ACTIVE-исполнителя
     # (_exec_deploy_network / _exec_community_liven / _exec_community_set_staff /
     # _exec_crosspost_run) переведены на resource_selector.select_account(s) —
     # ключ 'id, session_str, device_model, system_version, app_version, ' удалён.
     'services/op_worker.py::id, session_str, first_name, phone, device_model, system_ver',
+    'services/session_pool.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
     'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',
 }
 
@@ -88,8 +111,12 @@ def _leaks_in_source(rel: str, source: str) -> set[str]:
         m = re.search(r"\bselect\b(.*?)\bfrom\s+tg_accounts\b", low)
         if not m or not _bare_session(m.group(1)):
             continue
-        # загрузка одного по id — аккаунт уже выбран выше, флуд-выбор не нужен
-        if re.search(r"\bid\s*=\s*\$?\d?", low) and "any(" not in low:
+        # загрузка одного по id — аккаунт уже выбран выше, флуд-выбор не нужен.
+        # Цифра/параметр после '=' ОБЯЗАТЕЛЬНЫ (\d, не \d?): иначе join-условие
+        # `LEFT JOIN user_proxies p ON p.id = a.proxy_id` ложно читается как
+        # «загрузка по id», и выборка без ANY, но с джойном, пропускается —
+        # ратчет становится дырявым (так были потеряны phone_checker и др.).
+        if re.search(r"\bid\s*=\s*\$?\d", low) and "any(" not in low:
             continue
         keys.add(f"{rel}::{m.group(1).strip()[:60]}")
     return keys
