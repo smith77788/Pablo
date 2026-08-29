@@ -684,8 +684,8 @@ class BoostCb(CallbackData, prefix="bst"):
 class InviterCb(CallbackData, prefix="inv"):
     """Инвайтер — массовое добавление пользователей в группу."""
 
-    action: str          # menu|start|src_parser|src_manual|src_phones|pick_run|confirm
-    item: str = ""       # parse_run_id или "all"
+    action: str          # menu|start|src_parser|src_crm|src_manual|src_phones|pick_run|pick_crm|confirm
+    item: str = ""       # parse_run_id | "all" | "fav" | "t<idx>" (тег CRM по индексу)
 
 
 class ProfileSetterCb(CallbackData, prefix="pset"):

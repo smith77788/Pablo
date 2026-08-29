@@ -222,6 +222,7 @@ async def msg_inviter_group(message: Message, state: FSMContext) -> None:
     await state.set_state(InviterFSM.source)
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Из базы парсера", callback_data=InviterCb(action="src_parser"))
+    kb.button(text="📇 Из хранилища контактов (CRM)", callback_data=InviterCb(action="src_crm"))
     kb.button(text="✏️ Вручную (@username/ID)", callback_data=InviterCb(action="src_manual"))
     kb.button(text="📱 По номерам телефонов", callback_data=InviterCb(action="src_phones"))
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
@@ -374,6 +375,151 @@ async def cb_inviter_gender(
     except Exception:
         count = data.get("total_users", 0)
     await state.update_data(total_users=count)
+    await state.set_state(InviterFSM.acc_count)
+    await _ask_acc_count(callback, data, count, pool)
+
+
+# ── Шаг 2в: Из хранилища контактов (CRM) ─────────────────────────────────────
+#
+# Хранилище контактов (unified_contacts) — это отдельная база CRM, которая до сих
+# пор НЕ была источником инвайта: инвайтер умел парсер, ручной ввод и телефоны, а
+# накопленные контакты — нет. Здесь мы даём выбрать сегмент CRM (вся база /
+# избранные / тег) и отдаём его в тот же конвейер инвайта, что и остальные
+# источники — со всей его флуд-защитой (карантин, готовность аккаунта, дневные
+# лимиты, паузы). Никакого нового пути к аккаунтам не создаём: цели — из CRM,
+# исполнение — через существующую операцию mass_invite.
+
+
+def _crm_invitable_where(owner_id: int, crm_filter: dict | None) -> tuple[str, list]:
+    """WHERE для контактов, ПРИГОДНЫХ к инвайту, + аргументы.
+
+    ОДИН источник условия для подсчёта и для материализации целей: если считать
+    одним запросом, а выбирать другим — оператор увидит одно число, а пригласит
+    другое. Пригоден = есть хоть один идентификатор: @username, telegram_user_id
+    или непустой телефон.
+    """
+    where = ("owner_id=$1 AND (telegram_user_id IS NOT NULL "
+             "OR (username IS NOT NULL AND username <> '') "
+             "OR jsonb_array_length(COALESCE(phones, '[]'::jsonb)) > 0)")
+    args: list = [owner_id]
+    kind = (crm_filter or {}).get("kind")
+    if kind == "fav":
+        where += " AND is_favorite = TRUE"
+    elif kind == "tag":
+        args.append((crm_filter or {}).get("tag") or "")
+        where += f" AND ${len(args)} = ANY(tags)"
+    return where, args
+
+
+def _crm_split_targets(rows) -> tuple[list, list]:
+    """Разложить контакты на user_refs и phones, предпочитая ДЕШЁВЫЙ идентификатор.
+
+    Порядок предпочтения на контакт: @username → числовой id → телефон. Телефон
+    — только когда ни username, ни id нет: импорт контакта дороже и рискованнее
+    (лишний ImportContacts на аккаунт), поэтому не тащим номер там, где хватает
+    username. Дедуп сквозной, чтобы один и тот же человек не попал дважды.
+    """
+    import json as _json
+    user_refs: list = []
+    phones: list = []
+    seen: set = set()
+    for r in rows:
+        uname = (r["username"] or "").strip().lstrip("@")
+        uid = r["telegram_user_id"]
+        ref = f"@{uname}" if uname else (str(uid) if uid else None)
+        if ref:
+            key = ref.lower()
+            if key not in seen:
+                seen.add(key)
+                user_refs.append(ref)
+            continue
+        raw = r["phones"]
+        if isinstance(raw, str):
+            try:
+                raw = _json.loads(raw)
+            except Exception:
+                raw = []
+        for p in (raw or []):
+            p = str(p).strip() if p else ""
+            if p and p not in seen:
+                seen.add(p)
+                phones.append(p)
+                break
+    return user_refs, phones
+
+
+@router.callback_query(InviterCb.filter(F.action == "src_crm"))
+async def cb_src_crm(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    owner_id = callback.from_user.id
+    where, args = _crm_invitable_where(owner_id, None)
+    total = await pool.fetchval(
+        f"SELECT COUNT(*) FROM unified_contacts WHERE {where}", *args) or 0
+    if total == 0:
+        await callback.answer(
+            "⚠️ В хранилище контактов нет никого, кого можно пригласить "
+            "(нужен @username, ID или телефон). Сначала соберите контакты.",
+            show_alert=True)
+        return
+    fav_where, fav_args = _crm_invitable_where(owner_id, {"kind": "fav"})
+    fav = await pool.fetchval(
+        f"SELECT COUNT(*) FROM unified_contacts WHERE {fav_where}", *fav_args) or 0
+    # Топ тегов среди ПРИГОДНЫХ контактов — тот же предикат, чтобы счётчик тега
+    # совпадал с тем, что реально пригласится.
+    tag_rows = await pool.fetch(
+        f"SELECT t AS tag, COUNT(*) AS cnt FROM unified_contacts, unnest(tags) AS t "
+        f"WHERE {where} GROUP BY t ORDER BY cnt DESC, t LIMIT 6", *args)
+    tags = [r["tag"] for r in tag_rows]
+    await state.update_data(source_type="crm", crm_tags=tags)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"🌐 Вся база ({total} чел.)",
+              callback_data=InviterCb(action="pick_crm", item="all"))
+    if fav:
+        kb.button(text=f"⭐ Избранные ({fav})",
+                  callback_data=InviterCb(action="pick_crm", item="fav"))
+    for i, r in enumerate(tag_rows):
+        kb.button(text=f"🏷 {r['tag']} ({r['cnt']})"[:60],
+                  callback_data=InviterCb(action="pick_crm", item=f"t{i}"))
+    kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        "📇 <b>Из хранилища контактов (CRM)</b>\n\n"
+        "Кого приглашаем? Выберите сегмент.\n"
+        "<i>Приглашаем по @username или ID, где они есть; телефон — только если "
+        "другого идентификатора нет.</i>",
+        kb.as_markup())
+
+
+@router.callback_query(InviterCb.filter(F.action == "pick_crm"))
+async def cb_pick_crm(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext,
+    pool: asyncpg.Pool
+) -> None:
+    owner_id = callback.from_user.id
+    data = await state.get_data()
+    item = callback_data.item
+    if item == "fav":
+        crm_filter = {"kind": "fav"}
+    elif item.startswith("t") and item[1:].isdigit():
+        tags = data.get("crm_tags") or []
+        idx = int(item[1:])
+        if idx < 0 or idx >= len(tags):
+            await callback.answer("⚠️ Сегмент не найден — начните заново", show_alert=True)
+            return
+        crm_filter = {"kind": "tag", "tag": tags[idx]}
+    else:
+        crm_filter = {}          # "all"
+
+    where, args = _crm_invitable_where(owner_id, crm_filter)
+    count = await pool.fetchval(
+        f"SELECT COUNT(*) FROM unified_contacts WHERE {where}", *args) or 0
+    if count == 0:
+        await callback.answer("⚠️ В этом сегменте некого приглашать", show_alert=True)
+        return
+    await state.update_data(crm_filter=crm_filter, total_users=count)
     await state.set_state(InviterFSM.acc_count)
     await _ask_acc_count(callback, data, count, pool)
 
@@ -578,6 +724,7 @@ async def msg_inviter_acc_count(
 
     source_label = {
         "parser": f"База парсера ({total_users} чел.)",
+        "crm": f"Хранилище контактов ({total_users} чел.)",
         "manual": f"Вручную ({total_users} чел.)",
         "phones": f"По телефонам ({total_users} чел.)",
     }.get(source_type, str(source_type))
@@ -780,6 +927,15 @@ async def cb_inviter_confirm(
             for r in prows
         ]
         phones: list[str] = []
+    elif source_type == "crm":
+        # Материализуем цели из CRM ТЕМ ЖЕ предикатом, что и считали на прошлом
+        # шаге, — иначе оператор видел одно число, а пригласит другое.
+        crm_filter = data.get("crm_filter", {})
+        where, cargs = _crm_invitable_where(owner_id, crm_filter)
+        crows = await pool.fetch(
+            f"SELECT telegram_user_id, username, phones FROM unified_contacts "
+            f"WHERE {where} LIMIT 100000", *cargs)
+        user_refs, phones = _crm_split_targets(crows)
     elif source_type == "phones":
         user_refs = []
         phones = data.get("phones", [])
