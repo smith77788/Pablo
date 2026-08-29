@@ -67,7 +67,7 @@ def test_world_seo_counts_weak_and_worst():
         {"title": "Крипта Новости Аналитика", "username": "cryptonews",
          "about": "Ежедневная аналитика рынка криптовалют, сигналы и обзоры — подпишитесь."},
     ]
-    out = asyncio.get_event_loop().run_until_complete(world._seo(_FakePool(rows), 1))
+    out = asyncio.run(world._seo(_FakePool(rows), 1))
     assert out["scored"] == 3
     assert out["weak"] == 2          # два слабых, сильный не считается
     assert out["worst"]              # имя худшего заполнено (fallback «Канал»)
@@ -78,7 +78,7 @@ def test_world_seo_fail_open_on_db_error():
         async def fetch(self, q, *a):
             raise RuntimeError("db down")
 
-    out = asyncio.get_event_loop().run_until_complete(world._seo(Boom(), 1))
+    out = asyncio.run(world._seo(Boom(), 1))
     assert out == {"scored": 0, "weak": 0, "worst": None}
 
 

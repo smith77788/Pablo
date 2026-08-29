@@ -68,7 +68,7 @@ class _FakePool:
 
 
 def test_world_anomalies_counts():
-    out = asyncio.get_event_loop().run_until_complete(
+    out = asyncio.run(
         world._anomalies(_FakePool(2, 3, "Латентность"), 1))
     assert out["critical"] == 2 and out["warning"] == 3 and out["top"] == "Латентность"
 
@@ -78,7 +78,7 @@ def test_world_anomalies_fail_open():
         async def fetchrow(self, q, *a):
             raise RuntimeError("db down")
 
-    out = asyncio.get_event_loop().run_until_complete(world._anomalies(Boom(), 1))
+    out = asyncio.run(world._anomalies(Boom(), 1))
     assert out == {"critical": 0, "warning": 0, "top": None}
 
 

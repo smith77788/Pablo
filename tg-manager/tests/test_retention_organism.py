@@ -74,7 +74,7 @@ class _FakeValPool:
 
 
 def test_world_retention_summarizes():
-    out = asyncio.get_event_loop().run_until_complete(
+    out = asyncio.run(
         world._retention(_FakeValPool(40, 30), 1))
     assert out["joined"] == 40 and out["left"] == 30
     assert out["retained"] == 10
@@ -87,7 +87,7 @@ def test_world_retention_fail_open():
         async def fetchval(self, q, *a):
             raise RuntimeError("db down")
 
-    out = asyncio.get_event_loop().run_until_complete(world._retention(Boom(), 1))
+    out = asyncio.run(world._retention(Boom(), 1))
     assert out["health"] == "unknown" and out["joined"] == 0
 
 
