@@ -7226,7 +7226,7 @@ async function fleetDoctorLoad(){
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
-    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата'})[a&&a.kind] || 'Открыть';
+    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата', seo:'Оптимизировать SEO'})[a&&a.kind] || 'Открыть';
 }
 function runPulseAction(a) {
   const k = a && a.kind;
@@ -7242,6 +7242,7 @@ function runPulseAction(a) {
   if (k==='growth') return openGrowthHub();
   if (k==='bots') return openNetwork();
   if (k==='community') return openCommunity();
+  if (k==='seo') return openSeo();
   toast('Открываю…');
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).

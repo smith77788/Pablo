@@ -24,6 +24,7 @@ async def snapshot(pool, owner_id: int) -> dict:
         "vault": await _vault(pool, owner_id),
         "goal": await _goal(pool, owner_id),
         "growth": await _growth(pool, owner_id),
+        "seo": await _seo(pool, owner_id),
         "bots": await _bots(pool, owner_id),
         "chat_warmup": await _chat_warmup(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
@@ -95,6 +96,35 @@ async def _growth(pool, owner_id: int) -> dict:
             owner_id, list(growth_center.GROWTH_OP_TYPES)) or 0)
     except Exception:
         log.debug("world._growth failed owner=%s", owner_id)
+    return out
+
+
+async def _seo(pool, owner_id: int) -> dict:
+    """Находимость своих каналов в поиске Telegram: сколько объектов слабо
+    оптимизированы (grade 'red' по seo_advisor) — чистая эвристика по
+    заголовку/@username/описанию, без сети. Для подсказки мозга «оптимизируйте SEO».
+    """
+    out = {"scored": 0, "weak": 0, "worst": None}
+    try:
+        from services import seo_advisor
+        rows = await pool.fetch(
+            "SELECT title, username, about FROM managed_channels "
+            "WHERE owner_id=$1 LIMIT 200", owner_id)
+        worst_score = 101
+        for r in (rows or []):
+            res = seo_advisor.analyze(
+                title=r["title"] or "", username=r["username"] or "",
+                description=r["about"] or "")
+            out["scored"] += 1
+            if res["grade"] == "red":
+                out["weak"] += 1
+            if res["score"] < worst_score:
+                worst_score = res["score"]
+                name = (r["title"] or "").strip() \
+                    or (("@" + r["username"]) if r["username"] else "Канал")
+                out["worst"] = name
+    except Exception:
+        log.debug("world._seo failed owner=%s", owner_id)
     return out
 
 

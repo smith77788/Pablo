@@ -114,6 +114,17 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             "агент роста и самопиар в одном месте с планом под цель.",
             {"kind": "growth"})
 
+    seo = snap.get("seo") or {}
+    if seo.get("weak", 0) > 0:
+        w = seo["weak"]
+        worst = seo.get("worst")
+        add("seo_weak", "opportunity",
+            f"{w} объектов плохо находятся в поиске",
+            (f"«{worst}» и др. — " if worst else "")
+            + "слабый заголовок/@username/описание. Оптимизируйте — и канал начнут "
+            "находить по ключевым словам, а не только по прямой ссылке.",
+            {"kind": "seo"})
+
     geo = fleet.get("geo") or {}
     if geo.get("concentrated") and geo.get("top"):
         add("geo_concentrated", "opportunity",
