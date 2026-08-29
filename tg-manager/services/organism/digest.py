@@ -26,10 +26,12 @@ _TREND_METRICS = {
     "bots": ("bots", "total"),
     "community_nodes": ("bots", "community_nodes"),
     "failed_24h": ("ops", "failed_24h"),
+    "retained": ("retention", "retained"),
+    "seo_weak": ("seo", "weak"),
 }
 
 # Для этих метрик РОСТ — это плохо (тренд «вверх» подсвечиваем как негатив).
-_LOWER_IS_BETTER = {"fleet_dead", "failed_24h"}
+_LOWER_IS_BETTER = {"fleet_dead", "failed_24h", "seo_weak"}
 
 _DIGEST_STATE_KEY = "digest_metrics"
 
