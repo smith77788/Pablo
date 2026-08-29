@@ -159,15 +159,13 @@ async def warm_session(account_id: int, pool: asyncpg.Pool) -> SessionState:
 
 async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
     """Load all active accounts for owner into the session pool."""
-    rows = await pool.fetch(
-        """SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version,
-                  a.lang_code, a.system_lang_code, a.proxy_id,
-                  p.proxy_url, p.geo_country
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.owner_id = $1 AND a.is_active = TRUE AND a.session_str IS NOT NULL""",
-        owner_id,
-    )
+    # Одна дверь по полям: берём через resource_selector. respect_cooldown=False —
+    # это ЗАГРУЗКА пула (пул должен знать про все аккаунты, cooldown применяется
+    # при раздаче, а не здесь). Заодно тянем cf_relay_url — раньше device-словарь
+    # пула его терял, и сессии из пула шли мимо релея (транспортная дыра).
+    from services import resource_selector as _rsel
+    rows = await _rsel.select_all_active(
+        pool, owner_id, respect_cooldown=False, min_trust_score=0.0)
     loaded = 0
     for row in rows:
         device = {
@@ -179,6 +177,7 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
             "proxy_id": row["proxy_id"],
             "proxy_url": row["proxy_url"],
             "geo_country": row["geo_country"],
+            "cf_relay_url": row["cf_relay_url"],
         }
         register_session(row["id"], row["session_str"], owner_id, device)
         loaded += 1

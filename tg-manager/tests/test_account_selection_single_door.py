@@ -86,7 +86,7 @@ BASELINE = {
     # _exec_crosspost_run) переведены на resource_selector.select_account(s) —
     # ключ 'id, session_str, device_model, system_version, app_version, ' удалён.
     'services/op_worker.py::id, session_str, first_name, phone, device_model, system_ver',
-    'services/session_pool.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
+    # МИГРИРОВАНО (шаг №1): session_pool.load_from_db → resource_selector (+cf_relay_url в пул).
     'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',
 }
 
