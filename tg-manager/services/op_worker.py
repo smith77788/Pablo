@@ -11797,9 +11797,12 @@ async def _exec_niche_growth_post(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
 
-            # Пауза между группами: 10-20 минут (критично для безопасности)
+            # Пауза между группами: 10-20 минут (критично для безопасности).
+            # Под глобальным губернатором: при давлении флота темп замедляется
+            # (множитель ≥1 — спокойный флот не ускоряем, рисковый — тормозим).
             if idx < total - 1:
-                between_groups_delay = random.uniform(600, 1200)
+                between_groups_delay = await _governed_delay(
+                    pool, owner_id, random.uniform(600, 1200))
                 log.debug(
                     "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
                     between_groups_delay, idx + 1, total,

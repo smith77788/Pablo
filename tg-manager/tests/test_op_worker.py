@@ -386,3 +386,18 @@ class TestNormalizeResultFailedAlias:
         # "failed" каноничен: если он уже есть, "fail" не перетирает его.
         r = _normalize_result({"status": "done", "ok": 1, "failed": 7, "fail": 999}, "x", 1.0)
         assert r["failed"] == 7
+
+
+def test_niche_growth_between_groups_is_governed():
+    """Межгрупповая пауза Growth Agent (критично для безопасности) идёт через
+    глобальный губернатор — при давлении флота темп рекламного постинга в группы
+    замедляется. Гейт против регресса на голый sleep."""
+    import re
+    src = open("services/op_worker.py", encoding="utf-8").read()
+    i = src.find("async def _exec_niche_growth_post(")
+    assert i != -1
+    j = src.find("\nasync def ", i + 1)
+    body = src[i: j if j != -1 else len(src)]
+    # между группами — governed, а не голый sleep
+    assert "between_groups_delay = await _governed_delay(" in body, \
+        "межгрупповая пауза Growth Agent не под губернатором"
