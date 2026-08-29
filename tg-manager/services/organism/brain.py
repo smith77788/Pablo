@@ -159,6 +159,17 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             "Люди писали ключевые фразы («цена», «купить»). Посмотрите и дожмите.",
             {"kind": "intents"})
 
+    # Ретеншен: пригласить — половина дела, вторая — удержать. Высокий отток при
+    # значимом объёме → welcome не работает (лить в дырявое ведро).
+    ret = snap.get("retention") or {}
+    if ret.get("health") == "red" and ret.get("joined", 0) >= 10:
+        add("retention_low", "warn",
+            f"Отток {ret.get('churn_pct')}% приглашённых",
+            f"Из {ret['joined']} вступивших за месяц ушли {ret.get('left', 0)}. "
+            "Приглашать без удержания — лить в дырявое ведро: усильте welcome-цепочку "
+            "и сравните варианты приветствия (A/B).",
+            {"kind": "retention"})
+
     if fleet.get("dead", 0) > 0:
         add("dead", "opportunity", f"{fleet['dead']} мёртвых аккаунтов",
             "Невоскрешаемые (бан/деактивация/сессия) — удалите, чтобы не искажали "

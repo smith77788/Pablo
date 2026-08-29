@@ -25,6 +25,7 @@ async def snapshot(pool, owner_id: int) -> dict:
         "goal": await _goal(pool, owner_id),
         "growth": await _growth(pool, owner_id),
         "seo": await _seo(pool, owner_id),
+        "retention": await _retention(pool, owner_id),
         "bots": await _bots(pool, owner_id),
         "chat_warmup": await _chat_warmup(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
@@ -125,6 +126,32 @@ async def _seo(pool, owner_id: int) -> dict:
                 out["worst"] = name
     except Exception:
         log.debug("world._seo failed owner=%s", owner_id)
+    return out
+
+
+async def _retention(pool, owner_id: int) -> dict:
+    """Ретеншен инвайта за 30 дн.: приток (успешные вступления по инвайт-операциям)
+    vs отток (события 'left' из chat_guard). Переиспускает те же выборки, что и
+    эндпоинт, + чистую свёртку invite_retention. Для подсказки мозга «отток —
+    welcome не удерживает». fail-open."""
+    out = {"joined": 0, "left": 0, "retained": None,
+           "retention_pct": None, "churn_pct": None, "health": "unknown"}
+    try:
+        from services import invite_retention
+        joined = int(await pool.fetchval(
+            """SELECT COUNT(*) FROM operation_log ol
+               JOIN operation_queue oq ON oq.id = ol.op_id
+               WHERE oq.owner_id=$1 AND oq.op_type LIKE '%invite%'
+                 AND ol.status='ok' AND ol.message='joined'
+                 AND ol.created_at > NOW() - INTERVAL '30 days'""", owner_id) or 0)
+        left = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM organism_events WHERE owner_id=$1 AND kind='left' "
+            "AND created_at > NOW() - INTERVAL '30 days'", owner_id) or 0)
+        s = invite_retention.summarize(joined, left)
+        s["health"] = invite_retention.health(s["retention_pct"])
+        out = s
+    except Exception:
+        log.debug("world._retention failed owner=%s", owner_id)
     return out
 
 
