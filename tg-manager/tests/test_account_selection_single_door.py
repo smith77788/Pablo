@@ -64,7 +64,7 @@ BASELINE = {
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',
-    'bot/handlers/channel_ops.py::a.id, a.tg_user_id, a.session_str, a.first_name, a.phone, a.',
+    # МИГРИРОВАНО (шаг №1): channel_ops._run_invite_bg (инвайт) → resource_selector.
     'bot/handlers/global_search.py::id, session_str, device_model, system_version, app_version, ',
     'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',
     'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',

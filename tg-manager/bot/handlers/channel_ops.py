@@ -2954,21 +2954,20 @@ async def _run_invite_bg(
         return
 
     # ── Загружаем аккаунты (включая tg_user_id для promote_to_admin) ──────
-    _acc_q = (
-        "SELECT a.id, a.tg_user_id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL"
-    )
+    # Инвайт — высокий риск бана: аккаунт в кулдауне не берём. Одна дверь —
+    # флуд-осознанный resource_selector: выбранные грузим через include_ids (с
+    # фильтром cooldown), иначе берём один лучший, а не первый попавшийся.
+    # min_trust=0.0 — порог доверия здесь не вводим, только защита от cooling.
+    from services import resource_selector as _rsel
     try:
         if selected_acc_ids:
-            accounts = await pool.fetch(
-                _acc_q + " AND a.id = ANY($2::bigint[])",
-                user_id,
-                selected_acc_ids,
-            )
+            accounts = await _rsel.select_all_active(
+                pool, user_id, include_ids=[int(i) for i in selected_acc_ids],
+                action_type="invite", min_trust_score=0.0)
         else:
-            accounts = await pool.fetch(_acc_q + " LIMIT 1", user_id)
+            _best = await _rsel.select_account(
+                pool, user_id, action_type="invite", min_trust_score=0.0)
+            accounts = [_best] if _best else []
     except Exception as exc:
         mark_handled_error(f"invite_users accounts: {exc}")
         await msg_obj.answer(
