@@ -149,6 +149,7 @@ async def select_all_active(
     action_type: str = "default",
     min_trust_score: float | None = None,
     respect_daily_budget: bool = False,
+    geo_country: str | None = None,
 ) -> list[asyncpg.Record]:
     """Вернуть все активные аккаунты (аналог _get_active_accounts, но с опцией фильтра cooldown).
 
@@ -176,6 +177,13 @@ async def select_all_active(
     if tags:
         params.append(tags)
         conditions.append(f"a.tags @> ${len(params)}::text[]")
+
+    if geo_country:
+        # Гео-изоляция: только аккаунты, чей активный прокси в этой стране.
+        # Условие на p.geo_country делает LEFT JOIN фактически INNER (без прокси
+        # в стране — не проходит), что и нужно гео-выбору.
+        params.append(geo_country)
+        conditions.append(f"UPPER(p.geo_country) = UPPER(${len(params)})")
 
     min_trust = (
         flood_engine.min_trust_for_action(action_type)

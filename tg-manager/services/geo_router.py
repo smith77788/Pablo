@@ -28,24 +28,14 @@ async def get_accounts_by_geo(
     Вернуть аккаунты из заданной страны (по гео прокси).
     country_code: двухбуквенный ISO код (RU, US, DE, ...)
     """
-    rows = await pool.fetch(
-        """SELECT a.id, a.session_str, a.phone, a.first_name,
-                  a.device_model, a.system_version, a.app_version,
-                  a.lang_code, a.system_lang_code, a.proxy_id,
-                  p.proxy_url, p.geo_country
-           FROM tg_accounts a
-           JOIN user_proxies p ON p.id = a.proxy_id
-           WHERE a.owner_id = $1
-             AND a.is_active = true
-             AND a.session_str IS NOT NULL
-             AND UPPER(p.geo_country) = UPPER($2)
-           ORDER BY a.trust_score DESC NULLS LAST
-           LIMIT $3""",
-        owner_id,
-        country_code,
-        limit,
-    )
-    return [dict(r) for r in rows]
+    # Одна дверь: гео-выбор через resource_selector (фильтр cooldown/мёртвых
+    # статусов + полный транспорт с cf_relay_url). geo_country делает выбор
+    # только по аккаунтам с активным прокси в стране. min_trust=0.0 — порог не
+    # вводим. respect_cooldown встроено (True).
+    from services import resource_selector as _rsel
+    rows = await _rsel.select_all_active(
+        pool, owner_id, geo_country=country_code, min_trust_score=0.0)
+    return [dict(r) for r in rows[:limit]]
 
 
 def summarize_distribution(dist: dict[str, int]) -> dict:

@@ -72,7 +72,7 @@ BASELINE = {
     'bot/handlers/phone_checker.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
     'bot/handlers/promo_platform.py::id, session_str, first_name, username, phone, proxy_id',
     'services/ad_intelligence.py::id, session_str, device_model, system_version, app_version, ',
-    'services/geo_router.py::a.id, a.session_str, a.phone, a.first_name, a.device_model, ',
+    # МИГРИРОВАНО (шаг №1): geo_router.get_accounts_by_geo → resource_selector(geo_country).
     'services/invite_preflight.py::id, phone, session_str',
     'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
     'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
