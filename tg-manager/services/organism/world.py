@@ -26,6 +26,7 @@ async def snapshot(pool, owner_id: int) -> dict:
         "growth": await _growth(pool, owner_id),
         "seo": await _seo(pool, owner_id),
         "retention": await _retention(pool, owner_id),
+        "anomalies": await _anomalies(pool, owner_id),
         "bots": await _bots(pool, owner_id),
         "chat_warmup": await _chat_warmup(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
@@ -152,6 +153,30 @@ async def _retention(pool, owner_id: int) -> dict:
         out = s
     except Exception:
         log.debug("world._retention failed owner=%s", owner_id)
+    return out
+
+
+async def _anomalies(pool, owner_id: int) -> dict:
+    """Активные аномалии за 24ч (детектор аномалий): critical/warning + верхняя.
+    Прямой сигнал риска для флота — для срочной подсказки мозга. fail-open."""
+    out = {"critical": 0, "warning": 0, "top": None}
+    try:
+        r = await pool.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE severity='critical') AS crit, "
+            "COUNT(*) FILTER (WHERE severity='warning') AS warn "
+            "FROM anomaly_events WHERE owner_id=$1 AND is_active=TRUE "
+            "AND detected_at > NOW() - INTERVAL '24 hours'", owner_id)
+        if r:
+            out["critical"] = int(r["crit"] or 0)
+            out["warning"] = int(r["warn"] or 0)
+        if out["critical"] or out["warning"]:
+            t = await pool.fetchval(
+                "SELECT title FROM anomaly_events WHERE owner_id=$1 AND is_active=TRUE "
+                "AND detected_at > NOW() - INTERVAL '24 hours' "
+                "ORDER BY (severity='critical') DESC, detected_at DESC LIMIT 1", owner_id)
+            out["top"] = t
+    except Exception:
+        log.debug("world._anomalies failed owner=%s", owner_id)
     return out
 
 

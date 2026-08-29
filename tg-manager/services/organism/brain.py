@@ -81,6 +81,22 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             f"{d} дн. без новых сообщений — вероятно бизнес-бот отвалился.",
             {"kind": "vault"})
 
+    anom = snap.get("anomalies") or {}
+    if anom.get("critical", 0) > 0:
+        add("anomaly_crit", "urgent",
+            f"{anom['critical']} критических аномалий флота",
+            (f"{anom['top']}. " if anom.get("top") else "")
+            + "Детектор поймал резкий сбой (ошибки/trust/латентность). Откройте "
+            "здоровье — это ранний сигнал бана, лучше вмешаться сейчас.",
+            {"kind": "health"})
+    elif anom.get("warning", 0) > 0:
+        add("anomaly_warn", "warn",
+            f"{anom['warning']} аномалий флота за сутки",
+            (f"{anom['top']}. " if anom.get("top") else "")
+            + "Показатели отклонились от нормы. Проверьте здоровье, пока не переросло "
+            "в блокировки.",
+            {"kind": "health"})
+
     bans = fleet.get("bans_24h", 0)
     if bans > 0:
         add("bans", "warn", f"{bans} бан(ов) за сутки",
