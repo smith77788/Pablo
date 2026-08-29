@@ -432,7 +432,7 @@ def test_risky_fleet_ops_pace_under_governor():
     fns = ("_exec_boost_views", "_exec_boost_reactions", "_exec_boost_stories",
            "_exec_boost_subscribers", "_exec_boost_bot_starts", "_exec_bulk_set_profile",
            "_exec_mass_report", "_exec_content_clone", "_exec_promote_all_admins",
-           "_exec_niche_growth_post")
+           "_exec_niche_growth_post", "_exec_group_announce")
     for fn in fns:
         i = src.find(f"async def {fn}(")
         assert i != -1, fn

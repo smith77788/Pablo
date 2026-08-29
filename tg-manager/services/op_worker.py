@@ -7453,7 +7453,8 @@ async def _exec_group_announce(
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx < total - 1:
-                await asyncio.sleep(3)
+                # межцелевой темп анонса в группы под губернатором
+                await asyncio.sleep(await _governed_delay(pool, owner_id, 3.0))
 
         return {
             "status": "done",
