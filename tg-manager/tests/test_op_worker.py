@@ -401,3 +401,15 @@ def test_niche_growth_between_groups_is_governed():
     # между группами — governed, а не голый sleep
     assert "between_groups_delay = await _governed_delay(" in body, \
         "межгрупповая пауза Growth Agent не под губернатором"
+
+
+def test_boost_flph_paces_are_governed():
+    """Межцелевые паузы накрутки участников и стартов в ботах (расход аккаунтов
+    флота) идут через губернатор — при давлении темп замедляется."""
+    src = open("services/op_worker.py", encoding="utf-8").read()
+    for fn in ("_exec_boost_subscribers", "_exec_boost_bot_starts"):
+        i = src.find(f"async def {fn}(")
+        assert i != -1, fn
+        j = src.find("\nasync def ", i + 1)
+        body = src[i: j if j != -1 else len(src)]
+        assert "_governed_delay(pool, owner_id" in body, f"{fn}: межцелевая пауза не под губернатором"

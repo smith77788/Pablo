@@ -9842,7 +9842,8 @@ async def _exec_boost_subscribers(
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx < total:
-                await asyncio.sleep(random.uniform(3.0, 7.0))
+                # межцелевой темп накрутки под губернатором (давление флота тормозит)
+                await asyncio.sleep(await _governed_delay(pool, owner_id, random.uniform(3.0, 7.0)))
 
         summary = (
             f"👥 Подписчики/участники: {target}\n"
@@ -9933,7 +9934,8 @@ async def _exec_boost_bot_starts(
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx < total:
-                await asyncio.sleep(random.uniform(2.5, 6.0))
+                # межцелевой темп накрутки под губернатором (давление флота тормозит)
+                await asyncio.sleep(await _governed_delay(pool, owner_id, random.uniform(2.5, 6.0)))
 
         summary = (
             f"🚀 Старты в боте: @{bot_username}"
