@@ -4532,7 +4532,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         days = max(1, min(days, 180))
         try:
             rows = await _safe_fetch(pool,
-                "SELECT chat_id, direction, msg_date FROM vault_messages "
+                "SELECT chat_id, direction, msg_date, peer_name, peer_username FROM vault_messages "
                 "WHERE owner_id=$1 AND msg_date > NOW() - ($2 || ' days')::interval",
                 uid, str(days))
             from services import vault_analytics

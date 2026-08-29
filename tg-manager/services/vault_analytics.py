@@ -47,6 +47,20 @@ def analyze_dialogs(rows) -> dict:
             hour_hist[_dt.datetime.utcfromtimestamp(ts).hour] += 1
         by_chat.setdefault(cid, []).append((ts, d))
 
+    # Топ-собеседники по объёму переписки (важные контакты для CRM).
+    names: dict = {}
+    counts: dict = {}
+    for r in rows or []:
+        cid = r.get("chat_id")
+        counts[cid] = counts.get(cid, 0) + 1
+        nm = r.get("peer_name") or r.get("peer_username")
+        if nm and not names.get(cid):
+            names[cid] = nm
+    top_peers = [
+        {"chat_id": cid, "name": names.get(cid), "count": counts[cid]}
+        for cid in sorted(counts, key=lambda c: -counts[c])[:5]
+    ]
+
     dialogs = len(by_chat)
     replied = 0
     response_secs: list[float] = []
@@ -78,4 +92,5 @@ def analyze_dialogs(rows) -> dict:
         "reply_rate_pct": reply_rate,
         "median_response_min": avg_resp_min,
         "busiest_hour": busiest_hour,
+        "top_peers": top_peers,
     }

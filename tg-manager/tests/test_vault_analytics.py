@@ -75,3 +75,16 @@ def test_epoch_and_none_dates_safe():
     assert a["total"] == 2 and a["incoming"] == 1 and a["outgoing"] == 1
     # out без даты не даёт reply-time
     assert a["median_response_min"] is None
+
+
+def test_top_peers_ranked_by_volume():
+    rows = [
+        {"chat_id": 1, "direction": "in", "msg_date": None, "peer_name": "Аня"},
+        {"chat_id": 1, "direction": "out", "msg_date": None},
+        {"chat_id": 1, "direction": "in", "msg_date": None},
+        {"chat_id": 2, "direction": "in", "msg_date": None, "peer_username": "bob"},
+    ]
+    a = analyze_dialogs(rows)
+    tp = a["top_peers"]
+    assert tp[0]["chat_id"] == 1 and tp[0]["count"] == 3 and tp[0]["name"] == "Аня"
+    assert tp[1]["chat_id"] == 2 and tp[1]["name"] == "bob"

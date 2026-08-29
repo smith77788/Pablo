@@ -13334,12 +13334,19 @@ async function loadVaultAnalytics() {
     const unRow = un > 0
       ? `<div style="margin-top:6px;font-size:12px;color:var(--amber,#f59e0b);text-align:center">⚠ ${un} диалог(ов) без ответа</div>`
       : '';
+    const peers = (a.top_peers || []).slice(0, 3);
+    const peersRow = peers.length
+      ? `<div style="margin-top:6px;font-size:11px;color:var(--hint)">Активные собеседники:</div>`
+        + peers.map(p => `<div class="row tap" style="padding:6px 8px" onclick="openVaultChat(${p.chat_id})">
+             <div style="flex:1;font-size:13px">${esc(p.name || ('#'+p.chat_id))}</div>
+             <div style="font-size:12px;color:var(--hint)">${p.count} сообщ.</div></div>`).join('')
+      : '';
     el.innerHTML = `<div style="display:flex;gap:6px;background:var(--bg2);border-radius:12px;padding:10px 6px">
         ${cell(a.dialogs || 0, 'диалогов')}
         ${cell(rr, 'ответили')}
         ${cell(mr, 'медиана ответа')}
         ${cell(bh, 'час пик')}
-      </div>${unRow}`;
+      </div>${unRow}${peersRow}`;
   } catch(_) { el.innerHTML = ''; }
 }
 
