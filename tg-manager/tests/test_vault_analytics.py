@@ -41,6 +41,7 @@ def test_reply_rate_and_response_time():
     ]
     a = analyze_dialogs(rows)
     assert a["replied_dialogs"] == 2
+    assert a["unanswered_dialogs"] == 1   # диалог 3 без ответа
     assert a["reply_rate_pct"] == round(2 / 3 * 100, 1)      # 3 диалога с входящим
     assert a["median_response_min"] == 10.0                   # медиана(5,15)
 

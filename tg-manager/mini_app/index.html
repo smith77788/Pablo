@@ -13330,12 +13330,16 @@ async function loadVaultAnalytics() {
     const cell = (v, l) => `<div style="flex:1;text-align:center">
         <div style="font-size:16px;font-weight:700">${v}</div>
         <div style="font-size:10px;color:var(--hint)">${l}</div></div>`;
+    const un = a.unanswered_dialogs || 0;
+    const unRow = un > 0
+      ? `<div style="margin-top:6px;font-size:12px;color:var(--amber,#f59e0b);text-align:center">⚠ ${un} диалог(ов) без ответа</div>`
+      : '';
     el.innerHTML = `<div style="display:flex;gap:6px;background:var(--bg2);border-radius:12px;padding:10px 6px">
         ${cell(a.dialogs || 0, 'диалогов')}
         ${cell(rr, 'ответили')}
         ${cell(mr, 'медиана ответа')}
         ${cell(bh, 'час пик')}
-      </div>`;
+      </div>${unRow}`;
   } catch(_) { el.innerHTML = ''; }
 }
 

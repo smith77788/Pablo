@@ -63,6 +63,7 @@ def analyze_dialogs(rows) -> dict:
 
     dialogs_with_in = sum(
         1 for msgs in by_chat.values() if any(d == "in" for _, d in msgs))
+    unanswered = max(0, dialogs_with_in - replied)
     reply_rate = round(replied / dialogs_with_in * 100, 1) if dialogs_with_in else None
     avg_resp_min = round(median(response_secs) / 60, 1) if response_secs else None
     busiest_hour = max(range(24), key=lambda h: hour_hist[h]) if total else None
@@ -73,6 +74,7 @@ def analyze_dialogs(rows) -> dict:
         "outgoing": outgoing,
         "dialogs": dialogs,
         "replied_dialogs": replied,
+        "unanswered_dialogs": unanswered,
         "reply_rate_pct": reply_rate,
         "median_response_min": avg_resp_min,
         "busiest_hour": busiest_hour,
