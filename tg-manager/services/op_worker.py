@@ -9468,7 +9468,8 @@ async def _exec_boost_views(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(1.5)
+            # межцелевой темп под губернатором (давление флота тормозит)
+            await asyncio.sleep(await _governed_delay(pool, owner_id, 1.5))
 
     summary = (
         f"👁 Просмотры: {channel} × {len(msg_ids)} сообщений\n"
@@ -9538,7 +9539,8 @@ async def _exec_boost_reactions(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(2.0)
+            # межцелевой темп под губернатором (давление флота тормозит)
+            await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
     summary = (
         f"{emoji} Реакции: {channel} сообщение #{msg_id}\n"
@@ -9604,7 +9606,8 @@ async def _exec_boost_stories(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(1.0)
+            # межцелевой темп под губернатором (давление флота тормозит)
+            await asyncio.sleep(await _governed_delay(pool, owner_id, 1.0))
 
     summary = (
         f"📖 Сторис: {target}"
@@ -11219,7 +11222,8 @@ async def _exec_bulk_set_profile(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(2.0)
+            # межцелевой темп под губернатором (давление флота тормозит)
+            await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
     op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль",
                  "username": "Username", "bio": "Bio", "close_sessions": "Закрыть сессии",
@@ -11299,7 +11303,8 @@ async def _exec_mass_report(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(2.5)
+            # межцелевой темп под губернатором (давление флота тормозит)
+            await asyncio.sleep(await _governed_delay(pool, owner_id, 2.5))
 
     from services.reporter_engine import REPORT_REASONS
     reason_label = REPORT_REASONS.get(reason, ("?", ""))[0]
@@ -11390,7 +11395,8 @@ async def _exec_content_clone(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(1.5)
+            # межцелевой темп под губернатором (давление флота тормозит)
+            await asyncio.sleep(await _governed_delay(pool, owner_id, 1.5))
 
     mode_label = "Пересылка" if mode == "forward" else "Копирование"
     summary = (
