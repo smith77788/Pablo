@@ -4519,6 +4519,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "diagnostics": diag,
         })
 
+    async def vault_analytics(request: web.Request) -> web.Response:
+        """Аналитика диалогов Хранилища за период: объёмы, скорость ответа, часы.
+        Свёртка — чистая vault_analytics.analyze_dialogs. fail-open."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            days = int(request.query.get("days", "30"))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 180))
+        try:
+            rows = await _safe_fetch(pool,
+                "SELECT chat_id, direction, msg_date FROM vault_messages "
+                "WHERE owner_id=$1 AND msg_date > NOW() - ($2 || ' days')::interval",
+                uid, str(days))
+            from services import vault_analytics
+            data = vault_analytics.analyze_dialogs([dict(r) for r in (rows or [])])
+            data["days"] = days
+            return _json_resp(data)
+        except Exception:
+            log.exception("vault_analytics uid=%s", uid)
+            return _json_resp({"total": 0, "days": days})
+
     async def vault_chats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -14438,6 +14462,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/account/{acc_id}/bots", account_bots)
     # «Хранилище» (Echo Vault)
     app.router.add_get("/api/miniapp/vault/status", vault_status)
+    app.router.add_get("/api/miniapp/vault/analytics", vault_analytics)
     app.router.add_get("/api/miniapp/vault/chats", vault_chats)
     app.router.add_get("/api/miniapp/vault/chat/{chat_id}/messages", vault_messages)
     app.router.add_get("/api/miniapp/vault/search", vault_search)
