@@ -63,3 +63,24 @@ def test_frontend_card_wired():
     assert "/api/miniapp/onboarding" in html
     # действия шагов ведут в существующие потоки
     assert "openAccImportModal" in html and "openProxies" in html and "openMassInvite" in html
+
+
+def test_every_step_kind_is_handled_in_frontend():
+    """Гейт: каждый шаг чеклиста несёт action.kind, который фронт разворачивает
+    через _ONBOARD_ACT. Легко добавить шаг и забыть ветку → кнопка шага мёртвая."""
+    import re
+
+    checklist = onboarding.build_checklist(
+        accounts=0, accounts_with_proxy=0, proxies=0, ops_total=0
+    )
+    kinds = {s["action"]["kind"] for s in checklist["steps"] if s.get("action")}
+    assert kinds, "у шагов нет action.kind — сломался контракт"
+
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    i = html.find("const _ONBOARD_ACT")
+    assert i != -1, "_ONBOARD_ACT не найден во фронте"
+    body = html[i:i + 600]
+    for k in sorted(kinds):
+        assert re.search(rf"\b{k}\s*:", body), (
+            f"шаг '{k}' не обработан в _ONBOARD_ACT — тап по кнопке шага мёртвый"
+        )
