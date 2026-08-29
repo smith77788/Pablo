@@ -6329,6 +6329,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _filters = None
                 if _ssid and str(_ssid).isdigit():
                     _filters = await _crepo.get_segment_filters(pool, uid, int(_ssid))
+                # Быстрый выбор (избранные / по тегу) шлёт segment_filters —
+                # превью обязано считать ИМЕННО их, иначе счётчик покажет «весь
+                # список», а операция возьмёт срез: число соврёт с видом точности.
+                if _filters is None:
+                    _sf_raw = request.query.get("segment_filters")
+                    if _sf_raw:
+                        try:
+                            _filters = _crepo._clean_filters(json.loads(_sf_raw))
+                        except Exception:
+                            _filters = None
                 total = await _crepo.count_segment(pool, uid, _filters or {})
                 hint = "Сохраните срез контактов («Сегменты») — приглашайте его напрямую."
             else:
@@ -6353,6 +6363,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "capped_at": 2000,
             "hint": hint if not total else "",
         })
+
+    async def invite_segment_options(request: web.Request) -> web.Response:
+        """Быстрые срезы хранилища контактов для инвайта: избранные + топ-тегов.
+
+        Чтобы приглашать из хранилища не только «весь список» и сохранённые
+        сегменты, но и «избранные» / «по тегу» без предварительного создания
+        сегмента. Счётчики считаются тем же движком сегментов (count_segment),
+        что и превью с исполнителем, — показанное число обязано совпасть с тем,
+        что реально возьмёт операция.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub import repository as _crepo
+            all_n = await _crepo.count_segment(pool, uid, {})
+            fav_n = await _crepo.count_segment(pool, uid, {"favorite_only": True})
+            tag_rows = await _safe_fetch(
+                pool,
+                "SELECT t AS tag, COUNT(*) AS cnt FROM unified_contacts, unnest(tags) AS t "
+                "WHERE owner_id=$1 GROUP BY t ORDER BY cnt DESC, t LIMIT 8",
+                uid)
+            tags = [{"tag": r["tag"], "count": int(r["cnt"])} for r in (tag_rows or [])]
+            return _json_resp({"all": int(all_n or 0), "favorites": int(fav_n or 0),
+                               "tags": tags})
+        except Exception:
+            log.warning("invite_segment_options uid=%s", uid, exc_info=True)
+            return _json_resp({"all": 0, "favorites": 0, "tags": []})
 
     async def invite_preflight(request: web.Request) -> web.Response:
         """Предполётная проверка инвайта ДО запуска: флот, прокси, оценка проходов.
@@ -14123,6 +14161,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
+    app.router.add_get("/api/miniapp/invite/segment_options", invite_segment_options)
     app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
     app.router.add_post("/api/miniapp/invite/parse_file", invite_parse_file)
     app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)

@@ -15408,17 +15408,39 @@ function selectInviteParseRun() {
   INV_PARSE_RUN = v ? parseInt(v) : null;
   loadInviteAudienceSize();
 }
-// Подтянуть сохранённые сегменты в источник инвайта (единый движок сегментов).
+// Разобрать выбор сегмента инвайта в адресацию для бэкенда.
+//   ''        → весь список контактов (без фильтров)
+//   'fav'     → избранные
+//   'tag:XXX' → по тегу XXX
+//   число     → сохранённый сегмент по id
+// Единая точка разбора, чтобы превью аудитории и запуск не разошлись.
+function _inviteSegSel() {
+  const v = document.getElementById('massInviteSegment')?.value || '';
+  if (v === 'fav') return {segment_filters:{favorite_only:true}};
+  if (v.indexOf('tag:') === 0) return {segment_filters:{tag: v.slice(4)}};
+  if (/^\d+$/.test(v)) return {saved_segment_id: parseInt(v, 10)};
+  return {};
+}
+// Подтянуть срезы хранилища контактов в источник инвайта: весь список,
+// избранные, топ-тегов и сохранённые сегменты (единый движок сегментов).
 async function loadInviteSegments() {
   const sel = document.getElementById('massInviteSegment');
   if (!sel || sel.dataset.loaded) return;
+  let html = '<option value="">— весь список контактов —</option>';
+  try {
+    const o = await api('/api/miniapp/invite/segment_options');
+    if (o && o.favorites) html += `<option value="fav">⭐ Избранные (${o.favorites})</option>`;
+    (o && o.tags || []).forEach(t => {
+      html += `<option value="tag:${esc(t.tag)}">🏷 ${esc(t.tag)} (${t.count})</option>`;
+    });
+  } catch(e) {}
   try {
     const d = await api('/api/miniapp/uch/segments');
     const segs = d.segments||d||[];
-    sel.innerHTML = '<option value="">— весь список контактов —</option>' +
-      (Array.isArray(segs)?segs:[]).map(s=>`<option value="${s.id}">${esc(s.name)}${s.count!=null?` (${s.count})`:''}</option>`).join('');
-    sel.dataset.loaded = '1';
+    html += (Array.isArray(segs)?segs:[]).map(s=>`<option value="${s.id}">${esc(s.name)}${s.count!=null?` (${s.count})`:''}</option>`).join('');
   } catch(e) {}
+  sel.innerHTML = html;
+  sel.dataset.loaded = '1';
 }
 
 // Предпросмотр «Своего списка» ДО запуска: сколько распознано номеров/юзеров и
@@ -15565,8 +15587,9 @@ async function loadInviteAudienceSize() {
     let url = '/api/miniapp/invite/audience?source=' + encodeURIComponent(src);
     if (src === 'parsed' && INV_PARSE_RUN) url += '&parse_run_id=' + INV_PARSE_RUN;
     if (src === 'segment') {
-      const sid = document.getElementById('massInviteSegment')?.value;
-      if (sid) url += '&saved_segment_id=' + encodeURIComponent(sid);
+      const s = _inviteSegSel();
+      if (s.saved_segment_id) url += '&saved_segment_id=' + s.saved_segment_id;
+      else if (s.segment_filters) url += '&segment_filters=' + encodeURIComponent(JSON.stringify(s.segment_filters));
     }
     const d = await api(url);
     INV_AUDIENCE = (d.total === null || d.total === undefined) ? null : +d.total;
@@ -15721,8 +15744,11 @@ async function submitMassInvite() {
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;
   if (source==='segment') {
-    const sid = document.getElementById('massInviteSegment')?.value;
-    if (sid) body.saved_segment_id = parseInt(sid);
+    // Тот же разбор, что и в превью аудитории: весь список / избранные / тег /
+    // сохранённый сегмент. Иначе показанное число разойдётся с приглашёнными.
+    const s = _inviteSegSel();
+    if (s.saved_segment_id) body.saved_segment_id = s.saved_segment_id;
+    else if (s.segment_filters) body.segment_filters = s.segment_filters;
   }
   if (source==='import_list') {
     // Список из файла (уже разобран) имеет приоритет над текстом.
