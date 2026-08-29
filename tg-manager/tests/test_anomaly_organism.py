@@ -93,3 +93,11 @@ def test_pulse_action_routes_health():
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
     assert "if (k==='health') return openHealth();" in html
     assert "health:'Открыть здоровье'" in html
+
+
+def test_narrative_mentions_critical_anomaly():
+    from services.organism.brain import narrative
+    n = narrative(_snap(anomalies={"critical": 2, "warning": 0, "top": "x"}))
+    assert "критич" in n and "2" in n
+    # без аномалий — не упоминает
+    assert "критич" not in narrative(_snap())

@@ -231,7 +231,11 @@ def narrative(snap: dict) -> str:
     parts = [f"Флот: {f.get('accounts', 0)} акк. ({f.get('active', 0)} активны"
              + (f", {f['dead']} мёртвых" if f.get("dead") else "") + ")",
              f"давление {f.get('pressure', 0)}/100"]
+    an = snap.get("anomalies") or {}
     day = []
+    # Риск-сигналы — вперёд: сводка должна кричать о том, что горит.
+    if an.get("critical"):
+        day.append(f"⚠ {an['critical']} критич. аномалий")
     if o.get("running"):
         day.append(f"{o['running']} операц. в работе")
     if g.get("intents_24h"):
