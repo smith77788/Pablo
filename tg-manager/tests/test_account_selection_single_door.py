@@ -66,10 +66,10 @@ _LEGIT = {
 # mini_app_api/global_search bot, audience_parser).
 BASELINE = {
     'bot/handlers/channel_factory.py::id, session_str, first_name, phone, device_model, system_ver',  # TODO
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # TODO
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',  # TODO
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',  # TODO (_get_accounts: уже фильтрует cooldown)
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',  # TODO
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
     'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',  # LEAVE: дашборд здоровья
     'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',  # LEAVE: аналитика
     'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',  # LEAVE: аналитика
