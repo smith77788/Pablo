@@ -1239,16 +1239,7 @@ async def _maybe_requeue(
 #     в массовых операциях молча не применялась.
 #
 # Дальше — один текст на всех: разойтись копиям больше негде.
-_ACC_COLS = (
-    # a.phone — чтобы фолбэк в пул-прокси залипал по телефону ТАК ЖЕ, как на логине
-    # (один exit IP на логине и в операциях → нет AUTH_KEY_DUPLICATED на первой опе).
-    "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
-    "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
-    "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
-    "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-    "WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
-    "AND a.is_active=TRUE AND a.session_str IS NOT NULL"
-)
+# _ACC_COLS удалён: все использования переведены на resource_selector.select_all_active
 
 
 def _acc_has_bound_proxy(acc) -> bool:
@@ -9347,11 +9338,8 @@ async def _exec_boost_views(
     if not channel or not msg_ids or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_views"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -9417,11 +9405,8 @@ async def _exec_boost_reactions(
     if not channel or not msg_id or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_reactions"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -9486,11 +9471,8 @@ async def _exec_boost_stories(
     if not target or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_stories"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -9707,11 +9689,8 @@ async def _exec_boost_subscribers(
     if not target or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_subscribers"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -9799,11 +9778,8 @@ async def _exec_boost_bot_starts(
     if not bot_username or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_bot_starts"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -10224,11 +10200,8 @@ async def _exec_mass_invite(
         len(user_refs) + len(phones), op_id,
     )
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -11095,11 +11068,8 @@ async def _exec_bulk_set_profile(
     op = params.get("op", "")
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -11181,11 +11151,8 @@ async def _exec_mass_report(
     if not target or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры mass_report"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -11264,11 +11231,8 @@ async def _exec_content_clone(
     if not source_ref or not target_refs:
         return {"status": "failed", "summary": "⚠️ Не указан источник или цели"}
 
-    accounts = await _safe_fetch(
-            pool,
-        _ACC_COLS,
-        owner_id, account_ids,
-    )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 

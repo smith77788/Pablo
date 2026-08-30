@@ -130,6 +130,12 @@ def stand(monkeypatch):
             return ACCOUNTS if "LEFT JOIN user_proxies" in q else []
 
         monkeypatch.setattr(op_worker, "_safe_fetch", _accounts)
+
+        # Загрузка аккаунтов операции теперь идёт через флуд-осознанный
+        # resource_selector.select_all_active (одна дверь), а не сырой _safe_fetch.
+        async def _sel_all(pool, owner_id, **k):
+            return ACCOUNTS
+        monkeypatch.setattr(op_worker.resource_selector, "select_all_active", _sel_all)
         return s
 
     return _install

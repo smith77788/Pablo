@@ -160,7 +160,12 @@ async def select_all_active(
     respect_daily_budget: исключить аккаунты, исчерпавшие дневной бюджет действий
         (долговечность). Если исчерпали ВСЕ — возвращаем всех + warning (не рушим op).
     """
-    conditions = ["a.owner_id=$1", "a.is_active=TRUE", "a.session_str IS NOT NULL"]
+    conditions = ["a.owner_id=$1", "a.is_active=TRUE", "a.session_str IS NOT NULL",
+                  # Мёртвые по статусу не годятся для действия. Раньше bulk-
+                  # исполнители несли этот фильтр каждый у себя; после переноса
+                  # выбора в единую дверь он обязан быть здесь, иначе миграция
+                  # молча ослабила бы защиту (взяли бы banned с is_active=TRUE).
+                  "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired')"]
     params: list = [owner_id]
 
     if respect_cooldown:
