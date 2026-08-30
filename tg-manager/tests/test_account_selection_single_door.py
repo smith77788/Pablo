@@ -57,37 +57,31 @@ _LEGIT = {
 
 # Замороженное множество известных утечек (файл::сигнатура проекции, ≤60 симв).
 # СЖИМАЕТСЯ по мере миграции — не растёт. Новый ключ = новая утечка = падение.
+# Роль каждого оставшегося места:
+#   TODO  — боевой выбор-для-действия, кандидат на миграцию в resource_selector;
+#   LEAVE — намеренно оставлено: показ/дашборд/предполёт/не выбор-для-действия;
+#           там нужен ПОЛНЫЙ флот (включая cooling), миграция сменила бы смысл.
+# Мигрировано за шаг №1: 10 паттернов (op_worker боевые ×4-исполн., bot_factory,
+# channel_ops-инвайт, session_pool, geo_router, phone_checker, ad_intelligence,
+# mini_app_api/global_search bot, audience_parser).
 BASELINE = {
-    # МИГРИРОВАНО (шаг №1): audience_parser.cb_parser_geo_radius → select_account.
-    'bot/handlers/channel_factory.py::id, session_str, first_name, phone, device_model, system_ver',
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',
-    'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',
-    # МИГРИРОВАНО (шаг №1): channel_ops._run_invite_bg (инвайт) → resource_selector.
-    # МИГРИРОВАНО (шаг №1): global_search (bot) → select_account.
-    'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',
-    'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',
-    'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',
-    # МИГРИРОВАНО (шаг №1): phone_checker._get_best_account → resource_selector.select_account.
-    'bot/handlers/promo_platform.py::id, session_str, first_name, username, phone, proxy_id',
-    # МИГРИРОВАНО (шаг №1): ad_intelligence.scan_channel_ads фолбэк → select_account.
-    # МИГРИРОВАНО (шаг №1): geo_router.get_accounts_by_geo → resource_selector(geo_country).
-    'services/invite_preflight.py::id, phone, session_str',
-    'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
-    'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
-    # МИГРИРОВАНО (шаг №1): mini_app_api.global_search → get_account_for_telethon/select_account.
-    'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
-    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
-    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',
-    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, p.pr',
-    # МИГРИРОВАНО (шаг №1): 4 боевых ALL_ACTIVE-исполнителя
-    # (_exec_deploy_network / _exec_community_liven / _exec_community_set_staff /
-    # _exec_crosspost_run) переведены на resource_selector.select_account(s) —
-    # ключ 'id, session_str, device_model, system_version, app_version, ' удалён.
-    'services/op_worker.py::id, session_str, first_name, phone, device_model, system_ver',
-    # МИГРИРОВАНО (шаг №1): session_pool.load_from_db → resource_selector (+cf_relay_url в пул).
-    'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',
+    'bot/handlers/channel_factory.py::id, session_str, first_name, phone, device_model, system_ver',  # TODO
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # TODO
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',  # TODO
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',  # TODO (_get_accounts: уже фильтрует cooldown)
+    'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',  # TODO
+    'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',  # LEAVE: дашборд здоровья
+    'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',  # LEAVE: аналитика
+    'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',  # LEAVE: аналитика
+    'bot/handlers/promo_platform.py::id, session_str, first_name, username, phone, proxy_id',  # LEAVE: поиск аккаунта-владельца ботов (не выживаемость)
+    'services/invite_preflight.py::id, phone, session_str',  # LEAVE: предполётная проверка (показывает и cooling)
+    'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # LEAVE: rights_check/grant_admin (предполёт, свой proxy-фильтр)
+    'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # LEAVE: diag
+    'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # TODO: _maybe_requeue
+    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',  # LEAVE: health/scan (диагностика)
+    'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, p.pr',  # LEAVE: health-check (диагностика)
+    'services/op_worker.py::id, session_str, first_name, phone, device_model, system_ver',  # TODO: bulk-исполнители (10 мест)
+    'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',  # TODO: mass_report
 }
 
 

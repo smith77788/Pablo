@@ -5976,15 +5976,11 @@ async def _exec_bot_factory_multi(
     bot_name = (params.get("bot_name") or "Bot").strip()
     base_username = (params.get("base_username") or "").strip().lstrip("@")
 
-    rows = await _safe_fetch(
-            pool,
-        "SELECT a.id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-        owner_id,
-        account_ids,
-    )
+    # Одна дверь: выбранные аккаунты через флуд-осознанный select_all_active
+    # (фильтр cooldown/мёртвых статусов + полный транспорт с cf_relay_url).
+    from services import resource_selector as _rsel
+    rows = await _rsel.select_all_active(
+        pool, owner_id, include_ids=account_ids, min_trust_score=0.0)
     active_accounts = [dict(r) for r in rows]
     if not active_accounts:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для Bot Factory"}
