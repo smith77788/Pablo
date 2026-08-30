@@ -97,6 +97,9 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
         return aid == 2  # второй в карантине
     async def _not_cancelled(*a, **k):
         return False
+    # Выбор аккаунтов теперь идёт через флуд-осознанный resource_selector
+    # (одна дверь), поэтому мокаем его, а не сырой _safe_fetch.
+    monkeypatch.setattr(op_worker.resource_selector, "select_all_active", _fetch)
     monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
     monkeypatch.setattr(op_worker, "_safe_execute", _exec)
     monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _quar)

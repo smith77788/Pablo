@@ -166,7 +166,10 @@ async def select_all_active(
     if respect_cooldown:
         conditions.append("(a.cooldown_until IS NULL OR a.cooldown_until < NOW())")
 
-    if include_ids:
+    if include_ids is not None:
+        # Различаем None (все аккаунты) и [] (никого): пустой список — это
+        # «выбранных нет», и вернуть надо ПУСТО, а не весь флот. Иначе операция
+        # на выбранных аккаунтах молча раскатилась бы по всему флоту.
         params.append(include_ids)
         conditions.append(f"a.id = ANY(${len(params)})")
 

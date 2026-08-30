@@ -80,7 +80,7 @@ BASELINE = {
     'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # TODO: _maybe_requeue
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',  # LEAVE: health/scan (диагностика)
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, p.pr',  # LEAVE: health-check (диагностика)
-    'services/op_worker.py::id, session_str, first_name, phone, device_model, system_ver',  # TODO: bulk-исполнители (10 мест)
+    # МИГРИРОВАНО (шаг №1): bulk-исполнители op_worker (9 ANY-мест) → select_all_active(include_ids).
     'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',  # TODO: mass_report
 }
 
