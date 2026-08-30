@@ -594,6 +594,12 @@ async def main() -> None:
         # ровно то, что возвращает флот в строй, и флот остаётся запаркованным.
         # История с cf_relay_url выше показывает, что лаг здесь не гипотетический.
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS session_conflict_at TIMESTAMPTZ",
+        # Хартбиты процессов (schema_v186) — страж «одной реплики» пишет сюда на
+        # старте; без таблицы guard молча не работал бы (лаг миграции).
+        "CREATE TABLE IF NOT EXISTS process_heartbeats ("
+        "worker_id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'all', "
+        "started_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "last_seen TIMESTAMPTZ NOT NULL DEFAULT now())",
         # Профильные факты для риск-движка инвайтинга (schema_v160). Их читает
         # flood_engine.account_risk_factors в КАЖДОМ расчёте суточного лимита —
         # при лаге миграции запрос падал бы на каждом батче инвайта.
@@ -777,6 +783,13 @@ async def main() -> None:
         from services.account_manager import run_transport_refresh_loop
         asyncio.create_task(
             _web_resilient("account_transport_map", run_transport_refresh_loop, pool))
+
+        # Страж «одной реплики» (ось №3): лимиты флуда живут в памяти процесса, и
+        # вторая реплика молча разгоняет темп по флоту → риск бана. Guard бьёт
+        # хартбит и громко предупреждает, если реплик больше одной. Во всех ролях.
+        from services import replica_guard as _rguard
+        asyncio.create_task(_web_resilient(
+            "replica_guard", _rguard.run_heartbeat_loop, pool, op_worker._WORKER_ID, _ROLE))
 
         asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
         asyncio.create_task(
