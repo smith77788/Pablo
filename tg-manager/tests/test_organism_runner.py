@@ -81,3 +81,25 @@ def test_global_gap_between_different(monkeypatch):
     # другая подсказка через 30 мин — глобальный зазор 2ч не пускает
     _patch_pulse(monkeypatch, [{"id": "b", "severity": "warn", "title": "B", "why": "y", "action": {}}])
     assert _run(runner._tick_owner(pool, None, 1, notifier=notifier, now=t0 + 1800)) is False
+
+
+def test_open_button_none_without_kind():
+    from services.organism.runner import _open_button
+    assert _open_button(None) is None
+    assert _open_button({}) is None
+
+
+def test_snooze_kb_accepts_action_backcompat():
+    # старый вызов без action и новый с action оба строят клавиатуру (snooze всегда)
+    from services.organism.runner import _snooze_kb
+    m1 = _snooze_kb("sid1")
+    m2 = _snooze_kb("sid2", {"kind": "vault"})
+    assert m1 is not None and m2 is not None
+
+
+def test_miniapp_deeplink_uses_runpulseaction():
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    html = open(os.path.join(root, "mini_app", "index.html"), encoding="utf-8").read()
+    # deep-link разворачивает любой kind тем же runPulseAction (не только vault)
+    assert "runPulseAction({kind: _screen})" in html

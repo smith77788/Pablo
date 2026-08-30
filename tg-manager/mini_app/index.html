@@ -6323,11 +6323,12 @@ const FETCH_TIMEOUT_MS = 30000;
     loadRef();
     loadBots();
     loadAdminSection();
-    // Deep-link: кнопка «Открыть Хранилище» из бота ведёт прямо на архив.
-    // web_app-кнопка не передаёт start_param → поддерживаем и #vault в URL.
-    const _sp = tg.initDataUnsafe?.start_param || '';
-    const _hashScreen = (location.hash || '').replace('#','');
-    if (_sp === 'vault' || _hashScreen === 'vault') setTimeout(openVault, 100);
+    // Deep-link из нуджа бота: кнопка «Открыть» ведёт в нужный раздел прямо из
+    // уведомления. web_app-кнопка не передаёт start_param → берём и #<kind> из URL.
+    // Разворачиваем тем же runPulseAction, что и карточки Пульса — любой kind
+    // (vault/health/invite/seo/…), не только Хранилище.
+    const _screen = (tg.initDataUnsafe?.start_param || (location.hash || '').replace('#','')).trim();
+    if (_screen) setTimeout(() => { try { runPulseAction({kind: _screen}); } catch(_){} }, 100);
   } catch(e) {
     document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }

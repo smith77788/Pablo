@@ -78,8 +78,9 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
     wr = vault.get("waiting_reply", 0)
     if wr > 0 and vh not in ("disabled", "never"):
         add("vault_waiting", "warn", f"{wr} клиентов ждут ответа",
-            "В бизнес-переписке последнее сообщение — от собеседника. Ответьте, "
-            "пока лид тёплый: медленный ответ теряет продажи.",
+            "Люди написали в ваш Telegram и остались без ответа (переписка "
+            "сохранена в разделе «Хранилище»). Нажмите «Открыть» — прочитаете и "
+            "ответите прямо в приложении, пока лид тёплый.",
             {"kind": "vault"})
     if vh == "stale":
         d = vault.get("stale_days")

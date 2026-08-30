@@ -62,10 +62,34 @@ async def _tick(pool, bot) -> int:
     return sent
 
 
-def _snooze_kb(suggestion_id: str):
-    """Кнопки «заглушить» прямо под нуджем.
+def _open_button(action: dict | None):
+    """web_app-кнопка «Открыть» — прямо в нужный раздел мини-аппа.
 
-    Без них уведомление нечем выключить: оно повторяется каждые 6 часов, и
+    Без неё нудж был тупиком: «ответьте клиенту», но чтобы ПРОЧИТАТЬ, надо вручную
+    открыть приложение и искать раздел. Ведём на URL#<kind>; мини-апп разворачивает
+    kind тем же runPulseAction, что и карточки Пульса. Возвращает (text, WebAppInfo)
+    или None, если URL мини-аппа не настроен.
+    """
+    kind = (action or {}).get("kind")
+    if not kind:
+        return None
+    try:
+        from aiogram.types import WebAppInfo
+        from bot.handlers.botmother_menu import _valid_mini_app_url
+        from config import MINI_APP_URL
+        url = _valid_mini_app_url(MINI_APP_URL)
+        if not url:
+            return None
+        return ("👉 Открыть и ответить" if kind == "vault" else "👉 Открыть",
+                WebAppInfo(url=f"{url}#{kind}"))
+    except Exception:
+        return None
+
+
+def _snooze_kb(suggestion_id: str, action: dict | None = None):
+    """Кнопка «Открыть» (в нужный раздел) + кнопки «заглушить» под нуджем.
+
+    Без snooze уведомление нечем выключить: оно повторяется каждые 6 часов, и
     единственной альтернативой было отключить бота целиком. Периоды — из
     brain.SNOOZE_PRESETS (один источник правды с обработчиком колбэка).
     """
@@ -74,12 +98,16 @@ def _snooze_kb(suggestion_id: str):
     from services.organism import brain
 
     kb = InlineKeyboardBuilder()
+    ob = _open_button(action)
+    if ob:
+        kb.button(text=ob[0], web_app=ob[1])
     for code, label, _secs in brain.SNOOZE_PRESETS:
         kb.button(text=f"🔕 {label}",
                   callback_data=SnoozeCb(action="mute", sid=suggestion_id, code=code))
     kb.button(text="🚫 Больше не напоминать",
               callback_data=SnoozeCb(action="off", sid=suggestion_id, code="never"))
-    kb.adjust(2, 2, 1)
+    # Открыть (если есть) — отдельной строкой сверху, затем snooze-периоды 2×2.
+    kb.adjust(*([1, 2, 2, 1] if ob else [2, 2, 1]))
     return kb.as_markup()
 
 
@@ -106,7 +134,7 @@ async def _tick_owner(pool, bot, owner_id: int, *, notifier=None, now: float | N
             await notifier(owner_id, msg)
         else:
             await bot.send_message(owner_id, msg, parse_mode="HTML",
-                                   reply_markup=_snooze_kb(top["id"]))
+                                   reply_markup=_snooze_kb(top["id"], top.get("action")))
     except Exception:
         log.debug("organism.runner: notify failed owner=%s", owner_id)
         return False
