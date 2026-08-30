@@ -75,7 +75,13 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
         add("vault_off", "urgent", "Хранилище не пишет",
             "Входящие ЛС не сохраняются — сенсор намерений и welcome-аналитика "
             "не работают. Переподключите бизнес-бота.", {"kind": "vault"})
-    elif vh == "stale":
+    wr = vault.get("waiting_reply", 0)
+    if wr > 0 and vh not in ("disabled", "never"):
+        add("vault_waiting", "warn", f"{wr} клиентов ждут ответа",
+            "В бизнес-переписке последнее сообщение — от собеседника. Ответьте, "
+            "пока лид тёплый: медленный ответ теряет продажи.",
+            {"kind": "vault"})
+    if vh == "stale":
         d = vault.get("stale_days")
         add("vault_stale", "warn", "Хранилище молчит",
             f"{d} дн. без новых сообщений — вероятно бизнес-бот отвалился.",

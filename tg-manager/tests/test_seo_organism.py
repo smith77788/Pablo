@@ -93,3 +93,14 @@ def test_pulse_action_routes_seo():
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
     assert "if (k==='seo') return openSeo();" in html
     assert "seo:'Оптимизировать SEO'" in html
+
+
+def test_vault_waiting_reply_suggestion():
+    from services.organism.brain import build_suggestions
+    s = build_suggestions(_snap(vault={"health": "ok", "waiting_reply": 4}))
+    w = next((x for x in s if x["id"] == "vault_waiting"), None)
+    assert w is not None and w["action"]["kind"] == "vault"
+    assert "4" in w["title"]
+    # выключенное хранилище не поднимает подсказку
+    assert not any(x["id"] == "vault_waiting"
+                   for x in build_suggestions(_snap(vault={"health": "disabled", "waiting_reply": 4})))

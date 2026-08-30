@@ -260,12 +260,30 @@ async def _graph(pool, owner_id: int) -> dict:
 
 
 async def _vault(pool, owner_id: int) -> dict:
+    out = {"health": None, "stale_days": None, "waiting_reply": 0}
     try:
         from services import vault_service
         d = await vault_service.diagnostics(pool, owner_id)
-        return {"health": d.get("health"), "stale_days": d.get("stale_days")}
+        out["health"] = d.get("health")
+        out["stale_days"] = d.get("stale_days")
     except Exception:
-        return {"health": None, "stale_days": None}
+        return out
+    # Диалоги, где последнее сообщение — входящее (клиент ждёт ответа) за 7 дн.
+    # Один дешёвый агрегат; сильный сигнал для продаж. fail-open.
+    try:
+        n = await pool.fetchval(
+            "SELECT COUNT(*) FROM ("
+            "  SELECT chat_id, "
+            "    MAX(msg_date) FILTER (WHERE direction='in')  AS last_in, "
+            "    MAX(msg_date) FILTER (WHERE direction='out') AS last_out "
+            "  FROM vault_messages WHERE owner_id=$1 "
+            "    AND msg_date > NOW() - INTERVAL '7 days' GROUP BY chat_id"
+            ") t WHERE last_in IS NOT NULL AND (last_out IS NULL OR last_in > last_out)",
+            owner_id)
+        out["waiting_reply"] = int(n or 0)
+    except Exception:
+        log.debug("world._vault waiting failed owner=%s", owner_id)
+    return out
 
 
 async def _goal(pool, owner_id: int):
