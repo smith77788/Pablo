@@ -64,3 +64,12 @@ def test_frontend_screen_and_handler_present():
     assert "/api/miniapp/seo/analyze" in html
     # экран должен иметь уникальный id (не коллизия со старым s-seo)
     assert html.count('id="s-seoobj"') == 1
+
+
+def test_title_without_words_flagged():
+    r = seo_advisor.analyze(title="🔥🔥 12345 🚀", username="ok_channel",
+                            description="Норм описание с ключами про нишу и услуги здесь.")
+    assert any("без слов" in i.lower() for i in r["issues"])
+    # заголовок со словами — не флагается
+    r2 = seo_advisor.analyze(title="Крипта Сигналы", username="ok_channel")
+    assert not any("без слов" in i.lower() for i in r2["issues"])
