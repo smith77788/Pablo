@@ -58,14 +58,14 @@ _LEGIT = {
 # Замороженное множество известных утечек (файл::сигнатура проекции, ≤60 симв).
 # СЖИМАЕТСЯ по мере миграции — не растёт. Новый ключ = новая утечка = падение.
 BASELINE = {
-    'bot/handlers/audience_parser.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
+    # МИГРИРОВАНО (шаг №1): audience_parser.cb_parser_geo_radius → select_account.
     'bot/handlers/channel_factory.py::id, session_str, first_name, phone, device_model, system_ver',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.tg_user_id, a.first_name, a.username,',
     # МИГРИРОВАНО (шаг №1): channel_ops._run_invite_bg (инвайт) → resource_selector.
-    'bot/handlers/global_search.py::id, session_str, device_model, system_version, app_version, ',
+    # МИГРИРОВАНО (шаг №1): global_search (bot) → select_account.
     'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',
     'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',
     'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',

@@ -897,15 +897,10 @@ async def cb_parser_geo_radius(
     lon = data.get("geo_lon", 0)
 
     # Запускаем парсинг
-    acc = await pool.fetchrow(
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id "
-        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
-        "AND a.session_str IS NOT NULL AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
-        "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1",
-        callback.from_user.id,
-    )
+    # Одна дверь: лучший аккаунт через флуд-осознанный выбор (cooldown/мёртвые
+    # статусы + полный транспорт с cf_relay_url), а не сырой ORDER BY trust.
+    from services import resource_selector as _rsel
+    acc = await _rsel.select_account(pool, callback.from_user.id, action_type="parse", min_trust_score=0.0)
     if not acc:
         await callback.message.edit_text(
             "⚠️ Нет доступных аккаунтов.",

@@ -25,14 +25,6 @@ from services.security import sanitize_search_query
 log = logging.getLogger(__name__)
 router = Router()
 
-_ACC_SQL = (
-    "SELECT id, session_str, device_model, system_version, app_version, "
-    "lang_code, system_lang_code, "
-    "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-    "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-    "ORDER BY last_used DESC NULLS LAST LIMIT 1"
-)
-
 _TYPE_ICON = {"channel": "📢", "group": "👥", "user": "👤", "bot": "🤖"}
 
 
@@ -86,7 +78,9 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
         return
 
     try:
-        acc = await pool.fetchrow(_ACC_SQL, message.from_user.id)
+        # Одна дверь: лучший аккаунт через флуд-осознанный выбор.
+        from services import resource_selector as _rsel
+        acc = await _rsel.select_account(pool, message.from_user.id, action_type="parse", min_trust_score=0.0)
     except Exception as e:
         log.warning("global_search acc fetch uid=%s: %s", message.from_user.id, e)
         acc = None

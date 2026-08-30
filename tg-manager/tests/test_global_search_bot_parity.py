@@ -34,9 +34,14 @@ def test_uses_shared_search_engine():
 
 
 def test_picks_active_account_session_like_app():
+    """Аккаунт для поиска выбирается флуд-осознанно (одна дверь), как и в mini-app.
+
+    Раньше здесь был сырой SELECT (ORDER BY last_used LIMIT 1). Он мигрирован на
+    resource_selector.select_account — тот учитывает cooldown/доверие и не берёт
+    аккаунт, которому сейчас нельзя (см. tests/test_account_selection_single_door).
+    """
     h = _read("bot/handlers/global_search.py")
-    assert "is_active=TRUE AND session_str IS NOT NULL" in h
-    assert "ORDER BY last_used DESC NULLS LAST LIMIT 1" in h
+    assert "resource_selector" in h and "select_account(" in h
 
 
 def test_router_registered_in_main():
