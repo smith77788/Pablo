@@ -4789,11 +4789,11 @@ async def _exec_global_presence_channel(
                         i + 1,
                         tod_factor,
                     )
-                    await asyncio.sleep(cooldown)
+                    await asyncio.sleep(await _governed_delay(pool, owner_id, cooldown))
                 else:
                     # Короткая пауза между операциями
                     delay = random.uniform(45, 90) * chaos * tod_factor * jitter
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(await _governed_delay(pool, owner_id, delay))
 
         final_status = (
             "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
@@ -5495,8 +5495,9 @@ async def _exec_global_presence_bot(
                         f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}",
                     )
 
-            # Humanized delay between BotFather interactions
-            await asyncio.sleep(random.uniform(60, 120) * session_simulator.chaos_factor())
+            # Humanized delay between BotFather interactions (под губернатором темпа)
+            await asyncio.sleep(await _governed_delay(
+                pool, owner_id, random.uniform(60, 120) * session_simulator.chaos_factor()))
 
         final_status = (
             "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
@@ -5919,10 +5920,10 @@ async def _exec_bulk_create_channels(
                         cooldown,
                         i + 1,
                     )
-                    await asyncio.sleep(cooldown)
+                    await asyncio.sleep(await _governed_delay(pool, owner_id, cooldown))
                 else:
                     delay = random.uniform(15, 30) * chaos * tod_factor
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(await _governed_delay(pool, owner_id, delay))
 
             # Progress update every 5 channels
             if created_count > 0 and created_count % 5 == 0:
