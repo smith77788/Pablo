@@ -338,6 +338,31 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
     # Иначе — молчим (не раскрываем существование команды)
 
 
+@router.message(Command("backup"))
+async def cmd_backup(message: Message, pool: asyncpg.Pool, bot) -> None:
+    """Снять бэкап БД по требованию и отправить его в чат назначения (админ)."""
+    if not _is_admin(message.from_user.id):
+        return  # молчим — не раскрываем команду
+    from services import db_backup
+    dest = db_backup.backup_chat_id()
+    if dest is None:
+        await message.answer(
+            "⚠️ Некуда слать бэкап: задайте <code>DB_BACKUP_CHAT_ID</code> "
+            "(id приватного канала/чата, где бот — админ) или <code>ADMIN_IDS</code>.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+        return
+    await message.answer("🗄 Снимаю бэкап БД…")
+    res = await db_backup.run_backup_once(pool, bot, note="ручной запуск")
+    if res.get("ok"):
+        await message.answer(
+            f"✅ Бэкап готов: {res['size'] / (1024*1024):.1f} МБ, "
+            f"частей: {res['parts']}. Отправлен в чат <code>{dest}</code>.",
+            parse_mode="HTML", reply_markup=terminal_kb())
+    else:
+        await message.answer(f"❌ Бэкап не удался: {res.get('error')}",
+                             reply_markup=terminal_kb())
+
+
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
 
 

@@ -911,6 +911,13 @@ async def main() -> None:
         asyncio.create_task(
             _resilient("account_rehab", account_rehab.run_rehab_loop, pool)
         )
+        # Автобэкап БД во внешнее хранилище (Telegram). После инцидента с потерей
+        # эфемерной базы: система сама регулярно снимает дамп и кладёт его ЗА
+        # пределы Railway, чтобы потеря тома/проекта не была фатальной.
+        from services import db_backup
+        asyncio.create_task(
+            _resilient("db_backup", db_backup.run_backup_loop, pool, bot)
+        )
         asyncio.create_task(
             _resilient("activity_engine", activity_engine.run_activity_loop, pool)
         )
