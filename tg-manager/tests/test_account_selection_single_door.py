@@ -14,8 +14,8 @@
 рискованно. Поэтому первый безопасный шаг: заморозить множество известных
 утечек. Новая утечка (в новом файле или новый паттерн выбора) роняет тест —
 распространяться дальше нельзя. По мере миграции запись удаляется из BASELINE, и
-множество сжимается («ratchet down»). Уже мигрировано: 1 паттерн (4 боевых
-исполнителя op_worker), см. пометку в BASELINE.
+множество сжимается («ratchet down»). Уже мигрировано: 7 паттернов (op_worker боевые, channel_ops-инвайт, session_pool,
+geo_router, phone_checker, ad_intelligence, mini_app_api global_search).
 
 ОГРАНИЧЕНИЕ ДЕТЕКТОРА. Ловятся СТАТИЧЕСКИЕ SQL-строки (в т.ч. неявная склейка
 литералов — Python сворачивает её в одну константу). Запрос, собранный из
@@ -69,14 +69,14 @@ BASELINE = {
     'bot/handlers/health_dashboard.py::id, session_str, phone, first_name, username, trust_score, d',
     'bot/handlers/infra_analytics.py::id, acc_status, trust_score, session_str, proxy_id',
     'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',
-    'bot/handlers/phone_checker.py::a.id, a.session_str, a.device_model, a.system_version, a.app',
+    # МИГРИРОВАНО (шаг №1): phone_checker._get_best_account → resource_selector.select_account.
     'bot/handlers/promo_platform.py::id, session_str, first_name, username, phone, proxy_id',
-    'services/ad_intelligence.py::id, session_str, device_model, system_version, app_version, ',
+    # МИГРИРОВАНО (шаг №1): ad_intelligence.scan_channel_ads фолбэк → select_account.
     # МИГРИРОВАНО (шаг №1): geo_router.get_accounts_by_geo → resource_selector(geo_country).
     'services/invite_preflight.py::id, phone, session_str',
     'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
     'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
-    'services/mini_app_api.py::id, session_str, device_model, system_version, app_version, ',
+    # МИГРИРОВАНО (шаг №1): mini_app_api.global_search → get_account_for_telethon/select_account.
     'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',

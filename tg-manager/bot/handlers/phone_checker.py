@@ -50,18 +50,11 @@ async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.Record
     # этими колонками падал всегда, и «Проверка номеров» не работала ни разу.
     # proxy_id и cf_relay_url нужны _make_client, чтобы выбрать транспорт: без них
     # аккаунт с прокси ушёл бы напрямую (смена IP → AUTH_KEY_DUPLICATED).
-    return await pool.fetchrow(
-        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
-        "a.app_version, a.lang_code, a.system_lang_code, a.owner_id, "
-        "a.proxy_id, a.cf_relay_url, p.proxy_url "
-        "FROM tg_accounts a "
-        "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
-        "AND a.session_str IS NOT NULL "
-        "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
-        "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1",
-        owner_id,
-    )
+    # Одна дверь: «лучший аккаунт» — это ровно то, что делает флуд-осознанный
+    # select_account (cooldown/мёртвые статусы + ранжирование по доверию + полный
+    # транспорт с cf_relay_url). min_trust=0.0 — порог доверия здесь не вводим.
+    from services import resource_selector as _rsel
+    return await _rsel.select_account(pool, owner_id, min_trust_score=0.0)
 
 
 # ── Главное меню ─────────────────────────────────────────────────────────────

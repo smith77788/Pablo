@@ -3727,18 +3727,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             limit = max(1, min(validate_integer(body.get("limit") or 20, min_val=1, max_val=50) or 20, 50))
         except (TypeError, ValueError):
             limit = 20
-        # Аккаунт: указанный (если принадлежит владельцу и активен) либо первый активный.
+        # Аккаунт: указанный (грузим канонически по id) либо один лучший через
+        # флуд-осознанный выбор (одна дверь), а не «первый по last_used».
         acc_id = body.get("account_id")
-        base = (
-            "SELECT id, session_str, device_model, system_version, app_version, "
-            "lang_code, system_lang_code, "
-            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
-        )
         if acc_id:
-            acc = await _safe_fetchrow(pool, base + "AND id=$2 LIMIT 1", uid, int(acc_id))
+            from database import db as _db
+            acc = await _db.get_account_for_telethon(pool, int(acc_id), uid)
         else:
-            acc = await _safe_fetchrow(pool, base + "ORDER BY last_used DESC NULLS LAST LIMIT 1", uid)
+            from services import resource_selector as _rsel
+            acc = await _rsel.select_account(pool, uid, action_type="parse", min_trust_score=0.0)
         if not acc or not acc.get("session_str"):
             return _err("Нет активного аккаунта для поиска — добавьте аккаунт", 400)
         try:

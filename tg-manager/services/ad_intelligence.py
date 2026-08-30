@@ -330,17 +330,10 @@ async def scan_channel_ads(
         )
 
     if not acc:
-        # Пробуем любой активный аккаунт владельца
-        async with pool.acquire() as conn:
-            acc = await conn.fetchrow(
-                "SELECT id, session_str, device_model, system_version, app_version, "
-            "lang_code, system_lang_code, "
-            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts "
-                "WHERE owner_id = $1 AND is_active = TRUE "
-                "ORDER BY RANDOM() LIMIT 1",
-                owner_id,
-            )
+        # Одна дверь: любой активный аккаунт — через флуд-осознанный выбор
+        # (не берём кулдаун/мёртвый по статусу), а не ORDER BY RANDOM().
+        from services import resource_selector as _rsel
+        acc = await _rsel.select_account(pool, owner_id, action_type="parse", min_trust_score=0.0)
 
     if not acc:
         return {"status": "error", "error": "Нет доступных аккаунтов Telegram"}
