@@ -81,7 +81,7 @@ async def cmd_dbdiag(message: Message, pool: asyncpg.Pool) -> None:
     except Exception as e:
         await message.answer(f"❌ Не удалось опросить БД: {e}")
         return
-    lines = [f"🗄 <b>Диагностика БД</b>", f"database: <code>{dbname}</code>",
+    lines = [f"🗄 <b>Диагностика БД</b>", f"подключены к: <code>{dbname}</code>",
              f"host: <code>{host}</code>", ""]
     for t in ("tg_accounts", "user_proxies", "operation_queue",
               "managed_channels", "managed_bots", "users", "unified_contacts"):
@@ -90,6 +90,20 @@ async def cmd_dbdiag(message: Message, pool: asyncpg.Pool) -> None:
             lines.append(f"{t}: <b>{n}</b>")
         except Exception:
             lines.append(f"{t}: <i>нет таблицы</i>")
+    # Все базы в инстансе + размеры: если данные лежат в другой базе того же
+    # Postgres (частый случай — приложение уехало на пустую 'postgres'), сразу
+    # видно по размеру, и «восстановление» = поправить DATABASE_URL.
+    lines.append("")
+    lines.append("<b>Все базы в этом Postgres:</b>")
+    try:
+        rows = await pool.fetch(
+            "SELECT datname, pg_size_pretty(pg_database_size(datname)) AS sz "
+            "FROM pg_database WHERE datistemplate=false ORDER BY pg_database_size(datname) DESC")
+        for r in rows:
+            mark = " 👈 сюда подключены" if r["datname"] == dbname else ""
+            lines.append(f"• <code>{r['datname']}</code> — {r['sz']}{mark}")
+    except Exception as e:
+        lines.append(f"<i>не удалось перечислить базы: {e}</i>")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
