@@ -379,28 +379,30 @@ async def main() -> None:
     pool = await _create_pool_resilient()
     _set_boot_phase("init")
     # Диагностика подключения к БД — печатает host и число записей в ключевых
-    # таблицах ПРЯМО В ЛОГ старта. Нужна, чтобы при инциденте «данные пропали»
-    # сразу видеть: приложение смотрит в ту базу? данные там? — без SQL-клиента.
-    # Строго read-only, под try, на старт не влияет.
-    try:
-        async with pool.acquire() as _dc:
-            _dbname = await _dc.fetchval("SELECT current_database()")
-            _host = await _dc.fetchval(
-                "SELECT inet_server_addr()::text")
-            _counts = {}
-            for _t in ("tg_accounts", "user_proxies", "operation_queue",
-                       "managed_channels", "managed_bots", "users"):
-                try:
-                    _counts[_t] = await _dc.fetchval(
-                        f"SELECT count(*) FROM {_t}")
-                except Exception:
-                    _counts[_t] = "нет таблицы"
-            log.warning(
-                "DB-DIAG ▸ database=%s host=%s ▸ %s",
-                _dbname, _host,
-                " ".join(f"{k}={v}" for k, v in _counts.items()))
-    except Exception:
-        log.warning("DB-DIAG: не удалось снять диагностику подключения", exc_info=True)
+    # таблицах в ЛОГ. Нужна при инциденте «данные пропали»: видно, в ту ли базу
+    # смотрим и есть ли данные — без SQL-клиента. КРИТИЧНО: только в ФОНЕ и с
+    # таймаутом. Синхронно в пути старта она вешала бы бот, если count(*) на
+    # большой/залоченной таблице тормозит — старт бота важнее диагностики.
+    async def _db_diag() -> None:
+        try:
+            async def _run():
+                async with pool.acquire() as _dc:
+                    _dbname = await _dc.fetchval("SELECT current_database()")
+                    _host = await _dc.fetchval("SELECT inet_server_addr()::text")
+                    _counts = {}
+                    for _t in ("tg_accounts", "user_proxies", "operation_queue",
+                               "managed_channels", "managed_bots", "users"):
+                        try:
+                            _counts[_t] = await _dc.fetchval(
+                                f"SELECT count(*) FROM {_t}")
+                        except Exception:
+                            _counts[_t] = "нет таблицы"
+                    log.warning("DB-DIAG ▸ database=%s host=%s ▸ %s", _dbname, _host,
+                                " ".join(f"{k}={v}" for k, v in _counts.items()))
+            await asyncio.wait_for(_run(), timeout=20)
+        except Exception:
+            log.warning("DB-DIAG: диагностика не отработала (таймаут/ошибка)", exc_info=True)
+    asyncio.create_task(_db_diag())
     fsm_storage = await PostgresFSMStorage.create(pool)
     dp = Dispatcher(storage=fsm_storage)
     activity_log_middleware = UserActivityLogMiddleware()
