@@ -363,6 +363,43 @@ async def cmd_backup(message: Message, pool: asyncpg.Pool, bot) -> None:
                              reply_markup=terminal_kb())
 
 
+@router.message(Command("reconcile_payments"))
+async def cmd_reconcile_payments(message: Message, pool: asyncpg.Pool, bot) -> None:
+    """Восстановить подписки из истории платежей (CryptoBot + Telegram Stars).
+
+    Без аргумента — сухой прогон (только показать). `/reconcile_payments apply` —
+    реально записать восстановленные подписки в БД.
+    """
+    if not _is_admin(message.from_user.id):
+        return
+    apply = (message.text or "").strip().lower().endswith("apply")
+    from services import payment_recovery
+    import aiohttp
+    await message.answer(
+        "🔎 Собираю историю платежей…" if not apply
+        else "♻️ Восстанавливаю подписки из истории платежей…")
+    try:
+        async with aiohttp.ClientSession() as http:
+            rep = await payment_recovery.reconcile(pool, bot, http, dry_run=not apply)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=terminal_kb())
+        return
+    lines = [
+        f"{'♻️ Применено' if apply else '🔎 Сухой прогон'}",
+        f"Найдено платежей: <b>{rep['found']}</b> ({rep.get('by_source', {})})",
+        f"Платящих с действующей подпиской: <b>{rep['active']}</b>",
+    ]
+    if apply:
+        lines.append(f"Восстановлено подписок: <b>{rep['applied']}</b>")
+    else:
+        lines.append("Для записи: <code>/reconcile_payments apply</code>")
+    for s in rep.get("sample", [])[:10]:
+        lines.append(f"• <code>{s['user_id']}</code> {s['plan']} до "
+                     f"{s['expires_at'][:10]} ({s['payments']} плат.)")
+    await message.answer("\n".join(lines), parse_mode="HTML",
+                         reply_markup=terminal_kb())
+
+
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
 
 
