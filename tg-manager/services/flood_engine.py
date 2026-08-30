@@ -890,7 +890,7 @@ async def get_best_account(
         # этот фильтр каждый у себя (NOT IN banned/deactivated/session_expired);
         # переносим его в умный слой, чтобы «одна дверь» была строго безопаснее
         # сырого выбора, а не мягче.
-        "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired')",
+        "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired', 'spamblock')",
         "a.id != ALL($2::bigint[])",
     ]
     params: list = [owner_id, exclude]

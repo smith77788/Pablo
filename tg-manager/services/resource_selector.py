@@ -165,7 +165,7 @@ async def select_all_active(
                   # исполнители несли этот фильтр каждый у себя; после переноса
                   # выбора в единую дверь он обязан быть здесь, иначе миграция
                   # молча ослабила бы защиту (взяли бы banned с is_active=TRUE).
-                  "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired')"]
+                  "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired', 'spamblock')"]
     params: list = [owner_id]
 
     if respect_cooldown:
