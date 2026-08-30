@@ -69,6 +69,30 @@ async def cmd_version(message: Message) -> None:
     )
 
 
+@router.message(Command("dbdiag"))
+async def cmd_dbdiag(message: Message, pool: asyncpg.Pool) -> None:
+    """Диагностика БД по запросу (только админ): к какой базе подключены и сколько
+    в ней записей — прямо в чат, без копания в логах Railway. Read-only."""
+    if not is_platform_admin(message.from_user.id):
+        return
+    try:
+        dbname = await pool.fetchval("SELECT current_database()")
+        host = await pool.fetchval("SELECT inet_server_addr()::text")
+    except Exception as e:
+        await message.answer(f"❌ Не удалось опросить БД: {e}")
+        return
+    lines = [f"🗄 <b>Диагностика БД</b>", f"database: <code>{dbname}</code>",
+             f"host: <code>{host}</code>", ""]
+    for t in ("tg_accounts", "user_proxies", "operation_queue",
+              "managed_channels", "managed_bots", "users", "unified_contacts"):
+        try:
+            n = await pool.fetchval(f"SELECT count(*) FROM {t}")
+            lines.append(f"{t}: <b>{n}</b>")
+        except Exception:
+            lines.append(f"{t}: <i>нет таблицы</i>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
     current = await state.get_state()
