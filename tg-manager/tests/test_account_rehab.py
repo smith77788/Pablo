@@ -237,6 +237,301 @@ def _async_val(v):
     return _c(*[], **{})
 
 
+# ── Ветки ошибок в _process ────────────────────────────────────────────────────
+def test_appeal_exception_still_advances_to_warming(monkeypatch):
+    pool = _FakePool()
+
+    async def boom(sess, acc):
+        raise RuntimeError("сеть упала")
+
+    monkeypatch.setattr("services.account_manager.appeal_spamblock", boom)
+    monkeypatch.setattr("services.account_status.set_status", lambda *a, **k: _async_true())
+    r = {"acc_id": 601, "owner_id": 7, "phase": "appeal", "session_str": "x" * 20,
+         "attempts": 0, "appeal_count": 0, "warm_cycles": 0, "kind": None}
+    _run(ar._process(pool, r))
+    assert _advance_phase(pool) == "warming"
+
+
+def test_recheck_exception_backs_off_to_warming(monkeypatch):
+    pool = _FakePool()
+
+    async def boom(sess, acc, check_spambot=True):
+        raise RuntimeError("таймаут @SpamBot")
+
+    monkeypatch.setattr("services.account_manager.check_account_status_full", boom)
+    monkeypatch.setattr("services.account_status.set_status", lambda *a, **k: _async_true())
+    r = {"acc_id": 602, "owner_id": 7, "phase": "recheck", "session_str": "x" * 20,
+         "attempts": 0, "appeal_count": 1, "warm_cycles": 2, "kind": "temp"}
+    _run(ar._process(pool, r))
+    assert _advance_phase(pool) == "warming"
+
+
+# ── run_rehab_cycle: оркестрация и изоляция сбоев ──────────────────────────────
+def test_cycle_disabled_returns_zero(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: True)
+    assert _run(ar.run_rehab_cycle(_FakePool())) == 0
+
+
+def test_cycle_processes_due_rows(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "_sync_enrollment", lambda p: _async_true())
+    monkeypatch.setattr(ar, "_due_rows", lambda p, n: _async_val([{"acc_id": 1}, {"acc_id": 2}]))
+    seen = []
+    monkeypatch.setattr(ar, "_process", lambda p, r: _record_async(seen, r))
+    # без реальных пауз между аккаунтами
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+    n = _run(ar.run_rehab_cycle(_FakePool()))
+    assert n == 2 and len(seen) == 2
+
+
+def test_cycle_sync_failure_is_isolated(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+
+    async def boom(p):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(ar, "_sync_enrollment", boom)
+    assert _run(ar.run_rehab_cycle(_FakePool())) == 0
+
+
+def test_cycle_process_failure_does_not_abort_others(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "_sync_enrollment", lambda p: _async_true())
+    monkeypatch.setattr(ar, "_due_rows", lambda p, n: _async_val([{"acc_id": 1}, {"acc_id": 2}]))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+
+    async def one_fails(p, r):
+        if r["acc_id"] == 1:
+            raise RuntimeError("сбой на первом")
+    monkeypatch.setattr(ar, "_process", one_fails)
+    # первый упал (не засчитан), второй отработал → 1
+    assert _run(ar.run_rehab_cycle(_FakePool())) == 1
+
+
+# ── _quiet_warmup ──────────────────────────────────────────────────────────────
+def test_quiet_warmup_skips_when_claim_fails(monkeypatch):
+    monkeypatch.setattr("services.op_worker.try_claim_account", lambda a: _async_val(False))
+    n = _run(ar._quiet_warmup(_FakePool(), {"acc_id": 9, "owner_id": 7, "session_str": "s"}))
+    assert n == 0
+
+
+def test_quiet_warmup_runs_passive_actions(monkeypatch):
+    released = []
+
+    class _FakeClient:
+        async def disconnect(self):
+            return None
+
+    monkeypatch.setattr("services.op_worker.try_claim_account", lambda a: _async_val(True))
+    monkeypatch.setattr("services.op_worker.release_accounts",
+                        lambda ids: _record_async(released, ids))
+    monkeypatch.setattr("database.db.get_account_for_telethon",
+                        lambda pool, acc_id: _async_val({"session_str": "s" * 20}))
+    monkeypatch.setattr("services.account_manager.connect_client",
+                        lambda *a, **k: _async_val(_FakeClient()))
+    monkeypatch.setattr("services.account_warmer._get_warmup_resources",
+                        lambda pool, oid: _async_val({"channels": [{"username": "chan"}]}))
+    monkeypatch.setattr("services.account_warmer._perform_update_presence",
+                        lambda c: _async_val(True))
+    monkeypatch.setattr("services.account_warmer._perform_read_channel",
+                        lambda c, ref: _async_val(True))
+    monkeypatch.setattr("services.account_warmer._perform_view_profile",
+                        lambda c, ref: _async_val(True))
+    monkeypatch.setattr("services.account_warmer._perform_open_chat",
+                        lambda c, ref: _async_val(True))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    monkeypatch.setattr(ar.random, "randint", lambda a, b: a)
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+
+    n = _run(ar._quiet_warmup(_FakePool(), {"acc_id": 9, "owner_id": 7, "session_str": "s"}))
+    assert n >= 1, "пассивные действия не выполнились"
+    assert released == [[9]], "аккаунт не освобождён после прогрева"
+
+
+# ── rehab_overview ─────────────────────────────────────────────────────────────
+def test_rehab_overview_counts_phases():
+    class _P:
+        async def fetch(self, sql, *a):
+            return [{"phase": "warming", "n": 2}, {"phase": "freed", "n": 3},
+                    {"phase": "stuck", "n": 1}, {"phase": "recheck", "n": 1}]
+    ov = _run(ar.rehab_overview(_P(), 7))
+    assert ov["in_progress"] == 3   # warming + recheck (+appeal 0)
+    assert ov["freed"] == 3 and ov["stuck"] == 1
+
+
+def _record_async(bucket, item):
+    async def _c():
+        bucket.append(item)
+    return _c()
+
+
+def _async_raise(exc):
+    async def _c(*a, **k):
+        raise exc
+    return _c()
+
+
+def test_cycle_due_failure_is_isolated(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "_sync_enrollment", lambda p: _async_true())
+
+    async def boom(p, n):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(ar, "_due_rows", boom)
+    assert _run(ar.run_rehab_cycle(_FakePool())) == 0
+
+
+# ── run_rehab_loop ─────────────────────────────────────────────────────────────
+def test_loop_disabled_returns_immediately(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: True)
+    assert _run(ar.run_rehab_loop(_FakePool())) is None
+
+
+def test_loop_runs_one_iteration_then_cancels(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "run_rehab_cycle", lambda p: _async_val(1))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    calls = {"n": 0}
+
+    async def sleeper(*a, **k):
+        calls["n"] += 1
+        if calls["n"] >= 2:            # стартовая задержка — 1-я; пост-тик — 2-я
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(ar.asyncio, "sleep", sleeper)
+    with pytest.raises(asyncio.CancelledError):
+        _run(ar.run_rehab_loop(_FakePool()))
+    assert calls["n"] >= 2
+
+
+# ── _quiet_warmup: остальные ветки ─────────────────────────────────────────────
+def test_cycle_process_cancelled_propagates(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "_sync_enrollment", lambda p: _async_true())
+    monkeypatch.setattr(ar, "_due_rows", lambda p, n: _async_val([{"acc_id": 1}]))
+    monkeypatch.setattr(ar, "_process", lambda p, r: _async_raise(asyncio.CancelledError()))
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+    with pytest.raises(asyncio.CancelledError):
+        _run(ar.run_rehab_cycle(_FakePool()))
+
+
+def test_loop_cycle_cancelled_propagates(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "run_rehab_cycle",
+                        lambda p: _async_raise(asyncio.CancelledError()))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+    with pytest.raises(asyncio.CancelledError):
+        _run(ar.run_rehab_loop(_FakePool()))
+
+
+def test_loop_cycle_generic_error_is_logged_and_survives(monkeypatch):
+    monkeypatch.setattr(ar, "_disabled", lambda: False)
+    monkeypatch.setattr(ar, "run_rehab_cycle",
+                        lambda p: _async_raise(RuntimeError("тик упал")))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    calls = {"n": 0}
+
+    async def sleeper(*a, **k):
+        calls["n"] += 1
+        if calls["n"] >= 2:            # старт — 1-я; пост-тик после ошибки — 2-я
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(ar.asyncio, "sleep", sleeper)
+    with pytest.raises(asyncio.CancelledError):
+        _run(ar.run_rehab_loop(_FakePool()))
+
+
+def test_quiet_warmup_action_cancelled_propagates(monkeypatch):
+    released = []
+
+    class _Client:
+        async def disconnect(self):
+            return None
+
+    monkeypatch.setattr("services.op_worker.try_claim_account", lambda a: _async_val(True))
+    monkeypatch.setattr("services.op_worker.release_accounts",
+                        lambda ids: _record_async(released, ids))
+    monkeypatch.setattr("database.db.get_account_for_telethon",
+                        lambda pool, acc_id: _async_val({"session_str": "s" * 20}))
+    monkeypatch.setattr("services.account_manager.connect_client",
+                        lambda *a, **k: _async_val(_Client()))
+    monkeypatch.setattr("services.account_warmer._get_warmup_resources",
+                        lambda pool, oid: _async_val({"channels": []}))
+    monkeypatch.setattr("services.account_warmer._perform_update_presence",
+                        lambda c: _async_val(False))
+    monkeypatch.setattr("services.account_warmer._perform_read_channel",
+                        lambda c, ref: _async_raise(asyncio.CancelledError()))
+    monkeypatch.setattr("services.account_warmer._perform_view_profile",
+                        lambda c, ref: _async_raise(asyncio.CancelledError()))
+    monkeypatch.setattr("services.account_warmer._perform_open_chat",
+                        lambda c, ref: _async_raise(asyncio.CancelledError()))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    monkeypatch.setattr(ar.random, "randint", lambda a, b: a)
+    monkeypatch.setattr(ar.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+    with pytest.raises(asyncio.CancelledError):
+        _run(ar._quiet_warmup(_FakePool(), {"acc_id": 9, "owner_id": 7, "session_str": "s"}))
+    assert released == [[9]], "отмена не должна мешать освобождению аккаунта"
+
+
+def test_quiet_warmup_no_session_returns_zero(monkeypatch):
+    monkeypatch.setattr("services.op_worker.try_claim_account", lambda a: _async_val(True))
+    monkeypatch.setattr("services.op_worker.release_accounts", lambda ids: _async_true())
+    monkeypatch.setattr("database.db.get_account_for_telethon",
+                        lambda pool, acc_id: _async_val(None))
+    n = _run(ar._quiet_warmup(_FakePool(), {"acc_id": 9, "owner_id": 7, "session_str": "s"}))
+    assert n == 0
+
+
+def test_quiet_warmup_connect_failure_still_releases(monkeypatch):
+    released = []
+    monkeypatch.setattr("services.op_worker.try_claim_account", lambda a: _async_val(True))
+    monkeypatch.setattr("services.op_worker.release_accounts",
+                        lambda ids: _record_async(released, ids))
+    monkeypatch.setattr("database.db.get_account_for_telethon",
+                        lambda pool, acc_id: _async_val({"session_str": "s" * 20}))
+    monkeypatch.setattr("services.account_manager.connect_client",
+                        lambda *a, **k: _async_raise(RuntimeError("коннект упал")))
+    n = _run(ar._quiet_warmup(_FakePool(), {"acc_id": 9, "owner_id": 7, "session_str": "s"}))
+    assert n == 0 and released == [[9]]
+
+
+def test_quiet_warmup_survives_action_and_cleanup_errors(monkeypatch):
+    class _BadClient:
+        async def disconnect(self):
+            raise RuntimeError("disconnect упал")
+
+    monkeypatch.setattr("services.op_worker.try_claim_account", lambda a: _async_val(True))
+    monkeypatch.setattr("services.op_worker.release_accounts",
+                        lambda ids: _async_raise(RuntimeError("release упал")))
+    monkeypatch.setattr("database.db.get_account_for_telethon",
+                        lambda pool, acc_id: _async_val({"session_str": "s" * 20}))
+    monkeypatch.setattr("services.account_manager.connect_client",
+                        lambda *a, **k: _async_val(_BadClient()))
+    monkeypatch.setattr("services.account_warmer._get_warmup_resources",
+                        lambda pool, oid: _async_raise(RuntimeError("ресурсы упали")))
+    monkeypatch.setattr("services.account_warmer._WARMUP_PUBLIC_CHANNELS", ["@a"])
+    monkeypatch.setattr("services.account_warmer._perform_update_presence",
+                        lambda c: _async_raise(RuntimeError("presence упал")))
+    monkeypatch.setattr("services.account_warmer._perform_read_channel",
+                        lambda c, ref: _async_raise(RuntimeError("read упал")))
+    monkeypatch.setattr("services.account_warmer._perform_view_profile",
+                        lambda c, ref: _async_raise(RuntimeError("view упал")))
+    monkeypatch.setattr("services.account_warmer._perform_open_chat",
+                        lambda c, ref: _async_raise(RuntimeError("open упал")))
+    monkeypatch.setattr(ar.random, "uniform", lambda a, b: 0)
+    monkeypatch.setattr(ar.random, "randint", lambda a, b: b)   # n=max → сработает break
+    monkeypatch.setattr(ar.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(ar.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(ar.asyncio, "sleep", lambda *a, **k: _async_true())
+
+    # ничего не должно всплыть наружу, несмотря на сбои на каждом шаге
+    n = _run(ar._quiet_warmup(_FakePool(), {"acc_id": 9, "owner_id": 7, "session_str": "s"}))
+    assert n == 0
+
+
 # ── Живой Postgres: enrollment + полный цикл до freed ──────────────────────────
 @pytest.mark.skipif(not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 def test_enrollment_and_full_cycle_on_real_schema(monkeypatch):

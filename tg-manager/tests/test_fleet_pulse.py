@@ -54,14 +54,25 @@ def test_states_classify_on_real_schema():
         except Exception:
             pass
         try:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS account_rehab_state ("
+                "acc_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL, "
+                "phase TEXT NOT NULL DEFAULT 'appeal', attempts INTEGER DEFAULT 0, "
+                "next_action_at TIMESTAMPTZ NOT NULL DEFAULT now())")
+            await conn.execute("DELETE FROM account_rehab_state WHERE owner_id=$1", 7700)
             await conn.execute("DELETE FROM tg_accounts WHERE owner_id=$1", 7700)
             await conn.execute(
                 "INSERT INTO tg_accounts(id, owner_id, phone, first_name, is_active, "
                 "session_str, acc_status, cooldown_until, trust_score) VALUES "
                 "(77001,$1,'+1','Ready',TRUE,'s','active',NULL,0.8),"
                 "(77002,$1,'+2','Cooling',TRUE,'s','cooldown', now()+interval '5 minutes',0.6),"
-                "(77003,$1,'+3','Banned',TRUE,'s','banned',NULL,0.1)",
+                "(77003,$1,'+3','Banned',TRUE,'s','banned',NULL,0.1),"
+                "(77004,$1,'+4','Rehab',TRUE,'s','spamblock',NULL,0.2)",
                 7700)
+            # аккаунт под спам-блоком в фазе тихого прогрева
+            await conn.execute(
+                "INSERT INTO account_rehab_state(acc_id, owner_id, phase) "
+                "VALUES (77004,$1,'warming')", 7700)
 
             states = await fp.account_states(conn, 7700)
             by_id = {s["id"]: s for s in states}
@@ -70,11 +81,41 @@ def test_states_classify_on_real_schema():
             assert by_id[77002]["ready_in_sec"] > 0, "пауза без времени до готовности"
             assert by_id[77003]["state"] == "dead"
             assert "перезал" in by_id[77003]["reason"] or "забанен" in by_id[77003]["reason"]
+            # живая фаза реабилитации отражена в причине
+            assert by_id[77004]["state"] == "dead"
+            assert "прогрев" in by_id[77004]["reason"], "фаза реабилитации не показана"
 
             # сортировка: сначала «требующие внимания» (dead/cooling), ready в конце
             assert states[-1]["state"] == "ready"
         finally:
+            await conn.execute("DELETE FROM account_rehab_state WHERE owner_id=$1", 7700)
             await conn.execute("DELETE FROM tg_accounts WHERE owner_id=$1", 7700)
             await conn.close()
 
     asyncio.run(_run())
+
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def test_rehab_reason_covers_every_phase():
+    now = datetime.now(timezone.utc)
+    assert "снятие" in fp._rehab_reason({"phase": "appeal"}, now)
+    assert "прогрев" in fp._rehab_reason({"phase": "warming"}, now)
+    # recheck со сроком в будущем показывает «через …»
+    r = fp._rehab_reason({"phase": "recheck",
+                          "next_action_at": now + timedelta(hours=6)}, now)
+    assert "перепроверка" in r and "через" in r
+    # recheck без корректного срока — без «через»
+    r2 = fp._rehab_reason({"phase": "recheck", "next_action_at": None}, now)
+    assert "перепроверка" in r2
+    assert "ручной разбор" in fp._rehab_reason({"phase": "stuck"}, now)
+    # неизвестная фаза → общий текст спам-блока
+    assert "спам-блок" in fp._rehab_reason({"phase": "???"}, now)
+
+
+def test_dead_reason_maps_known_statuses():
+    assert "забанен" in fp._dead_reason("banned")
+    assert "деактив" in fp._dead_reason("deactivated")
+    assert "перезал" in fp._dead_reason("session_expired")
+    assert fp._dead_reason("нечто") == "нечто"
