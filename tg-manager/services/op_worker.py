@@ -10031,6 +10031,10 @@ async def _exec_mass_invite(
     _invite_method = str(params.get("invite_method") or "direct").strip().lower()
     if _invite_method not in ("direct", "admin", "link"):
         _invite_method = "direct"
+    # Безопасный режим (governor уровня ЧАТА): дросселирует частоту системных
+    # событий/мин по чату, замораживает приём при chat-flood, стопит на «мёртвом»
+    # чате и серии выходов/жалоб. См. services/smart_invite.py.
+    _safe_mode = str(params.get("safe_mode") or "").strip().lower() in ("1", "true", "yes", "on")
     # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер).
     _link_msg = params.get("link_message") or None
 
@@ -10498,6 +10502,30 @@ async def _exec_mass_invite(
     _no_rights_retired = 0        # аккаунтов выведено из-за отсутствия прав админа
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
+    _group_broken_reason = ""     # почему остановились по чату (safe-режим/недоступность)
+
+    # Безопасный режим: ДО массового притока оцениваем живость чата (участники +
+    # свежесть переписки). «Холодный» приток в тихий/малолюдный чат мгновенно
+    # ловит флуд, поэтому governor режет темп/останавливает по liveness. Best-
+    # effort одним аккаунтом; сбой не рушит операцию (governor работает и без оценки).
+    if _safe_mode and accounts:
+        try:
+            from services import smart_invite as _si
+            _lv_acc = dict(accounts[0])
+            _lv_client = await account_manager.connect_client(
+                _lv_acc["session_str"], _lv_acc, "resolve")
+            try:
+                _lv_entity = await inv._resolve_group_entity(_lv_client, group)
+                _lv_score = await _si.assess_and_store_liveness(
+                    pool, owner_id, _group_key, _lv_client, _lv_entity)
+                log.info("mass_invite op=%d: safe-режим liveness чата = %s", op_id, _lv_score)
+            finally:
+                try:
+                    await _lv_client.disconnect()
+                except Exception:
+                    pass
+        except Exception as _lv_exc:
+            log.debug("mass_invite op=%d: liveness-оценка пропущена: %s", op_id, _lv_exc)
     _group_reason = ""            # ЧЕМ именно недоступна (нет прав/закрыта/лимит)
     _fail_reasons: dict[str, int] = {}  # причина отказа → счётчик (для честного итога)
     # Стоп-кран по флудам на ВЕСЬ флот: Telegram смотрит на аккаунты как на группу,
@@ -10643,6 +10671,28 @@ async def _exec_mass_invite(
             batch = _take(queue, take_n)
             if not batch:
                 continue
+
+            # Безопасный режим: governor уровня ЧАТА решает, можно ли слать прямо
+            # сейчас. abort — чат «мёртвый»/убивает приглашённых, дальше лить
+            # нельзя (стоп всей операции). Иначе — ждём окно частоты/паузу чата и
+            # возвращаем batch в очередь (не тратим цели на отказ).
+            if _safe_mode:
+                from services import smart_invite as _si
+                _dec = await _si.can_invite(pool, owner_id, _group_key)
+                if not _dec.allowed:
+                    _give_back(queue, batch)
+                    if _dec.abort:
+                        group_broken = True
+                        _group_broken_reason = _dec.reason
+                        log.warning("mass_invite op=%d: safe-режим СТОП по чату: %s",
+                                    op_id, _dec.reason)
+                        break
+                    _wait = max(1.0, min(float(_dec.wait_sec), 120.0))
+                    log.info("mass_invite op=%d: safe-режим пауза чата %.0fс: %s",
+                             op_id, _wait, _dec.reason)
+                    await asyncio.sleep(_wait)
+                    continue
+
             progressed = True
 
             try:
@@ -10734,6 +10784,25 @@ async def _exec_mass_invite(
                     invited_this_run.update(batch[:attempted])
             total_ok += ok_n
             total_fail += fail_n
+
+            # Безопасный режим: копим состояние по чату и держим темп.
+            if _safe_mode:
+                from services import smart_invite as _si
+                for _ in range(attempted):
+                    await _si.note_sent(pool, owner_id, _group_key)
+                for _ in range(ok_n):
+                    await _si.note_outcome(pool, owner_id, _group_key, "joined")
+                # Флуд при инвайте в чат трактуем и как сигнал заморозки ПРИЁМА —
+                # чат отвечает flood не только аккаунту. Ставим паузу чата.
+                if res.get("peer_flood") or res.get("flood_wait"):
+                    await _si.note_outcome(pool, owner_id, _group_key, "chat_flood")
+                # Пауза между батчами по решению governor'а (джиттер, без ровной
+                # машинной частоты) — только если что-то реально отправили.
+                if attempted:
+                    _d2 = await _si.can_invite(pool, owner_id, _group_key)
+                    if _d2.next_delay_sec > 0:
+                        await asyncio.sleep(min(_d2.next_delay_sec, 120.0))
+
             step += attempted
             if attempted:
                 _used_accounts.add(acc_id)

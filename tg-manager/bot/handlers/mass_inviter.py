@@ -738,6 +738,8 @@ async def msg_inviter_acc_count(
     # затем права тут же снимаются, и пользователь остаётся участником. Обходит
     # приватность «кто может добавлять» и работает от любого админа с правом
     # «Назначать администраторов». Именно так добавляют «упрямых» пользователей.
+    kb.button(text="🛡 Безопасный (умный темп по чату)",
+              callback_data=InviterCb(action="method", item="safe"))
     kb.button(text="➕ Обычный инвайт", callback_data=InviterCb(action="method", item="direct"))
     kb.button(text="👑 Через админку (обход приватности)",
               callback_data=InviterCb(action="method", item="admin"))
@@ -846,8 +848,12 @@ async def cb_inviter_pace(
 async def cb_inviter_method(
     callback: CallbackQuery, callback_data: InviterCb, state: FSMContext
 ) -> None:
-    method = callback_data.item if callback_data.item in ("direct", "admin", "link") else "direct"
-    await state.update_data(inv_method=method)
+    # «Безопасный» — это обычное добавление (direct) ПОВЕРХ governor'а уровня
+    # чата (умный темп/паузы/стоп на мёртвом чате). Флаг независим от метода.
+    _item = callback_data.item
+    safe = _item == "safe"
+    method = _item if _item in ("direct", "admin", "link") else "direct"
+    await state.update_data(inv_method=method, inv_safe=safe)
     data = await state.get_data()
     try:
         await callback.message.delete()
@@ -968,9 +974,14 @@ async def cb_inviter_confirm(
         "volume_mode": _volume_mode,
         # Способ добавления: direct (InviteToChannel) или admin (промоут-трюк).
         "invite_method": method,
+        # Безопасный режим: governor уровня чата (частота/мин, заморозка приёма,
+        # стоп на мёртвом чате и серии выходов/жалоб).
+        "safe_mode": bool(data.get("inv_safe")),
     }
     _pace_ru = {"slow": "🐢 медленно", "normal": "🚶 обычно", "fast": "🐇 быстро"}[pace]
     _method_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
+    if params["safe_mode"]:
+        _method_ru = "🛡 безопасный + " + _method_ru
     _vol_ru = {"auto": "🤖 авто (по истории)",
                "prog": "🎯 прогрессивно (по возрасту)"}.get(_vol, f"{_vol}/аккаунт (один проход)")
     label = f"Инвайтер: {group} ← {total_users} пользователей × {len(account_ids)} акк."

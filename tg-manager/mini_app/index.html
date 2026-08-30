@@ -4416,6 +4416,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         </div>
         <div class="hint" style="padding:4px 2px 0">Отсеять ботов/удалённых/приватные аккаунты до запуска — меньше «пустых» приглашений и риска.</div>
       </div>
+      <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invSafeMode"> 🛡 Безопасный режим (умный темп по чату)</label>
+        <div class="hint" style="padding:4px 2px 0">Держит частоту вступлений/мин под лимитом, замораживает приём при флуде чата, оценивает «живость» чата и останавливается, если приглашённые массово выходят/жалуются.</div>
+      </div>
       <div class="field" id="massInviteImportField" style="display:none">
         <label>Список для инвайта</label>
         <textarea id="massInviteImport" rows="4" placeholder="@username&#10;123456789&#10;+79991234567" oninput="massInviteListPreview()"></textarea>
@@ -15826,6 +15830,7 @@ async function submitMassInvite() {
     return;
   }
   const body = {group, source};
+  if (document.getElementById('invSafeMode')?.checked) body.safe_mode = true;
   // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;

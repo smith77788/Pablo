@@ -602,6 +602,17 @@ async def main() -> None:
         "worker_id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'all', "
         "started_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
         "last_seen TIMESTAMPTZ NOT NULL DEFAULT now())",
+        # Состояние безопасного инвайтинга по чату (schema_v187) — governor пишет
+        # сюда темп/паузы/исходы; без таблицы safe-режим молча не работал бы.
+        "CREATE TABLE IF NOT EXISTS chat_invite_state ("
+        "chat_key TEXT NOT NULL, owner_id BIGINT NOT NULL, "
+        "window_start TIMESTAMPTZ, window_count INTEGER NOT NULL DEFAULT 0, "
+        "paused_until TIMESTAMPTZ, pause_reason TEXT, "
+        "invited_total INTEGER NOT NULL DEFAULT 0, joined_total INTEGER NOT NULL DEFAULT 0, "
+        "left_total INTEGER NOT NULL DEFAULT 0, reported_total INTEGER NOT NULL DEFAULT 0, "
+        "flood_hits INTEGER NOT NULL DEFAULT 0, liveness_score DOUBLE PRECISION, "
+        "liveness_checked_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "PRIMARY KEY (owner_id, chat_key))",
         # Профильные факты для риск-движка инвайтинга (schema_v160). Их читает
         # flood_engine.account_risk_factors в КАЖДОМ расчёте суточного лимита —
         # при лаге миграции запрос падал бы на каждом батче инвайта.

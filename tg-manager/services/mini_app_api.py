@@ -8095,6 +8095,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             label = f"Mass Invite → {group}"
             params = {"group": group, "source": source, "pace": pace, "batch_size": batch_size}
+            # Безопасный режим: governor уровня чата (частота/паузы/стоп на
+            # мёртвом чате). Флаг независим от способа добавления.
+            if str(body.get("safe_mode")).lower() in ("1", "true", "yes", "on"):
+                params["safe_mode"] = True
             # «Из парсера»: инвайтим ИМЕННО этот запуск (parse_run_id), симметрично
             # DM-мосту. Без него source=parsed брал всю аудиторию парсера.
             _pr = body.get("parse_run_id")
