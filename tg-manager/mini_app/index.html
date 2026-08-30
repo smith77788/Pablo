@@ -8471,6 +8471,18 @@ function renderChPreview(list, total) {
 function isOnCooldown(a) {
   return a.cooldown_until && new Date(a.cooldown_until) > new Date();
 }
+// Наблюдаемость: сколько осталось паузы (аудит — «когда продолжит»), а не сухая дата.
+function cooldownLeft(iso) {
+  try {
+    const ms = new Date(iso) - new Date();
+    if (ms <= 0) return 'скоро продолжит';
+    const min = Math.round(ms / 60000);
+    if (min < 60) return `— продолжит через ~${min} мин`;
+    const h = Math.round(min / 60);
+    if (h < 24) return `— продолжит через ~${h} ч`;
+    return `до ${new Date(iso).toLocaleDateString('ru-RU')}`;
+  } catch(_) { return ''; }
+}
 
 // Maps phone prefix to country flag emoji
 function phoneFlag(phone) {
@@ -9091,7 +9103,8 @@ function buildAccDetail(d) {
   if (a.acc_status==='session_expired') statusBadge = '<span class="badge b-or">🔑 Нужна переавторизация — в боте: Аккаунты → Переавторизатор</span>';
   else if (!a.is_active) statusBadge = '<span class="badge b-gy">Выключен</span>';
   else if (a.acc_status==='banned') statusBadge = '<span class="badge b-rd">🚫 Заблокирован</span>';
-  else if (cd) statusBadge = `<span class="badge b-or">⏳ Кулдаун до ${new Date(a.cooldown_until).toLocaleDateString('ru-RU')}</span>`;
+  else if (a.acc_status==='spamblock') statusBadge = '<span class="badge b-rd">🚫 Спам-блок — идёт реабилитация</span>';
+  else if (cd) statusBadge = `<span class="badge b-or">⏸ На паузе ${cooldownLeft(a.cooldown_until)}</span>`;
   else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
 
   if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(245,158,11,.18);color:var(--orange)">⭐ Premium</span>';
