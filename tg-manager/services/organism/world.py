@@ -181,7 +181,7 @@ async def _anomalies(pool, owner_id: int) -> dict:
 
 
 async def _fleet(pool, owner_id: int) -> dict:
-    out = {"accounts": 0, "active": 0, "dead": 0, "bans_24h": 0,
+    out = {"accounts": 0, "active": 0, "dead": 0, "restricted": 0, "bans_24h": 0,
            "pressure": 0, "governor_mult": 1.0, "governor_level": "green"}
     try:
         r = await pool.fetchrow(
@@ -189,10 +189,12 @@ async def _fleet(pool, owner_id: int) -> dict:
             "COUNT(*) FILTER (WHERE is_active AND COALESCE(acc_status,'ok') "
             "  NOT IN ('banned','spamblock','deactivated','session_expired')) AS active, "
             "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') "
-            "  IN ('banned','deactivated','session_expired')) AS dead "
+            "  IN ('banned','deactivated','session_expired')) AS dead, "
+            "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'spamblock') AS restricted "
             "FROM tg_accounts WHERE owner_id=$1", owner_id)
         if r:
             out["accounts"], out["active"], out["dead"] = int(r["total"]), int(r["active"]), int(r["dead"])
+            out["restricted"] = int(r["restricted"] or 0)
     except Exception:
         log.debug("world._fleet failed owner=%s", owner_id)
     try:

@@ -103,6 +103,15 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             "в блокировки.",
             {"kind": "health"})
 
+    restricted = fleet.get("restricted", 0)
+    if restricted > 0:
+        add("accounts_restricted", "warn",
+            f"{restricted} аккаунтов под спам-блоком",
+            "Ограничение снимается не само: снимите их с массовых операций, дайте "
+            "тихий прогрев и перепроверьте статус — иначе они копят риск и тянут "
+            "флот вниз. Откройте здоровье для реабилитации.",
+            {"kind": "health"})
+
     bans = fleet.get("bans_24h", 0)
     if bans > 0:
         add("bans", "warn", f"{bans} бан(ов) за сутки",

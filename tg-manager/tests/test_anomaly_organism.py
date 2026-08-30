@@ -111,3 +111,16 @@ def test_narrative_mentions_critical_anomaly():
     assert "критич" in n and "2" in n
     # без аномалий — не упоминает
     assert "критич" not in narrative(_snap())
+
+
+def test_restricted_accounts_suggestion():
+    from services.organism.brain import build_suggestions
+    s = build_suggestions(_snap(fleet={"accounts": 20, "active": 15, "dead": 0,
+                                       "restricted": 3, "pressure": 20,
+                                       "governor_mult": 1.0, "governor_level": "green",
+                                       "geo": {}, "bans_24h": 0}))
+    r = next((x for x in s if x["id"] == "accounts_restricted"), None)
+    assert r is not None and r["action"]["kind"] == "health" and "3" in r["title"]
+    # нет ограниченных — нет подсказки
+    assert not any(x["id"] == "accounts_restricted"
+                   for x in build_suggestions(_snap()))
