@@ -93,7 +93,9 @@ def test_flood_events_are_instrumented():
 
 
 def test_session_deaths_are_instrumented():
-    body = _func_src("services/op_worker.py", "_is_dead_session_error")
+    # Классификация ошибок вынесена в services/op_errors.py (распил монолита);
+    # op_worker импортирует _is_dead_session_error обратно.
+    body = _func_src("services/op_errors.py", "_is_dead_session_error")
     assert "infragram_session_deaths_total" in body, "смерть сессии не считается"
     # конфликт auth-key считаем ОТДЕЛЬНО: это сигнал нарушенного захвата (№1),
     # а не гибель сессии
