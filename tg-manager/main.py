@@ -269,6 +269,16 @@ async def _global_error_handler(event: ErrorEvent) -> None:
 
 
 _bootstrap_runner = None
+# Фаза старта — чтобы «starting» не был молчаливым. Bootstrap-сервер отдаёт её
+# текстом: при зависшем деплое сразу видно, ГДЕ застряли (пул/миграции/бот/веб),
+# а не безликое "starting". Обновляется по ходу init в main().
+_boot_phase = "boot"
+
+
+def _set_boot_phase(phase: str) -> None:
+    global _boot_phase
+    _boot_phase = phase
+    log.info("boot phase: %s", phase)
 
 
 async def _start_bootstrap_health_server() -> None:
@@ -288,7 +298,8 @@ async def _start_bootstrap_health_server() -> None:
         _app = _web.Application()
 
         async def _ok(_req):
-            return _web.Response(text="starting", status=200)
+            # Отдаём текущую фазу (не голое "starting") — при зависании видно где.
+            return _web.Response(text=f"starting: {_boot_phase}", status=200)
 
         _app.router.add_route("*", "/{tail:.*}", _ok)
         _bootstrap_runner = _web.AppRunner(_app)
@@ -364,7 +375,9 @@ async def main() -> None:
     # «Application failed to respond» становится невозможным. Реальный сервер займёт
     # порт после готовности (bootstrap останавливается перед его стартом).
     await _start_bootstrap_health_server()
+    _set_boot_phase("db-pool+migrations")
     pool = await _create_pool_resilient()
+    _set_boot_phase("init")
     fsm_storage = await PostgresFSMStorage.create(pool)
     dp = Dispatcher(storage=fsm_storage)
     activity_log_middleware = UserActivityLogMiddleware()
@@ -706,6 +719,7 @@ async def main() -> None:
             BotCommand(command="cancel", description="Отменить текущее действие"),
         ]
     )
+    _set_boot_phase("bot-commands")
     try:
         await bot.set_my_commands(_commands)
     except Exception:
@@ -791,6 +805,7 @@ async def main() -> None:
     try:
         # Освобождаем $PORT от bootstrap health-сервера прямо перед стартом реального —
         # окно, когда порт свободен, минимально (мс), Railway health-check его не заметит.
+        _set_boot_phase("web-start")
         await _stop_bootstrap_health_server()
         # HTTP server starts FIRST — must bind to PORT immediately for Railway web services.
         # Если задан WEBHOOK_URL — передаём dp чтобы Telegram webhook работал на том же порту.
