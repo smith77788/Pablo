@@ -43,8 +43,13 @@ def _run(coro):
 
 
 def _fresh_op_worker(tag: str):
-    """Независимый экземпляр op_worker — своя память, как отдельный процесс."""
-    path = os.path.join(ROOT, "services", "op_worker.py")
+    """Независимый экземпляр предохранителя — своя память, как отдельный процесс.
+
+    Предохранитель вынесен в services/op_circuit_breaker.py; грузим ИМЕННО его
+    (а не op_worker) — так у каждой «реплики» свой _circuit_breaker_state и _db_pool,
+    а база (op_circuit_breaker) остаётся общей.
+    """
+    path = os.path.join(ROOT, "services", "op_circuit_breaker.py")
     spec = importlib.util.spec_from_file_location(f"_cbreplica_{tag}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -76,8 +81,8 @@ def stand():
 
     pool = _run(_mk())
     a, b = _fresh_op_worker("a"), _fresh_op_worker("b")
-    a.init_op_worker_pool(pool)
-    b.init_op_worker_pool(pool)
+    a.set_pool(pool)
+    b.set_pool(pool)
     yield pool, a, b
     _run(pool.execute("DROP TABLE IF EXISTS op_circuit_breaker"))
     _run(pool.close())

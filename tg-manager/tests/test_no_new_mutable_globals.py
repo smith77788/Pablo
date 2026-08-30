@@ -124,6 +124,7 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/op_worker.py:_accounts_in_use": "быстрый локальный фильтр; арбитр — аренда в БД",
     "services/op_worker.py:_operation_account_locks": "то же, привязка операция→аккаунты",
     "services/op_worker.py:_db_pool": "пул asyncpg привязан к циклу событий",
+    "services/op_circuit_breaker.py:_db_pool": "пул asyncpg привязан к циклу событий",
     "services/organism/spine.py:_SUBS": "подписчики внутрипроцессной шины",
     "services/pacing_engine.py:_engine": "синглтон процесса",
     "services/relay.py:_offsets": "offset getUpdates: один бот опрашивает один процесс",
@@ -170,7 +171,7 @@ DB_BACKED: dict[str, str] = {
     "services/infra_memory.py:_proxy_memory": "infra_memory_proxies, флаш приростом",
     "services/infra_memory.py:_dirty_account_keys": "очередь флаша",
     "services/infra_memory.py:_dirty_proxy_keys": "очередь флаша",
-    "services/op_worker.py:_circuit_breaker_state": "op_circuit_breaker, решение под блокировкой строки",
+    "services/op_circuit_breaker.py:_circuit_breaker_state": "op_circuit_breaker, решение под блокировкой строки",
 }
 
 # Расхождение реально стоит качества, но пока принято. СПИСОК НЕ ДОЛЖЕН РАСТИ.
@@ -273,7 +274,7 @@ def test_detector_actually_detects():
     """Детектор, который ничего не находит, — зелёный и бесполезный."""
     found = detect()
     assert len(found) > 40, f"детектор нашёл всего {len(found)} — похоже, он сломан"
-    assert "services/op_worker.py:_circuit_breaker_state" in found
+    assert "services/op_circuit_breaker.py:_circuit_breaker_state" in found
     assert "services/infra_memory.py:_account_memory" in found
 
 

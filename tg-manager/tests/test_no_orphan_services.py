@@ -138,7 +138,13 @@ def test_dead_pacing_duplicate_is_marked():
 
 
 def test_real_pacing_loop_is_closed():
-    """Рабочий контур обучения должен остаться замкнутым: пишем и читаем."""
+    """Рабочий контур обучения должен остаться замкнутым: пишем и читаем.
+
+    Запись исходов живёт в op_worker (по итогу операции), а чтение множителя —
+    в op_pacing (расчёт задержки вынесен туда при распиле монолита); op_worker
+    использует эту задержку через op_worker.get_adaptive_delay (re-export).
+    """
     worker = (SERVICES / "op_worker.py").read_text(encoding="utf-8")
+    pacing = (SERVICES / "op_pacing.py").read_text(encoding="utf-8")
     assert "get_pacing_engine().record_result(" in worker, "результаты не записываются"
-    assert "get_pacing_engine().get_multiplier(" in worker, "множитель не читается"
+    assert "get_pacing_engine().get_multiplier(" in pacing, "множитель не читается"
