@@ -59,6 +59,16 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
         "ORDER BY id",
         owner_id)
 
+    # Живая фаза авто-реабилитации по спам-блокам (если таблица есть).
+    rehab: dict[int, dict] = {}
+    try:
+        rrows = await pool.fetch(
+            "SELECT acc_id, phase, attempts, next_action_at "
+            "FROM account_rehab_state WHERE owner_id=$1", owner_id)
+        rehab = {int(r["acc_id"]): dict(r) for r in rrows}
+    except Exception:
+        rehab = {}
+
     import time as _t
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -98,6 +108,8 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
         # Классификация состояния и человеческая причина.
         if status in ("banned", "deactivated", "session_expired", "spamblock"):
             state, reason, ready_in = "dead", _dead_reason(status), None
+            if status == "spamblock" and acc_id in rehab:
+                reason = _rehab_reason(rehab[acc_id], now)
         elif quarantined:
             state = "quarantine"
             reason = "снят риск-пульсом (недавние ограничения) — вернётся сам"
@@ -125,6 +137,28 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
     out.sort(key=lambda a: (STATE_ORDER.index(a["state"]),
                             -(a["ready_in_sec"] or 0)))
     return out
+
+
+def _rehab_reason(r: dict, now) -> str:
+    """Человеческая причина по живой фазе авто-реабилитации спам-блока."""
+    phase = r.get("phase")
+    if phase == "appeal":
+        return "спам-блок — запрашиваем снятие у @SpamBot"
+    if phase == "warming":
+        return "спам-блок — идёт тихий прогрев (реабилитация)"
+    if phase == "recheck":
+        nxt = r.get("next_action_at")
+        when = ""
+        try:
+            left = (nxt - now).total_seconds()
+            if left > 0:
+                when = f" через {_human_left(left)}"
+        except Exception:
+            when = ""
+        return f"спам-блок — перепроверка{when} (реабилитация)"
+    if phase == "stuck":
+        return "спам-блок не снят автоматически — нужен ручной разбор/перезаливка"
+    return _dead_reason("spamblock")
 
 
 def _dead_reason(status: str) -> str:

@@ -613,6 +613,20 @@ async def main() -> None:
         "flood_hits INTEGER NOT NULL DEFAULT 0, liveness_score DOUBLE PRECISION, "
         "liveness_checked_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
         "PRIMARY KEY (owner_id, chat_key))",
+        # Авто-реабилитация ограниченных аккаунтов (schema_v188) — стейт-машина
+        # спам-блок→прогрев→перепроверка→возврат пишет сюда; без таблицы цикл
+        # реабилитации молча простаивал бы при лаге миграции.
+        "CREATE TABLE IF NOT EXISTS account_rehab_state ("
+        "acc_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL, "
+        "phase TEXT NOT NULL DEFAULT 'appeal', kind TEXT, "
+        "attempts INTEGER NOT NULL DEFAULT 0, appeal_count INTEGER NOT NULL DEFAULT 0, "
+        "warm_cycles INTEGER NOT NULL DEFAULT 0, warm_actions INTEGER NOT NULL DEFAULT 0, "
+        "note TEXT, first_seen TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "last_action_at TIMESTAMPTZ, next_action_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "freed_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE INDEX IF NOT EXISTS idx_account_rehab_due "
+        "ON account_rehab_state(next_action_at) "
+        "WHERE phase IN ('appeal', 'warming', 'recheck')",
         # Профильные факты для риск-движка инвайтинга (schema_v160). Их читает
         # flood_engine.account_risk_factors в КАЖДОМ расчёте суточного лимита —
         # при лаге миграции запрос падал бы на каждом батче инвайта.
@@ -850,6 +864,12 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("account_health", account_health.run_health_check_loop, pool)
+        )
+        # Авто-реабилитация ограниченных аккаунтов: спам-блок → тихий прогрев →
+        # перепроверка → возврат в строй (иначе аккаунт замирал навсегда).
+        from services import account_rehab
+        asyncio.create_task(
+            _resilient("account_rehab", account_rehab.run_rehab_loop, pool)
         )
         asyncio.create_task(
             _resilient("activity_engine", activity_engine.run_activity_loop, pool)
