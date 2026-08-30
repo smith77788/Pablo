@@ -365,12 +365,13 @@ async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
                FROM vault_messages WHERE owner_id=$1 GROUP BY chat_id
            ),
            last AS (
-               SELECT DISTINCT ON (chat_id) chat_id, text_enc, media_type, is_deleted
+               SELECT DISTINCT ON (chat_id) chat_id, text_enc, media_type, is_deleted,
+                      direction
                FROM vault_messages WHERE owner_id=$1
                ORDER BY chat_id, msg_date DESC NULLS LAST, msg_id DESC
            )
            SELECT a.chat_id, a.peer_name, a.peer_username, a.total, a.deleted, a.last_date,
-                  l.text_enc, l.media_type
+                  l.text_enc, l.media_type, l.direction AS last_direction
            FROM agg a LEFT JOIN last l USING (chat_id)
            ORDER BY a.last_date DESC NULLS LAST LIMIT $2""",
         owner_id, limit)
@@ -384,6 +385,9 @@ async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
             "deleted": int(r["deleted"] or 0),
             "last_date": r["last_date"].isoformat() if r["last_date"] else None,
             "last_preview": _preview(r),
+            "last_direction": r["last_direction"],
+            # Ждёт ответа: последнее сообщение — от собеседника (входящее).
+            "awaiting_reply": (r["last_direction"] == "in"),
         })
     return out
 

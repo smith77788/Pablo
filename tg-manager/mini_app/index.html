@@ -1114,6 +1114,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="vaultAnalytics" style="padding:2px 0"></div>
     <div style="padding:2px 0 6px"><input type="text" id="vaultSearch" placeholder="🔍 Поиск по сообщениям..." oninput="vaultSearchDebounced()" class="inp"></div>
+    <div id="vaultInboxTabs" style="display:none;gap:6px;padding:2px 0 6px">
+      <button class="btn btn-s vinbox on" data-f="all" style="flex:1;font-size:12px;padding:8px 4px" onclick="setVaultInbox('all')">Все</button>
+      <button class="btn btn-s vinbox" id="vinboxWaiting" data-f="waiting" style="flex:1;font-size:12px;padding:8px 4px" onclick="setVaultInbox('waiting')">⏳ Ждут ответа</button>
+    </div>
     <div class="lst" id="vaultList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div style="padding:8px 0"><button class="btn btn-s" style="width:100%;font-size:12px" onclick="downloadVaultExport('html', null)">⬇️ Экспорт всего архива (HTML)</button></div>
   </div>
@@ -13294,6 +13298,7 @@ let VAULT_CHAT = null, VAULT_CAN_REPLY = false, _vaultSearchTimer = null, VAULT_
 
 async function openVault() {
   push('s-vault');
+  _VAULT_INBOX = 'all';
   document.getElementById('vaultConnect').style.display = 'none';
   const s = document.getElementById('vaultSearch'); if (s) s.value = '';
   txt('vaultList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -13387,20 +13392,47 @@ function renderVaultConnect(botUsername, diag) {
     </div>`;
 }
 
+let _VAULT_CHATS = [];
+let _VAULT_INBOX = 'all';   // 'all' | 'waiting'
+function setVaultInbox(f) {
+  _VAULT_INBOX = f;
+  document.querySelectorAll('#vaultInboxTabs .vinbox').forEach(e => e.classList.toggle('on', e.dataset.f === f));
+  renderVaultChats(_VAULT_CHATS);
+}
 function renderVaultChats(list) {
-  { const cntEl = document.getElementById('vaultCnt'); if (cntEl) cntEl.textContent = list.length ? (list.length+' чат.') : ''; }
-  if (!list.length) {
+  _VAULT_CHATS = list || [];
+  const waiting = _VAULT_CHATS.filter(c => c.awaiting_reply).length;
+  // Вкладки inbox: «Все» и «Ждут ответа N» — единый поток входящих под рукой.
+  const tabs = document.getElementById('vaultInboxTabs');
+  if (tabs) {
+    tabs.style.display = _VAULT_CHATS.length ? 'flex' : 'none';
+    const wb = document.getElementById('vinboxWaiting');
+    if (wb) wb.textContent = waiting ? `⏳ Ждут ответа ${waiting}` : '⏳ Ждут ответа';
+  }
+  { const cntEl = document.getElementById('vaultCnt'); if (cntEl) cntEl.textContent = _VAULT_CHATS.length ? (_VAULT_CHATS.length+' чат.') : ''; }
+  if (!_VAULT_CHATS.length) {
     txt('vaultList', empty('🗄','Архив пуст','Подключите бота к бизнес-аккаунту — и переписка начнёт сохраняться'));
     return;
   }
   VAULT_NAMES = {};
-  list.forEach(c => { VAULT_NAMES[c.chat_id] = c.peer_name; });
-  txt('vaultList', list.map(c => {
+  _VAULT_CHATS.forEach(c => { VAULT_NAMES[c.chat_id] = c.peer_name; });
+  // Ждущие ответа — вперёд (единый inbox: сначала то, что требует реакции).
+  const sorted = _VAULT_CHATS.slice().sort((a, b) => {
+    if (!!a.awaiting_reply !== !!b.awaiting_reply) return a.awaiting_reply ? -1 : 1;
+    return (b.last_date || '').localeCompare(a.last_date || '');
+  });
+  const view = _VAULT_INBOX === 'waiting' ? sorted.filter(c => c.awaiting_reply) : sorted;
+  if (!view.length) {
+    txt('vaultList', empty('✅','Все отвечено','Нет диалогов, ждущих ответа'));
+    return;
+  }
+  txt('vaultList', view.map(c => {
     const del = c.deleted > 0 ? `<span class="badge b-rd" style="margin-left:6px">🗑 ${c.deleted}</span>` : '';
+    const wait = c.awaiting_reply ? `<span class="badge b-or" style="margin-left:6px">⏳ ждёт</span>` : '';
     const date = c.last_date ? new Date(c.last_date).toLocaleDateString('ru-RU') : '';
     return `<div class="li tap" onclick="openVaultChat(${c.chat_id})">
       <div class="row-ico" style="background:var(--bg-blue-16)">👤</div>
-      <div class="li-body"><div class="li-name">${esc(c.peer_name)}${del}</div>
+      <div class="li-body"><div class="li-name">${esc(c.peer_name)}${wait}${del}</div>
         <div class="li-sub">${esc(c.last_preview||'')||'—'}</div></div>
       <div class="li-right"><div style="font-size:11px;color:var(--hint)">${date}</div><span class="chev">›</span></div>
     </div>`;
