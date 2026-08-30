@@ -1172,12 +1172,12 @@ async def cb_chanf_be_confirm(
         return
 
     try:
-        accounts = await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-            callback.from_user.id,
-            acc_ids,
-        )
+        # Одна дверь: выбранные аккаунты через флуд-осознанный select_all_active
+        # (фильтр cooldown/мёртвых статусов + полный транспорт с cf_relay_url).
+        from services import resource_selector as _rsel
+        accounts = await _rsel.select_all_active(
+            pool, callback.from_user.id,
+            include_ids=[int(_i) for _i in acc_ids], min_trust_score=0.0)
     except Exception:
         log_exc_swallow(log, "bulk_edit fetch accounts failed")
         accounts = []

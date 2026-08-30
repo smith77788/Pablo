@@ -61,11 +61,11 @@ _LEGIT = {
 #   TODO  — боевой выбор-для-действия, кандидат на миграцию в resource_selector;
 #   LEAVE — намеренно оставлено: показ/дашборд/предполёт/не выбор-для-действия;
 #           там нужен ПОЛНЫЙ флот (включая cooling), миграция сменила бы смысл.
-# Мигрировано за шаг №1: 12 паттернов (op_worker боевые ×4-исполн., bot_factory,
+# Мигрировано за шаг №1: 13 паттернов (op_worker боевые ×4-исполн., bot_factory,
 # channel_ops-инвайт, session_pool, geo_router, phone_checker, ad_intelligence,
 # mini_app_api/global_search bot, audience_parser).
 BASELINE = {
-    'bot/handlers/channel_factory.py::id, session_str, first_name, phone, device_model, system_ver',  # TODO
+    # МИГРИРОВАНО (шаг №1): channel_factory.cb_chanf_be_confirm → select_all_active(include_ids).
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.first_name, a.username, a.device_mode',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
     'bot/handlers/channel_ops.py::a.id, a.session_str, a.phone, a.first_name, a.username, a.is',  # UI-подготовка выбора; боевая флуд-защита — в op_worker-исполнителе (мигрирован)
