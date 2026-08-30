@@ -82,9 +82,10 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     # «Что за проект?» спрашивают чаще всего — кнопка отвечает за владельца и
     # отдаёт готовый текст для пересылки.
     kb.button(text="✨ Что умеет Infragram", callback_data=AboutCb(action="menu"))
+    kb.button(text="💓 Пульс флота", callback_data=BotCb(action="pulse"))
     if is_admin:
         kb.button(text="⚙️ Админка", callback_data="adm:main")
-    kb.adjust(1, 2, 2, 1, 1 if not is_admin else 2)
+    kb.adjust(1, 2, 2, 1, 1, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
