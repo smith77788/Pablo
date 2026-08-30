@@ -27,6 +27,7 @@ async def snapshot(pool, owner_id: int) -> dict:
         "seo": await _seo(pool, owner_id),
         "retention": await _retention(pool, owner_id),
         "anomalies": await _anomalies(pool, owner_id),
+        "invite_chats": await _invite_chats(pool, owner_id),
         "bots": await _bots(pool, owner_id),
         "chat_warmup": await _chat_warmup(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
@@ -177,6 +178,24 @@ async def _anomalies(pool, owner_id: int) -> dict:
             out["top"] = t
     except Exception:
         log.debug("world._anomalies failed owner=%s", owner_id)
+    return out
+
+
+async def _invite_chats(pool, owner_id: int) -> dict:
+    """Безопасный инвайтинг (governor уровня чата): сколько чатов сейчас на паузе
+    приёма (chat-flood/негатив) и сколько «мёртвых» по живости. Сигнал: приём в
+    эти чаты флудит — лить нельзя. fail-open."""
+    out = {"frozen": 0, "dead": 0}
+    try:
+        r = await pool.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE paused_until IS NOT NULL AND paused_until > NOW()) AS frozen, "
+            "COUNT(*) FILTER (WHERE liveness_score IS NOT NULL AND liveness_score <= 0.05) AS dead "
+            "FROM chat_invite_state WHERE owner_id=$1", owner_id)
+        if r:
+            out["frozen"] = int(r["frozen"] or 0)
+            out["dead"] = int(r["dead"] or 0)
+    except Exception:
+        log.debug("world._invite_chats failed owner=%s", owner_id)
     return out
 
 

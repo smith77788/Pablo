@@ -103,6 +103,21 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             "в блокировки.",
             {"kind": "health"})
 
+    ic = snap.get("invite_chats") or {}
+    if ic.get("frozen", 0) > 0 or ic.get("dead", 0) > 0:
+        fr, dd = ic.get("frozen", 0), ic.get("dead", 0)
+        bits = []
+        if fr:
+            bits.append(f"{fr} на паузе приёма")
+        if dd:
+            bits.append(f"{dd} мёртвых по активности")
+        add("invite_chats_frozen", "warn",
+            "Инвайт: " + ", ".join(bits),
+            "Telegram морозит приём в эти чаты (chat-flood или «холодный» приток в "
+            "мёртвый чат). Лить туда дальше — гарантированный флуд: смените цель или "
+            "сначала оживите чат.",
+            {"kind": "invite"})
+
     restricted = fleet.get("restricted", 0)
     if restricted > 0:
         add("accounts_restricted", "warn",
