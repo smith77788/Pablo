@@ -4021,14 +4021,11 @@ async def mass_report(
     # Загрузка аккаунтов если не переданы
     if accounts is None:
         try:
-            rows = await pool.fetch(
-                """SELECT id, phone, session_str, trust_score, is_active,
-                          acc_status, cooldown_until
-                   FROM tg_accounts
-                   WHERE owner_id=$1 AND is_active=TRUE
-                   ORDER BY trust_score DESC NULLS LAST""",
-                owner_id,
-            )
+            # Одна дверь: выбор через флуд-осознанный слой (не берём аккаунт в
+            # кулдауне/мёртвый по статусу — жалобы тяжёлая операция). min_trust=0.0
+            # — strike-порог доверия здесь не вводим, меняем лишь безопасность выбора.
+            from services import resource_selector as _rsel
+            rows = await _rsel.select_all_active(pool, owner_id, min_trust_score=0.0)
             accounts = [dict(r) for r in rows]
         except Exception as e:
             log.warning("mass_report: failed to load accounts: %s", e)

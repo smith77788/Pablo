@@ -61,7 +61,7 @@ _LEGIT = {
 #   TODO  — боевой выбор-для-действия, кандидат на миграцию в resource_selector;
 #   LEAVE — намеренно оставлено: показ/дашборд/предполёт/не выбор-для-действия;
 #           там нужен ПОЛНЫЙ флот (включая cooling), миграция сменила бы смысл.
-# Мигрировано за шаг №1: 10 паттернов (op_worker боевые ×4-исполн., bot_factory,
+# Мигрировано за шаг №1: 12 паттернов (op_worker боевые ×4-исполн., bot_factory,
 # channel_ops-инвайт, session_pool, geo_router, phone_checker, ad_intelligence,
 # mini_app_api/global_search bot, audience_parser).
 BASELINE = {
@@ -77,11 +77,11 @@ BASELINE = {
     'services/invite_preflight.py::id, phone, session_str',  # LEAVE: предполётная проверка (показывает и cooling)
     'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # LEAVE: rights_check/grant_admin (предполёт, свой proxy-фильтр)
     'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # LEAVE: diag
-    'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # TODO: _maybe_requeue
+    'services/op_worker.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # TODO: _ACC_COLS (модульная, полный транспорт; cooldown в пост-фильтрах исполнителей — миграция объёмна)
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',  # LEAVE: health/scan (диагностика)
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, p.pr',  # LEAVE: health-check (диагностика)
     # МИГРИРОВАНО (шаг №1): bulk-исполнители op_worker (9 ANY-мест) → select_all_active(include_ids).
-    'services/strike_engine.py::id, phone, session_str, trust_score, is_active, acc_status, ',  # TODO: mass_report
+    # МИГРИРОВАНО (шаг №1): strike_engine.mass_report → select_all_active.
 }
 
 
