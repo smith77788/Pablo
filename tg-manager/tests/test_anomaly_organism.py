@@ -8,6 +8,16 @@ anomaly_detector писал anomaly_events, но никто их не читал
 from __future__ import annotations
 
 import asyncio
+
+def _run(coro):
+    # Устойчиво к pytest-asyncio (asyncio_mode=auto): свой loop, а не глобальный
+    # (его pytest-asyncio может закрыть/обнулить между тестами → RuntimeError
+    # "no current event loop" при прямом asyncio.run в sync-тесте).
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 import os
 
 from services.organism.brain import build_suggestions
@@ -68,7 +78,7 @@ class _FakePool:
 
 
 def test_world_anomalies_counts():
-    out = asyncio.run(
+    out = _run(
         world._anomalies(_FakePool(2, 3, "Латентность"), 1))
     assert out["critical"] == 2 and out["warning"] == 3 and out["top"] == "Латентность"
 
@@ -78,7 +88,7 @@ def test_world_anomalies_fail_open():
         async def fetchrow(self, q, *a):
             raise RuntimeError("db down")
 
-    out = asyncio.run(world._anomalies(Boom(), 1))
+    out = _run(world._anomalies(Boom(), 1))
     assert out == {"critical": 0, "warning": 0, "top": None}
 
 

@@ -8,6 +8,16 @@
 from __future__ import annotations
 
 import asyncio
+
+def _run(coro):
+    # Устойчиво к pytest-asyncio (asyncio_mode=auto): свой loop, а не глобальный
+    # (его pytest-asyncio может закрыть/обнулить между тестами → RuntimeError
+    # "no current event loop" при прямом asyncio.run в sync-тесте).
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 import os
 
 from services.organism.brain import build_suggestions
@@ -74,7 +84,7 @@ class _FakeValPool:
 
 
 def test_world_retention_summarizes():
-    out = asyncio.run(
+    out = _run(
         world._retention(_FakeValPool(40, 30), 1))
     assert out["joined"] == 40 and out["left"] == 30
     assert out["retained"] == 10
@@ -87,7 +97,7 @@ def test_world_retention_fail_open():
         async def fetchval(self, q, *a):
             raise RuntimeError("db down")
 
-    out = asyncio.run(world._retention(Boom(), 1))
+    out = _run(world._retention(Boom(), 1))
     assert out["health"] == "unknown" and out["joined"] == 0
 
 

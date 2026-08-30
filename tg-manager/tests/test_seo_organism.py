@@ -8,6 +8,16 @@
 from __future__ import annotations
 
 import asyncio
+
+def _run(coro):
+    # Устойчиво к pytest-asyncio (asyncio_mode=auto): свой loop, а не глобальный
+    # (его pytest-asyncio может закрыть/обнулить между тестами → RuntimeError
+    # "no current event loop" при прямом asyncio.run в sync-тесте).
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 import os
 
 from services.organism.brain import build_suggestions
@@ -67,7 +77,7 @@ def test_world_seo_counts_weak_and_worst():
         {"title": "Крипта Новости Аналитика", "username": "cryptonews",
          "about": "Ежедневная аналитика рынка криптовалют, сигналы и обзоры — подпишитесь."},
     ]
-    out = asyncio.run(world._seo(_FakePool(rows), 1))
+    out = _run(world._seo(_FakePool(rows), 1))
     assert out["scored"] == 3
     assert out["weak"] == 2          # два слабых, сильный не считается
     assert out["worst"]              # имя худшего заполнено (fallback «Канал»)
@@ -78,7 +88,7 @@ def test_world_seo_fail_open_on_db_error():
         async def fetch(self, q, *a):
             raise RuntimeError("db down")
 
-    out = asyncio.run(world._seo(Boom(), 1))
+    out = _run(world._seo(Boom(), 1))
     assert out == {"scored": 0, "weak": 0, "worst": None}
 
 
