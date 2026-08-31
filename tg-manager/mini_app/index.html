@@ -7499,22 +7499,25 @@ function clearDraft(key) { try { localStorage.removeItem('infragram_draft_' + ke
 function renderCards(d) {
   // KPI scroll row
   const healthColor = (d.acc_health||100)>=80?'var(--green)':(d.acc_health||100)>=50?'var(--orange)':'var(--red)';
+  // act — КУДА ведёт плитка. Не все разделы это вкладки: Каналы и Операции —
+  // отдельные экраны (openChannels/openOps), а не goTab. Раньше все вели через
+  // goTab, из-за чего «Каналов» открывал «Аккаунты» и т.п.
   const kpis = [
-    {val:d.bots,        lbl:'🤖 Ботов',       tab:'bots',       color:'var(--blue)'},
-    {val:d.accounts,    lbl:'📱 Аккаунтов',    tab:'accounts',   color:'var(--teal)'},
-    {val:d.subscribers, lbl:'👥 Подписчиков',  tab:'bots',       color:'var(--green)'},
-    {val:d.channels,    lbl:'📡 Каналов',      tab:'accounts',   color:'var(--purple)'},
-    {val:d.campaigns_active, lbl:'📨 Кампаний', tab:'broadcasts', color:'var(--orange)'},
-    {val:d.funnels_active,   lbl:'🔄 Воронок',  tab:'broadcasts', color:'#f472b6'},
-    {val:d.ops_running, lbl:'⚙️ В работе',     tab:'more',       color:'var(--hint)'},
-    {val:(d.queue_backlog||0), lbl:'⏳ В очереди', tab:'more',   color:'var(--orange)'},
-    {raw:(d.acc_health!=null?(d.acc_health+'%'):'—'), lbl:'💚 Здоровье', tab:'accounts', color:healthColor},
-    {val:(d.ops_failed||0), lbl:'❌ Ошибок 24ч', tab:'more',    color:(d.ops_failed>0?'var(--red)':'var(--hint)')},
+    {val:d.bots,        lbl:'🤖 Ботов',       act:"goTab('bots')",       color:'var(--blue)'},
+    {val:d.accounts,    lbl:'📱 Аккаунтов',    act:"goTab('accounts')",   color:'var(--teal)'},
+    {val:d.subscribers, lbl:'👥 Подписчиков',  act:"goTab('bots')",       color:'var(--green)'},
+    {val:d.channels,    lbl:'📡 Каналов',      act:"openChannels()",      color:'var(--purple)'},
+    {val:d.campaigns_active, lbl:'📨 Кампаний', act:"goTab('broadcasts')", color:'var(--orange)'},
+    {val:d.funnels_active,   lbl:'🔄 Воронок',  act:"goTab('broadcasts')", color:'#f472b6'},
+    {val:d.ops_running, lbl:'⚙️ В работе',     act:"openOps()",           color:'var(--hint)'},
+    {val:(d.queue_backlog||0), lbl:'⏳ В очереди', act:"openOps()",        color:'var(--orange)'},
+    {raw:(d.acc_health!=null?(d.acc_health+'%'):'—'), lbl:'💚 Здоровье', act:"goTab('accounts')", color:healthColor},
+    {val:(d.ops_failed||0), lbl:'❌ Ошибок 24ч', act:"openOps()",         color:(d.ops_failed>0?'var(--red)':'var(--hint)')},
   ];
   document.getElementById('kpiScroll').innerHTML = kpis.map(k=>{
     const display = k.raw !== undefined ? k.raw : num(k.val);
     const hi = k.raw !== undefined ? (k.raw!=='—') : (k.val||0)>0;
-    return `<div class="kpi-chip ${hi?'hi':''}" onclick="goTab('${k.tab}')">
+    return `<div class="kpi-chip ${hi?'hi':''}" onclick="${k.act}">
       <div class="kpi-chip-val" style="color:${k.color}">${display}</div>
       <div class="kpi-chip-lbl">${k.lbl}</div>
     </div>`;
