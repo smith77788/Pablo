@@ -19919,15 +19919,20 @@ async function openAdminStats() {
   txt('adm-stats-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const s = await api('/api/miniapp/admin/stats');
+    // Плитка: с onclick — кликабельная (курсор + переход), без — просто показатель.
+    const tile = (ico, lbl, val, act) =>
+      `<div class="mgmt-tile"${act ? ` style="cursor:pointer" onclick="${act}"` : ''}>`
+      + `<div class="mgmt-tile-ico">${ico}</div><div class="mgmt-tile-lbl">${lbl}`
+      + `${act ? ' ›' : ''}</div><div class="mgmt-tile-val">${val}</div></div>`;
     let html = '<div class="mgmt-grid">';
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">👥</div><div class="mgmt-tile-lbl">Юзеры</div><div class="mgmt-tile-val">${s.total_users||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">💳</div><div class="mgmt-tile-lbl">Подписки</div><div class="mgmt-tile-val">${s.active_subs||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">🤖</div><div class="mgmt-tile-lbl">Боты</div><div class="mgmt-tile-val">${s.total_bots||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">📡</div><div class="mgmt-tile-lbl">Каналы</div><div class="mgmt-tile-val">${s.total_channels||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">📱</div><div class="mgmt-tile-lbl">Аккаунты</div><div class="mgmt-tile-val">${s.total_accounts||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">⚙️</div><div class="mgmt-tile-lbl">Операции/день</div><div class="mgmt-tile-val">${s.ops_today||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">⏳</div><div class="mgmt-tile-lbl">В очереди</div><div class="mgmt-tile-val">${s.ops_pending||0}</div></div>`;
-    html += `<div class="mgmt-tile"><div class="mgmt-tile-ico">🔄</div><div class="mgmt-tile-lbl">Выполняется</div><div class="mgmt-tile-val">${s.ops_running||0}</div></div>`;
+    html += tile('👥', 'Юзеры', s.total_users||0, 'openAdminUsers()');
+    html += tile('💳', 'Подписки', s.active_subs||0, 'openAdminUsers()');
+    html += tile('🤖', 'Боты', s.total_bots||0, '');
+    html += tile('📡', 'Каналы', s.total_channels||0, '');
+    html += tile('📱', 'Аккаунты', s.total_accounts||0, '');
+    html += tile('⚙️', 'Операции/день', s.ops_today||0, 'openOps()');
+    html += tile('⏳', 'В очереди', s.ops_pending||0, 'openOps()');
+    html += tile('🔄', 'Выполняется', s.ops_running||0, 'openOps()');
     html += '</div>';
     txt('adm-stats-body', html);
   } catch(e) { txt('adm-stats-body', errHtml(e.message)); }
