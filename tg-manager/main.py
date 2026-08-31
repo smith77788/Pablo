@@ -665,6 +665,13 @@ async def main() -> None:
         "CREATE INDEX IF NOT EXISTS idx_account_rehab_due "
         "ON account_rehab_state(next_action_at) "
         "WHERE phase IN ('appeal', 'warming', 'recheck')",
+        # Починка CHECK плана подписки (schema_v189): код перешёл на тариф 'paid',
+        # а базовая схема разрешала только старые 'starter'/'pro'/'enterprise' —
+        # из-за чего ВСЯ выдача 'paid' (мини-апп, billing, восстановление подписок)
+        # падала с CheckViolationError. Разрешаем free/paid + старые имена.
+        "ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_plan_check",
+        "ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_plan_check "
+        "CHECK (plan = ANY (ARRAY['free', 'paid', 'starter', 'pro', 'enterprise']))",
         # Профильные факты для риск-движка инвайтинга (schema_v160). Их читает
         # flood_engine.account_risk_factors в КАЖДОМ расчёте суточного лимита —
         # при лаге миграции запрос падал бы на каждом батче инвайта.

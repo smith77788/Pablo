@@ -45,6 +45,15 @@ def test_parse_payload_valid_and_invalid():
     assert pr.parse_payload("123:pro:0") == (123, "pro", 1)  # months<1 → 1
 
 
+def test_parse_payload_normalizes_unknown_plan():
+    # известные планы сохраняются, незнакомые сводятся к 'paid' (иначе падёт на
+    # CHECK-констрейнте subscriptions и платящий останется без подписки)
+    assert pr.parse_payload("1:pro:3") == (1, "pro", 3)
+    assert pr.parse_payload("1:paid:3") == (1, "paid", 3)
+    assert pr.parse_payload("1:vip:3") == (1, "paid", 3)       # vip → paid
+    assert pr.parse_payload("1:GOLD:3") == (1, "paid", 3)      # регистронезависимо
+
+
 # ── compute_expiries: дата-привязанная логика ──────────────────────────────────
 def test_single_payment_expiry_from_payment_date():
     # платёж 100 дней назад за 6 мес (~180 дней) → ещё активен ~80 дней
@@ -214,6 +223,43 @@ def _acoro(v):
 def test_wired_command():
     a = open(os.path.join(ROOT, "bot", "handlers", "admin.py"), encoding="utf-8").read()
     assert 'Command("reconcile_payments")' in a
+
+
+def test_constraint_fix_present_in_migration_and_selfheal():
+    """Констрейнт плана должен разрешать 'paid' — и в миграции, и в defensive DDL."""
+    mig = open(os.path.join(ROOT, "schema_v189.sql"), encoding="utf-8").read()
+    assert "subscriptions_plan_check" in mig and "'paid'" in mig
+    m = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    assert "subscriptions_plan_check" in m and "'paid'" in m
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+def test_subscriptions_accepts_paid_plan_after_fix():
+    """Регресс: выдача плана 'paid' не должна падать на CHECK-констрейнте."""
+    import asyncpg
+
+    async def _r():
+        conn = await asyncpg.connect(DSN)
+        try:
+            # привести констрейнт к исправленному виду (как делает миграция/DDL)
+            await conn.execute(
+                "ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_plan_check")
+            await conn.execute(
+                "ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_plan_check "
+                "CHECK (plan = ANY (ARRAY['free','paid','starter','pro','enterprise']))")
+            await conn.execute("DELETE FROM subscriptions WHERE user_id=606060")
+            # 'paid' раньше падал с CheckViolationError — теперь проходит
+            await conn.execute(
+                "INSERT INTO subscriptions(user_id, plan, expires_at, is_active) "
+                "VALUES(606060,'paid', now()+interval '1 month', true)")
+            row = await conn.fetchrow(
+                "SELECT plan FROM subscriptions WHERE user_id=606060")
+            assert row["plan"] == "paid"
+        finally:
+            await conn.execute("DELETE FROM subscriptions WHERE user_id=606060")
+            await conn.close()
+
+    _run(_r())
 
 
 # ── живой Postgres: apply реально ставит срок от даты платежа ──────────────────

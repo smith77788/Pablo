@@ -25,6 +25,16 @@ log = logging.getLogger(__name__)
 
 _CRYPTOPAY_API = "https://pay.crypt.bot/api"
 
+# Планы, которые принимает CHECK-констрейнт subscriptions (schema_v189). Любой
+# незнакомый план из payload сводим к 'paid' — иначе восстановление платящего
+# пользователя молча падало бы на констрейнте и он остался бы без подписки.
+_ALLOWED_PLANS = frozenset({"free", "paid", "starter", "pro", "enterprise"})
+
+
+def _safe_plan(plan: str) -> str:
+    p = (plan or "").strip().lower()
+    return p if p in _ALLOWED_PLANS else "paid"
+
 
 @dataclass(frozen=True)
 class Payment:
@@ -51,7 +61,7 @@ def parse_payload(payload: str) -> Optional[tuple[int, str, int]]:
         return None
     if uid <= 0 or not plan:
         return None
-    return uid, plan, months
+    return uid, _safe_plan(plan), months
 
 
 def _as_utc(dt: datetime) -> datetime:

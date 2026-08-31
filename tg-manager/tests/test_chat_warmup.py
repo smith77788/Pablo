@@ -265,3 +265,52 @@ def test_ambient_toggle_wired():
     assert "ANTHROPIC_USE_AMBIENT" in admin
     main = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     assert "ai_anthropic_ambient" in main and "ANTHROPIC_USE_AMBIENT" in main
+
+
+# ── Разнообразие голоса флота (фикс: все говорили одинаково с 😂 в конце) ────────
+def test_fallback_persona_varies_and_is_stable():
+    # разные аккаунты → разные характеры (иначе весь флот одним голосом)
+    personas = {cw._fallback_persona(i) for i in range(len(cw._DEFAULT_PERSONAS))}
+    assert len(personas) == len(cw._DEFAULT_PERSONAS), "персоны не уникальны"
+    # устойчивость: один и тот же id → тот же характер
+    assert cw._fallback_persona(42) == cw._fallback_persona(42)
+    # часть персон принципиально без эмодзи
+    assert any("без эмодзи" in p or "без смайл" in p for p in cw._DEFAULT_PERSONAS)
+
+
+def test_persona_desc_without_persona_returns_varied_not_empty(monkeypatch):
+    import asyncio
+    from services import persona_engine
+
+    async def _none(pool, acc_id):
+        return None
+    monkeypatch.setattr(persona_engine, "get_persona", _none)
+
+    async def _run():
+        a = await cw._persona_desc(object(), 1)
+        b = await cw._persona_desc(object(), 2)
+        return a, b
+
+    loop = asyncio.new_event_loop()
+    try:
+        a, b = loop.run_until_complete(_run())
+    finally:
+        loop.close()
+    assert a and b, "дефолт-персона не должна быть пустой (иначе единый голос флота)"
+    # разные аккаунты почти всегда получают разный характер
+    assert a != b
+
+
+def test_antibot_rules_discourage_emoji_spam():
+    r = cw._ANTIBOT_RULES
+    assert "без эмодзи" in r.lower() or "БЕЗ эмодзи" in r
+    assert "не заканчивай каждую реплику смайликом" in r
+    assert "один и тот же смайлик" in r
+
+
+def test_build_prompt_uses_varied_persona_in_system():
+    # дефолт-персона попадает в system-промпт → LLM получает разный голос
+    sys1, _ = cw.build_dialogue_prompt(cw._fallback_persona(0), [], None, "", "mixed")
+    sys2, _ = cw.build_dialogue_prompt(cw._fallback_persona(3), [], None, "", "mixed")
+    assert sys1 != sys2
+    assert "не заканчивай каждую реплику смайликом" in sys1  # правило дошло
