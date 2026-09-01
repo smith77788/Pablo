@@ -131,6 +131,7 @@ from bot.handlers import nodes_hub as nodes_handler
 from bot.handlers import spintax as spintax_handler
 from bot.handlers import about as about_handler
 from bot.handlers import fleet_pulse as fleet_pulse_handler
+from bot.handlers import budget_radar as budget_radar_handler
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
@@ -521,6 +522,7 @@ async def main() -> None:
     dp.include_router(spintax_handler.router)
     dp.include_router(about_handler.router)
     dp.include_router(fleet_pulse_handler.router)
+    dp.include_router(budget_radar_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
@@ -740,6 +742,7 @@ async def main() -> None:
             BotCommand(command="menu", description="🏠 Infragram OS"),
             BotCommand(command="about", description="✨ Что умеет Infragram"),
             BotCommand(command="pulse", description="💓 Пульс флота — кто на паузе и почему"),
+            BotCommand(command="budget", description="💸 Экономика флота — где утекает бюджет"),
             BotCommand(command="find", description="🔍 Найти функцию"),
             BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
             BotCommand(command="spin", description="🎲 Spintax — рандомизация текста"),
