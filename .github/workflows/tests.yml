@@ -33,8 +33,12 @@ jobs:
           python -m pip install --upgrade pip
           # Рантайм-зависимости, нужные для импорта хендлеров/сервисов в тестах.
           # telethon НЕ ставим — он застаблен в tests/conftest.py (и pyaes не собирается).
+          # anthropic обязателен: tests/test_ai_claude.py делает безусловный
+          # `import anthropic`, и без пакета падает СБОР всех тестов (весь прогон
+          # красный, ни один тест tg-manager не выполняется). Он уже в
+          # requirements.txt (anthropic>=0.69.0) — здесь просто не был продублирован.
           pip install \
-            "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai python-dotenv \
+            "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai anthropic python-dotenv \
             openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks \
             pytest pytest-asyncio
 
