@@ -121,6 +121,32 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         log.warning("db_maintenance: failed to prune infra_memory_proxies: %s", e)
         results["infra_memory_proxies(orphan)"] = -1
 
+    # Orphaned account-scoped state/stats — эти таблицы ссылаются на tg_accounts.id
+    # БЕЗ внешнего ключа, поэтому удаление аккаунта (mini_app account_delete / bulk
+    # delete) оставляет висячие строки. Consumers их не обрабатывают (join на
+    # tg_accounts отфильтровывает), но без чистки они копятся бесконечно. У
+    # operation_audit своё истечение (>30 дн), infra_memory чистится выше —
+    # поэтому здесь только эти три. managed_channels НЕ трогаем: канал — отдельная
+    # владеемая сущность, его судьба при удалении аккаунта — продуктовое решение.
+    for _tbl, _col in (
+        ("account_status_events", "acc_id"),
+        ("account_daily_stats", "account_id"),
+        ("account_rehab_state", "acc_id"),
+    ):
+        try:
+            deleted = await pool.fetchval(
+                f"WITH d AS (DELETE FROM {_tbl} t "
+                f"WHERE NOT EXISTS (SELECT 1 FROM tg_accounts a WHERE a.id = t.{_col}) "
+                f"RETURNING 1) SELECT COUNT(*) FROM d"
+            )
+            n = int(deleted or 0)
+            results[f"{_tbl}(orphan)"] = n
+            if n:
+                log.info("db_maintenance: pruned %d orphaned rows from %s", n, _tbl)
+        except Exception as e:
+            log.warning("db_maintenance: failed to prune %s: %s", _tbl, e)
+            results[f"{_tbl}(orphan)"] = -1
+
     # Completed operation_queue entries — but only if operation_log entries are
     # also gone (FK safety: operation_log.op_id refs operation_queue.id).
     # We prune operation_log first (above), then queue entries.

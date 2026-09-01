@@ -3579,9 +3579,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _json_resp({"ok": True, "count": n})
             if op == "delete":
                 # Жёсткое удаление аккаунтов (напр. массово — невоскрешаемые:
-                # фильтр 'dead'). Необратимо. Связанные строки чистит FK-каскад,
-                # как и в одиночном account_delete. Скоуп уже применён при
-                # резолве ids (owner/admin), поэтому чужие не заденем.
+                # фильтр 'dead'). Необратимо. Связанные строки: часть таблиц имеет
+                # FK ON DELETE CASCADE/SET NULL (trust/health history, flood_log,
+                # gifts и т.п.) и чистится сразу; таблицы БЕЗ FK
+                # (account_status_events/daily_stats/rehab_state) остаются висячими,
+                # но не обрабатываются (consumers join'ят tg_accounts) и подчищаются
+                # фоново в db_maintenance. Скоуп уже применён при резолве ids
+                # (owner/admin), поэтому чужие не заденем.
                 res = await pool.execute(
                     "DELETE FROM tg_accounts WHERE id=ANY($1::bigint[])"
                     + ("" if admin else " AND owner_id=$2"),

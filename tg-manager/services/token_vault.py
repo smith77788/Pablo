@@ -10,9 +10,37 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import os
+import time
+
+log = logging.getLogger(__name__)
 
 _MARKER = "ENC:"
+
+# Троттлинг предупреждения о сбое расшифровки. Неверный/ротированный
+# TOKEN_ENCRYPTION_KEY роняет расшифровку КАЖДОЙ строки (сессии, токены, прокси)
+# — без троттла один misconfig зальёт логи тысячами строк в секунду. Печатаем не
+# чаще раза в минуту, но обязательно печатаем: тихий сбой ключа = весь флот молча
+# «мёртв» без причины в логах.
+_DECRYPT_WARN_INTERVAL = 60.0
+_last_decrypt_warn = 0.0
+
+
+def _warn_decrypt_failure() -> None:
+    """Сообщить о провале расшифровки ENC:-строки (throttled). Секрет НЕ логируем."""
+    global _last_decrypt_warn
+    now = time.monotonic()
+    if now - _last_decrypt_warn >= _DECRYPT_WARN_INTERVAL:
+        _last_decrypt_warn = now
+        log.warning(
+            "token_vault: расшифровка ENC:-значения провалилась — возвращаю "
+            "шифротекст как есть. Вероятно неверный/ротированный "
+            "TOKEN_ENCRYPTION_KEY или повреждённая строка. Downstream сочтёт "
+            "значение невалидным (сессия/токен/прокси не сработают). "
+            "Сообщение троттлится до 1/мин.",
+            exc_info=True,
+        )
 
 
 def _key() -> bytes:
@@ -49,7 +77,11 @@ def decrypt_token(enc: str) -> str:
         cipher = _AES.new(_key(), _AES.MODE_GCM, nonce=nonce)
         return cipher.decrypt_and_verify(ct, tag).decode()
     except Exception:
-        return enc  # decryption failed — return raw value to avoid silent data loss
+        # Значение ЯВНО помечено ENC:, но расшифровать не удалось — это не legacy
+        # plaintext, а реальная ошибка (неверный ключ / порча). Сигналим (throttled)
+        # и возвращаем исходное, чтобы не терять данные молча.
+        _warn_decrypt_failure()
+        return enc
 
 
 def session_fingerprint(session_str: str) -> str:
