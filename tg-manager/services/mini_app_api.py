@@ -325,32 +325,13 @@ def _proxy_display_host(raw: str) -> str:
         return raw.split("@")[-1]
 
 
-def is_safe_public_url(url: str) -> bool:
-    """SSRF-гард для загрузки картинок по URL (аватар бота).
-
-    Требует https, отсекает localhost и приватные диапазоны IP в hostname.
-    Best-effort (без резолва DNS): блокирует очевидные внутренние адреса.
-    Чистая функция — тестируема.
-    """
-    import re as _re
-    from urllib.parse import urlparse
-    if not url or not isinstance(url, str):
-        return False
-    try:
-        p = urlparse(url.strip())
-    except Exception:
-        return False
-    if p.scheme != "https" or not p.hostname:
-        return False
-    host = p.hostname.lower()
-    if host in ("localhost", "0.0.0.0") or host.endswith(".local") or host.endswith(".internal"):
-        return False
-    # Приватные / loopback / link-local диапазоны по literal-IP в hostname.
-    if _re.match(r"^127\.", host) or _re.match(r"^10\.", host) \
-       or _re.match(r"^192\.168\.", host) or _re.match(r"^169\.254\.", host) \
-       or _re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host) or host == "::1":
-        return False
-    return True
+# SSRF-гард живёт в services/security.py (единый источник для мини-аппа и
+# скачивателя медиа). Реэкспорт: тесты и хендлеры зовут его отсюда как раньше.
+from services.security import (  # noqa: E402
+    is_internal_ip,
+    is_safe_public_url,
+    resolve_url_is_public,
+)
 
 
 _SCHEDULE_REPEAT_MIN = {"none": 0, "daily": 1440, "weekly": 10080}
@@ -2941,8 +2922,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("bad request", 400)
         photo_url = (body.get("photo_url") or "").strip()
-        if not is_safe_public_url(photo_url):
-            return _err("Нужен публичный https URL картинки", 400)
+        if not await resolve_url_is_public(photo_url):
+            return _err("Нужен публичный https URL картинки (внутренние адреса запрещены)", 400)
         try:
             async with _aio.ClientSession() as sess:
                 # Скачиваем с потолком размера (5 МБ) и таймаутом.
@@ -8623,8 +8604,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Медиа (фото/видео/док по URL) — send_dm отправит как файл с подписью.
         media_url = (body.get("media_url") or "").strip()
         if media_url:
-            if not is_safe_public_url(media_url):
-                return _err("Нужен публичный https URL медиа", 400)
+            if not await resolve_url_is_public(media_url):
+                return _err("Нужен публичный https URL медиа (внутренние адреса запрещены)", 400)
             _params["media_url"] = media_url
         # Дневной лимит отправок на аккаунт (защита от бана). Клампим 1..200.
         if body.get("per_account_daily") is not None:
