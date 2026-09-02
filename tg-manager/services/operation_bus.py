@@ -21,6 +21,11 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+# Окно идемпотентности постановки операции (сек). См. submit(dedup_window_sec).
+# 20с покрывает и двойной тап (<1с), и retry клиента после таймаута, но слишком
+# коротко, чтобы подавить намеренный повторный запуск позже.
+DEFAULT_DEDUP_WINDOW_SEC = 20
+
 
 class PlanRequiredError(PermissionError):
     """Операция требует платной подписки, а у владельца её нет.
@@ -567,6 +572,7 @@ async def submit(
     max_retries: Optional[int] = None,
     label: Optional[str] = None,
     bypass_plan_check: bool = False,
+    dedup_window_sec: int = DEFAULT_DEDUP_WINDOW_SEC,
 ) -> int:
     """Поставить операцию в очередь. Возвращает op_id.
 
@@ -582,6 +588,12 @@ async def submit(
       label        — человекочитаемая метка операции в очереди (None = описание
                      из OP_REGISTRY). Нужна, чтобы миграция прямых INSERT на шину
                      не теряла label, который они писали (см. Волна S/1A).
+      dedup_window_sec — окно идемпотентности постановки (сек). Повторный сабмит
+                     идентичной операции (owner+op_type+params+scheduled_for),
+                     пока прежняя ещё pending/running и не старше окна, вернёт её
+                     op_id вместо создания дубля. Защищает от двойного тапа и
+                     retry после таймаута. 0 = отключить (для намеренных серий
+                     идентичных операций).
 
     Raises:
       ValueError — если op_type не зарегистрирован в OP_REGISTRY
@@ -603,26 +615,60 @@ async def submit(
     op_label = label or meta.get("description") or op_type
 
     params_json = json.dumps(params, ensure_ascii=False)
+    sched = _coerce_scheduled_for(scheduled_for)
 
-    row = await pool.fetchrow(
-        """INSERT INTO operation_queue
-               (owner_id, op_type, status, params,
-                total_items, done_items,
-                scheduled_for, template_id, max_retries, label, created_at)
-           VALUES ($1, $2, 'pending', $3::jsonb,
-                   $4, 0,
-                   $5::timestamptz, $6, $7, $8, NOW())
-           RETURNING id""",
-        owner_id,
-        op_type,
-        params_json,
-        total_items,
-        _coerce_scheduled_for(scheduled_for),
-        template_id,
-        retries,
-        op_label,
-    )
-    op_id: int = row["id"]
+    # Идемпотентность постановки. Двойной тап кнопки или retry клиента после
+    # таймаута НЕ должны плодить дубль-операцию: 82 вызова submit() идут через
+    # этот choke point, поэтому дедуп здесь защищает весь продукт от двойного
+    # исполнения (двойная стоимость расходников, удвоенный риск для аккаунтов).
+    # pg_advisory_xact_lock сериализует одновременные идентичные сабмиты (закрывает
+    # TOCTOU без изменения схемы); внутри окна ищем ещё-в-полёте идентичную
+    # операцию. Отличающиеся params (в т.ч. per-account циклы) не дедупятся —
+    # ложных слияний нет. Отключается dedup_window_sec=0.
+    reused = False
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if dedup_window_sec and dedup_window_sec > 0:
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"opbus|{owner_id}|{op_type}|{params_json}|{sched}",
+                )
+                existing = await conn.fetchval(
+                    """SELECT id FROM operation_queue
+                       WHERE owner_id = $1 AND op_type = $2
+                         AND status IN ('pending', 'running')
+                         AND params = $3::jsonb
+                         AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                         AND created_at > NOW() - make_interval(secs => $5)
+                       ORDER BY id DESC LIMIT 1""",
+                    owner_id, op_type, params_json, sched, dedup_window_sec,
+                )
+                if existing is not None:
+                    op_id = int(existing)
+                    reused = True
+            if not reused:
+                row = await conn.fetchrow(
+                    """INSERT INTO operation_queue
+                           (owner_id, op_type, status, params,
+                            total_items, done_items,
+                            scheduled_for, template_id, max_retries, label, created_at)
+                       VALUES ($1, $2, 'pending', $3::jsonb,
+                               $4, 0,
+                               $5::timestamptz, $6, $7, $8, NOW())
+                       RETURNING id""",
+                    owner_id, op_type, params_json, total_items, sched,
+                    template_id, retries, op_label,
+                )
+                op_id = int(row["id"])
+
+    if reused:
+        log.info(
+            "operation_bus: дедуп повторного сабмита op_type=%s owner=%d "
+            "(окно %dс) → переиспользую op_id=%d",
+            op_type, owner_id, dedup_window_sec, op_id,
+        )
+        return op_id
+
     log.info(
         "operation_bus: submitted op_id=%d op_type=%s owner=%d total_items=%d",
         op_id,
@@ -630,9 +676,10 @@ async def submit(
         owner_id,
         total_items,
     )
-    # Единый choke point: КАЖДАЯ операция любого модуля попадает в память организма
+    # Единый choke point: КАЖДАЯ новая операция попадает в память организма
     # (событие op_queued). Пара к op_done из op_worker — полный ЖЦ операции виден
-    # мозгу без правки 20 эндпоинтов. Fail-open — шина не блокер постановки.
+    # мозгу без правки 20 эндпоинтов. Дедуп-повторы op_queued НЕ эмитят (событие
+    # только для реально созданной операции). Fail-open — шина не блокер.
     try:
         from services.organism import spine
         await spine.emit(pool, owner_id, "op_queued",
