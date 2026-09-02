@@ -131,6 +131,7 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/session_pool.py:_check_lock": "asyncio.Lock",
     "services/session_pool.py:_registry": "живые клиенты Telethon — объекты процесса",
     "services/task_registry.py:_registry": "asyncio.Task этого процесса",
+    "services/token_vault.py:_last_decrypt_warn": "троттл лога сбоя расшифровки; каждая реплика предупреждает независимо — расхождение безвредно",
 }
 
 # Производное состояние: расхождение стоит лишней работы или устаревшего
