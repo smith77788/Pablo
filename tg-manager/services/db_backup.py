@@ -119,27 +119,34 @@ async def create_archive(pool, *, exclude: Optional[set[str]] = None) -> bytes:
         "row_counts": {},
     }
     async with pool.acquire() as conn:
-        tables = await _list_tables(conn, exclude)
-        manifest["sequences"] = await _dump_sequences(conn)
-        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-            for tbl in tables:
-                data = io.BytesIO()
-                # COPY на стороне сервера — версионно-независимо и потоково.
-                await conn.copy_from_query(
-                    f'SELECT * FROM "{tbl}"', output=data, format="csv", header=True)
-                raw = data.getvalue()
-                manifest["tables"].append(tbl)
-                # Число строк = строки CSV минус заголовок (грубо, для отчёта).
-                manifest["row_counts"][tbl] = max(0, raw.count(b"\n") - 1)
-                info = tarfile.TarInfo(name=f"data/{tbl}.csv")
-                info.size = len(raw)
-                info.mtime = int(time.time())
-                tar.addfile(info, io.BytesIO(raw))
-            mbytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
-            minfo = tarfile.TarInfo(name="manifest.json")
-            minfo.size = len(mbytes)
-            minfo.mtime = int(time.time())
-            tar.addfile(minfo, io.BytesIO(mbytes))
+        # Единый снапшот на весь дамп: список таблиц, секвенции и ВСЕ COPY читаются
+        # в одной REPEATABLE READ транзакции. Иначе параллельные записи между
+        # дампами разных таблиц дают несогласованный архив (child ссылается на
+        # parent, которого нет в его дампе). При restore FK-триггеры выключены
+        # (session_replication_role=replica), поэтому такой мусор зальётся МОЛЧА.
+        # Так же обеспечивает консистентность pg_dump.
+        async with conn.transaction(isolation="repeatable_read"):
+            tables = await _list_tables(conn, exclude)
+            manifest["sequences"] = await _dump_sequences(conn)
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                for tbl in tables:
+                    data = io.BytesIO()
+                    # COPY на стороне сервера — версионно-независимо и потоково.
+                    await conn.copy_from_query(
+                        f'SELECT * FROM "{tbl}"', output=data, format="csv", header=True)
+                    raw = data.getvalue()
+                    manifest["tables"].append(tbl)
+                    # Число строк = строки CSV минус заголовок (грубо, для отчёта).
+                    manifest["row_counts"][tbl] = max(0, raw.count(b"\n") - 1)
+                    info = tarfile.TarInfo(name=f"data/{tbl}.csv")
+                    info.size = len(raw)
+                    info.mtime = int(time.time())
+                    tar.addfile(info, io.BytesIO(raw))
+                mbytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+                minfo = tarfile.TarInfo(name="manifest.json")
+                minfo.size = len(mbytes)
+                minfo.mtime = int(time.time())
+                tar.addfile(minfo, io.BytesIO(mbytes))
     return buf.getvalue()
 
 
