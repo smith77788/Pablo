@@ -65,7 +65,9 @@ def test_operation_bus_emits_op_queued_centrally():
     import os
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "services", "operation_bus.py"), encoding="utf-8").read()
-    tail = src[src.rindex("op_id: int = row"):]
+    # Якорь — единственный INSERT ... RETURNING id в submit(); после него (закрытие
+    # транзакции, лог, ветка дедупа) обязан идти централизованный emit op_queued.
+    tail = src[src.rindex("RETURNING id"):]
     assert "spine" in tail and '"op_queued"' in tail
 
 

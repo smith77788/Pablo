@@ -13,9 +13,43 @@ import bot.utils.subscription as sub
 from services import operation_bus
 
 
+class _Acq:
+    """acquire() → контекст, отдающий сам пул как conn (conn==pool)."""
+    def __init__(self, conn):
+        self._c = conn
+
+    async def __aenter__(self):
+        return self._c
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Txn:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 class FakePool:
+    """Фейк-пул с поддержкой транзакционного submit(): acquire()+transaction()+
+    advisory-lock (execute) + поиск дубля (fetchval→None) + вставка (fetchrow)."""
     def __init__(self):
         self.inserted = False
+
+    def acquire(self):
+        return _Acq(self)
+
+    def transaction(self):
+        return _Txn()
+
+    async def execute(self, *args, **kwargs):
+        return "SELECT 1"  # advisory-lock и прочее — no-op
+
+    async def fetchval(self, *args, **kwargs):
+        return None  # идентичной операции в полёте нет → идём на вставку
 
     async def fetchrow(self, *args, **kwargs):
         self.inserted = True
