@@ -2699,12 +2699,19 @@ _VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"
 
 
 def classify_spambot_reply(reply_text: str) -> str | None:
-    reply_lower = reply_text.lower()
-    if any(pattern in reply_lower for pattern in _SPAMBOT_OK_PATTERNS):
-        return "active"
-    if any(pattern in reply_lower for pattern in _SPAMBOT_LIMIT_PATTERNS):
-        return "spamblock"
-    return None
+    """'active' | 'spamblock' | None (не распознано).
+
+    @SpamBot отвечает на языке аккаунта (lang_code). Классификация вынесена в
+    services/spambot_i18n.py и покрывает все 10 локалей, которые раздаёт
+    generate_device_fingerprint. Раньше понимались только en+ru: для остальных
+    8 локалей ответ не распознавался (None) и check_account_status_full
+    проваливался в фолбэк «Аккаунт активен» — заблокированный аккаунт
+    оставался в ротации. Кортежи ниже сохранены как исторический EN/RU-набор;
+    i18n-набор является их строгим надмножеством.
+    """
+    from services.spambot_i18n import classify_reply
+
+    return classify_reply(reply_text)
 
 
 # Признаки ВРЕМЕННОГО спамблока в ответе @SpamBot: назван срок/дата снятия.
@@ -2753,12 +2760,12 @@ def classify_spambot_restriction(reply_text: str) -> str:
     имеют приоритет: фраза «not going to be lifted automatically» содержит слово
     об автоснятии, но по смыслу — вечный.
     """
-    low = reply_text.lower()
-    if any(p in low for p in _SPAMBOT_PERM_PATTERNS):
+    from services.spambot_i18n import classify_restriction
+
+    kind = classify_restriction(reply_text)
+    if kind == "perm":
         return "perm"
-    if _SPAMBOT_DATE_RE.search(reply_text) or any(
-        p in low for p in _SPAMBOT_TEMP_PATTERNS
-    ):
+    if kind == "temp" or _SPAMBOT_DATE_RE.search(reply_text):
         return "temp"
     return "perm"
 
@@ -2766,8 +2773,26 @@ def classify_spambot_restriction(reply_text: str) -> str:
 # Кнопки аппеляции @SpamBot, которые надо нажать для запроса снятия спамблока
 # (свой аккаунт — легитимная реабилитация). Порядок шагов: «это ошибка» → «да».
 _SPAMBOT_APPEAL_BTN_PATTERNS = (
+    # en / ru (исторические)
     "this is a mistake", "это ошибк", "какая-то ошибка", "mistake",
     "yes", "да", "уверен", "sure", "confirm",
+    # Кнопки @SpamBot тоже локализованы под lang_code аккаунта — без этих
+    # вариантов аппеляция для не-EN/RU аккаунтов не находила кнопок и молча
+    # прекращалась (см. spambot_i18n).
+    # uk / be
+    "це помилка", "помилка", "підтверд", "впевнен", "гэта памылка", "памылка", "пацвярдж",
+    # de
+    "das ist ein fehler", "fehler", "bestätigen", "ja, ",
+    # fr
+    "c'est une erreur", "erreur", "confirmer", "oui",
+    # it
+    "è un errore", "errore", "conferma", "sì",
+    # es
+    "es un error", "error", "confirmar", "sí",
+    # pl
+    "to błąd", "błąd", "potwierdź", "na pewno", "tak,",
+    # tr
+    "bu bir hata", "hata", "onayla", "eminim", "evet",
 )
 
 
@@ -2984,6 +3009,25 @@ async def check_account_status_full(
                         "status": "spamblock",
                         "spamblock_kind": kind,
                         "reason": f"SpamBot: {reply_text[:120]}",
+                        "display_name": display_name,
+                        "profile": profile,
+                    }
+                if reply_text.strip():
+                    # Ответ получен, но НЕ распознан. Раньше проваливались в общий
+                    # фолбэк и объявляли аккаунт «активным» — заблокированный
+                    # аккаунт молча оставался в ротации (тот же анти-паттерн, что
+                    # уже исправлен для AUTH_KEY_DUPLICATED ниже). Честный
+                    # 'unknown' НЕ проходит should_persist_account_status, поэтому
+                    # прежний acc_status не перезаписывается ложным 'active'.
+                    log.warning(
+                        "check_account_status_full: нераспознанный ответ @SpamBot "
+                        "(acc=%s, lang=%s): %.120s",
+                        (_acc or {}).get("id"), (_acc or {}).get("lang_code"), reply_text,
+                    )
+                    return {
+                        "status": "unknown",
+                        "reason": f"@SpamBot ответил нераспознанным текстом: {reply_text[:120]}",
+                        "spambot_unparsed": True,
                         "display_name": display_name,
                         "profile": profile,
                     }
