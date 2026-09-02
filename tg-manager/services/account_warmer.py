@@ -462,6 +462,70 @@ async def get_active_plans(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+_WARM_SAFE_ACTIONS = ("update_presence", "browse_dialogs", "read_channel")
+_WARM_RISKY_L1 = ("send_comment", "send_reaction", "forward_to_saved")
+
+
+def _maturity_level(age_days: float | None, warmup_day: int | None) -> int:
+    """Зрелость аккаунта 0..3 по возрасту и пройденным дням прогрева.
+
+    Неизвестное значение НЕ ограничивает (999) — ограничивает второй сигнал.
+    """
+    a = 999.0 if age_days is None else float(age_days)
+    d = 999 if warmup_day is None else int(warmup_day)
+    if a < 2 or d < 3:
+        return 0
+    if a < 7 or d < 7:
+        return 1
+    if a < 14 or d < 14:
+        return 2
+    return 3
+
+
+def _health_level(trust_score: float | None) -> int:
+    """Здоровье 0..3 по trust_score (шкала 0..1, пороги как во всём проекте)."""
+    t = 1.0 if trust_score is None else float(trust_score)
+    if t < 0.3:
+        return 0
+    if t < 0.5:
+        return 1
+    if t < 0.7:
+        return 2
+    return 3
+
+
+def _progressive_actions(
+    available: list[str],
+    *,
+    trust_score: float | None = None,
+    age_days: float | None = None,
+    warmup_day: int | None = None,
+) -> list[str]:
+    """Урезать набор действий прогрева по СТРОГОМУ из двух сигналов.
+
+    Раньше гейт зависел только от trust_score, но trust_score в проекте — это
+    ЗДОРОВЬЕ: здоровый аккаунт получает 1.0 с первого дня, поэтому гейт
+    фактически не ограничивал ничего — свежий аккаунт с нуля писал комментарии
+    и ставил реакции (сильный ban-сигнал). В пути одиночных планов гейта не
+    было вовсе. Теперь ограничивает и зрелость (возраст + день прогрева).
+
+    Пустой список никогда не возвращается: цепочка фильтров могла обнулить
+    набор, и random.choice() упал бы с IndexError.
+    """
+    level = min(_maturity_level(age_days, warmup_day), _health_level(trust_score))
+    if level <= 0:
+        out = [a for a in available if a in _WARM_SAFE_ACTIONS]
+    elif level == 1:
+        out = [a for a in available if a not in _WARM_RISKY_L1]
+    elif level == 2:
+        out = [a for a in available if a != "send_comment"]
+    else:
+        out = list(available)
+    if not out:
+        out = [a for a in available if a in _WARM_SAFE_ACTIONS] or list(_WARM_SAFE_ACTIONS)
+    return out
+
+
 def _get_actions_for_day(day: int) -> list[str]:
     if day <= 3:
         return _WARMUP_SCHEDULE["days_1_3"]
@@ -1198,6 +1262,27 @@ async def _run_daily_warmup_impl(
     consecutive_fails = 0
     fail_streak = 0  # подряд провалов (сброс только на успехе) — потолок безопасности
     available_actions = _get_actions_for_day(current_day)
+    # Прогрессивный гейт: в этом пути (одиночные планы) его не было вовсе —
+    # свежий аккаунт мог с первого дня писать комментарии и ставить реакции.
+    _p_age_days = None
+    _p_trust = None
+    if acc_health is not None:
+        try:
+            from datetime import datetime as _dtm2, timezone as _tzz2
+
+            _p_trust = acc_health["trust_score"]
+            if acc_health["added_at"] is not None:
+                _p_age_days = (
+                    _dtm2.now(_tzz2.utc) - acc_health["added_at"].replace(tzinfo=_tzz2.utc)
+                ).total_seconds() / 86400.0
+        except (TypeError, ValueError, AttributeError, KeyError):
+            pass
+    available_actions = _progressive_actions(
+        available_actions,
+        trust_score=_p_trust,
+        age_days=_p_age_days,
+        warmup_day=current_day,
+    )
     resources = await _get_warmup_resources(pool, owner_id)
     own_bots = resources["bots"]
     own_channels = resources["channels"]
@@ -1793,7 +1878,8 @@ async def _run_warmup_session_impl(
         # geo_country берём этим же запросом (без лишнего round-trip) — нужен
         # для локального времени/ночи аккаунта.
         _acc_h = await pool.fetchrow(
-            """SELECT a.is_active, a.acc_status, up.geo_country
+            """SELECT a.is_active, a.acc_status, a.added_at, a.trust_score,
+                      up.geo_country
                FROM tg_accounts a
                LEFT JOIN user_proxies up ON up.id = a.proxy_id
                WHERE a.id=$1""",
@@ -1854,14 +1940,28 @@ async def _run_warmup_session_impl(
         client = account_manager._make_client(acc_row["session_str"], device)
         available_actions = _get_actions_for_day(current_day)
 
-        # Progressive trust: ограничиваем действия по trust_score аккаунта
-        trust_score = float(acc_row.get("trust_score") or 0.3)
-        if trust_score < 0.3:
-            available_actions = [a for a in available_actions if a in ("update_presence", "browse_dialogs", "read_channel")]
-        elif trust_score < 0.5:
-            available_actions = [a for a in available_actions if a not in ("send_comment", "send_reaction", "forward_to_saved")]
-        elif trust_score < 0.7:
-            available_actions = [a for a in available_actions if a != "send_comment"]
+        # Прогрессивный гейт: по ЗРЕЛОСТИ (возраст + день прогрева) И здоровью.
+        # Только trust_score было недостаточно — он равен 1.0 у любого здорового
+        # аккаунта с первого дня, т.е. ничего не ограничивал.
+        _age_days = None
+        _trust = None
+        try:
+            from datetime import datetime as _dtm, timezone as _tzz
+
+            if _acc_h is not None:
+                _trust = _acc_h["trust_score"]
+                if _acc_h["added_at"] is not None:
+                    _age_days = (
+                        _dtm.now(_tzz.utc) - _acc_h["added_at"].replace(tzinfo=_tzz.utc)
+                    ).total_seconds() / 86400.0
+        except (TypeError, ValueError, AttributeError, KeyError):
+            pass
+        available_actions = _progressive_actions(
+            available_actions,
+            trust_score=_trust,
+            age_days=_age_days,
+            warmup_day=current_day,
+        )
 
         try:
             await asyncio.wait_for(client.connect(), timeout=15)

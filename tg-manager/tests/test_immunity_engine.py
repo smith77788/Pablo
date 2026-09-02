@@ -22,7 +22,7 @@ def _read(rel: str) -> str:
 
 def test_signature_deterministic_and_grouping():
     f1 = {"op_counts": {"mass_invite": 30, "mass_publish": 5},
-          "geo_country": "Germany", "warming_age_days": 1.0, "trust_score": 30}
+          "geo_country": "Germany", "warming_age_days": 1.0, "trust_score": 0.2}
     # тот же вход → та же строка (нужно для роллапов/правил)
     assert ie.compute_signature(f1) == ie.compute_signature(dict(f1))
     sig = ie.compute_signature(f1)
@@ -34,8 +34,11 @@ def test_signature_buckets():
     assert "warm=fresh" in ie.compute_signature({"warming_age_days": 2})
     assert "warm=young" in ie.compute_signature({"warming_age_days": 10})
     assert "warm=mature" in ie.compute_signature({"warming_age_days": 40})
-    assert "trust=high" in ie.compute_signature({"trust_score": 80})
-    assert "trust=mid" in ie.compute_signature({"trust_score": 55})
+    assert "trust=high" in ie.compute_signature({"trust_score": 0.8})
+    assert "trust=mid" in ie.compute_signature({"trust_score": 0.55})
+    # шкала 0..1 (не 0..100): значение 1.0 — максимум доверия, а не "low"
+    assert "trust=high" in ie.compute_signature({"trust_score": 1.0})
+    assert "trust=low" in ie.compute_signature({"trust_score": 0.1})
     # порядок op_mix не зависит от порядка вставки (детерминизм)
     a = ie.compute_signature({"op_counts": {"a": 1, "b": 9}})
     b = ie.compute_signature({"op_counts": {"b": 9, "a": 1}})
@@ -47,7 +50,7 @@ def test_signature_buckets():
 def test_autopsy_structure_and_cause_invites():
     event = {"acc_id": 42, "new_status": "spamblock", "is_death": True}
     feats = {"op_counts": {"mass_invite": 45}, "actions_72h": 45,
-             "geo_country": "Poland", "warming_age_days": 20, "trust_score": 60,
+             "geo_country": "Poland", "warming_age_days": 20, "trust_score": 0.6,
              "error_rate": 0.1}
     a = ie.build_autopsy(event, feats, {"median_actions_72h": 10})
     assert set(a) >= {"signature", "summary", "probable_cause",
@@ -62,7 +65,7 @@ def test_autopsy_structure_and_cause_invites():
 def test_autopsy_cause_fresh_account():
     event = {"acc_id": 7, "new_status": "banned", "is_death": True}
     feats = {"op_counts": {"mass_publish": 40}, "actions_72h": 40,
-             "geo_country": "US", "warming_age_days": 1, "trust_score": 50}
+             "geo_country": "US", "warming_age_days": 1, "trust_score": 0.5}
     a = ie.build_autopsy(event, feats, {})
     assert "свеж" in a["probable_cause"].lower() or "непрогрет" in a["probable_cause"].lower()
     # свежий аккаунт → предложение карантина (жёстче)

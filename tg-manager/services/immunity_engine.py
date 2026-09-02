@@ -42,11 +42,16 @@ def _warm_bucket(age_days: Optional[float]) -> str:
 
 
 def _trust_bucket(score: Optional[float]) -> str:
+    """Бакет доверия. Шкала trust_score в проекте — 0.1..1.0 (не 0..100):
+    пороги 0.3/0.7 совпадают с остальным кодом (account_warmer, infra_advisor,
+    health_dashboard). Раньше здесь стояли 40/70 — любой аккаунт попадал в
+    'low', и сигнатура смерти теряла различающую силу по доверию.
+    """
     if score is None:
         return "unknown"
-    if score < 40:
+    if score < 0.3:
         return "low"
-    if score < 70:
+    if score < 0.7:
         return "mid"
     return "high"
 
