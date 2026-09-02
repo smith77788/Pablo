@@ -60,11 +60,65 @@ def _cc_tz() -> dict[str, str]:
     return _CC_TZ
 
 
+# Переименованные IANA-зоны: в свежей tzdata старые имена могут отсутствовать.
+# Реальный случай: geo_data хранил "Europe/Kiev" (и "Europe/Uzhgorod"), которые
+# в текущей tzdata не резолвятся → для УКРАИНСКИХ аккаунтов local_hour молча
+# возвращал None, и вся гео-логика (ночь/темп) откатывалась на серверное время
+# у всех потребителей (op_worker, ghost_engine, chat_warmup, прогрев).
+_ZONE_ALIASES: dict[str, str] = {
+    "Europe/Kiev": "Europe/Kyiv",
+    "Europe/Uzhgorod": "Europe/Kyiv",
+    "Europe/Zaporozhye": "Europe/Kyiv",
+    "Asia/Calcutta": "Asia/Kolkata",
+    "Asia/Rangoon": "Asia/Yangon",
+    "Asia/Saigon": "Asia/Ho_Chi_Minh",
+    "America/Godthab": "America/Nuuk",
+    "Europe/Nicosia": "Asia/Nicosia",
+}
+_ZONE_WARNED: set[str] = set()
+
+
+def _zoneinfo(tz: str):
+    """ZoneInfo с фолбэком на канонический алиас. None — если зона неизвестна.
+
+    Неразрешимая зона логируется ОДИН раз: иначе деградация гео молчит.
+    """
+    try:
+        return ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        pass
+    alias = _ZONE_ALIASES.get(tz)
+    if alias:
+        try:
+            return ZoneInfo(alias)
+        except (ZoneInfoNotFoundError, ValueError, KeyError):
+            pass
+    if tz not in _ZONE_WARNED:
+        _ZONE_WARNED.add(tz)
+        log.warning(
+            "geo_tempo: таймзона %r не резолвится — гео-логика для этой страны "
+            "откатывается на серверное время", tz,
+        )
+    return None
+
+
 def timezone_for(country_code: str | None) -> str | None:
-    """IANA-таймзона для country_code (регистронезависимо) или None."""
+    """IANA-таймзона для страны (регистронезависимо) или None.
+
+    Принимает и ISO2 («UA»), и полное имя («Ukraine»): часть legacy-строк
+    `user_proxies.geo_country` хранит полное имя — детект писал его до фикса и
+    бэкфилла на ISO2. Без нормализации такие аккаунты молча теряли гео и вся
+    гео-логика (ночь/темп) откатывалась на серверное время.
+    """
     if not country_code:
         return None
-    return _cc_tz().get(country_code.strip().lower())
+    tz = _cc_tz().get(country_code.strip().lower())
+    if tz:
+        return tz
+    from services.geo_normalize import to_iso2
+
+    iso = to_iso2(country_code)
+    return _cc_tz().get(iso.lower()) if iso else None
 
 
 def local_hour(country_code: str | None,
@@ -80,10 +134,10 @@ def local_hour(country_code: str | None,
         now = _dt.datetime.now(_dt.timezone.utc)
     elif now.tzinfo is None:
         now = now.replace(tzinfo=_dt.timezone.utc)
-    try:
-        return now.astimezone(ZoneInfo(tz)).hour
-    except (ZoneInfoNotFoundError, ValueError, KeyError):
+    zi = _zoneinfo(tz)
+    if zi is None:
         return None
+    return now.astimezone(zi).hour
 
 
 def local_factor(country_code: str | None,

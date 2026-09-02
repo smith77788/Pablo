@@ -348,7 +348,7 @@ EUROPE_CAPITALS: list[dict] = [
         "country": "Ukraine",
         "country_code": "ua",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Andorra la Vella",
@@ -1901,7 +1901,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Kyiv",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Kharkiv",
@@ -1911,7 +1911,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Kharkiv Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Odessa",
@@ -1921,7 +1921,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Odessa Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Dnipro",
@@ -1931,7 +1931,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Dnipropetrovsk Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Donetsk",
@@ -1941,7 +1941,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Donetsk Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Zaporizhzhia",
@@ -1951,7 +1951,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Zaporizhzhia Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Lviv",
@@ -1961,7 +1961,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Lviv Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Mykolaiv",
@@ -1971,7 +1971,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Mykolaiv Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Mariupol",
@@ -1981,7 +1981,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Donetsk Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Vinnytsia",
@@ -1991,7 +1991,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Vinnytsia Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Simferopol",
@@ -2011,7 +2011,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Chernivtsi Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Khmelnytskyi",
@@ -2021,7 +2021,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Khmelnytskyi Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Cherkasy",
@@ -2031,7 +2031,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Cherkasy Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Zhytomyr",
@@ -2041,7 +2041,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Zhytomyr Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Sumy",
@@ -2051,7 +2051,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Sumy Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Rivne",
@@ -2061,7 +2061,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Rivne Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Ivano-Frankivsk",
@@ -2071,7 +2071,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Ivano-Frankivsk Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Ternopil",
@@ -2081,7 +2081,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Ternopil Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Poltava",
@@ -2091,7 +2091,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Poltava Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Kryvyi Rih",
@@ -2101,7 +2101,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Dnipropetrovsk Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Luhansk",
@@ -2111,7 +2111,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Luhansk Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Uzhhorod",
@@ -2121,7 +2121,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Zakarpattia Oblast",
         "language": "uk",
-        "timezone": "Europe/Uzhgorod",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Lutsk",
@@ -2131,7 +2131,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Volyn Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
     {
         "city": "Chernihiv",
@@ -2141,7 +2141,7 @@ UKRAINE_CITIES: list[dict] = [
         "country_code": "ua",
         "region": "Chernihiv Oblast",
         "language": "uk",
-        "timezone": "Europe/Kiev",
+        "timezone": "Europe/Kyiv",
     },
 ]
 

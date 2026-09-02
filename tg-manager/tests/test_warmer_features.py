@@ -4,28 +4,33 @@ import pytest
 from services.account_warmer import _time_of_day_multiplier, _actions_for_day_count
 
 
-def test_time_of_day_multiplier_night():
-    from unittest.mock import patch
-    from datetime import datetime, timedelta, timezone
+def test_time_of_day_multiplier_is_geo_aware_not_server_kyiv():
+    """Множитель темпа считается по ЛОКАЛЬНОМУ времени гео аккаунта.
 
-    mock_time = datetime(2024, 1, 1, 2, 0, 0, tzinfo=timezone.utc)
-    with patch("services.account_warmer.datetime") as mock_dt:
-        mock_dt.datetime.utcnow.return_value = mock_time
-        mock_dt.timedelta = timedelta
-        result = _time_of_day_multiplier()
-        assert result == pytest.approx(1 / 3)
+    Раньше был захардкожен Киев (UTC+2) для всего флота: аккаунт на US-прокси
+    «бодрствовал» в киевские часы. Теперь делегируем в geo_tempo, поэтому в
+    один и тот же момент разные гео дают разный множитель.
+    """
+    import datetime as _dt
+
+    from services import geo_tempo
+
+    now = _dt.datetime(2024, 1, 1, 2, 0, tzinfo=_dt.timezone.utc)
+    # Детерминированное доказательство: локальные ЧАСЫ разных гео в один и тот
+    # же момент различаются (сам множитель содержит джиттер — сравнивать его
+    # значения между вызовами нельзя).
+    assert geo_tempo.local_hour("UA", now) != geo_tempo.local_hour("US", now)
+    assert geo_tempo.is_local_night("UA", now) != geo_tempo.is_local_night("US", now)
+    # обёртка прогрева принимает гео аккаунта и отдаёт валидный множитель
+    v = _time_of_day_multiplier("UA")
+    assert isinstance(v, float) and 0 < v < 3
 
 
-def test_time_of_day_multiplier_day():
-    from unittest.mock import patch
-    from datetime import datetime, timedelta, timezone
-
-    mock_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    with patch("services.account_warmer.datetime") as mock_dt:
-        mock_dt.datetime.utcnow.return_value = mock_time
-        mock_dt.timedelta = timedelta
-        result = _time_of_day_multiplier()
-        assert result == pytest.approx(1.5)
+def test_time_of_day_multiplier_unknown_geo_falls_back():
+    """Гео неизвестно → откат на серверное время, без падения (нет регрессии)."""
+    for geo in (None, "", "ZZ"):
+        v = _time_of_day_multiplier(geo)
+        assert isinstance(v, float) and v > 0
 
 
 def test_progressive_trust_filters_actions():

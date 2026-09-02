@@ -151,6 +151,7 @@ CACHE: dict[str, str] = {
     "services/contacts_hub/search_engine.py:_cache": "кэш результатов поиска",
     "services/fleet_governor.py:_CACHE": "множитель темпа с TTL",
     "services/geo_tempo.py:_CC_TZ": "страна→таймзона, справочник",
+    "services/geo_tempo.py:_ZONE_WARNED": "де-дуп WARN о нерезолвящейся зоне, process-local",
     "services/invite_engine.py:_link_cache": "инвайт-ссылки, перевыпускаются",
     "services/mini_app_api.py:_bot_username_cache": "имя бота, неизменно",
     "services/mini_app_api.py:_cache": "ответы API с TTL",

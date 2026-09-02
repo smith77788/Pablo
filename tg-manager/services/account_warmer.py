@@ -549,14 +549,22 @@ def _actions_for_day_count(day: int, target_daily: int) -> int:
         return max(4, (target_daily * 3) // 4)
     return target_daily
 
-def _time_of_day_multiplier() -> float:
-    now_utc = datetime.datetime.utcnow()
-    kyiv_hour = (now_utc + datetime.timedelta(hours=2)).hour
-    if 0 <= kyiv_hour < 6:
-        return 1 / 3
-    if 10 <= kyiv_hour < 18:
-        return 1.5
-    return 1.0
+def _time_of_day_multiplier(geo_country: str | None = None, account_id=None) -> float:
+    """Множитель темпа по ЛОКАЛЬНОМУ времени аккаунта (гео его прокси).
+
+    Раньше весь флот жил по захардкоженному Киеву (UTC+2, без учёта DST):
+    аккаунт на US-прокси «бодрствовал» в киевские часы — поведенческий
+    рассинхрон с заявленным гео, который Telegram видит. `geo_tempo` уже
+    использовался op_worker/ghost_engine/chat_warmup; прогрев оставался
+    единственной подсистемой на хардкоде.
+
+    При неизвестном гео geo_tempo сам откатывается на серверное время — без
+    регрессии. `account_id` накладывает персональный хронотип: флот не
+    замедляется синхронно в один и тот же час (анти-сигнатура ботнета).
+    """
+    from services import geo_tempo
+
+    return geo_tempo.local_factor(geo_country, account_id=account_id)
 
 
 # In-memory guards: предотвращают одновременный запуск прогрева одного и того же плана/сессии
@@ -1225,7 +1233,8 @@ async def _run_daily_warmup_impl(
     # Рампа объёма действий: свежий аккаунт (день 0-1) делает мало действий,
     # объём растёт с возрастом. Это ключевая защита от бана.
     day_actions_n = _actions_for_day_count(current_day, daily_actions)
-    _tod_mult = _time_of_day_multiplier()
+    # Темп — по локальному времени гео аккаунта + личный хронотип (не по Киеву).
+    _tod_mult = _time_of_day_multiplier(plan.get("geo_country"), account_id=account_id)
     if _tod_mult != 1.0:
         day_actions_n = max(1, int(day_actions_n * _tod_mult))
 
@@ -1750,10 +1759,10 @@ async def _run_warmup_session_impl(
 
     # Рампа: на ранних днях каждый аккаунт делает меньше действий
     _target_per_acc = max(1, daily_actions // len(account_ids))
-    actions_per_acc = _actions_for_day_count(current_day, _target_per_acc)
-    _tod_mult = _time_of_day_multiplier()
-    if _tod_mult != 1.0:
-        actions_per_acc = max(1, int(actions_per_acc * _tod_mult))
+    # База без времени суток: множитель применяется ПО-АККАУНТНО ниже, по
+    # локальному времени гео каждого аккаунта (сессия может держать аккаунты
+    # из разных стран — один общий «киевский» множитель здесь был неверен).
+    actions_per_acc_base = _actions_for_day_count(current_day, _target_per_acc)
     total_ok = 0
     total_fail = 0
 
@@ -1780,9 +1789,15 @@ async def _run_warmup_session_impl(
             )
             # Proceed with warmup if check fails - better than skipping
 
-        # Health/ban gate: не разгоняем забаненные/неактивные аккаунты
+        # Health/ban gate: не разгоняем забаненные/неактивные аккаунты.
+        # geo_country берём этим же запросом (без лишнего round-trip) — нужен
+        # для локального времени/ночи аккаунта.
         _acc_h = await pool.fetchrow(
-            "SELECT is_active, acc_status FROM tg_accounts WHERE id=$1", acc_id
+            """SELECT a.is_active, a.acc_status, up.geo_country
+               FROM tg_accounts a
+               LEFT JOIN user_proxies up ON up.id = a.proxy_id
+               WHERE a.id=$1""",
+            acc_id,
         )
         if _acc_h and (
             _acc_h["is_active"] is False
@@ -1798,6 +1813,31 @@ async def _run_warmup_session_impl(
                 except Exception:
                     log_exc_swallow(log, "warmup_session: release on skip failed")
             continue
+
+        # Локальная ночь аккаунта (по гео его прокси) — не греем. Сессия может
+        # держать аккаунты из разных стран, поэтому решение по-аккаунтное.
+        _acc_geo = _acc_h["geo_country"] if _acc_h else None
+        from services import geo_tempo as _gt
+
+        if _gt.is_local_night(_acc_geo):
+            log.info(
+                "warmup_session: acc=%d — локальная ночь (гео=%s), пропуск цикла",
+                acc_id, _acc_geo,
+            )
+            if _claimed:
+                try:
+                    from services import op_worker as _opw
+
+                    await _opw.release_accounts([acc_id])
+                except Exception:
+                    log_exc_swallow(log, "warmup_session: release on night skip failed")
+            continue
+
+        # Объём действий — по локальному времени ЭТОГО аккаунта + личный хронотип.
+        _acc_actions = max(
+            1,
+            int(actions_per_acc_base * _time_of_day_multiplier(_acc_geo, account_id=acc_id)),
+        )
 
         acc_row = await db.get_account_for_telethon(pool, acc_id)
         if not acc_row or not acc_row["session_str"]:
@@ -1826,7 +1866,7 @@ async def _run_warmup_session_impl(
         try:
             await asyncio.wait_for(client.connect(), timeout=15)
 
-            for i in range(actions_per_acc):
+            for i in range(_acc_actions):
                 action = random.choice(available_actions)
                 target = targets[i % len(targets)] if targets else ""
                 success = False
@@ -2111,23 +2151,26 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     Один запуск в сутки на план/сессию (проверяем last_action_at > 20ч).
     Планы и сессии запускаются ПАРАЛЛЕЛЬНО (до _MAX_PARALLEL_WARMUP одновременно),
     но не более одного аккаунта на один proxy_id в одном батче.
-    Smart scheduling: не запускаем прогрев ночью (00:00-06:00 UTC+2).
+    Smart scheduling: аккаунт не греется в СВОЮ локальную ночь (23:00–07:00 по
+    таймзоне гео его прокси, см. geo_tempo), а не по серверному Киеву — иначе
+    поведение рассинхронизировано с заявленным гео аккаунта.
     """
     import datetime
     while True:
         try:
-            # Smart scheduling: skip warmup during night hours (00:00-06:00 Kyiv time)
-            now_utc = datetime.datetime.utcnow()
-            kyiv_hour = (now_utc + datetime.timedelta(hours=2)).hour
-            if 0 <= kyiv_hour < 6:
-                log.debug("warmup loop: night time (hour=%d), skipping", kyiv_hour)
-                await asyncio.sleep(interval_hours * 3600)
-                continue
+            # Ночь считаем по ЛОКАЛЬНОМУ времени КАЖДОГО аккаунта (гео его прокси),
+            # а не по серверному Киеву. Раньше весь цикл замирал в киевскую ночь:
+            # US-аккаунты простаивали в свой вечер (естественно активное время), а
+            # азиатские грелись в свою ночь — рассинхрон гео и поведения.
+            from services import geo_tempo
+
             # Одиночные планы разогрева — включаем proxy_id для proxy-correlation
+            # и geo_country прокси для локального времени аккаунта.
             rows = await pool.fetch(
-                """SELECT wp.*, a.owner_id, a.proxy_id
+                """SELECT wp.*, a.owner_id, a.proxy_id, up.geo_country
                    FROM account_warmup_plans wp
                    JOIN tg_accounts a ON a.id = wp.account_id
+                   LEFT JOIN user_proxies up ON up.id = a.proxy_id
                    WHERE wp.status = 'active'
                      -- НЕ берём аккаунты, занятые активной операцией: параллельный
                      -- коннект одной сессии прогревом и операцией = AUTH_KEY_DUPLICATED.
@@ -2135,6 +2178,14 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                      AND (wp.last_action_at IS NULL
                           OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
             )
+            if rows:
+                _total = len(rows)
+                rows = [r for r in rows if not geo_tempo.is_local_night(r["geo_country"])]
+                if _total != len(rows):
+                    log.info(
+                        "warmup loop: %d/%d планов отложено — у аккаунта локальная ночь",
+                        _total - len(rows), _total,
+                    )
             if rows:
                 log.info("warmup loop: %d single-plans to run (proxy-safe batches)", len(rows))
             for batch in _proxy_safe_batches(list(rows), _MAX_PARALLEL_WARMUP):
