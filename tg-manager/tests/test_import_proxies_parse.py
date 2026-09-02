@@ -7,7 +7,17 @@ proxy_fingerprint) схлопываются и НЕ считаются проп�
 """
 from __future__ import annotations
 
-from services.mini_app_api import _collect_valid_proxies
+from services.mini_app_api import _collect_valid_proxies, _reject_proxy_reason
+
+
+def test_reject_reason_single_source():
+    assert _reject_proxy_reason("socks5://1.2.3.4:1080") is None
+    assert _reject_proxy_reason("socks4://9.9.9.9:1080") is None
+    assert _reject_proxy_reason("http://localhost:8080") == "internal"
+    assert _reject_proxy_reason("http://127.0.0.1:1") == "internal"
+    assert _reject_proxy_reason("ftp://x") == "scheme"
+    assert _reject_proxy_reason("") == "scheme"
+    assert _reject_proxy_reason("http://" + "a" * 600) == "too_long"
 
 
 def test_valid_dedup_and_skips():

@@ -378,6 +378,26 @@ def parse_proxy_type(proxy_url: str) -> str | None:
     return None
 
 
+def _reject_proxy_reason(purl: str) -> str | None:
+    """Единая проверка одного прокси-URL для add_proxy и import_proxies.
+
+    Возвращает код причины отказа или None если приемлем:
+      "too_long"  — длиннее 500 символов;
+      "internal"  — loopback/внутренний адрес (SSRF-гигиена);
+      "scheme"    — не socks5/socks4/http.
+    Чистая функция — один источник правды, чтобы одиночный и массовый ввод
+    отбраковывали одно и то же (раньше add_proxy не проверял длину/loopback).
+    """
+    p = (purl or "").strip()
+    if len(p) > 500:
+        return "too_long"
+    if any(h in p.lower() for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
+        return "internal"
+    if not parse_proxy_type(p):
+        return "scheme"
+    return None
+
+
 def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
     """Разобрать вставленный список прокси для массового импорта.
 
@@ -398,13 +418,7 @@ def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
         purl = line.strip()
         if not purl:
             continue
-        if len(purl) > 500:
-            skipped += 1
-            continue
-        if any(h in purl.lower() for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
-            skipped += 1
-            continue
-        if not parse_proxy_type(purl):
+        if _reject_proxy_reason(purl) is not None:
             skipped += 1
             continue
         fp = proxy_fingerprint(purl)
@@ -11516,9 +11530,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         label = (body.get("label") or "").strip() or None
         if not proxy_url:
             return _err("proxy_url required")
-        proxy_type = parse_proxy_type(proxy_url)
-        if not proxy_type:
+        # Единая валидация (паритет с import_proxies): длина, loopback, схема.
+        _reason = _reject_proxy_reason(proxy_url)
+        if _reason == "too_long":
+            return _err("proxy_url слишком длинный (>500 символов)")
+        if _reason == "internal":
+            return _err("Внутренние/loopback-адреса недопустимы")
+        if _reason == "scheme":
             return _err("proxy_url must start with socks5://, socks4://, or http://")
+        proxy_type = parse_proxy_type(proxy_url)
         try:
             # шифруем at-rest; дедуп по детерминированному proxy_fp (шифр недетерминирован)
             from services.token_vault import encrypt_token, proxy_fingerprint
