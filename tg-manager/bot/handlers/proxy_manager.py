@@ -454,36 +454,56 @@ async def fsm_proxy_bulk(message: Message, state: FSMContext, pool: asyncpg.Pool
 
     from services.token_vault import encrypt_token, proxy_fingerprint
 
-    added = 0
-    duplicates = 0
     owner_id = message.from_user.id
+    # ОДИН bulk-INSERT вместо N последовательных round-trip'ов (паритет с mini-app
+    # import_proxies). Дедуп по детерминированному proxy_fp внутри вставки +
+    # ON CONFLICT для уже существующих; шифрование at-rest сохранено.
+    seen_fp: set[str] = set()
+    encs: list[str] = []
+    labels: list[str | None] = []
+    ptypes: list[str] = []
+    fps: list[str] = []
+    intra_dups = 0
     for url, label in entries:
-        proxy_type = "socks5"
-        if url.lower().startswith("http://"):
-            proxy_type = "http"
-        elif url.lower().startswith("socks4://"):
-            proxy_type = "socks4"
+        fp = proxy_fingerprint(url)
+        if fp in seen_fp:
+            intra_dups += 1
+            continue
+        seen_fp.add(fp)
+        low = url.lower()
+        pt = "http" if low.startswith("http://") else "socks4" if low.startswith("socks4://") else "socks5"
+        encs.append(encrypt_token(url))
+        labels.append(label)
+        ptypes.append(pt)
+        fps.append(fp)
+
+    added = 0
+    if encs:
         try:
-            result = await pool.execute(
+            rows = await pool.fetch(
                 """INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type, proxy_fp)
-                   VALUES ($1, $2, $3, $4, $5)
-                   ON CONFLICT (owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO NOTHING""",
-                owner_id, label, encrypt_token(url), proxy_type, proxy_fingerprint(url),
+                   SELECT $1, u.lbl, u.enc, u.pt, u.fp
+                   FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) AS u(lbl, enc, pt, fp)
+                   ON CONFLICT (owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO NOTHING
+                   RETURNING id""",
+                owner_id, labels, encs, ptypes, fps,
             )
-            if str(result).split()[-1] != "0":
-                added += 1
-            else:
-                duplicates += 1
+            added = len(rows)
         except asyncpg.UndefinedColumnError:
-            await pool.execute(
-                "INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type) "
-                "VALUES ($1, $2, $3, $4)",
-                owner_id, label, encrypt_token(url), proxy_type,
+            # proxy_fp ещё не мигрирован — фолбэк без него (шифротекст
+            # недетерминирован → дубли не отсечёт, но не упадёт).
+            rows = await pool.fetch(
+                """INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type)
+                   SELECT $1, u.lbl, u.enc, u.pt
+                   FROM unnest($2::text[], $3::text[], $4::text[]) AS u(lbl, enc, pt)
+                   ON CONFLICT (owner_id, proxy_url) DO NOTHING
+                   RETURNING id""",
+                owner_id, labels, encs, ptypes,
             )
-            added += 1
+            added = len(rows)
         except Exception:
             log_exc_swallow(log, "Ошибка массового импорта прокси")
-            invalid += 1
+    duplicates = intra_dups + (len(encs) - added)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Список прокси", callback_data=ProxyCb(action="list"))
