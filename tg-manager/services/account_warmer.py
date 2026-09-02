@@ -185,6 +185,72 @@ _WARMUP_SEARCH_QUERIES = [
 _WARMUP_REACTIONS = ["👍", "❤️", "🔥", "🎉", "👏", "😍", "💯", "🤩", "😂", "🏆"]
 _WARMUP_BOTS = ["@BotFather", "@Stickers", "@gamee"]
 
+
+def _account_channels(account_id: int | None, source: list[str], k: int = 8) -> list[str]:
+    """Стабильный ПЕР-АККАУНТНЫЙ набор и порядок каналов из общего пула.
+
+    Раньше сессионный путь брал `_WARMUP_PUBLIC_CHANNELS[:8]` — одни и те же 8
+    каналов для КАЖДОГО аккаунта всего флота, а путь планов делал глобальный
+    random.shuffle (набор тот же, порядок скачет каждый день). Совпадающий граф
+    вступлений кластеризует когорту — прогрев сам создавал сигнатуру ботнета.
+
+    Сид от account_id даёт: (а) у каждого аккаунта свой набор/порядок,
+    (б) он СТАБИЛЕН во времени — живой человек не перевыбирает интересы каждый
+    день. account_id=None → прежнее поведение (первые k), чтобы не ломать
+    вызовы без контекста аккаунта.
+    """
+    if not source:
+        return []
+    k = max(1, min(int(k), len(source)))
+    if account_id is None:
+        return list(source[:k])
+    rnd = random.Random(f"warmup-channels:{int(account_id)}")
+    picked = list(source)
+    rnd.shuffle(picked)
+    return picked[:k]
+
+
+# Spintax-шаблоны комментариев прогрева: текст генерируется движком проекта
+# (services/spintax_engine) с сидом от аккаунта+поста. Раньше был
+# random.choice из 19 фиксированных фраз — весь флот писал одинаковые тексты,
+# что тривиально детектируется.
+_COMMENT_SPINTAX = [
+    # Каждая ветка самодостаточна: любая комбинация читается грамотно —
+    # неестественный текст сам по себе является детект-сигналом.
+    "{Согласен|Соглашусь|Полностью согласен}{.|!}",
+    "{Спасибо!|Спасибо за пост!|Благодарю!|Благодарю за пост!}",
+    "{Интересно|Любопытно|Занятно}{.|!}",
+    "{Не знал|Не думал об этом|Надо обдумать}{.|!}",
+    "{Хороший|Годный|Толковый} {пост|материал|разбор}{.|!}",
+    "{Полезно|Пригодится|Забрал в закладки}{.|!}",
+    "{Актуально|В точку|Верно подмечено}{.|!}",
+    "{Согласен|Соглашусь}, {дельно|по делу|толково}{.|!}",
+    "{Спасибо|Благодарю}, {полезно|пригодится|интересно}{.|!}",
+]
+
+
+def _warm_comment_text(account_id: int | None = None, salt: str | int = "") -> str:
+    """Сгенерировать текст комментария прогрева (spintax, сид от аккаунта).
+
+    Fail-soft: при любой ошибке движка откатываемся на исторический список —
+    прогрев не должен падать из-за генерации текста.
+    """
+    try:
+        from services.spintax_engine import SpintaxEngine
+
+        tpl_rnd = random.Random(f"warmup-tpl:{account_id}:{salt}")
+        template = tpl_rnd.choice(_COMMENT_SPINTAX)
+        text = SpintaxEngine().generate(
+            template, seed=f"warmup-comment:{account_id}:{salt}"
+        )
+        text = (text or "").strip()
+        if text:
+            return text
+    except Exception:
+        log_exc_swallow(log, "warmup: spintax-комментарий не сгенерирован")
+    return random.choice(_COMMENT_TEXTS)
+
+
 _COMMENT_TEXTS = [
     "👍",
     "Спасибо!",
@@ -913,7 +979,7 @@ async def _perform_vote_poll(client, channel_ref: str) -> bool:
         return False
 
 
-async def _perform_send_comment(client, channel_ref: str) -> bool:
+async def _perform_send_comment(client, channel_ref: str, account_id: int | None = None) -> bool:
     """Отправляем комментарий к посту через группу обсуждений."""
     try:
         from telethon.tl.functions.channels import GetFullChannelRequest
@@ -930,7 +996,7 @@ async def _perform_send_comment(client, channel_ref: str) -> bool:
         if not msg_with_replies:
             return False
         post = random.choice(msg_with_replies[:5])
-        comment = random.choice(_COMMENT_TEXTS)
+        comment = _warm_comment_text(account_id, salt=getattr(post, 'id', ''))
         discussion = await client.get_entity(linked_id)
         await client.send_message(discussion, comment, comment_to=post.id)
         await asyncio.sleep(random.uniform(5, 15))
@@ -1289,8 +1355,10 @@ async def _run_daily_warmup_impl(
     # Нишево-осведомлённый список каналов: через account_niche_profiles
     channels = await get_account_niche_channels(pool, account_id)
     if not channels:
-        channels = _WARMUP_PUBLIC_CHANNELS.copy()
-    random.shuffle(channels)
+        channels = list(_WARMUP_PUBLIC_CHANNELS)
+    # Стабильный пер-аккаунтный порядок/набор вместо глобального shuffle:
+    # одинаковый граф вступлений у всего флота — сигнатура ботнета.
+    channels = _account_channels(account_id, channels, k=len(channels))
 
     # Описания действий для прогресс-коллбэка
     _action_descriptions = {
@@ -1370,7 +1438,7 @@ async def _run_daily_warmup_impl(
                     await asyncio.sleep(random.uniform(2.0, 8.0))
                     await asyncio.sleep(random.uniform(1.0, 4.0))
                     success = await asyncio.wait_for(
-                        _perform_send_comment(client, target), timeout=90
+                        _perform_send_comment(client, target, account_id), timeout=90
                     )
 
                 elif action == "own_channel_read":
@@ -1840,7 +1908,7 @@ async def _run_warmup_session_impl(
         ]
         targets += [f"@{b['username']}" for b in resources["bots"] if b.get("username")]
     if not targets:
-        targets = _WARMUP_PUBLIC_CHANNELS[:8]
+        targets = list(_WARMUP_PUBLIC_CHANNELS)
 
     # Рампа: на ранних днях каждый аккаунт делает меньше действий
     _target_per_acc = max(1, daily_actions // len(account_ids))
@@ -1920,6 +1988,10 @@ async def _run_warmup_session_impl(
             continue
 
         # Объём действий — по локальному времени ЭТОГО аккаунта + личный хронотип.
+        # Пер-аккаунтный набор целей: раньше все аккаунты сессии работали по
+        # одному и тому же списку (а фолбэк был вообще _WARMUP_PUBLIC_CHANNELS[:8]
+        # для всего флота) — совпадающий граф вступлений кластеризует когорту.
+        _acc_targets = _account_channels(acc_id, targets, k=min(8, len(targets))) if targets else []
         _acc_actions = max(
             1,
             int(actions_per_acc_base * _time_of_day_multiplier(_acc_geo, account_id=acc_id)),
@@ -1968,7 +2040,7 @@ async def _run_warmup_session_impl(
 
             for i in range(_acc_actions):
                 action = random.choice(available_actions)
-                target = targets[i % len(targets)] if targets else ""
+                target = _acc_targets[i % len(_acc_targets)] if _acc_targets else ""
                 success = False
                 error_str: Optional[str] = None
                 t0 = time.monotonic()
@@ -1999,7 +2071,7 @@ async def _run_warmup_session_impl(
                     elif action == "send_comment" and target:
                         await asyncio.sleep(random.uniform(2.0, 8.0))
                         await asyncio.sleep(random.uniform(1.0, 4.0))
-                        success = await _perform_send_comment(client, target)
+                        success = await _perform_send_comment(client, target, acc_id)
                     elif action == "forward_to_saved" and target:
                         success = await _perform_forward_to_saved(client, target)
                     elif action == "vote_poll" and target:
