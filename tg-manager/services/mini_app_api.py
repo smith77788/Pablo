@@ -378,6 +378,45 @@ def parse_proxy_type(proxy_url: str) -> str | None:
     return None
 
 
+def _collect_valid_proxies(raw: str, limit: int = 500) -> tuple[list[str], int]:
+    """Разобрать вставленный список прокси для массового импорта.
+
+    Возвращает (уникальные валидные URL в порядке появления, число пропущенных
+    невалидных). Правила (паритет с add_proxy + защита): пустые строки не
+    считаются; длиннее 500 символов, loopback/внутренние адреса и неподдержанные
+    схемы — пропускаются (skipped); дубли в пределах вставки схлопываются по
+    детерминированному proxy_fingerprint (тот же ключ, что у одиночного добавления
+    — иначе один и тот же прокси задвоился бы между путями). Чистая функция —
+    тестируема без БД и без шифрования (fp не требует pycryptodome для plaintext).
+    """
+    import re as _re
+    from services.token_vault import proxy_fingerprint
+    skipped = 0
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in _re.split(r"[\n,;]+", raw or ""):
+        purl = line.strip()
+        if not purl:
+            continue
+        if len(purl) > 500:
+            skipped += 1
+            continue
+        if any(h in purl.lower() for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
+            skipped += 1
+            continue
+        if not parse_proxy_type(purl):
+            skipped += 1
+            continue
+        fp = proxy_fingerprint(purl)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        out.append(purl)
+        if len(out) >= limit:
+            break
+    return out, skipped
+
+
 # Единый источник фильтров parsed_audiences (парсер-вью + инвайт + DM) —
 # вынесен в services/audience_filters.py, чтобы все три места применяли одно и то же.
 from services.audience_filters import parsed_audience_filters  # noqa: E402,F401
@@ -11703,36 +11742,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Invalid JSON", 400)
-        import re as _re
+        from services.token_vault import encrypt_token, proxy_fingerprint
         raw = validate_string(body.get("proxies"), max_len=50000) or ""
-        added, skipped = 0, 0
-        for line in _re.split(r"[\n,;]+", raw):
-            purl = line.strip()
-            if not purl:
-                continue
-            # Validate proxy URL format
-            if len(purl) > 500:
-                skipped += 1
-                continue
-            # Block internal/loopback addresses
-            if any(h in purl.lower() for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
-                skipped += 1
-                continue
-            ptype = parse_proxy_type(purl)
-            if not ptype:
-                skipped += 1
-                continue
+
+        # Валидация/нормализация — в чистой _collect_valid_proxies (тестируется),
+        # затем ОДИН bulk-INSERT вместо N round-trip'ов (до 500 строк → до 500
+        # запросов). Паритет с add_proxy: шифруем at-rest (encrypt_token) и дедуп
+        # по детерминированному proxy_fp — иначе bulk-импорт клал креды прокси в
+        # БД ПЛЕЙНТЕКСТОМ и не отсекал дубли, добавленные одиночно.
+        purls, skipped = _collect_valid_proxies(raw)
+        encs = [encrypt_token(p) for p in purls]
+        ptypes = [parse_proxy_type(p) for p in purls]
+        fps = [proxy_fingerprint(p) for p in purls]
+
+        added = 0
+        if encs:
             try:
-                await pool.execute(
+                rows = await pool.fetch(
+                    """INSERT INTO user_proxies(owner_id, proxy_url, proxy_type, proxy_fp)
+                       SELECT $1, u.enc, u.ptype, u.fp
+                       FROM unnest($2::text[], $3::text[], $4::text[]) AS u(enc, ptype, fp)
+                       ON CONFLICT(owner_id, proxy_fp) WHERE proxy_fp IS NOT NULL DO NOTHING
+                       RETURNING id""",
+                    uid, encs, ptypes, fps)
+                added = len(rows)
+            except asyncpg.UndefinedColumnError:
+                # proxy_fp ещё не мигрирован (лаг деплоя schema_v146) — фолбэк без
+                # него, как в add_proxy. Шифротекст недетерминирован, поэтому
+                # ON CONFLICT(proxy_url) дубли не отсечёт, но импорт не упадёт.
+                rows = await pool.fetch(
                     """INSERT INTO user_proxies(owner_id, proxy_url, proxy_type)
-                       VALUES($1,$2,$3) ON CONFLICT(owner_id, proxy_url) DO NOTHING""",
-                    uid, purl, ptype)
-                added += 1
-            except Exception:
-                skipped += 1
-            if added >= 500:
-                break
-        return _json_resp({"ok": True, "added": added, "skipped": skipped})
+                       SELECT $1, u.enc, u.ptype
+                       FROM unnest($2::text[], $3::text[]) AS u(enc, ptype)
+                       ON CONFLICT(owner_id, proxy_url) DO NOTHING
+                       RETURNING id""",
+                    uid, encs, ptypes)
+                added = len(rows)
+
+        duplicates = len(encs) - added   # прошли валидацию, но уже были в пуле
+        return _json_resp({"ok": True, "added": added, "skipped": skipped,
+                           "duplicates": duplicates})
 
     # ── Analytics ────────────────────────────────────────────────────────────
 
