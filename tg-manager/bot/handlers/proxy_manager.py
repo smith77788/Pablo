@@ -128,13 +128,18 @@ async def _detect_proxy_geo(proxy_url: str) -> dict:
             # ip-api.com without an IP argument returns geo for the caller's IP,
             # which — routed through the proxy — is the proxy's egress IP.
             async with session.get(
-                "http://ip-api.com/json/?fields=country,city,query",
+                "http://ip-api.com/json/?fields=country,countryCode,city,query",
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    # Пишем ISO2-код (матч-сайты сравнивают geo_country с ISO2:
+                    # UPPER(geo_country)=UPPER('UA')). Раньше писалось полное имя
+                    # («Ukraine») → гео-подбор прокси/аккаунтов не срабатывал.
+                    from services.geo_normalize import to_iso2
+
                     return {
-                        "geo_country": data.get("country"),
+                        "geo_country": to_iso2(data.get("countryCode") or data.get("country")),
                         "geo_city": data.get("city"),
                     }
     except Exception:
@@ -216,7 +221,11 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             label = row["label"] or row["proxy_url"][:30]
             ptype = row["proxy_type"] or "socks5"
             lat = f" {row['latency_avg_ms']}ms" if row.get("latency_avg_ms") else ""
-            geo = f" [{row['geo_country']}]" if row.get("geo_country") else ""
+            geo = ""
+            if row.get("geo_country"):
+                from services.geo_normalize import flag_emoji
+                _fl = flag_emoji(row["geo_country"])
+                geo = f" {_fl} [{row['geo_country']}]" if _fl else f" [{row['geo_country']}]"
             lines.append(
                 f"{status} <code>{html.escape(label)}</code> [{ptype}]{lat}{geo}"
             )
