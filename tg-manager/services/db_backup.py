@@ -41,6 +41,10 @@ log = logging.getLogger(__name__)
 _INTERVAL_SEC = int(os.getenv("DB_BACKUP_INTERVAL_SEC", str(6 * 3600)))  # каждые 6ч
 _PART_LIMIT = 49 * 1024 * 1024   # 49 МБ — под лимит Telegram Bot API (50 МБ)
 _ARCHIVE_VERSION = 1
+# Отправка файла в Telegram: щедрый таймаут (загрузка до 49 МБ) + повторы, чтобы
+# сетевой блип не ронял бэкап (инцидент «Request timeout error» при /backup).
+_SEND_TIMEOUT_S = 300
+_SEND_ATTEMPTS = 3
 
 # Таблицы-логи с высоким оборотом и без ценности для восстановления флота —
 # по умолчанию исключаем, чтобы бэкап был компактным и быстрым. Переопределяется
@@ -177,8 +181,26 @@ async def send_backup(bot, chat_id: int, archive: bytes, *, caption_note: str = 
                    f"db_backup.restore_archive.")
             if caption_note:
                 cap += f"\n{caption_note}"
-        await bot.send_document(
-            chat_id, BufferedInputFile(part, filename=name), caption=cap)
+        # Загрузка документа в Telegram может идти долго (файл до 49 МБ по
+        # небыстрой сети Railway↔Telegram), а дефолтный request-таймаут aiogram
+        # (~60с) её обрывает — отсюда «Request timeout error». Даём щедрый таймаут
+        # и пару повторов с backoff: разовый сетевой блип не должен ронять бэкап.
+        last_err: Exception | None = None
+        for attempt in range(1, _SEND_ATTEMPTS + 1):
+            try:
+                await bot.send_document(
+                    chat_id, BufferedInputFile(part, filename=name), caption=cap,
+                    request_timeout=_SEND_TIMEOUT_S)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < _SEND_ATTEMPTS:
+                    log.warning("db_backup: отправка части %d/%d, попытка %d не удалась (%s) — повтор",
+                                idx, total, attempt, e)
+                    await asyncio.sleep(2 * attempt)
+        if last_err is not None:
+            raise last_err
         await asyncio.sleep(0.5)  # не упереться в флуд-лимит при многих частях
     return total
 

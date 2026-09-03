@@ -68,7 +68,7 @@ class _FakeBot:
     def __init__(self, fail=False):
         self.docs = []
         self.fail = fail
-    async def send_document(self, chat_id, document, caption=None):
+    async def send_document(self, chat_id, document, caption=None, **kwargs):
         if self.fail:
             raise RuntimeError("сеть Telegram упала")
         self.docs.append((chat_id, getattr(document, "filename", "?"), caption))
@@ -244,7 +244,7 @@ def test_run_backup_once_sends_via_fake_bot():
     class _FakeBot:
         def __init__(self):
             self.docs = []
-        async def send_document(self, chat_id, document, caption=None):
+        async def send_document(self, chat_id, document, caption=None, **kwargs):
             self.docs.append((chat_id, getattr(document, "filename", "?"), caption))
 
     async def _r(monkeyenv):
