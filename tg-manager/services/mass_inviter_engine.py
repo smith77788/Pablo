@@ -81,16 +81,109 @@ async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
 
 # ── Добавление пачки user_id/username ────────────────────────────────────────
 
+# ── Классификация отказов по цели ────────────────────────────────────────────
+# Отказы инвайта делятся на горстку РАЗНЫХ по смыслу случаев, и оператору важно
+# различать их: «приватность» — ограничение получателя (помогает ссылка в ЛС или
+# промоут-трюк), «нет в Telegram» — мёртвая цель (её надо убрать из базы), «в
+# слишком многих чатах» — лимит на стороне цели (сегодня не добавится никак).
+# Раньше всё, кроме приватности и флуда, сваливалось в «прочее»: крупнейшая по
+# объёму корзина отказов не имела ни имени, ни смысла, и оператор не понимал,
+# чинить ему аудиторию, права или аккаунты.
+FAIL_PRIVACY = "privacy"          # настройки приватности получателя
+FAIL_NOT_MUTUAL = "not_mutual"    # требует взаимного контакта
+FAIL_DEAD = "dead"                # username не существует / аккаунт удалён
+FAIL_TOO_MANY_CHATS = "too_many_chats"   # цель уже в предельном числе чатов
+FAIL_BANNED = "banned_in_chat"    # цель забанена/кикнута в этом чате
+FAIL_BLOCKED = "blocked"          # цель заблокировала инвайтера
+FAIL_FLOOD = "flood"
+FAIL_PERM = "perm"                # права/доступность самого чата
+FAIL_OTHER = "other"
+
+FAIL_LABELS = {
+    FAIL_PRIVACY: "🔒 приватность (нельзя добавить)",
+    FAIL_NOT_MUTUAL: "🔒 не в контактах",
+    FAIL_DEAD: "👻 нет в Telegram (удалён/username свободен)",
+    FAIL_TOO_MANY_CHATS: "📦 у цели предел по числу чатов",
+    FAIL_BANNED: "⛔ цель забанена в этом чате",
+    FAIL_BLOCKED: "🚷 цель заблокировала инвайтера",
+    FAIL_FLOOD: "⏳ флуд-лимит",
+    FAIL_PERM: "🚫 нет прав в чате",
+    FAIL_OTHER: "❓ прочее",
+}
+
+# Подсказка «что с этим делать» — по крупнейшей корзине отказов.
+FAIL_ADVICE = {
+    FAIL_PRIVACY: ("Приватность получателей Telegram обойти нельзя. Работает метод "
+                   "«ссылка в ЛС» — человек вступает сам."),
+    FAIL_NOT_MUTUAL: ("Эти цели требуют взаимного контакта. Метод «ссылка в ЛС» "
+                      "обходит требование."),
+    FAIL_DEAD: ("Аудитория устарела: этих аккаунтов больше нет. Соберите её заново "
+                "и почистите базу — на мёртвых целях тратится дневной лимит."),
+    FAIL_TOO_MANY_CHATS: ("Цели состоят в предельном числе чатов — Telegram не даст "
+                          "добавить их никаким методом."),
+    FAIL_BANNED: "Эти люди забанены в целевом чате — снимите бан или исключите их.",
+    FAIL_BLOCKED: "Цели заблокировали ваши аккаунты — используйте другие инвайтеры.",
+}
+
+_DEAD_MARKERS = (
+    "no user has", "cannot find any entity", "usernamenotoccupied",
+    "usernameinvalid", "inputuserdeactivated", "userdeactivated",
+    "peeridinvalid", "the username is not occupied",
+)
+
+
+def classify_invite_error(exc: BaseException) -> str:
+    """К какой корзине отнести отказ по одной цели.
+
+    Сначала по ИМЕНИ класса ошибки Telethon (устойчиво к формулировкам), затем по
+    тексту — часть случаев Telethon отдаёт обычным ValueError без своего типа.
+    """
+    name = type(exc).__name__
+    if name in ("UserPrivacyRestrictedError",):
+        return FAIL_PRIVACY
+    if name in ("UserNotMutualContactError",):
+        return FAIL_NOT_MUTUAL
+    if name in ("UserChannelsTooMuchError", "ChannelsTooMuchError"):
+        return FAIL_TOO_MANY_CHATS
+    if name in ("UserBannedInChannelError", "UserKickedError"):
+        return FAIL_BANNED
+    if name in ("UserBlockedError", "YouBlockedUserError"):
+        return FAIL_BLOCKED
+    if name in ("InputUserDeactivatedError", "UsernameNotOccupiedError",
+                "UsernameInvalidError", "PeerIdInvalidError"):
+        return FAIL_DEAD
+    if "flood" in name.lower():
+        return FAIL_FLOOD
+    text = str(exc).lower()
+    if any(m in text for m in _DEAD_MARKERS):
+        return FAIL_DEAD
+    if "too much" in text and "channel" in text:
+        return FAIL_TOO_MANY_CHATS
+    if "privacy" in text:
+        return FAIL_PRIVACY
+    return FAIL_OTHER
+
+
 async def invite_batch(
     session_string: str,
     _acc: dict | None,
     group_ref: str,
     user_refs: list[str | int],
+    pace_mult: float = 1.0,
 ) -> dict[str, Any]:
     """Добавить список пользователей (ID или @username) в группу.
 
+    pace_mult — множитель пауз ВНУТРИ батча. Раньше здесь стояла жёсткая пауза
+    2–4с на цель, не зависящая ни от режима темпа, ни от состояния аккаунта.
+    Она же и была основной задержкой прогона: исполнитель аккуратно считал
+    адаптивную паузу МЕЖДУ батчами, а внутри батча всё равно спалось 10–20с на
+    пятёрку целей. Пользователь выбирал «быстро» и не видел разницы — настройка
+    существовала, но ни на что не влияла.
+
     Возвращает:
-      {"ok": int, "failed": int, "peer_flood": bool, "errors": list[str]}
+      {"ok", "failed", "peer_flood", "flood_wait", "errors", "privacy_failed",
+       "no_rights", "fail_kinds"} — fail_kinds это {корзина: счётчик}, чтобы
+      вызывающему не приходилось угадывать причину разбором английского текста.
     """
     from services.account_manager import connect_client
     from telethon.tl.functions.channels import InviteToChannelRequest
@@ -109,12 +202,19 @@ async def invite_batch(
     except Exception:  # имя может отличаться между версиями telethon
         UsersTooMuchError = ()
 
+    # Множитель темпа: ограничиваем снизу, чтобы «быстро» не превращалось в
+    # безпаузный долбёж — самый верный способ поймать PeerFlood на первом батче.
+    _pm = max(0.35, float(pace_mult or 1.0))
     client = None
     ok, failed = 0, 0
     errors: list[str] = []
     peer_flood = False
     flood_wait = 0
     no_rights = False  # у ЭТОГО аккаунта нет прав админа (проблема аккаунта, не группы)
+    fail_kinds: dict[str, int] = {}
+
+    def _note(kind: str) -> None:
+        fail_kinds[kind] = fail_kinds.get(kind, 0) + 1
     # Цели, которые отклонены приватностью/не-взаимностью — их прямой инвайт не
     # берёт, но может взять «добавление через выдачу админки» (промоут-трюк).
     privacy_failed: list = []
@@ -138,29 +238,34 @@ async def invite_batch(
                 # privacy-ошибку — уйдёт в промоут/контакт-фолбэк).
                 if getattr(_res, "missing_invitees", None):
                     failed += 1
+                    _note(FAIL_PRIVACY)
                     privacy_failed.append(ref)
                     errors.append(f"{ref}: not added (privacy/limit — missing_invitee)")
                 else:
                     ok += 1
-                await asyncio.sleep(random.uniform(2.0, 4.0))
+                await asyncio.sleep(random.uniform(2.0, 4.0) * _pm)
             except UserAlreadyParticipantError:
                 ok += 1  # уже в группе = успех
             except UserPrivacyRestrictedError:
                 failed += 1
+                _note(FAIL_PRIVACY)
                 privacy_failed.append(ref)
                 errors.append(f"{ref}: privacy restricted")
             except UserNotMutualContactError:
                 failed += 1
+                _note(FAIL_NOT_MUTUAL)
                 privacy_failed.append(ref)
                 errors.append(f"{ref}: not mutual contact")
             except PeerFloodError:
                 peer_flood = True
                 failed += 1
+                _note(FAIL_FLOOD)
                 errors.append(f"{ref}: peer flood — аккаунт ограничен")
                 break  # аккаунт перегрет, дальше не пробуем
             except FloodWaitError as e:
                 _fw = int(getattr(e, "seconds", 60) or 60)
                 failed += 1
+                _note(FAIL_FLOOD)
                 errors.append(f"{ref}: flood wait {_fw}s")
                 if _fw > _MAX_FLOOD_INLINE:
                     # Длинный флуд: НЕ инвайтим во время активного флуда (эскалация).
@@ -180,29 +285,45 @@ async def invite_batch(
                 break
             except UsersTooMuchError:
                 failed += 1
+                _note(FAIL_PERM)
                 errors.append("group error: в чате достигнут лимит участников Telegram")
                 break
             except (ChatWriteForbiddenError, ChannelPrivateError) as e:
                 failed += 1
+                _note(FAIL_PERM)
                 errors.append(f"group error: нет доступа к чату ({type(e).__name__})")
                 break  # нет прав/группа закрыта
             except Exception as e:
-                log.warning('invite failed: %s', e)
+                # Сюда попадает большинство реальных отказов: мёртвый username,
+                # удалённый аккаунт, «слишком много чатов», бан в чате. Раньше
+                # все они уходили в отчёт сырым английским текстом Telethon и
+                # считались одной корзиной «прочее».
+                _kind = classify_invite_error(e)
+                _note(_kind)
                 failed += 1
-                errors.append(f"{ref}: {str(e)[:80]}")
+                if _kind in (FAIL_PRIVACY, FAIL_NOT_MUTUAL):
+                    privacy_failed.append(ref)
+                errors.append(f"{ref}: {FAIL_LABELS.get(_kind, str(e)[:80])}")
+                if _kind == FAIL_OTHER:
+                    log.warning("invite failed: %s", e)
 
     except Exception as exc:
         log.warning("invite_batch connect/group error: %s", exc)
         errors.append(f"connect: {str(exc)[:100]}")
     finally:
-        try:
-            await client.disconnect()
-        except Exception as e:
-            log_exc_swallow(log, "invite_batch: disconnect")
+        # client остаётся None, если упал сам connect_client — тогда disconnect
+        # звать не на чем, и попытка давала лишний AttributeError в логе поверх
+        # настоящей причины сбоя.
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "invite_batch: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors,
-            "privacy_failed": privacy_failed, "no_rights": no_rights}
+            "privacy_failed": privacy_failed, "no_rights": no_rights,
+            "fail_kinds": fail_kinds}
 
 
 # ── Автовыдача прав админа инвайтерам + «промоут-трюк» ───────────────────────
@@ -242,10 +363,14 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:120]}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "channel_admin_status: disconnect")
+        # client остаётся None, если упал сам connect_client —
+        # тогда disconnect звать не на чем, и попытка добавляла лишний
+        # AttributeError в лог поверх настоящей причины сбоя.
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "channel_admin_status: disconnect")
 
 
 async def check_membership_and_admin(session_string: str, _acc: dict | None,
@@ -296,10 +421,14 @@ async def check_membership_and_admin(session_string: str, _acc: dict | None,
     except Exception as exc:
         return {"state": "error", "error": str(exc)[:120]}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "check_membership_and_admin: disconnect")
+        # client остаётся None, если упал сам connect_client —
+        # тогда disconnect звать не на чем, и попытка добавляла лишний
+        # AttributeError в лог поверх настоящей причины сбоя.
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "check_membership_and_admin: disconnect")
 
 
 async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str,
@@ -389,10 +518,14 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
         log.warning("add_via_promote connect/group error: %s", exc)
         errors.append(f"connect: {str(exc)[:100]}")
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "add_via_promote: disconnect")
+        # client остаётся None, если упал сам connect_client —
+        # тогда disconnect звать не на чем, и попытка добавляла лишний
+        # AttributeError в лог поверх настоящей причины сбоя.
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "add_via_promote: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights}
@@ -420,10 +553,14 @@ async def export_group_invite_link(session_string: str, _acc: dict | None,
         log.warning("export_group_invite_link error: %s", e)
         return ""
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "export_group_invite_link: disconnect")
+        # client остаётся None, если упал сам connect_client —
+        # тогда disconnect звать не на чем, и попытка добавляла лишний
+        # AttributeError в лог поверх настоящей причины сбоя.
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "export_group_invite_link: disconnect")
 
 
 # Шаблон сообщения со ссылкой-приглашением (по умолчанию). {link} обязателен.
@@ -616,10 +753,14 @@ async def invite_by_phones(
         errors.append(str(exc)[:100])
         not_found_phones = []
     finally:
-        try:
-            await client.disconnect()
-        except Exception as e:
-            log_exc_swallow(log, "invite_by_phones: disconnect")
+        # client остаётся None, если упал сам connect_client —
+        # тогда disconnect звать не на чем, и попытка добавляла лишний
+        # AttributeError в лог поверх настоящей причины сбоя.
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception as e:
+                log_exc_swallow(log, "invite_by_phones: disconnect")
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,

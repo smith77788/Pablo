@@ -70,8 +70,13 @@ class _Stand:
     def __init__(self, responder):
         self.responder = responder
         self.calls: list[tuple[int, list]] = []
+        self.pace_seen: list[float] = []
 
-    async def invite_batch(self, session_str, acc, group, refs):
+    async def invite_batch(self, session_str, acc, group, refs, pace_mult=1.0):
+        # pace_mult: исполнитель прокидывает множитель темпа ВНУТРЬ батча —
+        # до этого движок спал фиксированные 2–4с на цель, и режим «быстро»
+        # не влиял на основную задержку прогона.
+        self.pace_seen.append(float(pace_mult))
         self.calls.append((int(acc["id"]), list(refs)))
         return self.responder(int(acc["id"]), list(refs))
 
@@ -561,4 +566,49 @@ def test_invited_targets_written_in_one_query(stand):
     assert len(pool.log) == len(TARGETS)
     assert pool.log_writes == 1, (
         f"на {len(TARGETS)} целей ушло {pool.log_writes} запросов — должен быть один"
+    )
+
+
+# ── Темп: настройка обязана доходить до движка ───────────────────────────────
+
+def test_pace_reaches_the_engine(stand):
+    """Режим темпа должен влиять на паузы ВНУТРИ батча, а не только между ними.
+
+    Раньше движок спал фиксированные 2–4с на каждую цель, и именно это было
+    основной задержкой прогона: пользователь выбирал «быстро», исполнитель
+    послушно уменьшал паузу МЕЖДУ батчами, а суммарное время почти не менялось.
+    Настройка существовала и ни на что не влияла.
+    """
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    _run(_Pool(), TARGETS[:5], pace="fast")
+    assert s.pace_seen, "движок не получил множитель темпа"
+    assert all(p < 1.0 for p in s.pace_seen), (
+        f"режим «быстро» должен уменьшать паузы внутри батча, получено {s.pace_seen}"
+    )
+
+    s2 = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    _run(_Pool(), TARGETS[:5], pace="slow")
+    assert all(p > 1.0 for p in s2.pace_seen), (
+        f"режим «медленно» должен увеличивать паузы, получено {s2.pace_seen}"
+    )
+
+
+def test_failure_reasons_come_from_engine_structure(stand):
+    """Причины отказов берутся из fail_kinds, а не угадываются по тексту."""
+    from services import mass_inviter_engine as mie
+
+    def responder(acc_id, refs, dry=False):
+        return {"ok": 0, "failed": len(refs), "errors": [],
+                "fail_kinds": {mie.FAIL_DEAD: len(refs)}}
+
+    stand(responder)
+    res = _run(_Pool(), TARGETS[:5])
+    assert mie.FAIL_LABELS[mie.FAIL_DEAD] in res["summary"], (
+        f"корзина отказа не названа в итоге: {res['summary']}"
+    )
+    assert mie.FAIL_ADVICE[mie.FAIL_DEAD][:30] in res["summary"], (
+        "к крупнейшей корзине отказов должна прилагаться подсказка «что делать»"
+    )
+    assert "прочее" not in res["summary"], (
+        "известная причина не должна попадать в корзину «прочее»"
     )

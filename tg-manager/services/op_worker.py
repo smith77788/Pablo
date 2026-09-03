@@ -10561,7 +10561,11 @@ async def _exec_mass_invite(
                     res = await inv.invite_via_link_batch(
                         acc["session_str"], dict(acc), _invite_link, batch, _link_msg)
                 else:
-                    res = await inv.invite_batch(acc["session_str"], dict(acc), group, batch)
+                    # Множитель темпа уходит ВНУТРЬ батча: раньше движок спал
+                    # 2–4с на цель независимо от выбранного режима, и «быстро»
+                    # не ускоряло ничего заметного.
+                    res = await inv.invite_batch(
+                        acc["session_str"], dict(acc), group, batch, _pace_mult)
             except Exception as exc:
                 # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
                 # другой аккаунт), а этот выводим из круга, чтобы не зациклиться.
@@ -10672,19 +10676,27 @@ async def _exec_mass_invite(
             # Классифицируем причины отказов + ПИШЕМ по каждой цели в лог операции,
             # чтобы CSV показывал, КТО и ПОЧЕМУ не добавлен (раньше per-target лога
             # инвайта не было — «Ошибок: 7» без деталей).
+            # Причины отказов движок теперь отдаёт СТРУКТУРОЙ (fail_kinds).
+            # Разбор английского текста ошибок оставлен запасным путём — для
+            # движков «через админку» и «ссылка в ЛС», которые его пока не дают.
+            _kinds = res.get("fail_kinds")
+            if _kinds:
+                for _k, _n in _kinds.items():
+                    _fail_reasons[_k] = _fail_reasons.get(_k, 0) + int(_n)
             for _e in (res.get("errors") or []):
-                _es = str(_e).lower()
-                if "privacy" in _es:
-                    _k = "privacy"
-                elif "not mutual" in _es:
-                    _k = "not_mutual"
-                elif _es.startswith("group error"):
-                    _k = "perm"
-                elif "flood" in _es:
-                    _k = "flood"
-                else:
-                    _k = "other"
-                _fail_reasons[_k] = _fail_reasons.get(_k, 0) + 1
+                if not _kinds:
+                    _es = str(_e).lower()
+                    if "privacy" in _es:
+                        _k = "privacy"
+                    elif "not mutual" in _es:
+                        _k = "not_mutual"
+                    elif _es.startswith("group error"):
+                        _k = "perm"
+                    elif "flood" in _es:
+                        _k = "flood"
+                    else:
+                        _k = "other"
+                    _fail_reasons[_k] = _fail_reasons.get(_k, 0) + 1
                 # "{ref}: reason" → target=ref, message=reason; иначе цель — группа.
                 _raw = str(_e)
                 if _raw.startswith("group error"):
@@ -10825,16 +10837,15 @@ async def _exec_mass_invite(
     _left = len(q_users) + len(q_phones)
 
     # Человекочитаемый разбор ошибок — чтобы «Ошибок: 7» не читалось как поломка.
-    _reason_labels = {
-        "privacy": "🔒 приватность (нельзя добавить)",
-        "not_mutual": "🔒 не в контактах",
-        "perm": "🚫 нет прав в чате",
-        "flood": "⏳ флуд-лимит",
-        "other": "❓ прочее",
-    }
+    _reason_labels = dict(inv.FAIL_LABELS)
     _fail_breakdown = " · ".join(
         f"{_reason_labels.get(k, k)}: {v}"
         for k, v in sorted(_fail_reasons.items(), key=lambda kv: -kv[1]) if v)
+    # Подсказка по КРУПНЕЙШЕЙ корзине отказов: цифра без действия оператору
+    # ничего не даёт — «👻 нет в Telegram: 812» означает «почистите базу», а
+    # «🔒 приватность: 812» — «смените метод на ссылку в ЛС».
+    _top_reason = max(_fail_reasons.items(), key=lambda kv: kv[1])[0] if _fail_reasons else ""
+    _fail_advice = inv.FAIL_ADVICE.get(_top_reason, "") if total_fail else ""
 
     # ── Остаток не бросаем: продолжим, когда лимиты обновятся ────────────────
     # Суточный лимит на аккаунт консервативен по умолчанию (холодный старт — 15).
@@ -10928,7 +10939,9 @@ async def _exec_mass_invite(
            "остальные подтянутся следующими прогонами." if not _source_exhausted else "")
         + (f"\n🚫 Пропущено из реестра «не приглашать»: {_opted_out}" if _opted_out else "")
         + (f"\n📵 Номеров не в Telegram (пропущены): {_phones_not_found}" if _phones_not_found else "")
-        + (f"\n⚠️ Ошибок: {total_fail}" + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")
+        + (f"\n⚠️ Ошибок: {total_fail}"
+           + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")
+           + (f"\n   💡 {_fail_advice}" if _fail_advice else "")
            if total_fail else "")
         + (f"\n🤖 Авто-темп: {_auto_reason}" if _auto_reason else "")
         + ("\n🚀 Режим «один проход»: работали до потолка ёмкости по живым сигналам "
