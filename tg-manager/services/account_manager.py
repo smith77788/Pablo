@@ -2256,6 +2256,10 @@ async def get_dialogs(
                 log.debug("get_dialogs: dialog.entity error: %s", e)
                 continue
             if isinstance(entity, (Channel, Chat)):
+                # Права аккаунта в этом канале/группе — чтобы отличать «мою
+                # инфраструктуру» (создатель/админ) от чужих подписок (участник).
+                _is_creator = bool(getattr(entity, "creator", False))
+                _admin_rights = getattr(entity, "admin_rights", None)
                 dialogs.append(
                     {
                         "id": entity.id,
@@ -2274,6 +2278,8 @@ async def get_dialogs(
                         "members": getattr(entity, "participants_count", 0) or 0,
                         "username": getattr(entity, "username", "") or "",
                         "access_hash": getattr(entity, "access_hash", 0) or 0,
+                        "is_creator": _is_creator,
+                        "is_admin": _is_creator or _admin_rights is not None,
                     }
                 )
         return dialogs

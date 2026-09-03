@@ -3581,12 +3581,14 @@ async def upsert_managed_channels(
                 acc_id,
             )
             await conn.executemany(
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
-                   VALUES($1, $2, $3, $4, $5, $6, $7)
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, is_admin, is_creator)
+                   VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
                    ON CONFLICT (owner_id, channel_id) DO UPDATE
                    SET title=EXCLUDED.title, username=EXCLUDED.username,
                        acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-                       type=EXCLUDED.type""",
+                       type=EXCLUDED.type,
+                       is_admin=COALESCE(EXCLUDED.is_admin, managed_channels.is_admin),
+                       is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator)""",
                 [
                     (
                         owner_id,
@@ -3596,6 +3598,8 @@ async def upsert_managed_channels(
                         ch.get("username", ""),
                         ch.get("access_hash", 0),
                         ch.get("type", "channel"),
+                        ch.get("is_admin"),
+                        ch.get("is_creator"),
                     )
                     for ch in channels
                 ],
@@ -3619,12 +3623,14 @@ async def add_managed_channels(
     if not channels:
         return 0
     await pool.executemany(
-        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
-           VALUES($1, $2, $3, $4, $5, $6, $7)
+        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, is_admin, is_creator)
+           VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
            ON CONFLICT (owner_id, channel_id) DO UPDATE
            SET title=EXCLUDED.title, username=EXCLUDED.username,
                acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-               type=EXCLUDED.type""",
+               type=EXCLUDED.type,
+               is_admin=COALESCE(EXCLUDED.is_admin, managed_channels.is_admin),
+               is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator)""",
         [
             (
                 owner_id,
@@ -3634,6 +3640,8 @@ async def add_managed_channels(
                 ch.get("username", ""),
                 ch.get("access_hash", 0),
                 ch.get("type", "channel"),
+                ch.get("is_admin"),
+                ch.get("is_creator"),
             )
             for ch in channels
         ],

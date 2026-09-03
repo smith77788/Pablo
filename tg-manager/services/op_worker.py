@@ -6910,10 +6910,13 @@ async def _exec_group_import_all(
     from services import account_manager
     from database.db import add_managed_channels
 
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
     if account_ids:
         rows = await resource_selector.select_all_active(
-        pool, owner_id, min_trust_score=0.0)
+            pool, owner_id, include_ids=account_ids, min_trust_score=0.0)
+    else:
+        rows = await resource_selector.select_all_active(
+            pool, owner_id, min_trust_score=0.0)
     accounts = [dict(r) for r in rows]
     if not accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
@@ -6930,6 +6933,7 @@ async def _exec_group_import_all(
     try:
 
         total_imported = 0
+        total_foreign = 0  # группы, где аккаунт лишь участник — чужие, не тянем
         errors: list[str] = []
         n = len(accounts)
         await _safe_execute(
@@ -6944,10 +6948,13 @@ async def _exec_group_import_all(
                 }
             try:
                 dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
-                groups = [
+                typed = [
                     d for d in dialogs
                     if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
                 ]
+                # «Моя инфраструктура» = группы, где аккаунт создатель или админ.
+                groups = [d for d in typed if d.get("is_admin") or d.get("is_creator")]
+                total_foreign += len(typed) - len(groups)
                 if groups:
                     # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 групп), поэтому groups — частичный
@@ -6968,11 +6975,13 @@ async def _exec_group_import_all(
                 await asyncio.sleep(2)
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
+        foreign_hint = f"\n🚫 Пропущено чужих (только участник): {total_foreign}" if total_foreign else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{err_hint}",
+            "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{foreign_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
@@ -7967,6 +7976,7 @@ async def _exec_channel_import_all(
                 pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
 
         total_imported = 0
+        total_foreign = 0  # чужие каналы (аккаунт — лишь подписчик), их не тянем
         errors: list[str] = []
 
         for idx, acc in enumerate(accounts):
@@ -7978,7 +7988,12 @@ async def _exec_channel_import_all(
                 }
             try:
                 dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
-                channels = [d for d in dialogs if d.get("type") in _CHANNEL_TYPES]
+                typed = [d for d in dialogs if d.get("type") in _CHANNEL_TYPES]
+                # «Моя инфраструктура» = каналы, где аккаунт создатель или админ.
+                # Каналы-подписки (участник) — чужие, в managed_channels не тянем,
+                # иначе список «Мои каналы» распухает чужими подписками.
+                channels = [d for d in typed if d.get("is_admin") or d.get("is_creator")]
+                total_foreign += len(typed) - len(channels)
                 if channels:
                     # add_managed_channels — НЕ upsert_managed_channels(): get_dialogs(limit=200)
                     # отдаёт максимум 200 ДИАЛОГОВ (не 200 каналов), поэтому channels — частичный
@@ -7999,11 +8014,13 @@ async def _exec_channel_import_all(
                 await session_simulator.short_pause(1.5, 3.0)
 
         err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
+        foreign_hint = f"\n🚫 Пропущено чужих (только подписка): {total_foreign}" if total_foreign else ""
         return {
             "status": "done",
             "imported": total_imported,
+            "foreign_skipped": total_foreign,
             "accounts": n,
-            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{err_hint}",
+            "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{foreign_hint}{err_hint}",
         }
     finally:
         await release_accounts(claimed_ids)
