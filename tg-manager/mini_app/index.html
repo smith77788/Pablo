@@ -13821,6 +13821,9 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0">💼 CRM</button>
     </div>`;
     txt('cdBody', html);
+    if (c.telegram_user_id || c.username || (c.phones && c.phones.length)) {
+      renderContactInviteLink(id);  // screens/contact_invite_link.js — своя секция
+    }
   } catch(e) { txt('cdBody', errHtml(e.message)); }
 }
 
@@ -21050,5 +21053,6 @@ function downloadBlob(content, filename, type) {
 <script src="screens/spintax.js"></script>
 <script src="screens/cmdcenter.js"></script>
 <script src="screens/dashboard.js"></script>
+<script src="screens/contact_invite_link.js"></script>
 </body>
 </html>

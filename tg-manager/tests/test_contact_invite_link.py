@@ -116,6 +116,28 @@ def test_mini_app_endpoints_registered_and_wired():
     assert "allow_contact_invite" in seg
 
 
+def test_mini_app_ui_wired_into_contact_detail():
+    """Ровно одна строка в openContactDetail подключает новую секцию — не
+    трогает основной рендер карточки (минимальный отпечаток в index.html)."""
+    html = _read("mini_app/index.html")
+    assert '<script src="screens/contact_invite_link.js"></script>' in html
+    i_db = html.index('<script src="screens/dashboard.js">')
+    i_cil = html.index('<script src="screens/contact_invite_link.js">')
+    assert i_db < i_cil, "contact_invite_link.js должен грузиться после dashboard.js"
+    assert "renderContactInviteLink(id)" in html
+
+
+def test_mini_app_screen_uses_documented_endpoints():
+    js = _read("mini_app/screens/contact_invite_link.js")
+    for fn in ("renderContactInviteLink", "_cilEnsureBox", "_cilRender", "_cilOptOut", "_cilAllow"):
+        assert f"function {fn}" in js, f"нет {fn}"
+    assert "/invite_history')" in js
+    assert "/opt_out'" in js
+    assert "/allow_invite'" in js
+    # box переиспользуется при повторном вызове — не задваивает секцию
+    assert "getElementById('cilBox')" in js
+
+
 def test_all_public_functions_present():
     from services import contact_invite_link as cil
 
