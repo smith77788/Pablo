@@ -24,15 +24,21 @@ The pool automatically applies all `schema*.sql` files on startup.
 
 ### Schema Migration
 
-Schema files are applied in version order, in full, on every process start
-(no skip-already-applied tracking — idempotent SQL is what makes repeated
-application safe):
+Schema files are applied in version order on process start, skipping any file
+the `schema_migrations` journal already records as `ok`. Only files marked
+`warnings` (a previous partial failure) and files absent from the journal are
+re-run; idempotent SQL keeps that re-run safe:
 - `schema.sql` — base schema
-- `schema_v2.sql` through `schema_v152.sql` — incremental migrations (151
-  files as of 2026-07-09; growth already flagged as technical debt, see
-  `docs/SCHEMA_CONSOLIDATION_PLAN.md` for a phased consolidation plan)
+- `schema_v2.sql` through `schema_v193_channel_ownership.sql` — incremental
+  migrations (194 files as of 2026-09-03; growth flagged as technical debt, see
+  `docs/SCHEMA_CONSOLIDATION_PLAN.md` for the phased consolidation)
+- `schema_baseline.sql` + `.manifest` — optional snapshot that replaces the whole
+  history on a provably empty database (built by
+  `deploy/scripts/make_schema_baseline.py`)
 
-Each file is split into individual statements and executed idempotently.
+Each file runs in its own transaction with a savepoint per statement, under a
+`lock_timeout`, so a blocked `ALTER` fails and retries instead of freezing
+startup.
 
 ### Query Helpers
 

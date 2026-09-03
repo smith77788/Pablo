@@ -26,6 +26,23 @@ from database.pool_config import get_pool_config, log_pool_config
 log = logging.getLogger(__name__)
 
 
+def parse_baseline_manifest(text: str) -> set[str]:
+    """Разобрать манифест baseline: имена файлов схемы, которые снимок содержит.
+
+    Формат намеренно простой — по имени файла в строке, `#` начинает комментарий:
+    манифест правит человек рядом с релизом, и любой формат сложнее ломался бы
+    молча. Пустые строки и пути игнорируются: в журнал миграций попадает только
+    базовое имя, как и у обычных файлов схемы.
+    """
+    names: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        names.add(os.path.basename(line))
+    return names
+
+
 def _split_sql_statements(sql: str) -> list[str]:
     """Split a SQL file into individual statements on top-level ";".
 
@@ -279,6 +296,55 @@ async def create_pool() -> asyncpg.Pool:
             _applied_ok = {r["filename"] for r in _rows}
         except Exception:
             _applied_ok = set()
+
+        # ── Baseline: пустая база не должна проигрывать 190+ файлов ──────────
+        # Журнал выше избавил ОБНОВЛЕНИЕ от повторного проигрывания, но ПЕРВЫЙ
+        # запуск на чистой базе по-прежнему прокатывает всю историю миграций
+        # подряд: чем дальше, тем дольше старт нового окружения и тем выше шанс,
+        # что развалится давняя миграция, чей контекст уже никто не помнит.
+        # Baseline — снимок схемы на некоторой версии плюс манифест файлов,
+        # которые он уже содержит. Берём его ТОЛЬКО на заведомо чистой базе
+        # (пустой журнал И нет ключевой таблицы): у существующего окружения
+        # снимок затирал бы данные, а у наполовину мигрированного — молча
+        # пометил бы непроигранные файлы применёнными.
+        # Сам файл снимка генерируется из живой базы: deploy/scripts/make_schema_baseline.py.
+        _baseline_sql = os.path.join(base_dir, "schema_baseline.sql")
+        _baseline_manifest = os.path.join(base_dir, "schema_baseline.manifest")
+        _baselined: set[str] = set()
+        if not _applied_ok and os.path.exists(_baseline_sql) and os.path.exists(_baseline_manifest):
+            try:
+                _core_exists = await conn.fetchval("SELECT to_regclass('public.tg_accounts')")
+            except Exception:
+                _core_exists = "unknown"      # не смогли проверить — не рискуем
+            if _core_exists is None:
+                with open(_baseline_manifest, encoding="utf-8") as _mf:
+                    _baselined = parse_baseline_manifest(_mf.read())
+                with open(_baseline_sql, encoding="utf-8") as _bf:
+                    _b_stmts = _split_sql_statements(_bf.read())
+                _b_ok, _b_errs, _b_last = await apply_migration_statements(
+                    conn, _b_stmts, "schema_baseline.sql")
+                if _b_ok:
+                    log.info("Schema baseline применён: %d операторов, %d файлов "
+                             "истории помечены применёнными",
+                             len(_b_stmts), len(_baselined))
+                    for _bn_b in sorted(_baselined) + ["schema_baseline.sql"]:
+                        try:
+                            await conn.execute(
+                                """INSERT INTO schema_migrations(filename, status, error_count, applied_at)
+                                   VALUES($1, 'ok', 0, now())
+                                   ON CONFLICT (filename) DO NOTHING""", _bn_b)
+                        except Exception:
+                            pass
+                    _applied_ok = set(_baselined)
+                else:
+                    # Снимок не лёг — откатываться некуда и незачем: дальше
+                    # отработает обычный путь по файлам, он идемпотентен.
+                    log.error("Schema baseline не применился (%d ошибок, последняя: %s) — "
+                              "иду обычным путём по файлам истории", _b_errs, _b_last)
+                    _baselined = set()
+            else:
+                log.info("Schema baseline пропущен: база не пустая "
+                         "(есть tg_accounts) — играю историю миграций как обычно")
 
         applied = 0
         failed = 0

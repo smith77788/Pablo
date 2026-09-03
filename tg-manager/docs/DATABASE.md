@@ -1,10 +1,10 @@
 # Database — База данных
 
 ## Stack
-PostgreSQL · asyncpg pool (min=15, max=50) · `schema.sql` + `schema_v2.sql` … `schema_v152.sql`
-(151 файлов на 2026-07-09, число растёт — см. «Миграции» ниже и
-`docs/SCHEMA_CONSOLIDATION_PLAN.md` про план консолидации без большого
-разового риска).
+PostgreSQL · asyncpg pool (min=15, max=50) · `schema.sql` + `schema_v2.sql` …
+`schema_v193_channel_ownership.sql` (194 файла на 2026-09-03, число растёт —
+см. «Миграции» ниже и `docs/SCHEMA_CONSOLIDATION_PLAN.md` про свёртку истории
+в baseline без большого разового риска).
 
 ## Таблицы
 
@@ -56,14 +56,28 @@ CREATE INDEX idx_audit_account ON operation_audit(account_id);
 
 ## Миграции
 - Файлы `schema_v*.sql` в корне (+ дубли в `database/` при наличии)
-- Применяются `database/db.py::create_pool()` **заново при каждом старте
-  процесса** — нет пропуска уже применённых файлов, единственная защита от
-  повторного применения — идемпотентность SQL (`IF NOT EXISTS` и т.п.).
-  Таблица `schema_migrations` фиксирует статус применения каждого файла, но
-  используется только для наблюдаемости, не для skip-логики.
+- Применяются `database/db.py::create_pool()` на старте процесса, в порядке
+  версии, **с пропуском уже применённых**: таблица `schema_migrations` хранит
+  статус каждого файла, и файлы со статусом `ok` при следующем старте не
+  выполняются. Перезапускаются только файлы со статусом `warnings` (был
+  частичный сбой) и те, которых в журнале ещё нет.
+- Транзакция на файл, savepoint на оператор: сбой одного оператора не рвёт весь
+  файл, а фиксируется в `schema_migrations.last_error`.
+- `SET lock_timeout` (по умолчанию `5s`, переопределяется `SCHEMA_LOCK_TIMEOUT`):
+  DDL, не получивший блокировку, честно падает и повторяется, но **приложение
+  стартует в любом случае**. Иначе `ALTER TABLE`, ждущий блокировку за старым
+  контейнером, вешал бы каждый запрос к данным.
+- После миграций проверяются критичные таблицы. По умолчанию их отсутствие —
+  ERROR в лог (падать нельзя: получился бы цикл перезапусков); `SCHEMA_STRICT=1`
+  превращает это в отказ старта.
+- Baseline (`schema_baseline.sql` + `schema_baseline.manifest`): на **заведомо
+  чистой** базе — пустой журнал И нет `tg_accounts` — применяется снимок схемы,
+  а покрытые им файлы истории помечаются применёнными. Снимок генерируется из
+  живой базы: `deploy/scripts/make_schema_baseline.py`. У существующего
+  окружения baseline не берётся никогда.
 - Идемпотентны (IF NOT EXISTS)
-- Только ADD COLUMN, не удалять (в 151 файле на 2026-07-09 нет ни одного
+- Только ADD COLUMN, не удалять (в 194 файлах на 2026-09-03 нет ни одного
   `DROP TABLE`/`DROP COLUMN`)
-- Число файлов уже нарушает `.botmother/21_DATABASE_GOVERNANCE.md`
-  ("avoid uncontrolled schema growth"). Не консолидировать всё разом —
-  конкретный, дробимый на фазы план: `docs/SCHEMA_CONSOLIDATION_PLAN.md`.
+- Число файлов нарушает `.botmother/21_DATABASE_GOVERNANCE.md`
+  ("avoid uncontrolled schema growth"). Свёртка — по фазам, не разом:
+  `docs/SCHEMA_CONSOLIDATION_PLAN.md`.
