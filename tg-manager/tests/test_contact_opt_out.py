@@ -101,7 +101,11 @@ def test_wired_into_mass_invite_exec():
     seg = src[start:next_def if next_def != -1 else len(src)]
     assert "contact_opt_out" in seg
     assert "load_opted_out(pool, owner_id)" in seg
-    assert "filter_targets(" in seg
+    # Реестр применяется ДО усечения источника — иначе opted-out цели съедали бы
+    # выборку и вытесняли из неё живые. Поведение: test_invite_queue_scheduler.
+    assert "_oo_keys" in seg and "compare_key" in seg, (
+        "opt-out должен фильтровать цели по нормализованному ключу"
+    )
     # отдельный счётчик от per-группового дедупа — разная причина пропуска
     assert "_opted_out" in seg
     # попадает в финальную сводку оператору, а не только в ранний return

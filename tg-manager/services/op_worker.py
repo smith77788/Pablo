@@ -9317,6 +9317,35 @@ async def _filter_quarantined_accounts(
 # продлеваться не должен, иначе забытая операция будет жить месяцами.
 _MAX_INVITE_CHAIN = 14
 
+# Потолок пула целей, читаемых из источника за одну операцию инвайта. Прежние
+# 2000 были зашиты в каждый запрос и служили одновременно потолком и причиной
+# ложного тупика «все уже приглашены» (дедуп применялся ПОСЛЕ усечения). Остаток
+# уезжает в продолжение (_schedule_invite_continuation), так что больший пул —
+# это то, что цепочке нужно дотягивать.
+_INVITE_AUDIENCE_CAP = 20000
+
+
+def _row_to_ref(row) -> tuple:
+    """Строка источника аудитории → (цель, ключ источника).
+
+    Одна функция на все источники: у них разные колонки, но одинаковый контракт —
+    '@username' | numeric id | '+phone' и метка источника для interleave_by_source.
+    (None, None) — строка не даёт годной цели.
+    """
+    r = dict(row)
+    skey = r.get("source_username") or r.get("source_id") or r.get("bot_id")
+    uname = r.get("username")
+    if uname:
+        return "@" + str(uname).lstrip("@"), skey
+    for col in ("tg_user_id", "user_id"):
+        if r.get(col):
+            return r[col], skey
+    ph = r.get("phone")
+    if ph:
+        ph = str(ph).strip()
+        return (ph if ph.startswith("+") else "+" + ph), skey
+    return None, None
+
 
 async def _schedule_invite_continuation(
     pool, owner_id: int, params: dict, users: list, phones: list, chain: int
@@ -9642,7 +9671,12 @@ async def _load_invited_targets(pool, owner_id: int, group_key: str) -> set:
             "SELECT target FROM invite_target_log WHERE owner_id=$1 AND group_key=$2",
             owner_id, group_key,
         )
-        return {r["target"] for r in (rows or [])}
+        # Ключи нормализованные: '@Ivan' и '@ivan' — один человек, и Telegram
+        # матчит username именно так. Сырое сравнение строк давало второй инвайт
+        # в ту же группу тому, кто попал в аудиторию из двух парсингов с разным
+        # регистром (в реестре «не приглашать» это уже было учтено, здесь — нет).
+        from services.contact_opt_out import compare_key as _ck
+        return {_ck(r["target"]) for r in (rows or [])}
     except Exception:
         log_exc_swallow(log, "invite dedup: load failed")
         return set()
@@ -9655,12 +9689,15 @@ async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: in
         return
     try:
         await pool.execute(_INVITE_LOG_DDL)
-        for t in uniq:
-            await pool.execute(
-                "INSERT INTO invite_target_log(owner_id, group_key, target, op_id) "
-                "VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
-                owner_id, group_key, t, op_id,
-            )
+        # Один запрос вместо N: прогон на 2000 успешных целей давал 2000
+        # round-trip'ов в конце операции — минуты ожидания на ровном месте и
+        # окно, в котором падение процесса теряло ВЕСЬ дедуп прогона.
+        await pool.execute(
+            "INSERT INTO invite_target_log(owner_id, group_key, target, op_id) "
+            "SELECT $1, $2, t, $4 FROM unnest($3::text[]) AS t "
+            "ON CONFLICT DO NOTHING",
+            owner_id, group_key, sorted(uniq), op_id,
+        )
     except Exception:
         log_exc_swallow(log, "invite dedup: record failed")
 
@@ -9826,11 +9863,85 @@ async def _exec_mass_invite(
             log.debug("mass_invite: auto strategy unavailable op=%d", op_id)
             _pace_mult, _batch_delay = 1.0, 3.0
 
-    # Audience may be passed explicitly (bot handler sends user_refs/phones) OR
-    # referenced by source (Mini App sends only {group, source}). When no explicit
-    # list is given, load it from the matching table here — otherwise the invite
-    # loop iterates an empty audience and adds nobody.
+    # ── Аудитория ────────────────────────────────────────────────────────────
+    # Список либо передан явно (бот-хендлер шлёт user_refs/phones), либо задан
+    # источником (мини-апп шлёт только {group, source}) — тогда грузим его здесь.
+    #
+    # ПОРЯДОК ВАЖЕН. Раньше источник читался одним `LIMIT 2000`, и только потом
+    # применялись дедуп и реестр «не приглашать». Для второй кампании в ту же
+    # группу это давало ложный тупик: свежие 2000 целиком состояли из уже
+    # приглашённых, операция завершалась словами «все цели уже приглашались,
+    # соберите свежую аудиторию» — при том, что в базе лежали десятки тысяч
+    # НЕтронутых. Пользователь шёл собирать аудиторию, которая у него уже была.
+    #
+    # Теперь фильтры известны ДО чтения, а источник читается страницами, пока не
+    # наберётся нужное число СВЕЖИХ целей (или источник не кончится). Усечение
+    # больше не молчаливое: сколько отброшено и осталось — видно в итоге.
+    _group_key = inv.parse_group_ref(group)
+    _skip_invited = bool(params.get("skip_invited", True))
+    _already = await _load_invited_targets(pool, owner_id, _group_key) if _skip_invited else set()
+    from services import contact_opt_out as _coo
+    _oo = await _coo.load_opted_out(pool, owner_id)
+    _oo_keys = {_coo.compare_key(t) for t in _oo}
+    _deduped = 0
+    _opted_out = 0
+    _source_exhausted = True     # источник вычитан до конца (не упёрлись в потолок)
+
+    def _fresh(ref) -> bool:
+        """Цель не приглашалась в эту группу и не в реестре «не приглашать».
+
+        Сравнение регистронезависимо для username'ов: '@Ivan' и '@ivan' —
+        один и тот же человек, и Telegram матчит их именно так. Раньше дедуп
+        сравнивал строки как есть, поэтому один и тот же человек, попавший в
+        аудиторию из двух парсингов с разным регистром, получал два инвайта в
+        одну группу (opt-out это уже учитывал, дедуп — нет).
+        """
+        nonlocal _deduped, _opted_out
+        key = _coo.compare_key(str(ref))
+        if key in _oo_keys:
+            _opted_out += 1
+            return False
+        if _skip_invited and key in _already:
+            _deduped += 1
+            return False
+        return True
+
     if not user_refs and not phones:
+        # Потолок пула целей за операцию. Прежние 2000 были и потолком, и
+        # причиной ложного тупика выше; остаток всё равно уезжает в продолжение
+        # (_schedule_invite_continuation), поэтому больший пул только помогает —
+        # цепочка наконец получает, что дотягивать.
+        _AUD_CAP = _INVITE_AUDIENCE_CAP
+        _PAGE = 2000
+
+        async def _page_source(sql: str, *args) -> list:
+            """Читать источник страницами, оставляя только свежие цели.
+
+            Возвращает список пар (ref, source_key) — вперемешку их разложит
+            interleave_by_source. Останавливается, когда набрано _AUD_CAP свежих
+            или источник кончился; факт упора в потолок фиксируется, чтобы итог
+            не врал про «это вся аудитория».
+            """
+            nonlocal _source_exhausted
+            out: list = []
+            offset = 0
+            while len(out) < _AUD_CAP:
+                rows = await _safe_fetch(pool, sql + f" LIMIT {_PAGE} OFFSET {offset}", *args)
+                if not rows:
+                    return out
+                offset += len(rows)
+                for r in rows:
+                    ref, skey = _row_to_ref(r)
+                    if ref is None or not _fresh(ref):
+                        continue
+                    out.append((ref, skey))
+                    if len(out) >= _AUD_CAP:
+                        _source_exhausted = False
+                        return out
+                if len(rows) < _PAGE:
+                    return out
+            return out
+
         if source == "parsed":
             # Конкретный запуск парсера (мост «→ в инвайт»), иначе — вся аудитория.
             _pr = params.get("parse_run_id")
@@ -9845,43 +9956,28 @@ async def _exec_mass_invite(
             _af = params.get("aud_filters") or {}
             if _pr:
                 _fsql, _fp = parsed_audience_filters(_af, base_params_count=2)
-                rows = await _safe_fetch(
-                    pool,
+                _pairs = await _page_source(
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} ORDER BY parsed_at DESC LIMIT 2000",
-                    owner_id, _pr, *_fp,
-                )
+                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} ORDER BY parsed_at DESC",
+                    owner_id, _pr, *_fp)
             else:
                 _fsql, _fp = parsed_audience_filters(_af, base_params_count=1)
-                rows = await _safe_fetch(
-                    pool,
+                _pairs = await _page_source(
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC LIMIT 2000",
-                    owner_id, *_fp,
-                )
+                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC",
+                    owner_id, *_fp)
             # Источник каждой цели известен (из какого канала её спарсили) —
             # раскладываем вперемешку, чтобы аккаунт не приглашал подряд сорок
             # человек из одного канала. Подробности — в interleave_by_source.
-            user_refs = interleave_by_source([
-                (("@" + r["username"]) if r["username"] else r["tg_user_id"],
-                 r.get("source_username") or r.get("source_id"))
-                for r in rows if r["username"] or r["tg_user_id"]
-            ])
+            user_refs = interleave_by_source(_pairs)
         elif source == "crm":
-            rows = await _safe_fetch(
-                    pool,
-                "SELECT username, tg_user_id, phone FROM crm_contacts WHERE owner_id=$1 LIMIT 2000",
-                owner_id,
-            )
-            for r in rows:
-                if r["username"]:
-                    user_refs.append("@" + r["username"])
-                elif r["tg_user_id"]:
-                    user_refs.append(r["tg_user_id"])
-                elif r["phone"]:
-                    phones.append(r["phone"])
+            _pairs = await _page_source(
+                "SELECT username, tg_user_id, phone FROM crm_contacts WHERE owner_id=$1 "
+                "ORDER BY id DESC", owner_id)
+            for ref, _ in _pairs:
+                (phones if str(ref).startswith("+") else user_refs).append(ref)
         elif source == "segment":
             # Единый движок сегментов (unified_contacts): сохранённый срез или
             # фильтры — тот же таргетинг, что у рассылки.
@@ -9892,80 +9988,47 @@ async def _exec_mass_invite(
                 _filters = await _crepo.get_segment_filters(pool, owner_id, int(_ssid))
             if _filters is None:
                 _filters = params.get("segment_filters") or {}
-            seg_rows = await _crepo.resolve_segment(pool, owner_id, _filters, limit=2000)
+            seg_rows = await _crepo.resolve_segment(pool, owner_id, _filters, limit=_AUD_CAP)
+            if len(seg_rows) >= _AUD_CAP:
+                _source_exhausted = False
             for c in seg_rows:
                 u = (c.get("username") or "").lstrip("@")
                 if u:
-                    user_refs.append("@" + u)
+                    _ref = "@" + u
                 elif c.get("telegram_user_id"):
-                    user_refs.append(c["telegram_user_id"])
+                    _ref = c["telegram_user_id"]
                 else:
                     _ph = c.get("phones")
-                    if isinstance(_ph, list) and _ph:
-                        phones.append(str(_ph[0]))
+                    _ref = str(_ph[0]) if isinstance(_ph, list) and _ph else None
+                if _ref is None or not _fresh(_ref):
+                    continue
+                (phones if str(_ref).startswith("+") else user_refs).append(_ref)
         elif source == "bot_users":
-            rows = await _safe_fetch(
-                    pool,
+            _pairs = await _page_source(
                 "SELECT DISTINCT bu.user_id, bu.bot_id FROM bot_users bu "
                 "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
-                "WHERE mb.added_by=$1 AND bu.is_active=TRUE LIMIT 2000",
-                owner_id,
-            )
+                "WHERE mb.added_by=$1 AND bu.is_active=TRUE ORDER BY bu.user_id",
+                owner_id)
             # Разные боты — разные источники аудитории, раскладываем так же.
-            user_refs = interleave_by_source(
-                [(r["user_id"], r.get("bot_id")) for r in rows])
+            user_refs = interleave_by_source(_pairs)
+    else:
+        # Список передан явно (бот-хендлер): те же два фильтра, тот же
+        # регистронезависимый ключ — иначе поведение зависело бы от поверхности.
+        user_refs = [r for r in user_refs if _fresh(r)]
+        phones = [p for p in phones if _fresh(p)]
 
     if not user_refs and not phones:
         return {
             "status": "failed",
             "summary": f"⚠️ Аудитория пуста — нечего добавлять (источник: {source or 'не задан'})",
-        }
-
-    # Дедуп уже-приглашённых в ЭТУ группу (вкл. по умолчанию, отключается
-    # skip_invited=False). Ключ — нормализованная группа, чтобы повторный прогон
-    # не тыкал тех же людей. Телефоны дедупим по НОРМАЛИЗОВАННОМУ номеру: движок
-    # теперь запоминает УСПЕШНО приглашённые номера (не «не найден в Telegram» —
-    # такие можно пробовать позже, когда человек зарегистрируется).
-    _group_key = inv.parse_group_ref(group)
-    _deduped = 0
-    if params.get("skip_invited", True) and (user_refs or phones):
-        _already = await _load_invited_targets(pool, owner_id, _group_key)
-        if _already:
-            if user_refs:
-                _before = len(user_refs)
-                user_refs = [r for r in user_refs if str(r) not in _already]
-                _deduped += _before - len(user_refs)
-            if phones:
-                _before_p = len(phones)
-                phones = [p for p in phones if str(p) not in _already]
-                _deduped += _before_p - len(phones)
-
-    # Глобальный реестр «не приглашать» (contact_opt_out) — в отличие от
-    # invite_target_log выше, действует на ВСЕ группы, не только текущую:
-    # человек, явно попросивший больше не писать, не получит инвайт в
-    # следующую кампанию. Считается отдельно от _deduped — разная причина
-    # («уже приглашали сюда» vs «попросили не приглашать»).
-    from services import contact_opt_out as _coo
-    _opted_out = 0
-    if user_refs or phones:
-        _oo = await _coo.load_opted_out(pool, owner_id)
-        if _oo:
-            user_refs, _n1 = _coo.filter_targets(user_refs, _oo)
-            phones, _n2 = _coo.filter_targets(phones, _oo)
-            _opted_out = _n1 + _n2
-
-    if not user_refs and not phones:
-        if _opted_out and not _deduped:
-            return {
-                "status": "done", "ok": 0, "failed": 0, "left": 0,
-                "summary": (f"🚫 Все цели ({_opted_out}) в реестре «не приглашать» — "
-                            "новых нет."),
-            }
-        return {
+        } if not (_deduped or _opted_out) else {
             "status": "done", "ok": 0, "failed": 0, "left": 0,
-            "summary": (f"♻️ Все цели ({_deduped + _opted_out}) уже приглашались в эту "
-                        "группу или в реестре «не приглашать» — новых нет. Соберите "
-                        "свежую аудиторию или отключите дедуп."),
+            "summary": (
+                (f"🚫 Все цели ({_opted_out}) в реестре «не приглашать» — новых нет."
+                 if _opted_out and not _deduped else
+                 f"♻️ Новых целей нет: уже приглашались в эту группу — {_deduped}"
+                 + (f", в реестре «не приглашать» — {_opted_out}" if _opted_out else "")
+                 + ". Соберите свежую аудиторию или отключите дедуп.")),
         }
 
     # account_ids is optional in the Mini App ("не выбрано = все активные"):
@@ -10861,6 +10924,8 @@ async def _exec_mass_invite(
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
+        + (f"\n📦 Источник больше {_INVITE_AUDIENCE_CAP} целей — взята первая порция; "
+           "остальные подтянутся следующими прогонами." if not _source_exhausted else "")
         + (f"\n🚫 Пропущено из реестра «не приглашать»: {_opted_out}" if _opted_out else "")
         + (f"\n📵 Номеров не в Telegram (пропущены): {_phones_not_found}" if _phones_not_found else "")
         + (f"\n⚠️ Ошибок: {total_fail}" + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")

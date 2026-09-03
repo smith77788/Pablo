@@ -24,10 +24,14 @@ def test_invite_by_phones_returns_per_phone_breakdown():
 
 
 def test_executor_dedups_phones_on_load():
+    """Телефоны проходят тот же фильтр свежести, что и user_refs.
+
+    Поведение проверяется в tests/test_invite_queue_scheduler.py
+    (test_phones_dedup_between_runs); здесь — что фильтр вообще применён к
+    телефонам, а не только к username'ам."""
     src = inspect.getsource(op_worker._exec_mass_invite)
-    # дедуп теперь применяется и к телефонам, а не только к user_refs
-    assert "phones = [p for p in phones if str(p) not in _already]" in src, (
-        "телефоны должны дедупиться против invite_target_log"
+    assert "phones = [p for p in phones if _fresh(p)]" in src, (
+        "телефоны должны проходить фильтр дедупа/opt-out"
     )
 
 

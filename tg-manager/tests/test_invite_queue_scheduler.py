@@ -366,7 +366,12 @@ class _LogPool:
         if "done_items=done_items+" in q:
             self.done_items += int(a[1])
         elif "INSERT INTO invite_target_log" in q:
-            self.log.add((a[0], a[1], a[2]))
+            # Исполнитель пишет цели ОДНИМ запросом через unnest($3::text[]) —
+            # раньше это был INSERT на цель, и прогон на 2000 успехов давал
+            # 2000 round-trip'ов. Стенд принимает обе формы.
+            targets = a[2] if isinstance(a[2], (list, tuple, set)) else [a[2]]
+            for t in targets:
+                self.log.add((a[0], a[1], t))
         return "OK"
 
     async def fetch(self, q, *a):
@@ -403,3 +408,157 @@ def test_invite_dedup_off_reinvites(stand):
     r2 = _run(pool, list(TARGETS), skip_invited=False)
     assert len(s.calls) > before, "без дедупа второй прогон снова приглашает"
     assert r2["ok"] == len(TARGETS)
+
+
+# ── Аудитория: фильтры ДО усечения источника ─────────────────────────────────
+# ЧТО БЫЛО СЛОМАНО. Источник читался одним `LIMIT 2000`, и лишь потом
+# применялись дедуп и реестр «не приглашать». Для второй кампании в ту же группу
+# это давало ЛОЖНЫЙ ТУПИК: свежие 2000 целиком состояли из уже приглашённых,
+# операция отвечала «все цели уже приглашались, соберите свежую аудиторию» — при
+# том, что в базе лежали десятки тысяч нетронутых. Пользователь шёл собирать
+# аудиторию, которая у него уже была.
+
+class _SourcePool(_LogPool):
+    """Пул с источником `parsed_audiences`, честно уважающим LIMIT/OFFSET."""
+
+    def __init__(self, usernames):
+        super().__init__()
+        self.rows = [{"username": u, "tg_user_id": None,
+                      "source_username": "src", "source_id": None} for u in usernames]
+        self.pages = 0
+
+    async def fetch(self, q, *a):
+        if "FROM parsed_audiences" in q:
+            self.pages += 1
+            lim = int(q.split("LIMIT ")[1].split()[0])
+            off = int(q.split("OFFSET ")[1].split()[0])
+            return self.rows[off:off + lim]
+        return await super().fetch(q, *a)
+
+
+def _run_source(pool, **params):
+    p = {"group": "@g", "account_ids": [1, 2], "source": "parsed", "batch_size": 5}
+    p.update(params)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(op_worker._exec_mass_invite(pool, None, 43, 100, p))
+    finally:
+        loop.run_until_complete(op_worker.release_operation_accounts(43))
+        loop.close()
+
+
+@pytest.fixture
+def source_stand(stand, monkeypatch):
+    """Стенд, где _safe_fetch отдаёт и аккаунты, и страницы источника."""
+    def _install(pool, responder):
+        s = stand(responder)
+
+        async def _fetch(_pool, q, *a):
+            if "LEFT JOIN user_proxies" in q or "FROM tg_accounts" in q:
+                return ACCOUNTS
+            return await pool.fetch(q, *a)
+
+        monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
+        return s
+    return _install
+
+
+def test_source_paging_finds_fresh_targets_behind_already_invited(source_stand):
+    """Уже приглашённые не должны съедать всю выборку: за ними есть свежие."""
+    invited = [f"old{i}" for i in range(1, 2501)]     # больше одной страницы (2000)
+    fresh = [f"new{i}" for i in range(1, 11)]
+    pool = _SourcePool(invited + fresh)
+    # все `old*` уже приглашены в эту группу. Ключи — ровно те, что пишет
+    # исполнитель: '@username' и нормализованная ссылка на группу.
+    from services.mass_inviter_engine import parse_group_ref
+    gkey = parse_group_ref("@g")
+    for u in invited:
+        pool.log.add((100, gkey, "@" + u))
+
+    s = source_stand(pool, lambda acc_id, refs, dry=False: _ok(len(refs)))
+    res = _run_source(pool)
+
+    assert res["ok"] == len(fresh), (
+        "исполнитель обязан долистать источник до свежих целей, а не упереться "
+        f"в первую страницу уже приглашённых (ok={res['ok']}, summary={res['summary']})"
+    )
+    assert set(s.attempted) == {"@" + u for u in fresh}
+    assert pool.pages >= 2, "одна страница — значит долистывания не было"
+
+
+def test_opted_out_never_invited_from_source(source_stand):
+    """Реестр «не приглашать» действует и на цели, пришедшие из источника."""
+    pool = _SourcePool(["keep1", "banned1", "keep2"])
+
+    async def _fetch_oo(_pool, q, *a):
+        return [{"target": "@banned1"}]
+    import services.contact_opt_out as coo
+    _orig = coo.load_opted_out
+
+    async def _loader(pool_, owner_id):
+        return {"@banned1"}
+    coo.load_opted_out = _loader
+    try:
+        s = source_stand(pool, lambda acc_id, refs, dry=False: _ok(len(refs)))
+        res = _run_source(pool)
+    finally:
+        coo.load_opted_out = _orig
+
+    assert "@banned1" not in set(s.attempted), "opted-out цель ушла в инвайт"
+    assert res["ok"] == 2
+
+
+def test_dedup_is_case_insensitive_for_usernames(stand):
+    """'@Ivan' и '@ivan' — один человек: второй инвайт в ту же группу не идёт.
+
+    Telegram матчит username без учёта регистра, а аудитория собирается из
+    разных парсингов, где регистр может отличаться. Сырое сравнение строк
+    приглашало одного и того же человека дважды."""
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    pool = _LogPool()
+
+    r1 = _run(pool, ["@Ivan", "@Petr"])
+    assert r1["ok"] == 2
+    before = len(s.calls)
+
+    r2 = _run(pool, ["@ivan", "@PETR"])
+    assert s.calls[before:] == [], "тот же человек в другом регистре получил второй инвайт"
+    assert r2["ok"] == 0
+
+
+def test_phones_dedup_between_runs(stand):
+    """Успешно приглашённый номер не импортируется повторно."""
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs),
+                                                  invited_phones=list(refs)))
+    pool = _LogPool()
+    phones = ["+79990000001", "+79990000002"]
+
+    r1 = _run(pool, [], phones=list(phones))
+    assert r1["ok"] == 2
+    before = len(s.calls)
+
+    r2 = _run(pool, [], phones=list(phones))
+    assert s.calls[before:] == [], "номера приглашены повторно"
+    assert r2["ok"] == 0
+
+
+def test_invited_targets_written_in_one_query(stand):
+    """Запись дедупа — один запрос, а не по запросу на цель."""
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+
+    class _CountingPool(_LogPool):
+        def __init__(self):
+            super().__init__()
+            self.log_writes = 0
+
+        async def execute(self, q, *a):
+            if "INSERT INTO invite_target_log" in q:
+                self.log_writes += 1
+            return await super().execute(q, *a)
+
+    pool = _CountingPool()
+    _run(pool, list(TARGETS))
+    assert len(pool.log) == len(TARGETS)
+    assert pool.log_writes == 1, (
+        f"на {len(TARGETS)} целей ушло {pool.log_writes} запросов — должен быть один"
+    )

@@ -128,7 +128,7 @@ async def load_opted_out(pool, owner_id: int) -> set[str]:
         return set()
 
 
-def _compare_key(value: str) -> str:
+def compare_key(value: str) -> str:
     """Ключ сравнения: username регистронезависим (Telegram сам так матчит),
     id/телефон — как есть. mass_inviter_engine.parse_user_refs НЕ приводит
     регистр username'ов (сохраняет '@Ivan' как есть) — без этого сравнение
@@ -139,12 +139,15 @@ def _compare_key(value: str) -> str:
     return s.lower() if s.startswith("@") else s
 
 
+_compare_key = compare_key   # прежнее имя: на него ссылались тесты
+
+
 def filter_targets(targets: list, opted_out: set[str]) -> tuple[list, int]:
     """Убрать opted-out значения из списка user_refs/phones. Чистая функция."""
     if not opted_out:
         return list(targets), 0
-    blocked = {_compare_key(t) for t in opted_out}
-    remaining = [t for t in targets if _compare_key(t) not in blocked]
+    blocked = {compare_key(t) for t in opted_out}
+    remaining = [t for t in targets if compare_key(t) not in blocked]
     return remaining, len(targets) - len(remaining)
 
 
