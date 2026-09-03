@@ -13,6 +13,7 @@ from typing import Any
 import asyncpg
 from aiohttp import web
 
+from services import operation_bus as _obus
 from services.mini_app_auth import validate_init_data, make_token, parse_token
 from services.security import (
     check_rate_limit,
@@ -1561,21 +1562,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             bot_id_int, text, total, uid)
                 broadcast_id = row["id"]
                 _op_params["broadcast_id"] = broadcast_id
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
-                    uid, _json.dumps(_op_params), total, label)
+                op_id = await _obus.submit(
+                    pool, uid, "run_broadcast", _op_params,
+                    total_items=total, label=label)
             else:
                 # Отложенная: НЕ создаём запись рассылки заранее (иначе resume
                 # отправит её сразу при рестарте). Воркер создаст её, когда
                 # наступит scheduled_for. Планировщик воркера уважает scheduled_for.
                 label = f"⏰ {label}"
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
-                    "VALUES($1,'run_broadcast','pending',$2,$3,$4, now() + ($5 || ' minutes')::interval) RETURNING id",
-                    uid, _json.dumps(_op_params), total, label, str(schedule_minutes))
+                from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn
+                op_id = await _obus.submit(
+                    pool, uid, "run_broadcast", _op_params,
+                    total_items=total, label=label,
+                    scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=schedule_minutes))
             return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id,
                                "total_users": total, "scheduled_minutes": schedule_minutes})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("create_broadcast bot=%d uid=%d", bot_id_int, uid)
             return _err("Failed to create broadcast", 500)
@@ -2624,7 +2630,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid op_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT op_type, params, label, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
+                "SELECT op_type, params, label, status, total_items "
+                "FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
                 return _err("Not found", 404)
@@ -2651,23 +2658,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     base = {}
                 base = dict(base)
                 base["channel_ids"] = failed_ids
-                new_id = await pool.fetchval(
-                    """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
-                       VALUES($1,$2,$3::jsonb,'pending',$4,$5) RETURNING id""",
-                    uid, row["op_type"], _json.dumps(base),
-                    f"Повтор неудавшихся ({len(failed_ids)})", len(failed_ids))
+                new_id = await _obus.submit(
+                    pool, uid, row["op_type"], base,
+                    total_items=len(failed_ids),
+                    label=f"Повтор неудавшихся ({len(failed_ids)})")
                 return _json_resp({"ok": True, "new_id": new_id, "channels": len(failed_ids)})
 
             # Прочие операции — повтор целиком, только для проваленных.
             if row["status"] != "failed":
                 return _err("Not found or not failed", 404)
-            new_id = await pool.fetchval(
-                """INSERT INTO operation_queue(owner_id, op_type, params, status, label, total_items)
-                   SELECT owner_id, op_type, params, 'pending', label, total_items
-                   FROM operation_queue WHERE id=$1
-                   RETURNING id""",
-                op_id)
+            try:
+                _retry_params = (row["params"] if isinstance(row["params"], dict)
+                                 else _json.loads(row["params"] or "{}"))
+            except (TypeError, ValueError):
+                _retry_params = {}
+            # dedup_window_sec=0: повтор — намеренно та же операция с теми же
+            # params, и окно идемпотентности приняло бы его за двойной тап.
+            try:
+                new_id = await _obus.submit(
+                    pool, uid, row["op_type"], _retry_params,
+                    total_items=row["total_items"] or 0, label=row["label"],
+                    dedup_window_sec=0)
+            except ValueError:
+                # Тип операции больше не поддерживается (переименован или убран из
+                # реестра). Раньше копирование строки очереди воскрешало такую
+                # операцию, и она навсегда зависала pending — воркер её не знает.
+                return _err(
+                    f"Тип операции «{row['op_type']}» больше не поддерживается — "
+                    "повтор невозможен", 400)
             return _json_resp({"ok": True, "new_id": new_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("retry_operation op_id=%d uid=%d", op_id, uid)
             return _err("Failed to retry", 500)
@@ -3201,11 +3225,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         label_map = {"leave_all_chats": "Выход из чатов", "delete_contacts": "Удаление контактов"}
         label = f"Cleaner: {label_map[op]} акк #{account_id}"
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
-                uid, op, _json.dumps({"account_id": account_id}), label,
-            )
+            op_id = await _obus.submit(
+                pool, uid, op, {"account_id": account_id},
+                total_items=1, label=label)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
@@ -3655,10 +3677,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 # leave_all_chats — по одному аккаунту, ставим N операций
                 op_ids = []
                 for aid in ids:
-                    oid = await pool.fetchval(
-                        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                        "VALUES($1,'leave_all_chats','pending',$2,1,$3) RETURNING id",
-                        uid, _json.dumps({"account_id": aid}), f"Выход из всех чатов (акк. {aid})")
+                    oid = await _obus.submit(
+                        pool, uid, "leave_all_chats", {"account_id": aid},
+                        total_items=1, label=f"Выход из всех чатов (акк. {aid})")
                     op_ids.append(int(oid))
                 return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
             if op in ("name", "avatar", "2fa", "username", "bio", "close_sessions", "privacy",
@@ -3667,10 +3688,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 params, label = _build_profile_params(op, body, ids)
                 if params is None:
                     return _err(label, 400)
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,'profile_setter','pending',$2,$3,$4) RETURNING id",
-                    uid, _json.dumps(params), n, f"{label}: {n} акк.")
+                op_id = await _obus.submit(
+                    pool, uid, "profile_setter", params,
+                    total_items=n, label=f"{label}: {n} акк.")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             return _err("Неизвестная операция", 400)
         except PermissionError as exc:
@@ -3997,11 +4017,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "channel_acc_pairs": [{"channel_id": ch_id, "acc_id": int(ch["acc_id"]), "title": ch.get("title") or ""}],
         }
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'bulk_chan_exec','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps(params), f"Канал: {op}")
+            op_id = await _obus.submit(
+                pool, uid, "bulk_chan_exec", params,
+                total_items=1, label=f"Канал: {op}")
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("channel_edit uid=%d ch=%d op=%s", uid, ch_id, op)
             return _err(str(exc), 500)
@@ -4070,10 +4094,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           "title": c.get("title") or ""} for c in chans]
                 params = {"op": worker_op, "value": value, "base_uname": value,
                           "channel_acc_pairs": pairs}
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,'bulk_chan_exec','pending',$2,$3,$4) RETURNING id",
-                    uid, _json.dumps(params), n, f"Каналы ({op}): {n}")
+                op_id = await _obus.submit(
+                    pool, uid, "bulk_chan_exec", params,
+                    total_items=n, label=f"Каналы ({op}): {n}")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             if op == "post":
                 text = (body.get("text") or "").strip()
@@ -4133,13 +4156,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _lim = await get_channel_limit(pool, uid)
             if await get_effective_channel_count(pool, uid) >= _lim:
                 return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'channel_add','pending',$2,1,$3) RETURNING id",
-                uid, json.dumps({"channel_identifier": link}),
-                f"Добавить канал: {link}",
-            )
+            op_id = await _obus.submit(
+                pool, uid, "channel_add", {"channel_identifier": link},
+                total_items=1, label=f"Добавить канал: {link}")
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("channel_add uid=%d", uid)
             return _err(str(exc), 500)
@@ -4264,11 +4289,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         else:
             return _err("Неизвестное действие", 400)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
-                uid, op_type, _json.dumps(params), label)
+            op_id = await _obus.submit(
+                pool, uid, op_type, params, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
             return _err(str(exc), 500)
@@ -5220,11 +5248,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 from services import operation_bus
                 op_id = await operation_bus.submit(pool, uid, op_type, params, total_items=total)
             else:
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,$2,'pending',$3,$4,$5) RETURNING id",
-                    uid, op_type, _json.dumps(params), total, label,
-                )
+                op_id = await _obus.submit(
+                    pool, uid, op_type, params, total_items=total, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "accounts": len(account_ids)})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -5269,13 +5294,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нет активных аккаунтов", 400)
         try:
             label = f"Growth Agent: {niche[:40]}"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'niche_growth_post','pending',$2,5,$3) RETURNING id",
-                uid,
-                _json.dumps({"niche": niche, "geo": geo, "promo_text": promo_text, "acc_count": acc_count}),
-                label,
-            )
+            op_id = await _obus.submit(
+                pool, uid, "niche_growth_post",
+                {"niche": niche, "geo": geo, "promo_text": promo_text, "acc_count": acc_count},
+                total_items=5, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -5321,12 +5343,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нет активных аккаунтов", 400)
         try:
             label = f"AI-комментинг: {len(channels)} каналов"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'ai_comment','pending',$2,$3,$4) RETURNING id",
-                uid,
-                _json.dumps({"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count}),
-                len(channels), label)
+            op_id = await _obus.submit(
+                pool, uid, "ai_comment",
+                {"channels": channels, "niche": niche, "tone": tone, "acc_count": acc_count},
+                total_items=len(channels), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "channels": len(channels)})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -5419,11 +5439,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите цель репортинга", 400)
         try:
             label = f"Репорт {target} ({reason}) × {acc_count} аккаунтов"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'report_peer','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"target": target, "reason": reason}), acc_count, label,
-            )
+            op_id = await _obus.submit(
+                pool, uid, "report_peer", {"target": target, "reason": reason},
+                total_items=acc_count, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -5476,19 +5494,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         _pd["repeat_count"] = max(1, min(int(_rc), 1000))
                     except (TypeError, ValueError):
                         pass
-            _params = _json.dumps(_pd)
             if schedule_minutes > 0:
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label, scheduled_for) "
-                    "VALUES($1,'quick_post','pending',$2,$3,$4, now() + ($5 || ' minutes')::interval) RETURNING id",
-                    uid, _params, len(channel_ids), "⏰ " + label, str(schedule_minutes),
-                )
+                from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn
+                op_id = await _obus.submit(
+                    pool, uid, "quick_post", _pd,
+                    total_items=len(channel_ids), label="⏰ " + label,
+                    scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=schedule_minutes))
             else:
-                op_id = await pool.fetchval(
-                    "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                    "VALUES($1,'quick_post','pending',$2,$3,$4) RETURNING id",
-                    uid, _params, len(channel_ids), label,
-                )
+                op_id = await _obus.submit(
+                    pool, uid, "quick_post", _pd,
+                    total_items=len(channel_ids), label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label, "scheduled_minutes": schedule_minutes})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -7635,12 +7650,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not _client:
             return _err(f"SMS-сервис не настроен ({_service}). Обратитесь к администратору платформы.", 400)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'auto_register','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps({"count": count, "country": country}), count,
-                f"Авторег {count} акк. ({country})",
-            )
+            op_id = await _obus.submit(
+                pool, uid, "auto_register", {"count": count, "country": country},
+                total_items=count, label=f"Авторег {count} акк. ({country})")
             return _json_resp({"ok": True, "op_id": op_id, "count": count})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -8784,15 +8796,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Кампания уже выполняется", 409)
         try:
             label = f"DM-кампания: {row['name']}"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'dm_campaign','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"campaign_id": campaign_id}), label,
-            )
+            op_id = await _obus.submit(
+                pool, uid, "dm_campaign", {"campaign_id": campaign_id},
+                total_items=1, label=label)
             await pool.execute(
                 "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1 AND owner_id=$2", campaign_id, uid
             )
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("dm_campaign_launch uid=%d cid=%d", uid, campaign_id)
             return _err(str(exc), 500)
@@ -8931,14 +8946,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
 
             label = f"Прогрев аккаунта ({plan_type}, {profile_type})"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'account_warmup','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({
+            op_id = await _obus.submit(
+                pool, uid, "account_warmup", {
                     "account_id": account_id, "plan_type": plan_type,
                     "profile_type": profile_type, "niche": niche,
-                }), label,
-            )
+                }, total_items=1, label=label)
             await pool.execute(
                 """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
                    VALUES($1,$2,$3,$4,$5)
@@ -8952,6 +8964,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "custom_channels": len(custom_channels),
                 "daily_actions": daily_actions, "target_days": target_days,
             })
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("warmup_create_plan uid=%d acc=%s", uid, account_id)
             return _err(str(exc), 500)
@@ -9941,13 +9958,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Нет доступных активных аккаунтов для Strike", 400)
 
             # Создаём операцию в очереди (op_type='strike' — воркер знает этот тип)
-            op_id = await pool.fetchval(
-                """INSERT INTO operation_queue(owner_id, op_type, label, status, params, total_items)
-                   VALUES($1, 'strike', $2, 'pending', $3::jsonb, $4)
-                   RETURNING id""",
-                uid,
-                f"Strike: {normalized} [{cat['label']}] · {num_waves} волн",
-                __import__("json").dumps({
+            op_id = await _obus.submit(
+                pool, uid, "strike",
+                {
                     "target": normalized,
                     "reason": cat["tg_reason"],
                     "num_waves": num_waves,
@@ -9955,9 +9968,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "force": force,
                     "persist": persist,
                     "account_ids": [r["id"] for r in accs],
-                }),
-                len(accs),
-            )
+                },
+                total_items=len(accs),
+                label=f"Strike: {normalized} [{cat['label']}] · {num_waves} волн")
             # Подписанная запись правового основания ДО запуска: жалоба подаётся
             # только по abuse-категории (гейт MINI_CATEGORIES выше), и этот факт
             # фиксируется в аудите вместе с целью — доказательная база кампании.
@@ -9971,6 +9984,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 log.debug("strike_launch: compliance record failed op=%s", op_id)
             return _json_resp({"ok": True, "operation_id": op_id, "accounts": len(accs), "num_waves": num_waves})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("strike_launch uid=%d", uid)
             return _err(str(exc), 500)
@@ -11041,12 +11059,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_params["buttons"] = _buttons
         label = f"Network Broadcast: {text[:40]}{'…' if len(text) > 40 else ''}"
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'network_broadcast','pending',$2,$3,$4) RETURNING id",
-                uid, _json.dumps(op_params),
-                total_recipients, label,
-            )
+            op_id = await _obus.submit(
+                pool, uid, "network_broadcast", op_params,
+                total_items=total_recipients, label=label)
             return _json_resp({
                 "ok": True,
                 "op_id": op_id,
@@ -11054,6 +11069,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "broadcasts_created": len(bots),
                 "label": label,
             })
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("network_broadcast op_queue uid=%d", uid)
             return _err("Failed to queue broadcast", 500)
@@ -11302,12 +11322,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, acc_id, plan_type, target_days, daily_actions)
             # Also create op_queue entry so op_worker executes warmup logic
             label = f"Прогрев аккаунта #{acc_id} ({plan_type})"
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'account_warmup','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps({"account_id": acc_id, "plan_type": plan_type}), label,
-            )
+            op_id = await _obus.submit(
+                pool, uid, "account_warmup",
+                {"account_id": acc_id, "plan_type": plan_type},
+                total_items=1, label=label)
             return _json_resp({"ok": True, "id": row["id"], "op_id": op_id, "target_days": target_days})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
             return _err(f"Ошибка запуска прогрева: {exc}", 500)
@@ -12938,12 +12962,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _lim = await get_channel_limit(pool, uid)
             if await get_effective_channel_count(pool, uid) >= _lim:
                 return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'create_channel','pending',$2,1,$3) RETURNING id",
-                uid, json.dumps({"title": title, "about": about, "account_id": account_id}),
-                f"Создать канал: {title}",
-            )
+            op_id = await _obus.submit(
+                pool, uid, "create_channel",
+                {"title": title, "about": about, "account_id": account_id},
+                total_items=1, label=f"Создать канал: {title}")
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -12996,12 +13018,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _lim = await get_channel_limit(pool, uid)
             if await get_effective_channel_count(pool, uid) >= _lim:
                 return _err(f"Достигнут лимит каналов/групп ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'create_group','pending',$2,1,$3) RETURNING id",
-                uid, json.dumps({"title": title, "account_id": account_id, "is_supergroup": is_supergroup}),
-                f"Создать группу: {title}",
-            )
+            op_id = await _obus.submit(
+                pool, uid, "create_group",
+                {"title": title, "account_id": account_id, "is_supergroup": is_supergroup},
+                total_items=1, label=f"Создать группу: {title}")
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -13241,20 +13261,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not target_refs:
             return _err("Нет управляемых каналов — добавьте канал, куда клонировать контент", 400)
         try:
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'content_clone','pending',$2,$3,$4) RETURNING id",
-                uid, json.dumps({
+            op_id = await _obus.submit(
+                pool, uid, "content_clone", {
                     "source": source,          # kept for history display (JS reads payload.source)
                     "source_ref": source,      # read by _exec_content_clone
                     "target_refs": target_refs,
                     "account_ids": account_ids,
                     "mode": "forward",
                     "msg_count": 10,
-                }),
-                len(target_refs),
-                f"Клонировать контент: {source} → {len(target_refs)} канал(ов)",
-            )
+                },
+                total_items=len(target_refs),
+                label=f"Клонировать контент: {source} → {len(target_refs)} канал(ов)")
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -13370,17 +13387,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Целевой бот не найден", 404)
             src_name = src["username"] or src["first_name"] or f"id{src['bot_id']}"
             tgt_name = tgt["username"] or tgt["first_name"] or f"id{tgt['bot_id']}"
-            op_id = await pool.fetchval(
-                """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label)
-                   VALUES($1,'clone_adapt','pending',$2,1,$3) RETURNING id""",
-                uid,
-                _json.dumps({
+            op_id = await _obus.submit(
+                pool, uid, "clone_adapt", {
                     "source_bot_id": int(source_bot_id),
                     "target_bot_id": int(target_bot_id),
                     "fields": fields,
-                }),
-                f"Clone: @{src_name} → @{tgt_name}",
-            )
+                }, total_items=1, label=f"Clone: @{src_name} → @{tgt_name}")
             return _json_resp({"op_id": op_id, "ok": True})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -13807,13 +13819,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not tpl:
                 return _err("Шаблон не найден или неактивен", 404)
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-                "VALUES($1,'self_promo_blast','pending',$2,1,$3) RETURNING id",
-                uid, json.dumps({"template_id": tpl_id}),
-                f"Self-promo: {tpl['title'] or tpl_id}",
-            )
+            op_id = await _obus.submit(
+                pool, uid, "self_promo_blast", {"template_id": tpl_id},
+                total_items=1, label=f"Self-promo: {tpl['title'] or tpl_id}")
             return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
+            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
+            # причиной вместо сырого 500 с внутренним текстом.
+            return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("self_promo_launch uid=%d tpl=%d", uid, tpl_id)
             return _err(str(exc), 500)

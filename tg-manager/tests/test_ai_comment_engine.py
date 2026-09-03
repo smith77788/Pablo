@@ -59,7 +59,9 @@ def test_op_and_endpoint_and_ui_wired():
     assert "content_safety.enforce" in seg
     api = _read("services/mini_app_api.py")
     assert "async def ai_comment_submit" in api
-    assert "'ai_comment','pending'" in api
+    # операция ставится через шину (гейт тарифа + предохранитель + дедуп),
+    # а не сырым INSERT в очередь
+    assert '_obus.submit(' in api and '"ai_comment"' in api
     assert 'add_post("/api/miniapp/ai_comment", ai_comment_submit)' in api
     ui = _read("mini_app/index.html")
     assert "submitAiComment" in ui and "/api/miniapp/ai_comment" in ui

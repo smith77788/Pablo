@@ -288,14 +288,9 @@ async def _do_queue(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, ms
         "account_ids": account_ids,
     }
 
-    import json
-    op_id = await pool.fetchval(
-        """INSERT INTO operation_queue
-           (owner_id, op_type, params, status, total_items, done_items, created_at)
-           VALUES ($1, 'content_clone', $2::jsonb, 'pending', $3, 0, NOW())
-           RETURNING id""",
-        owner_id, json.dumps(op_params), len(targets),
-    )
+    from services import operation_bus as _obus
+    op_id = await _obus.submit(
+        pool, owner_id, "content_clone", op_params, total_items=len(targets))
 
     mode_label = "переслать" if mode == "forward" else "скопировать"
     await cb.message.edit_text(

@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import html
-import json
 import logging
 
 import asyncpg
@@ -322,11 +321,10 @@ async def cb_setter_confirm(callback: CallbackQuery, state: FSMContext, pool: as
 
     lbl = _OP_LABELS.get(op, op)
     label = f"Действие: {lbl} × {len(account_ids)} акк."
-    op_id = await pool.fetchval(
-        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-        "VALUES($1,'bulk_set_profile','pending',$2,$3,$4) RETURNING id",
-        owner_id, json.dumps(params), len(account_ids), label,
-    )
+    from services import operation_bus as _obus
+    op_id = await _obus.submit(
+        pool, owner_id, "bulk_set_profile", params,
+        total_items=len(account_ids), label=label)
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
     kb.button(text="◀️ В меню", callback_data=ProfileSetterCb(action="menu"))

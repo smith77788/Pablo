@@ -253,7 +253,6 @@ async def cb_reporter_confirm(
         await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
         return
 
-    import json
     params = {
         "mode": data.get("mode", "peer"),
         "target": data.get("target", ""),
@@ -264,11 +263,10 @@ async def cb_reporter_confirm(
     }
     reason_label = REPORT_REASONS.get(params["reason"], ("?", ""))[0]
     label = f"Жалобы: {params['target']} [{reason_label}] × {len(account_ids)} акк."
-    op_id = await pool.fetchval(
-        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-        "VALUES($1,'mass_report','pending',$2,$3,$4) RETURNING id",
-        owner_id, json.dumps(params), len(account_ids), label,
-    )
+    from services import operation_bus as _obus
+    op_id = await _obus.submit(
+        pool, owner_id, "mass_report", params,
+        total_items=len(account_ids), label=label)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
