@@ -41,7 +41,7 @@ def test_import_flood_engine():
     assert hasattr(flood_engine, 'get_best_account')
 
 
-def test_import_api_rate_limiter():
-    from services.api_rate_limiter import ApiRateLimiter
-    rl = ApiRateLimiter()
-    assert rl.max_requests == 60
+def test_import_rate_limiter():
+    """Ограничитель запросов живёт в security и подключён middleware'ом."""
+    from services.security import check_rate_limit, rate_limit_response
+    assert callable(check_rate_limit) and callable(rate_limit_response)

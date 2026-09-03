@@ -101,12 +101,17 @@ def invalidate_pattern(pattern: str) -> int:
     """Invalidate all keys matching pattern."""
 ```
 
-### Rate Limiter (`services/api_rate_limiter.py`)
+### Rate Limiter (`services/security.py`)
+
+Подключён `security_middleware()` ко всем `/api/` и `/webhook`; отдельного
+модуля-лимитера нет.
 
 ```python
-class ApiRateLimiter:
-    async def check(self, user_id: int) -> bool:
-        """Check if user is within rate limit. Returns True if allowed."""
+async def check_rate_limit(request, uid=None, max_requests=..., window=...) -> bool:
+    """True — запрос разрешён. Ключ: u:<uid>, иначе ip:<адрес>."""
+
+def rate_limit_response(request, uid=None) -> web.Response:
+    """429 с заголовком Retry-After и JSON-телом."""
 ```
 
 ## Bot Handler APIs

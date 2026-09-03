@@ -111,11 +111,13 @@ Daily action budgets per account:
 - Budget exhaustion detection
 - Configurable via platform settings
 
-### Rate Limiting (`services/api_rate_limiter.py`)
-Per-user request throttling:
-- Configurable window and max requests
-- Sliding window counter
-- Automatic cleanup of expired entries
+### Rate Limiting (`services/security.py`)
+Applied by `security_middleware()` to every `/api/` and `/webhook` request:
+- Per-user key when a Bearer token identifies the caller, per-IP otherwise
+  (`X-Forwarded-For` aware)
+- Sliding window counter with automatic cleanup of expired entries
+- Refusal is `429` with a `Retry-After` header and a JSON body the Mini App can
+  parse — not a bare drop
 
 ### In-Memory Caching (`services/cache.py`)
 TTL-based caching layer:
@@ -145,7 +147,7 @@ tg-manager/
     ├── ecosystem_brain.py  # Ecosystem analysis
     ├── account_manager.py  # Account management
     ├── cache.py            # In-memory caching
-    ├── api_rate_limiter.py # Rate limiting
+    ├── security.py         # Rate limiting, headers, validation
     └── ...
 ```
 

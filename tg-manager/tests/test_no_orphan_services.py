@@ -29,7 +29,6 @@ KNOWN_ORPHANS = {
     "invite_engine",       # сценарий раздачи ссылок в продукте не реализован
     "ai_action_router",    # ассистент использует intent_planner
     "perf",                # инструмент разработки
-    "api_rate_limiter",    # требует решения, что делать при превышении
 }
 
 
