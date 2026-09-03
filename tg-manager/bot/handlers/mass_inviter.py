@@ -18,6 +18,8 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import InviterCb, BmCb
+from bot.keyboards import subscription_locked_markup
+from bot.utils.subscription import locked_text
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -958,7 +960,6 @@ async def cb_inviter_confirm(
     if method not in ("direct", "admin", "link"):
         method = "direct"
 
-    import json
     params = {
         "group": group,
         "account_ids": account_ids,
@@ -985,11 +986,40 @@ async def cb_inviter_confirm(
     _vol_ru = {"auto": "🤖 авто (по истории)",
                "prog": "🎯 прогрессивно (по возрасту)"}.get(_vol, f"{_vol}/аккаунт (один проход)")
     label = f"Инвайтер: {group} ← {total_users} пользователей × {len(account_ids)} акк."
-    op_id = await pool.fetchval(
-        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-        "VALUES($1,'mass_invite','pending',$2,$3,$4) RETURNING id",
-        owner_id, json.dumps(params), total_users, label,
-    )
+    # operation_bus.submit() — не сырой INSERT: централизует то, что раньше здесь
+    # молча обходилось для самой баноопасной операции продукта — план-гейт
+    # (mass_invite требует "pro"), дедуп повторной постановки и предохранитель
+    # Ban Weather (при шторме банов по этому op_type новые прогоны блокируются).
+    # docstring services/operation_bus.py прямо запрещает прямой INSERT в новых
+    # хендлерах — этот путь был исключением, которое отменяло все три защиты.
+    from services import operation_bus
+    from services.operation_bus import PlanRequiredError, ImmunityBlockedError
+
+    try:
+        op_id = await operation_bus.submit(
+            pool, owner_id, "mass_invite", params,
+            total_items=total_users, label=label,
+        )
+    except PlanRequiredError as exc:
+        await _edit(
+            callback,
+            locked_text("Массовый инвайтинг", exc.required_plan),
+            subscription_locked_markup(exc.required_plan, back_callback=InviterCb(action="menu")),
+        )
+        return
+    except ImmunityBlockedError as exc:
+        await _edit(
+            callback,
+            f"🌩 <b>Инвайт временно приостановлен</b>\n\n{html.escape(str(exc))}",
+            InlineKeyboardBuilder().button(
+                text="◀️ В меню", callback_data=InviterCb(action="menu")
+            ).as_markup(),
+        )
+        return
+    except Exception as exc:
+        log.exception("mass_invite submit owner=%s", owner_id)
+        await callback.answer(f"⚠️ Не удалось поставить в очередь: {str(exc)[:150]}", show_alert=True)
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))

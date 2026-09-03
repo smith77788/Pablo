@@ -8222,10 +8222,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             elif _wt and not check_sql_suspicious(_wt):
                 params["welcome"] = {"text": _wt,
                                      "delay": _clamp(body.get("welcome_delay"), 5, 600, 45)}
-            op_id = await pool.fetchval(
-                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
-                "VALUES($1,'mass_invite','pending',$2,1,$3) RETURNING id",
-                uid, _json.dumps(params), label,
+            # operation_bus.submit() — не сырой INSERT: раньше здесь молча
+            # обходились план-гейт (mass_invite требует "pro"), дедуп повторной
+            # постановки и предохранитель Ban Weather (при шторме банов по этому
+            # op_type новые прогоны блокируются). except PermissionError ниже уже
+            # был написан в расчёте на PlanRequiredError от submit(), но раньше
+            # submit() здесь не вызывался — ветка была мертва.
+            from services import operation_bus as _obus
+
+            total_items = (len(user_refs) + len(phones)) if (user_refs or phones) else 1
+            op_id = await _obus.submit(
+                pool, uid, "mass_invite", params,
+                total_items=total_items, label=label,
             )
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
         except PermissionError as exc:
