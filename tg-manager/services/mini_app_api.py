@@ -1766,7 +1766,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       JOIN workspace_members wm ON wm.workspace_id=w.id
                       WHERE wm.user_id=$1
                   )
-               ORDER BY members_count DESC NULLS LAST
+               ORDER BY member_count DESC NULLS LAST
                LIMIT $2 OFFSET $3""", uid, limit, offset)
         total = await _safe_count(pool,
             """SELECT COUNT(DISTINCT id) FROM managed_channels
