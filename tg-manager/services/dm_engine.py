@@ -441,6 +441,35 @@ _DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
 # Потолок выборки сегмента на кампанию: аудитория целиком грузится в память,
 # а при задержке 45–110 с даже 20k получателей — это недели отправки.
 _SEGMENT_TARGET_LIMIT = 20000
+
+# Множители пользовательского темпа. Держим рядом с таблицей задержек: расчёт
+# срока и сам send-цикл обязаны использовать ОДНИ и те же числа, иначе UI будет
+# обещать одно, а движок делать другое.
+_PACE_MULTIPLIERS: dict[str, float] = {"slow": 2.0, "normal": 1.0, "fast": 0.5}
+
+
+def estimate_duration_seconds(target_type: str, pace: str | None, remaining: int) -> int:
+    """Сколько примерно займёт рассылка на `remaining` получателей.
+
+    Отправка идёт последовательно: аккаунты чередуются, но пауза выдерживается
+    между сообщениями глобально — поэтому число аккаунтов срок НЕ сокращает.
+
+    Нужна потому, что пользователь запускал кампанию на тысячи получателей, не
+    имея никакого представления о сроке: при паузе 45–110 с это недели, а на
+    экране было только «0/5000 отправлено».
+
+    'auto' считаем как обычный темп: реальный множитель движок берёт из
+    состояния флота на старте, заранее он неизвестен.
+    """
+    try:
+        n = max(0, int(remaining))
+    except (TypeError, ValueError):
+        return 0
+    if not n:
+        return 0
+    dmin, dmax = _DELAYS_BY_TARGET_TYPE.get(target_type or "", _DEFAULT_DELAY_RANGE)
+    mult = _PACE_MULTIPLIERS.get(pace or "normal", 1.0)
+    return int(n * ((dmin + dmax) / 2.0) * mult)
 _DEFAULT_DELAY_RANGE: tuple[float, float] = (45.0, 110.0)
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
 _PEER_FLOOD_COOLDOWN = 48 * 3600  # PeerFlood — аккаунт-флаг: длинный cooldown (48ч)
@@ -803,7 +832,9 @@ async def run_campaign(
             _delay_min *= _pace_mult
             _delay_max *= _pace_mult
         else:
-            _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
+            # Те же множители, по которым UI считает срок кампании, — иначе
+            # экран обещал бы одно, а движок выдерживал другое.
+            _pace_mult = _PACE_MULTIPLIERS.get(_pace)
             if _pace_mult:
                 _delay_min *= _pace_mult
                 _delay_max *= _pace_mult

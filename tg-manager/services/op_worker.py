@@ -2443,12 +2443,19 @@ async def _exec_dm_campaign(
         failed = final["fail_count"] or 0
         total = final["total_targets"] or 0
         name = campaign["name"] or f"#{campaign_id}"
-        summary = f"📨 DM «{name}»: ✅ {sent} sent, ❌ {failed} errors, 📊 {total} total"
+        # Кампанию могли поставить на паузу (кнопкой или дневным лимитом) —
+        # тогда операция «выполнена», но рассылка НЕ завершена. Раньше в панели
+        # операций это выглядело одинаково с честным завершением.
+        _paused = final["status"] == "paused"
+        _tail = " · ⏸ на паузе, можно возобновить" if _paused else ""
+        summary = (f"📨 DM «{name}»: ✅ {sent} отправлено, ❌ {failed} ошибок, "
+                   f"📊 {total} всего{_tail}")
         return {
             "status": "done",
             "ok": sent,
             "failed": failed,
             "total": total,
+            "paused": _paused,
             "summary": summary,
         }
     return {"status": "done", "summary": f"📨 DM campaign #{campaign_id} completed"}
