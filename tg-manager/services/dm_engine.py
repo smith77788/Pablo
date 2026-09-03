@@ -155,6 +155,83 @@ def parse_import_list(raw, limit: int = 5000) -> list[dict]:
     return out
 
 
+# ── Реестр «не писать» (opt-out) ──────────────────────────────────────────────
+#
+# `contact_opt_out` наполняется явным действием оператора («человек попросил
+# больше не писать») и до сих пор применялся ТОЛЬКО в масс-инвайте. Рассылки
+# его не знали: тот, кто просил не писать, получал следующую кампанию — это и
+# юридический риск, и прямая причина спам-репортов, от которых горят аккаунты.
+# Фильтр ниже — общая точка для кампаний и разовой рассылки.
+
+
+def opt_out_keys(user_id=None, username: str | None = None) -> list[str]:
+    """Ключи, под которыми получатель мог попасть в реестр отказов.
+
+    Реестр хранит нормализованные строки ('@username' в нижнем регистре,
+    голый numeric id, телефон в E.164). У получателя рассылки есть id и/или
+    username, поэтому проверяем оба ключа. Дополнительно прогоняем id через
+    normalize_target: у него своя граница id/телефон (11+ цифр → '+...'), и без
+    этого длинный id, занесённый оператором, тихо не совпал бы.
+    """
+    keys: list[str] = []
+    try:
+        uid = int(user_id or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    if uid > 0:
+        keys.append(str(uid))
+        try:
+            from services.contact_opt_out import normalize_target
+
+            norm = normalize_target(str(uid))
+            if norm and norm not in keys:
+                keys.append(norm)
+        except Exception:
+            pass
+    if username:
+        uname = str(username).lstrip("@").strip().lower()
+        if uname:
+            keys.append("@" + uname)
+    return keys
+
+
+def filter_opted_out(targets: list[dict], opted_out: set[str]) -> tuple[list[dict], int]:
+    """Убрать из списка получателей тех, кто просил не писать.
+
+    Чистая функция (без БД) — тестируется отдельно от send-цикла.
+    Возвращает (оставшиеся, сколько убрано).
+    """
+    if not opted_out or not targets:
+        return list(targets or []), 0
+    remaining = [
+        t for t in targets
+        if not any(k in opted_out for k in opt_out_keys(t.get("user_id"), t.get("username")))
+    ]
+    return remaining, len(targets) - len(remaining)
+
+
+def filter_opted_out_refs(refs: list, opted_out: set[str]) -> tuple[list, int]:
+    """То же для плоского списка ссылок (@username / id) — разовая рассылка.
+
+    Отдельная функция, а не contact_opt_out.filter_targets: та сравнивает
+    строки как есть и не приводит к канону голый 'ivan' без «собаки», из-за
+    чего отказ по '@ivan' для такого ввода не срабатывал бы.
+    """
+    if not opted_out or not refs:
+        return list(refs or []), 0
+    remaining = []
+    for ref in refs:
+        s = str(ref).strip()
+        if s.lstrip("-").isdigit():
+            keys = opt_out_keys(user_id=s.lstrip("-"))
+        else:
+            keys = opt_out_keys(username=s)
+        if any(k in opted_out for k in keys):
+            continue
+        remaining.append(ref)
+    return remaining, len(refs) - len(remaining)
+
+
 def pick_account_under_cap(acc_cycle: list, start_idx: int, sent_by_acc: dict, cap):
     """Выбирает следующий аккаунт из ротации, пропуская достигших дневного лимита.
 
@@ -506,6 +583,25 @@ async def run_campaign(
             "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
         )
         return
+
+    # Реестр «не писать»: тот, кто явно просил больше не писать, не должен
+    # получить НИ ОДНУ следующую кампанию. Fail-open — сбой реестра не срывает
+    # рассылку (тот же принцип, что в масс-инвайте).
+    opt_out_removed = 0
+    try:
+        from services import contact_opt_out as _coo
+
+        _opted = await _coo.load_opted_out(pool, owner_id)
+        if _opted:
+            targets, opt_out_removed = filter_opted_out(targets, _opted)
+            if opt_out_removed:
+                log.info(
+                    "dm_engine campaign=%d: отфильтровано %d получателей из реестра «не писать»",
+                    campaign_id, opt_out_removed,
+                )
+    except Exception:
+        log_exc_swallow(log, "dm_engine: opt-out filter failed")
+
     total = len(targets)
     await pool.execute(
         "UPDATE dm_campaigns SET total_targets=$1 WHERE id=$2", total, campaign_id
@@ -523,6 +619,24 @@ async def run_campaign(
             "UPDATE dm_campaigns SET status='done', finished_at=now() WHERE id=$1",
             campaign_id,
         )
+        # Пустая аудитория без объяснения выглядит как поломка. Если её обнулил
+        # реестр отказов — говорим об этом прямо, иначе пользователь будет
+        # перезапускать кампанию и гадать, почему «0 отправлено».
+        try:
+            from database import db as _db
+
+            _why = (
+                f"\n\n🚫 Все {opt_out_removed} получателей в реестре «не писать»."
+                if opt_out_removed else
+                "\n\nВ выбранной аудитории нет новых получателей "
+                "(всем уже отправляли или список пуст)."
+            )
+            await _db.notify_if_enabled(
+                pool, bot, owner_id, "op_complete",
+                f"📨 <b>DM «{campaign['name']}»</b> — отправлять некому{_why}",
+            )
+        except Exception:
+            log_exc_swallow(log, "dm_engine: empty-audience notification failed")
         return
 
     template = campaign["text_template"]
@@ -908,7 +1022,9 @@ async def run_campaign(
             f"📨 <b>DM-кампания «{campaign['name']}» завершена</b>\n\n"
             f"✅ Отправлено: <b>{sent}</b>\n"
             f"❌ Ошибок: <b>{failed}</b>\n"
-            f"📊 Всего целей: <b>{total}</b>",
+            f"📊 Всего целей: <b>{total}</b>"
+            + (f"\n🚫 Пропущено по реестру «не писать»: <b>{opt_out_removed}</b>"
+               if opt_out_removed else ""),
         )
     except Exception:
         log_exc_swallow(

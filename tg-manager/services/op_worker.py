@@ -7099,6 +7099,26 @@ async def _exec_bulk_dm_adhoc(
     if not account_ids or not usernames or (not text and media_bytes is None):
         return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст/медиа"}
 
+    # Реестр «не писать»: раньше применялся только в масс-инвайте, из-за чего
+    # человек, явно попросивший не писать, получал разовую рассылку. Fail-open —
+    # сбой реестра не срывает операцию.
+    _opt_out_skipped = 0
+    try:
+        from services import contact_opt_out as _coo
+        from services.dm_engine import filter_opted_out_refs as _filter_refs
+
+        _opted = await _coo.load_opted_out(pool, owner_id)
+        if _opted:
+            usernames, _opt_out_skipped = _filter_refs(usernames, _opted)
+            if _opt_out_skipped:
+                log.info("bulk_dm_adhoc op=%d: пропущено %d по реестру «не писать»",
+                         op_id, _opt_out_skipped)
+    except Exception:
+        log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: opt-out filter failed")
+    if not usernames:
+        return {"status": "done", "ok": 0, "fail": 0,
+                "summary": f"🚫 Все {_opt_out_skipped} получателей в реестре «не писать» — отправлять некому"}
+
     rows = await resource_selector.select_all_active(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     active_accounts = [dict(r) for r in rows]
@@ -7218,11 +7238,13 @@ async def _exec_bulk_dm_adhoc(
                 pass
 
         _quar_note = f" · 🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс)" if _skipped_quar else ""
+        _oo_note = f" · 🚫 {_opt_out_skipped} в реестре «не писать»" if _opt_out_skipped else ""
         return {
             "status": "done",
             "ok": ok_count,
             "fail": err_count,
-            "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей{_quar_note}",
+            "opt_out_skipped": _opt_out_skipped,
+            "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей{_quar_note}{_oo_note}",
         }
     finally:
         await release_accounts(claimed_ids)
