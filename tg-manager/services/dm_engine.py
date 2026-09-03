@@ -374,9 +374,13 @@ _DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
     "cohort":          (35.0, 90.0),
     "all_bots":        (40.0, 100.0),   # агрегат всех своих ботов
     "crm":             (45.0, 110.0),   # crm-контакты
+    "segment":         (45.0, 110.0),   # срез crm-контактов — тот же класс риска
     "parsed_audience": (55.0, 130.0),   # спарсенные — незнакомые
     "import_list":     (70.0, 160.0),   # внешний список — максимальная осторожность
 }
+# Потолок выборки сегмента на кампанию: аудитория целиком грузится в память,
+# а при задержке 45–110 с даже 20k получателей — это недели отправки.
+_SEGMENT_TARGET_LIMIT = 20000
 _DEFAULT_DELAY_RANGE: tuple[float, float] = (45.0, 110.0)
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
 _PEER_FLOOD_COOLDOWN = 48 * 3600  # PeerFlood — аккаунт-флаг: длинный cooldown (48ч)
@@ -427,6 +431,36 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
+    elif target_type == "segment" and target_id:
+        # Сохранённый сегмент CRM как аудитория кампании. Раньше единственным
+        # CRM-таргетом был «все контакты»: пользователь строил срез («Горячие»,
+        # «Молчуны 30д») в контактах, но написать именно ему не мог. Резолвим тем
+        # же движком сегментов, что и список контактов, — «вижу = пишу».
+        from services.contacts_hub import repository as _repo
+
+        filters = await _repo.get_segment_filters(pool, campaign["owner_id"], int(target_id))
+        if filters is None:
+            # Сегмент удалён или принадлежит другому владельцу — не молчим,
+            # иначе кампания «успешно» уйдёт в пустоту.
+            raise ValueError(f"Сегмент #{target_id} не найден")
+        rows = await _repo.resolve_segment(
+            pool, campaign["owner_id"], filters, limit=_SEGMENT_TARGET_LIMIT
+        )
+        out: list[dict] = []
+        seen_uids: set[int] = set()
+        for r in rows:
+            uid = int(r.get("telegram_user_id") or 0)
+            uname = (r.get("username") or "").lstrip("@").strip() or None
+            # Для ЛС нужен user_id или @username: контакт, у которого есть только
+            # телефон, адресовать нечем — молча пропускаем, он не «ошибка».
+            if uid <= 0 and not uname:
+                continue
+            if uid and (uid in sent_ids or uid in seen_uids):
+                continue
+            if uid:
+                seen_uids.add(uid)
+            out.append({"user_id": uid, "username": uname})
+        return out
     elif target_type == "cohort" and target_id:
         # target_id = bot_id, params.cohort_type = hot|warm|cold|lost
         import json as _json
@@ -551,6 +585,27 @@ async def run_campaign(
         campaign_id,
     )
 
+    async def _fail(reason: str, hint: str = "") -> None:
+        """Пометить кампанию упавшей И СКАЗАТЬ, почему.
+
+        Раньше все три пути отказа молча ставили status='failed': пользователь
+        видел в списке «ошибка» без единого слова причины и не мог понять, чинить
+        ему аккаунты, аудиторию или сегмент.
+        """
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
+        )
+        try:
+            from database import db as _db
+
+            await _db.notify_if_enabled(
+                pool, bot, owner_id, "op_complete",
+                f"⚠️ <b>DM «{campaign.get('name') or campaign_id}» не запущена</b>\n\n"
+                f"{reason}" + (f"\n\n💡 {hint}" if hint else ""),
+            )
+        except Exception:
+            log_exc_swallow(log, "dm_engine: failure notification failed")
+
     try:
         from services.flood_engine import get_active_accounts
 
@@ -559,9 +614,8 @@ async def run_campaign(
         log.exception(
             "dm_engine: get_active_accounts failed for campaign %d", campaign_id
         )
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
-        )
+        await _fail("Не удалось получить список аккаунтов для отправки.",
+                    "Попробуйте запустить кампанию ещё раз.")
         return
 
     if not accounts:
@@ -570,18 +624,16 @@ async def run_campaign(
             campaign_id,
             owner_id,
         )
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
-        )
+        await _fail("Нет активных аккаунтов для отправки ЛС.",
+                    "Подключите аккаунт или снимите с них паузу/кулдаун.")
         return
 
     try:
         targets = await _get_targets(pool, campaign)
-    except Exception:
+    except Exception as _texc:
         log.exception("dm_engine: _get_targets failed for campaign %d", campaign_id)
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
-        )
+        await _fail(f"Не удалось собрать аудиторию: {str(_texc)[:150]}",
+                    "Проверьте выбранную аудиторию — она могла быть удалена.")
         return
 
     # Реестр «не писать»: тот, кто явно просил больше не писать, не должен

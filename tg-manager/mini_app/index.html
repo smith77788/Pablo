@@ -5755,10 +5755,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="all_bots">Все боты — все подписчики</option>
         <option value="bot_users">Конкретный бот</option>
         <option value="cohort">Когорта по активности (один бот)</option>
-        <option value="crm">CRM-контакты</option>
+        <option value="crm">CRM-контакты — все</option>
+        <option value="segment">🎯 Сегмент CRM (сохранённый)</option>
         <option value="parsed_audience">Аудитория из парсера</option>
         <option value="import_list">Свой список (вставить)</option>
       </select>
+    </div>
+    <div class="field" id="cmpSegmentField" style="display:none">
+      <label>Сегмент</label>
+      <select id="cmpSegment"><option value="">Загрузка…</option></select>
+      <div class="field-note">Срез контактов из «Контакты → Сегменты». Пишем ровно тем, кого видно в срезе</div>
     </div>
     <div class="field" id="cmpBotField" style="display:none">
       <label>Бот</label>
@@ -12076,6 +12082,9 @@ function startCampaignFromParse(runId) {
 function openCmpModal() {
   buildCmpPresets();
   CMP_PARSE_RUN = null;
+  // Размеры сегментов живые — перечитываем при каждом открытии, иначе
+  // пользователь целится по устаревшему числу контактов.
+  CMP_SEGMENTS = null;
   document.getElementById('cmpName').value='';
   document.getElementById('cmpTargetType').value='all_bots';
   document.getElementById('cmpText').value='';
@@ -12093,15 +12102,51 @@ function openCmpModal() {
 }
 function closeCmpModal() { document.getElementById('cmpMbg').classList.remove('show'); }
 
+// Сегменты CRM для выбора аудитории кампании. Грузим лениво — только когда
+// пользователь реально выбрал таргет «сегмент».
+let CMP_SEGMENTS = null;
+async function loadCmpSegments() {
+  const sel = document.getElementById('cmpSegment');
+  if (!sel) return;
+  if (CMP_SEGMENTS) { renderCmpSegments(); return; }
+  sel.innerHTML = '<option value="">Загрузка…</option>';
+  try {
+    const d = await api('/api/miniapp/uch/segments');
+    CMP_SEGMENTS = d.segments || [];
+  } catch(e) {
+    CMP_SEGMENTS = [];
+    sel.innerHTML = '<option value="">Не удалось загрузить сегменты</option>';
+    return;
+  }
+  renderCmpSegments();
+}
+function renderCmpSegments() {
+  const sel = document.getElementById('cmpSegment');
+  if (!sel) return;
+  if (!CMP_SEGMENTS.length) {
+    sel.innerHTML = '<option value="">Нет сохранённых сегментов — создайте в «Контактах»</option>';
+    return;
+  }
+  sel.innerHTML = CMP_SEGMENTS.map(s=>{
+    const cnt = (s.count==null) ? '' : ' · '+num(s.count)+' конт.';
+    return `<option value="${s.id}">${esc(s.name||('Сегмент #'+s.id))}${cnt}</option>`;
+  }).join('');
+}
+
 function updateCmpTargetBot() {
   const type = document.getElementById('cmpTargetType').value;
   const bf = document.getElementById('cmpBotField');
   const cf = document.getElementById('cmpCohortField');
   const imf = document.getElementById('cmpImportField');
+  const sf = document.getElementById('cmpSegmentField');
   const needBot = (type==='bot_users' || type==='cohort');
   bf.style.display = needBot ? 'block' : 'none';
   if (cf) cf.style.display = (type==='cohort') ? 'block' : 'none';
   if (imf) imf.style.display = (type==='import_list') ? 'block' : 'none';
+  if (sf) {
+    sf.style.display = (type==='segment') ? 'block' : 'none';
+    if (type==='segment') loadCmpSegments();
+  }
   if (needBot) {
     document.getElementById('cmpBot').innerHTML = BOTS.length ? BOTS.map(b=>{
       const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
@@ -12142,6 +12187,11 @@ async function saveCmp() {
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
   if (needBot && !target_id) { errEl.textContent='Выберите бота'; errEl.style.display='block'; return; }
   const payload = {name, text, target_type, target_id, pace, cohort_type};
+  if (target_type==='segment') {
+    const segId = document.getElementById('cmpSegment')?.value;
+    if (!segId) { errEl.textContent='Выберите сегмент (создайте его в «Контактах»)'; errEl.style.display='block'; return; }
+    payload.target_id = segId;
+  }
   // Пришли «из парсера» — таргетим ИМЕННО тот запуск (backend: parsed_audience +
   // target_id=parse_run_id). Без этого рассылка шла по ВСЕЙ аудитории парсера.
   if (target_type==='parsed_audience' && CMP_PARSE_RUN) payload.target_id = CMP_PARSE_RUN;

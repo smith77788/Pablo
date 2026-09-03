@@ -8662,10 +8662,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Заполните название и текст", 400)
         # Полный список типов таргета, поддержанных dm_engine._get_targets.
         _ALLOWED_TARGETS = {
-            "all_bots", "bot_users", "cohort", "crm", "parsed_audience", "import_list",
+            "all_bots", "bot_users", "cohort", "crm", "segment",
+            "parsed_audience", "import_list",
         }
         if target_type not in _ALLOWED_TARGETS:
             return _err(f"target_type должен быть одним из: {', '.join(sorted(_ALLOWED_TARGETS))}", 400)
+        # Сегмент CRM как аудитория: проверяем владение ДО создания кампании —
+        # иначе кампания создастся и молча уйдёт в пустоту на этапе резолва.
+        _segment_filters = None
+        if target_type == "segment":
+            if not target_id:
+                return _err("Для сегмента выберите сохранённый сегмент", 400)
+            try:
+                _seg_id = int(target_id)
+            except (TypeError, ValueError):
+                return _err("Invalid target_id", 400)
+            try:
+                from services.contacts_hub import repository as _repo
+                _segment_filters = await _repo.get_segment_filters(pool, uid, _seg_id)
+            except Exception:
+                log.exception("dm campaign: segment lookup uid=%d seg=%s", uid, target_id)
+                return _err("Не удалось прочитать сегмент", 500)
+            if _segment_filters is None:
+                return _err("Сегмент не найден", 404)
         # IDOR-защита: при таргете на конкретного бота проверяем владение.
         if target_type in ("bot_users", "cohort") and target_id:
             try:
@@ -8718,6 +8737,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             elif target_type == "crm":
                 total_targets = await _safe_count(pool,
                     "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0", uid)
+            elif target_type == "segment" and _segment_filters is not None:
+                from services.contacts_hub import repository as _repo
+                total_targets = await _repo.count_segment(pool, uid, _segment_filters)
             elif target_type == "parsed_audience":
                 if target_id:
                     total_targets = await _safe_count(pool,
