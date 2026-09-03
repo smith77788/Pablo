@@ -41,6 +41,43 @@ class PlanRequiredError(PermissionError):
         super().__init__(f"operation {op_type!r} requires plan {required_plan!r}")
 
 
+class ImmunityBlockedError(PermissionError):
+    """Тип операции временно приостановлен предохранителем Ban Weather.
+
+    Взводится автоматически, когда паттерн прямо сейчас массово убивает
+    аккаунты владельца (immunity_engine, шторм). Наследник PermissionError —
+    middleware мини-аппа уже отдаёт такие ошибки чистым 403 с текстом причины,
+    а не «внутренней ошибкой». Снимается автоматически по истечении cooldown.
+    """
+
+    def __init__(self, op_type: str, reason: str, until=None) -> None:
+        self.op_type = op_type
+        self.reason = reason
+        self.until = until
+        super().__init__(reason)
+
+
+async def _enforce_immunity(pool, owner_id: int, op_type: str) -> None:
+    """Спросить предохранитель Ban Weather перед постановкой операции.
+
+    Fail-open: любая ошибка проверки НЕ должна мешать работе — иммунитет это
+    страховка, а не критический путь (тот же принцип, что у проверки плана).
+    """
+    try:
+        from services import immunity_engine
+
+        policy = await immunity_engine.check_policy(pool, owner_id, op_type)
+    except Exception:
+        log.warning(
+            "operation_bus: immunity check errored for op=%s owner=%s — allowing (fail-open)",
+            op_type, owner_id, exc_info=True,
+        )
+        return
+    if policy and policy.get("action") == "block":
+        raise ImmunityBlockedError(op_type, policy.get("reason") or
+                                   "Тип операции временно приостановлен", policy.get("until"))
+
+
 async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> None:
     """Проверить подписку владельца против min_plan операции.
 
@@ -610,6 +647,12 @@ async def submit(
     # платную операцию, даже если какой-то хендлер забыл проверку.
     if not bypass_plan_check:
         await _enforce_min_plan(pool, owner_id, op_type, meta)
+
+    # Предохранитель Ban Weather: если этот тип операции прямо сейчас массово
+    # убивает аккаунты владельца — не ставим новые, пока волна не спадёт.
+    # Замыкает петлю «исход → причина → защита»: без этого детектор вспышек
+    # оставался бы просто дашбордом. Fail-open внутри.
+    await _enforce_immunity(pool, owner_id, op_type)
 
     retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
     op_label = label or meta.get("description") or op_type

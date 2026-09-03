@@ -392,6 +392,10 @@ async def detect_outbreaks(pool) -> int:
                     "ban-weather[%s]: owner=%s сигнатура %s — смертей 1ч=%d, 24ч=%d",
                     level, r["owner_id"], r["signature"], d1, d24,
                 )
+            # Предохранитель взводим ТОЛЬКО на шторме: warning — предупреждение
+            # оператору, а не повод глушить работу.
+            if level == "storm" and breaker_enabled():
+                await _arm_breaker(pool, r["owner_id"], r["signature"], d1, d24)
         except Exception:
             log_exc_swallow(log, f"immunity: роллап сигнатуры {r.get('signature')!r} упал")
 
@@ -415,6 +419,95 @@ async def detect_outbreaks(pool) -> int:
     except Exception:
         log_exc_swallow(log, "immunity: затухание затихших сигнатур")
     return updated
+
+
+# ── Фаза 3: предохранитель (circuit breaker) ─────────────────────────────────
+
+_BREAKER_ENV = "IMMUNITY_BREAKER"          # "0" → выключить принудительно
+_BREAKER_COOLDOWN_SEC = 30 * 60            # авто-снятие через 30 минут
+
+
+def breaker_enabled() -> bool:
+    """Предохранитель включён? Kill-switch на случай ложных срабатываний."""
+    import os
+
+    return (os.getenv(_BREAKER_ENV, "1") or "1").strip() not in ("0", "false", "no")
+
+
+def op_type_from_signature(signature: Optional[str]) -> Optional[str]:
+    """Доминирующий op_type из сигнатуры вида 'a+b|geo=..|warm=..|trust=..'."""
+    if not signature:
+        return None
+    head = str(signature).split("|", 1)[0].strip()
+    if not head or head == "idle":
+        return None
+    return head.split("+", 1)[0].strip() or None
+
+
+async def _arm_breaker(pool, owner_id, signature: str, deaths_1h: int, deaths_24h: int) -> bool:
+    """Взвести предохранитель на op_type сигнатуры (идемпотентно).
+
+    Блокируем ТОЛЬКО конкретный тип операции этого владельца и ТОЛЬКО при
+    шторме — не глушим весь флот. Причина человекочитаемая, снятие
+    автоматическое по `until`.
+    """
+    from services.logger import log_exc_swallow
+
+    op_type = op_type_from_signature(signature)
+    if not op_type:
+        return False
+    reason = (
+        f"Ban Weather: паттерн «{op_type}» сейчас массово убивает аккаунты "
+        f"({deaths_1h} за час, {deaths_24h} за сутки). Тип операции приостановлен "
+        f"автоматически, чтобы не потерять остальной флот."
+    )
+    try:
+        # Продлеваем уже активную авто-политику вместо создания дублей.
+        updated = await pool.fetchval(
+            """UPDATE immunity_policy
+               SET until = now() + ($3 * INTERVAL '1 second'),
+                   reason = $4, signature = $5
+               WHERE owner_id = $1 AND op_type = $2 AND auto = TRUE AND until > now()
+               RETURNING id""",
+            owner_id, op_type, _BREAKER_COOLDOWN_SEC, reason, signature,
+        )
+        if updated:
+            return False  # уже был взведён — не считаем новым срабатыванием
+        await pool.execute(
+            """INSERT INTO immunity_policy
+                   (owner_id, op_type, signature, action, reason, until, auto)
+               VALUES ($1,$2,$3,'block',$4, now() + ($5 * INTERVAL '1 second'), TRUE)""",
+            owner_id, op_type, signature, reason, _BREAKER_COOLDOWN_SEC,
+        )
+        log.warning("ban-weather: ПРЕДОХРАНИТЕЛЬ взведён owner=%s op_type=%s (%s)",
+                    owner_id, op_type, signature)
+        return True
+    except Exception:
+        log_exc_swallow(log, "immunity: не удалось взвести предохранитель")
+        return False
+
+
+async def check_policy(pool, owner_id, op_type: str) -> Optional[dict[str, Any]]:
+    """Активное ограничение для (владелец, тип операции) или None.
+
+    Fail-soft: при любой ошибке возвращаем None — иммунитет НЕ должен
+    становиться причиной отказа в работе.
+    """
+    if not owner_id or not op_type or not breaker_enabled():
+        return None
+    try:
+        row = await pool.fetchrow(
+            """SELECT action, reason, until FROM immunity_policy
+               WHERE owner_id = $1 AND (op_type = $2 OR op_type IS NULL)
+                 AND until > now()
+               ORDER BY until DESC LIMIT 1""",
+            owner_id, op_type,
+        )
+    except Exception:
+        return None
+    if not row:
+        return None
+    return {"action": row["action"], "reason": row["reason"], "until": row["until"]}
 
 
 async def run_once(pool) -> int:

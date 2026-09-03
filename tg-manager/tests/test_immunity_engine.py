@@ -154,3 +154,42 @@ def test_outbreak_detector_present_and_wired():
     assert "NOT EXISTS" in src and "immunity_signatures s" in src
     # объяснимость: предупреждение в лог при warning/storm
     assert "ban-weather[%s]" in src
+
+
+# ── Фаза 3: предохранитель ───────────────────────────────────────────────────
+
+def test_op_type_extracted_from_signature():
+    assert ie.op_type_from_signature("mass_invite|geo=DE|warm=fresh|trust=low") == "mass_invite"
+    # берём доминирующий из op_mix
+    assert ie.op_type_from_signature("mass_invite+mass_publish|geo=US") == "mass_invite"
+    # «безоперационная» сигнатура не даёт повода блокировать
+    assert ie.op_type_from_signature("idle|geo=US|warm=mature|trust=high") is None
+    assert ie.op_type_from_signature(None) is None
+    assert ie.op_type_from_signature("") is None
+
+
+def test_breaker_kill_switch(monkeypatch):
+    monkeypatch.setenv("IMMUNITY_BREAKER", "0")
+    assert ie.breaker_enabled() is False
+    monkeypatch.setenv("IMMUNITY_BREAKER", "1")
+    assert ie.breaker_enabled() is True
+    monkeypatch.delenv("IMMUNITY_BREAKER", raising=False)
+    assert ie.breaker_enabled() is True  # включён по умолчанию
+
+
+def test_breaker_wired_into_engine():
+    src = _read("services/immunity_engine.py")
+    # взводится ТОЛЬКО на шторме (warning — предупреждение, не остановка работы)
+    assert 'if level == "storm" and breaker_enabled():' in src
+    assert "_arm_breaker" in src and "check_policy" in src
+    # авто-снятие: политика действует до `until`
+    assert "until > now()" in src
+
+
+def test_breaker_wired_into_operation_bus():
+    src = _read("services/operation_bus.py")
+    assert "class ImmunityBlockedError(PermissionError)" in src, "нет типизированной ошибки"
+    assert "await _enforce_immunity(pool, owner_id, op_type)" in src, "гейт не в submit"
+    # fail-open: сбой проверки не мешает работе
+    seg = src[src.index("async def _enforce_immunity"):src.index("async def _enforce_min_plan")]
+    assert "fail-open" in seg and "return" in seg
