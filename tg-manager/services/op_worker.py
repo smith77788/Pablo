@@ -9826,11 +9826,33 @@ async def _exec_mass_invite(
                 _before_p = len(phones)
                 phones = [p for p in phones if str(p) not in _already]
                 _deduped += _before_p - len(phones)
+
+    # Глобальный реестр «не приглашать» (contact_opt_out) — в отличие от
+    # invite_target_log выше, действует на ВСЕ группы, не только текущую:
+    # человек, явно попросивший больше не писать, не получит инвайт в
+    # следующую кампанию. Считается отдельно от _deduped — разная причина
+    # («уже приглашали сюда» vs «попросили не приглашать»).
+    from services import contact_opt_out as _coo
+    _opted_out = 0
+    if user_refs or phones:
+        _oo = await _coo.load_opted_out(pool, owner_id)
+        if _oo:
+            user_refs, _n1 = _coo.filter_targets(user_refs, _oo)
+            phones, _n2 = _coo.filter_targets(phones, _oo)
+            _opted_out = _n1 + _n2
+
     if not user_refs and not phones:
+        if _opted_out and not _deduped:
+            return {
+                "status": "done", "ok": 0, "failed": 0, "left": 0,
+                "summary": (f"🚫 Все цели ({_opted_out}) в реестре «не приглашать» — "
+                            "новых нет."),
+            }
         return {
             "status": "done", "ok": 0, "failed": 0, "left": 0,
-            "summary": (f"♻️ Все цели ({_deduped}) уже приглашались в эту группу — "
-                        "новых нет. Соберите свежую аудиторию или отключите дедуп."),
+            "summary": (f"♻️ Все цели ({_deduped + _opted_out}) уже приглашались в эту "
+                        "группу или в реестре «не приглашать» — новых нет. Соберите "
+                        "свежую аудиторию или отключите дедуп."),
         }
 
     # account_ids is optional in the Mini App ("не выбрано = все активные"):
@@ -10726,6 +10748,7 @@ async def _exec_mass_invite(
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
+        + (f"\n🚫 Пропущено из реестра «не приглашать»: {_opted_out}" if _opted_out else "")
         + (f"\n📵 Номеров не в Telegram (пропущены): {_phones_not_found}" if _phones_not_found else "")
         + (f"\n⚠️ Ошибок: {total_fail}" + (f"\n   ({_fail_breakdown})" if _fail_breakdown else "")
            if total_fail else "")

@@ -33,6 +33,7 @@ class InviterFSM(StatesGroup):
     phones = State()       # телефоны
     acc_count = State()    # кол-во аккаунтов
     preflight_group = State()  # проверка готовности флота: ждём группу
+    optout_target = State()    # реестр «не приглашать»: ждём @username/id/телефон
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ async def cb_inviter_menu(
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить пользователей", callback_data=InviterCb(action="start"))
     kb.button(text="🔍 Проверить готовность флота", callback_data=InviterCb(action="preflight"))
+    kb.button(text="🚫 Реестр «не приглашать»", callback_data=InviterCb(action="optout_menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     kb.adjust(1)
     await _edit(
@@ -1037,3 +1039,100 @@ async def cb_inviter_confirm(
         f"📊 Объём: <b>{_vol_ru}</b>",
         kb.as_markup(),
     )
+
+
+# ── Реестр «не приглашать» ────────────────────────────────────────────────────
+# Первопричина: invite_target_log дедупит инвайты ТОЛЬКО в пределах одной
+# группы — человек, явно попросивший больше не писать, снова получает инвайт
+# в следующую кампанию. contact_opt_out.py — глобальный (по всем группам)
+# реестр, наполняемый вручную (авто-opt-out по ошибкам приватности был бы
+# ложным срабатыванием — см. docstring модуля).
+
+
+async def _render_optout_menu(pool: asyncpg.Pool, owner_id: int):
+    from services import contact_opt_out as coo
+
+    rows = await coo.list_for_owner(pool, owner_id, limit=50)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить в реестр", callback_data=InviterCb(action="optout_add"))
+    lines = [
+        "🚫 <b>Реестр «не приглашать»</b>\n",
+        "Эти цели исключаются из ВСЕХ будущих инвайт-кампаний (не только "
+        "текущей группы) — навсегда, пока вы не уберёте их вручную.\n",
+    ]
+    if not rows:
+        lines.append("<i>Реестр пуст.</i>")
+    else:
+        for i, r in enumerate(rows):
+            reason = f" — {html.escape(r['reason'])}" if r.get("reason") else ""
+            lines.append(f"• <code>{html.escape(r['target'])}</code>{reason}")
+            kb.button(
+                text=f"✖️ Убрать {r['target']}",
+                callback_data=InviterCb(action="optout_remove", item=str(i)),
+            )
+    kb.button(text="◀️ Назад", callback_data=InviterCb(action="menu"))
+    kb.adjust(1)
+    return "\n".join(lines), kb.as_markup(), rows
+
+
+@router.callback_query(InviterCb.filter(F.action == "optout_menu"))
+async def cb_optout_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await state.clear()
+    text, markup, _ = await _render_optout_menu(pool, callback.from_user.id)
+    await _edit(callback, text, markup)
+
+
+@router.callback_query(InviterCb.filter(F.action == "optout_add"))
+async def cb_optout_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(InviterFSM.optout_target)
+    await _edit(
+        callback,
+        "🚫 <b>Добавить в реестр «не приглашать»</b>\n\n"
+        "Отправьте @username, ID или номер телефона (+79991234567).\n"
+        "Можно несколько — по одному на строку.",
+        _cancel_kb(),
+    )
+
+
+@router.message(InviterFSM.optout_target, F.text)
+async def msg_optout_add(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    from services import contact_opt_out as coo
+
+    await state.clear()
+    owner_id = message.from_user.id
+    added, bad = [], []
+    for line in (message.text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        target = await coo.add(pool, owner_id, line, source="manual")
+        (added if target else bad).append(target or line)
+    parts = []
+    if added:
+        parts.append("✅ Добавлено: " + ", ".join(f"<code>{html.escape(a)}</code>" for a in added))
+    if bad:
+        parts.append("⚠️ Не распознано: " + ", ".join(html.escape(b) for b in bad))
+    text, markup, _ = await _render_optout_menu(pool, owner_id)
+    await message.answer("\n".join(parts) or "Ничего не добавлено.", parse_mode="HTML")
+    await message.answer(text, reply_markup=markup, parse_mode="HTML")
+
+
+@router.callback_query(InviterCb.filter(F.action == "optout_remove"))
+async def cb_optout_remove(
+    callback: CallbackQuery, callback_data: InviterCb, pool: asyncpg.Pool
+) -> None:
+    from services import contact_opt_out as coo
+
+    owner_id = callback.from_user.id
+    try:
+        idx = int(callback_data.item)
+    except (TypeError, ValueError):
+        idx = -1
+    rows = await coo.list_for_owner(pool, owner_id, limit=50)
+    if 0 <= idx < len(rows):
+        await coo.remove(pool, owner_id, rows[idx]["target"])
+        await callback.answer(f"Убрано: {rows[idx]['target']}")
+    else:
+        await callback.answer()
+    text, markup, _ = await _render_optout_menu(pool, owner_id)
+    await _edit(callback, text, markup)
