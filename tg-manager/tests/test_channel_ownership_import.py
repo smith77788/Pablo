@@ -154,3 +154,20 @@ def test_get_dialogs_exposes_role_flags_in_source():
     assert '"is_creator"' in src and '"is_admin"' in src, (
         "get_dialogs должна отдавать флаги роли, иначе импорт не сможет отличить чужие"
     )
+
+
+def test_channels_endpoint_exposes_role():
+    """Список каналов должен отдавать роль — на ней держится бейдж владелец/админ/участник."""
+    src = _func_source("services/mini_app_api.py", "channels")
+    assert "is_admin" in src and "is_creator" in src and "role" in src, (
+        "endpoint channels обязан отдавать is_admin/is_creator/role для различения инфраструктуры"
+    )
+
+
+def test_reclassify_op_registered_and_routed():
+    from services import operation_bus
+    assert "reclassify_channels" in operation_bus.OP_REGISTRY, (
+        "reclassify_channels не зарегистрирован — submit() отклонит операцию"
+    )
+    api_src = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert "/api/miniapp/channels/reclassify" in api_src, "нет роута переопределения инфраструктуры"

@@ -1185,7 +1185,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
-      <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт с аккаунтов</button>
+      <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 0 8px">
+      <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🔄 Только мои (убрать чужие)</button>
     </div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -9323,6 +9326,7 @@ function renderChannels(list) {
   txt('chList', list.map(c=>{
     const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
     const type = c.type==='supergroup'?'💬 Группа':c.type==='channel'?'📡 Канал':'💬 Чат';
+    const role = c.role==='owner'?' · 👑 владелец':c.role==='admin'?' · 🛡 админ':c.role==='member'?' · 👤 участник':'';
     const sel = CH_SEL.has(c.channel_id);
     const onclick = CH_SEL_MODE ? `toggleChSel('${c.channel_id}')` : `openChannel(${c.channel_id})`;
     const checkbox = CH_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
@@ -9332,7 +9336,7 @@ function renderChannels(list) {
       <div class="ava ava-purple">📡</div>
       <div class="li-body">
         <div class="li-name">${esc(name)}</div>
-        <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div>
+        <div class="li-sub">${type} · ${num(c.member_count||0)} участников${role}</div>
       </div>
       ${right}
     </div>`;
@@ -10055,13 +10059,13 @@ async function cancelOp(id) {
 // Опрос статуса операции после enqueue — показывает РЕАЛЬНЫЙ итог (успех/ошибка),
 // а не только «поставлено в очередь». Для единичных действий: устраняет ощущение
 // «ничего не происходит» при тихом фоновом провале (мёртвый аккаунт/прокси).
-async function pollOpResult(opId, label){
+async function pollOpResult(opId, label, onDone){
   if(!opId) return;
   for(let i=0;i<24;i++){            // ~24 × 2.5с ≈ 60с
     await new Promise(r=>setTimeout(r,2500));
     let d;
     try { d = await api('/api/miniapp/operation/'+opId); } catch(_){ continue; }
-    if(d.status==='done'){ toast('✅ '+(label||'Готово')+': '+(d.summary||'выполнено')); return; }
+    if(d.status==='done'){ toast('✅ '+(label||'Готово')+': '+(d.summary||'выполнено')); if(typeof onDone==='function'){ try{ onDone(); }catch(_){} } return; }
     if(d.status==='failed'){ toast('❌ '+(label||'Ошибка')+': '+(d.error_msg||d.summary||'не выполнено')); return; }
     if(d.status==='cancelled'){ toast('⏹ '+(label||'Отменено')); return; }
   }
@@ -18080,6 +18084,7 @@ const MASS_OP_LABELS = {
   boost_stories:'📖 Сторис', boost_subscribers:'👥 Подписчики/участники', boost_bot_starts:'🚀 Старты в ботах',
   niche_growth_post:'🌿 Growth Agent',
   check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
+  reclassify_channels:'🔄 Переопределение инфраструктуры',
   channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
   promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
@@ -18227,6 +18232,17 @@ async function importAllResources(kind) {
     const r = await api(url, {method:'POST'});
     toast(`📥 Импорт ${isCh?'каналов':'групп'} запущен · ${r.accounts} акк. · операция #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, isCh ? 'Импорт каналов' : 'Импорт групп');
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+// Переопределить «мою инфраструктуру»: сессии проверяют роль аккаунта в каждом
+// канале, чужие (только участник) удаляются из списка. Операция reclassify_channels.
+async function reclassifyChannels() {
+  if (!await askConfirm('Проверить роль во всех каналах/группах и убрать чужие (где аккаунт только подписчик)?\n\nУдаляются лишь каналы, которые сессия подтвердила как чужие. Ваши (владелец/админ) останутся.')) return;
+  try {
+    const r = await api('/api/miniapp/channels/reclassify', {method:'POST', body:JSON.stringify({prune:true})});
+    toast(`🔄 Проверка инфраструктуры запущена · ${r.accounts} акк. · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Переопределение инфраструктуры', ()=>openChannels());
   } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
 }
 

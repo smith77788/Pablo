@@ -1750,7 +1750,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         rows = await _safe_fetch(pool,
             """SELECT DISTINCT channel_id AS id, channel_id, username, title,
                       COALESCE(members_count, 0) AS member_count,
-                      type, added_at
+                      type, added_at, is_admin, is_creator,
+                      CASE
+                          WHEN is_creator THEN 'owner'
+                          WHEN is_admin THEN 'admin'
+                          WHEN is_admin IS FALSE THEN 'member'
+                          ELSE 'unknown'
+                      END AS role
                FROM managed_channels
                WHERE owner_id=$1
                   OR channel_id IN (
@@ -7397,6 +7403,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def groups_import_all(request: web.Request) -> web.Response:
         return await _import_all_op(request, "groups")
+
+    async def channels_reclassify(request: web.Request) -> web.Response:
+        """Переопределить «мою инфраструктуру»: живыми сессиями проставить роль
+        каждой строке managed_channels и убрать чужие (только участник). Чинит
+        уже накопленную засорённость списка чужими подписками."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(
+            pool,
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
+            "AND session_str IS NOT NULL ORDER BY id",
+            uid,
+        )
+        acc_ids = [int(r["id"]) for r in (rows or [])]
+        if not acc_ids:
+            return _err("Нет активных аккаунтов с сессией", 400)
+        prune = True
+        try:
+            body = await request.json()
+            if isinstance(body, dict) and "prune" in body:
+                prune = bool(body["prune"])
+        except Exception:
+            pass
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "reclassify_channels",
+                {"prune": prune},
+                total_items=len(acc_ids),
+                label="Переопределение моей инфраструктуры",
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("channels_reclassify uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def channels_bulk_join(request: web.Request) -> web.Response:
         return await _mass_membership_op(request, "join")
@@ -14264,6 +14308,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/bulk_create", channels_bulk_create)
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
+    app.router.add_post("/api/miniapp/channels/reclassify", channels_reclassify)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)

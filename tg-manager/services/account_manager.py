@@ -2369,6 +2369,11 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
                         "username": getattr(entity, "username", "") or "",
                         "members": getattr(entity, "participants_count", 0) or 0,
                         "is_creator": is_creator,
+                        # Сюда попадают только создатель/админ → инфраструктура наша.
+                        "is_admin": True,
+                        "type": "channel" if is_broadcast else (
+                            "megagroup" if getattr(entity, "megagroup", False) else "supergroup"
+                        ),
                         "access_hash": getattr(entity, "access_hash", 0) or 0,
                     }
                     if is_broadcast:

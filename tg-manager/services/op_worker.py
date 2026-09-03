@@ -1754,6 +1754,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_check_accounts_health(pool, bot, op_id, owner_id, params)
             elif op_type == "scan_owned_resources":
                 result = await _exec_scan_owned_resources(pool, bot, op_id, owner_id, params)
+            elif op_type == "reclassify_channels":
+                result = await _exec_reclassify_channels(pool, bot, op_id, owner_id, params)
             elif op_type == "promote_all_admins":
                 result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
             elif op_type == "deploy_network":
@@ -8477,6 +8479,120 @@ async def _exec_scan_owned_resources(
             "scanned": n,
             "imported": total_imported,
             "dead": dead_count,
+            "summary": summary,
+        }
+    finally:
+        await release_accounts(claimed_ids)
+
+
+async def _exec_reclassify_channels(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Переопределить «мою инфраструктуру»: пройтись живыми сессиями по диалогам,
+    проставить каждой строке managed_channels роль (is_admin/is_creator) и убрать
+    чужие каналы/группы, где ни один аккаунт не является создателем/админом.
+
+    Безопасность: удаляем ТОЛЬКО строки, которые сессия положительно
+    подтвердила как «только участник». Каналы недоступных (мёртвых) сессий и
+    любые, что не встретились в диалогах, остаются нетронутыми (роль NULL)."""
+    from services import account_manager, session_simulator
+
+    prune = bool(params.get("prune", True))
+
+    accounts = [dict(r) for r in await resource_selector.select_all_active(
+        pool, owner_id, min_trust_score=0.0)]
+    if not accounts:
+        return {"status": "failed", "summary": "Нет активных аккаунтов с сессией"}
+
+    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed_ids:
+        return {"status": "failed",
+                "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
+
+    try:
+        n = len(accounts)
+        await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+
+        # channel_id → ранг роли по всем аккаунтам: 0=участник, 1=админ, 2=создатель
+        rank_map: dict[int, int] = {}
+        errors = 0
+
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                break
+            try:
+                dialogs = await account_manager.get_dialogs(acc["session_str"], limit=300, _acc=acc) or []
+                for d in dialogs:
+                    cid = d.get("id")
+                    if cid is None:
+                        continue
+                    cid = int(cid)
+                    rank = 2 if d.get("is_creator") else (1 if d.get("is_admin") else 0)
+                    rank_map[cid] = max(rank_map.get(cid, 0), rank)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                errors += 1
+                log.warning("_exec_reclassify_channels acc=%s: %s", acc.get("id"), exc)
+            await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if idx < n - 1:
+                await session_simulator.short_pause(1.0, 2.5)
+
+        if not rank_map:
+            return {"status": "failed",
+                    "summary": "⚠️ Не удалось прочитать диалоги ни одной сессией — роли не изменены"}
+
+        owned_ids = [c for c, r in rank_map.items() if r >= 1]
+        creator_ids = [c for c, r in rank_map.items() if r >= 2]
+        foreign_ids = [c for c, r in rank_map.items() if r == 0]
+
+        # Проставляем роль по подтверждённым каналам.
+        if owned_ids:
+            await _safe_execute(
+                pool,
+                "UPDATE managed_channels SET is_admin=TRUE "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                owner_id, owned_ids,
+            )
+        if creator_ids:
+            await _safe_execute(
+                pool,
+                "UPDATE managed_channels SET is_creator=TRUE "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                owner_id, creator_ids,
+            )
+        removed = 0
+        if foreign_ids:
+            await _safe_execute(
+                pool,
+                "UPDATE managed_channels SET is_admin=FALSE "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                owner_id, foreign_ids,
+            )
+            if prune:
+                res = await _safe_fetchval(
+                    pool,
+                    "WITH d AS (DELETE FROM managed_channels "
+                    "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[]) RETURNING 1) "
+                    "SELECT COUNT(*) FROM d",
+                    owner_id, foreign_ids,
+                )
+                removed = int(res or 0)
+
+        kept = len(owned_ids)
+        err_note = f"\n⚠️ Сессий с ошибкой: {errors}" if errors else ""
+        if prune:
+            summary = (f"✅ Инфраструктура переопределена\n"
+                       f"👑 Моих каналов/групп: {kept}\n"
+                       f"🚫 Убрано чужих (только участник): {removed}{err_note}")
+        else:
+            summary = (f"✅ Роли обновлены\n"
+                       f"👑 Моих: {kept} · 🚫 Чужих помечено: {len(foreign_ids)}{err_note}")
+        return {
+            "status": "done",
+            "owned": kept,
+            "foreign_removed": removed,
             "summary": summary,
         }
     finally:
