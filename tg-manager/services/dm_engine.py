@@ -291,6 +291,66 @@ def _classify_error(exc: Exception) -> str:
     return "retry"
 
 
+# Ошибки уровня ПОЛУЧАТЕЛЯ: доставить нельзя никогда, но аккаунт здоров и
+# обязан продолжать работу. Строки — ровно те, что формирует
+# account_manager.send_dm; имена Telethon-классов добавлены на случай, когда
+# наверх просачивается сырой текст исключения.
+_PERMANENT_TARGET_MARKERS = (
+    "приватность",
+    "заблокирован",
+    "нет доступа",
+    "аккаунт удалён",
+    "username не существует",
+    "userprivacyrestricted",
+    "userisblocked",
+    "chatwriteforbidden",
+    "inputuserdeactivated",
+    "usernamenotoccupied",
+    "usernameinvalid",
+)
+
+
+def classify_send_result(result: dict) -> str:
+    """Свести ответ account_manager.send_dm к исходу.
+
+    Возвращает 'sent' | 'flood' | 'peer_flood' | 'auth' | 'skip' | 'retry'.
+
+    Нужна потому, что разовая рассылка складывала ВСЁ в «ошибку»: флуд-вейт,
+    флаг PeerFlood (аккаунт помечен за спам) и мёртвую сессию было не отличить
+    от «у получателя закрыты личные сообщения». Аккаунт под PeerFlood при этом
+    оставался в ротации и продолжал слать — самый быстрый способ его потерять.
+
+    Отдельно: send_dm НИКОГДА не возвращает ключ 'banned', поэтому проверять
+    его бессмысленно — мёртвая сессия распознаётся по тексту ошибки.
+    """
+    if not isinstance(result, dict):
+        return "retry"
+    if result.get("ok"):
+        return "sent"
+    if result.get("flood_wait"):
+        return "flood"
+    if result.get("peer_flood"):
+        return "peer_flood"
+    err = str(result.get("error") or "")
+    low = err.lower()
+    if "peer_flood" in low or "peerflood" in low:
+        return "peer_flood"
+    if "flood_wait" in low or "floodwait" in low:
+        return "flood"
+    try:
+        from services.account_manager import is_dead_session_error
+
+        if is_dead_session_error(err):
+            return "auth"
+    except Exception:
+        pass
+    if any(m in low for m in ("auth_key", "session_revoked", "unauthorized")):
+        return "auth"
+    if any(m in low for m in _PERMANENT_TARGET_MARKERS):
+        return "skip"
+    return "retry"
+
+
 def _extract_flood_seconds(exc: Exception) -> int:
     """Извлекает количество секунд флуд-вейта из исключения."""
     for attr in ("seconds", "x"):
