@@ -211,6 +211,10 @@ async def import_sessions(
             country_code_from_phone,
         )
 
+        # Закрепляем Telegram-приложение из пула (services/tg_apps.py): весь
+        # флот под одним api_id — прямой корреляционный признак когорты.
+        from services.tg_apps import assign_api_id as _assign_api_id
+
         phone = result.get('phone', '') or ''
         dev = generate_device_fingerprint(country_code_from_phone(phone))
         try:
@@ -218,12 +222,13 @@ async def import_sessions(
                 """INSERT INTO tg_accounts
                        (owner_id, session_str, session_fp, phone, is_active, acc_status,
                         device_model, system_version, app_version, lang_code, system_lang_code,
-                        proxy_id)
+                        api_id, proxy_id)
                    VALUES ($1, $2, $3, $4, TRUE, 'active',
-                        $5, $6, $7, $8, $9, $10)""",
+                        $5, $6, $7, $8, $9, $10, $11)""",
                 owner_id, encrypt_token(session_str), _fp, phone,
                 dev["device_model"], dev["system_version"], dev["app_version"],
-                dev["lang_code"], dev["system_lang_code"], proxy_id,
+                dev["lang_code"], dev["system_lang_code"],
+                _assign_api_id(_fp), proxy_id,
             )
             imported += 1
         except Exception as e:

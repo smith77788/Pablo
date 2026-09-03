@@ -1051,6 +1051,21 @@ def _normalize_device_profile(device: dict | None = None) -> dict[str, Any]:
     payload.setdefault("device_model", "Samsung SM-S911B")
     payload.setdefault("system_version", "Android 14")
     payload.setdefault("app_version", "11.5.3")
+    # Пер-аккаунтное Telegram-приложение: весь флот под одной парой
+    # TG_API_ID/HASH — прямой корреляционный признак связности когорты.
+    # Пул пуст → пара из config (поведение ровно прежнее).
+    if not payload.get("api_id") or not payload.get("api_hash"):
+        try:
+            from services import tg_apps
+
+            _pair = tg_apps.for_account(
+                payload.get("id") or payload.get("acc_id"),
+                payload.get("api_id"),
+            )
+            if _pair:
+                payload["api_id"], payload["api_hash"] = _pair[0], _pair[1]
+        except Exception:
+            log_exc_swallow(log, "tg_apps: не удалось выбрать приложение")
     return payload
 
 
@@ -1349,8 +1364,8 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
 
     _client = TelegramClient(
         StringSession(session_string),
-        int(TG_API_ID),
-        TG_API_HASH,
+        int(d.get("api_id") or TG_API_ID),
+        d.get("api_hash") or TG_API_HASH,
         device_model=d["device_model"],
         system_version=d["system_version"],
         app_version=d["app_version"],

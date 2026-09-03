@@ -56,6 +56,39 @@ def _trust_bucket(score: Optional[float]) -> str:
     return "high"
 
 
+# ── Фаза 2: детектор вспышек ─────────────────────────────────────────────────
+
+THREAT_LEVELS = ("calm", "watch", "warning", "storm")
+_MIN_DEATHS_FOR_SIGNAL = 2   # ниже — статистический шум, не вспышка
+
+
+def classify_threat(deaths_1h: int, deaths_24h: int, exposures: int) -> str:
+    """Уровень угрозы по сигнатуре: calm | watch | warning | storm.
+
+    Вспышка — это УСКОРЕНИЕ смертности, а не абсолютное число: ловим момент,
+    когда паттерн начал убивать быстрее собственной суточной нормы, чтобы
+    успеть притормозить остальной флот. Дополнительно учитываем долю флота,
+    выкошенную этой сигнатурой за сутки.
+
+    Чистая функция (без БД) — тестируется напрямую.
+    """
+    d1 = max(0, int(deaths_1h or 0))
+    d24 = max(0, int(deaths_24h or 0))
+    exp = max(0, int(exposures or 0))
+    if d24 < _MIN_DEATHS_FOR_SIGNAL:
+        return "calm"
+    baseline = d24 / 24.0                      # ожидаемо смертей в час
+    accel = (d1 / baseline) if baseline > 0 else 0.0
+    share = d24 / float(d24 + exp) if (d24 + exp) > 0 else 0.0
+    if (d1 >= 3 and accel >= 3.0) or share >= 0.50:
+        return "storm"
+    if (d1 >= 2 and accel >= 2.0) or share >= 0.30:
+        return "warning"
+    if d24 >= _MIN_DEATHS_FOR_SIGNAL or share >= 0.15:
+        return "watch"
+    return "calm"
+
+
 def _op_mix(op_counts: dict[str, int], top: int = 2) -> str:
     """Топ-N типов операций по частоте — детерминированная строка."""
     if not op_counts:
@@ -298,9 +331,97 @@ async def process_pending(pool, limit: int = 100) -> int:
     return n
 
 
+async def detect_outbreaks(pool) -> int:
+    """Фаза 2: пересчитать роллап `immunity_signatures` и уровни угрозы.
+
+    Считаем по потоку смертей (account_status_events), а не по дорогому
+    пересчёту сигнатур живых аккаунтов: вспышка — это всплеск смертности
+    конкретного паттерна относительно его же суточной нормы.
+
+    `exposures_24h` — живые аккаунты владельца: знаменатель для «какая доля
+    флота выкошена этой сигнатурой за сутки» (интерпретируемая величина, а не
+    выдуманная точность). Возвращает число обновлённых сигнатур. Fail-soft.
+    """
+    from services.logger import log_exc_swallow
+
+    try:
+        rows = await pool.fetch(
+            """SELECT owner_id, signature,
+                      COUNT(*) FILTER (WHERE created_at > now() - INTERVAL '1 hour') AS d1,
+                      COUNT(*) AS d24
+               FROM account_status_events
+               WHERE is_death AND signature IS NOT NULL
+                 AND created_at > now() - INTERVAL '24 hours'
+               GROUP BY owner_id, signature"""
+        )
+        alive_rows = await pool.fetch(
+            """SELECT owner_id, COUNT(*) AS alive
+               FROM tg_accounts
+               WHERE is_active = TRUE AND COALESCE(acc_status,'active') = 'active'
+               GROUP BY owner_id"""
+        )
+    except Exception:
+        log_exc_swallow(log, "immunity: выборка для детектора вспышек упала")
+        return 0
+
+    alive_by_owner = {r["owner_id"]: int(r["alive"] or 0) for r in alive_rows}
+    updated = 0
+    for r in rows:
+        try:
+            d1, d24 = int(r["d1"] or 0), int(r["d24"] or 0)
+            exposures = alive_by_owner.get(r["owner_id"], 0)
+            level = classify_threat(d1, d24, exposures)
+            rate = d24 / float(d24 + exposures) if (d24 + exposures) > 0 else 0.0
+            await pool.execute(
+                """INSERT INTO immunity_signatures
+                       (signature, owner_id, deaths_1h, deaths_24h, exposures_24h,
+                        death_rate, threat_level, updated_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+                   ON CONFLICT (signature, owner_id) DO UPDATE SET
+                       deaths_1h = EXCLUDED.deaths_1h,
+                       deaths_24h = EXCLUDED.deaths_24h,
+                       exposures_24h = EXCLUDED.exposures_24h,
+                       death_rate = EXCLUDED.death_rate,
+                       threat_level = EXCLUDED.threat_level,
+                       updated_at = now()""",
+                r["signature"], r["owner_id"], d1, d24, exposures, rate, level,
+            )
+            updated += 1
+            if level in ("warning", "storm"):
+                log.warning(
+                    "ban-weather[%s]: owner=%s сигнатура %s — смертей 1ч=%d, 24ч=%d",
+                    level, r["owner_id"], r["signature"], d1, d24,
+                )
+        except Exception:
+            log_exc_swallow(log, f"immunity: роллап сигнатуры {r.get('signature')!r} упал")
+
+    # Затухание: сигнатура, у которой в 24-часовом окне не осталось смертей,
+    # НЕМЕДЛЕННО падает в 'calm'. По времени (updated_at) это не работает —
+    # активные строки обновляются каждым проходом, и «погода» показывала бы
+    # шторм, который кончился сутки назад.
+    try:
+        await pool.execute(
+            """UPDATE immunity_signatures s
+               SET deaths_1h = 0, deaths_24h = 0, death_rate = 0,
+                   threat_level = 'calm', updated_at = now()
+               WHERE s.threat_level <> 'calm'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM account_status_events e
+                     WHERE e.is_death
+                       AND e.signature = s.signature
+                       AND e.owner_id IS NOT DISTINCT FROM s.owner_id
+                       AND e.created_at > now() - INTERVAL '24 hours')"""
+        )
+    except Exception:
+        log_exc_swallow(log, "immunity: затухание затихших сигнатур")
+    return updated
+
+
 async def run_once(pool) -> int:
-    """Один проход движка (обработка ожидающих событий)."""
-    return await process_pending(pool)
+    """Один проход движка: автопсии ожидающих событий + детектор вспышек."""
+    processed = await process_pending(pool)
+    await detect_outbreaks(pool)
+    return processed
 
 
 async def start(pool, interval_sec: int = 120) -> None:

@@ -111,3 +111,46 @@ def test_engine_layers_present():
     for fn in ("compute_signature", "build_autopsy", "process_event",
                "process_pending", "run_once", "start"):
         assert hasattr(ie, fn), f"нет {fn}"
+
+
+# ── Фаза 2: детектор вспышек ─────────────────────────────────────────────────
+
+def test_threat_needs_minimum_sample():
+    """Одна смерть — статистический шум, а не вспышка."""
+    assert ie.classify_threat(1, 1, 100) == "calm"
+    assert ie.classify_threat(0, 0, 100) == "calm"
+
+
+def test_threat_detects_acceleration_not_absolute_count():
+    """Вспышка — это УСКОРЕНИЕ относительно собственной суточной нормы."""
+    # 8 смертей за сутки, но равномерно (0 за последний час) — не шторм
+    assert ie.classify_threat(0, 8, 100) in ("watch", "warning")
+    # те же 8 за сутки, но 5 из них за последний час — шторм
+    assert ie.classify_threat(5, 8, 100) == "storm"
+
+
+def test_threat_share_of_fleet():
+    """Доля выкошенного флота — самостоятельный признак шторма."""
+    assert ie.classify_threat(0, 6, 4) == "storm"      # 60% флота
+    assert ie.classify_threat(0, 5, 10) == "warning"   # ~33%
+
+
+def test_threat_levels_are_known_values():
+    for args in [(0, 0, 0), (5, 8, 100), (0, 2, 100), (0, 6, 4), (1, 3, 10)]:
+        assert ie.classify_threat(*args) in ie.THREAT_LEVELS
+
+
+def test_threat_handles_garbage_input():
+    assert ie.classify_threat(None, None, None) == "calm"
+    assert ie.classify_threat(-5, -5, -5) == "calm"
+
+
+def test_outbreak_detector_present_and_wired():
+    assert hasattr(ie, "detect_outbreaks")
+    src = _read("services/immunity_engine.py")
+    # подключён в основной проход движка
+    assert "await detect_outbreaks(pool)" in src
+    # затухание по ФАКТУ отсутствия смертей в окне, а не по времени строки
+    assert "NOT EXISTS" in src and "immunity_signatures s" in src
+    # объяснимость: предупреждение в лог при warning/storm
+    assert "ban-weather[%s]" in src
