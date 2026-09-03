@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from services import op_worker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -68,7 +69,7 @@ def test_register_and_list_are_owner_scoped():
 
 def test_add_channel_goes_through_op():
     ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
-    assert 'op_type == "community_add_channel"' in ow
+    assert op_worker.handler_for("community_add_channel") is not None
     assert "async def _exec_community_add_channel" in ow
     i = ow.index("async def _exec_community_add_channel")
     assert "create_community_channel" in ow[i:i + 900]
@@ -128,8 +129,8 @@ def test_liven_and_staff_ops_and_schema():
     sql = open(os.path.join(ROOT, "schema_v178.sql"), encoding="utf-8").read()
     assert "community_node_members" in sql and "role" in sql
     ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
-    for op in ('op_type == "community_liven"', 'op_type == "community_set_staff"'):
-        assert op in ow
+    for op in ("community_liven", "community_set_staff"):
+        assert op_worker.handler_for(op) is not None
     assert "async def _exec_community_liven" in ow
     assert "async def _exec_community_set_staff" in ow
     # оживление = вступление флота по инвайт-ссылке (работает и для приватных

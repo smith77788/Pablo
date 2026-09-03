@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock, patch
-
 from services import op_worker
+
 
 
 class _Dialog:
@@ -77,7 +77,7 @@ def test_account_missing():
 def test_wired_in_dispatch_and_action():
     import inspect
     src = inspect.getsource(op_worker)
-    assert 'op_type == "read_all_dialogs"' in src
+    assert op_worker.handler_for("read_all_dialogs") is not None
     from services import mini_app_api
     msrc = inspect.getsource(mini_app_api)
     assert '"read_all_dialogs"' in msrc and 'act == "read_all"' in msrc

@@ -48,13 +48,11 @@ def test_publisher_and_campaign_have_insert_template_button():
 def test_quick_post_reuses_mass_publish_for_spintax():
     """Быстрый пост НЕ должен заводить свой публикатор без spintax — он обязан
     переиспользовать _exec_mass_publish (в котором spintax на канал уже есть)."""
-    import inspect
     from services import op_worker
 
-    dispatch = inspect.getsource(op_worker)
-    i = dispatch.index('op_type == "quick_post"')
-    seg = dispatch[i:i + 400]
-    assert "_exec_mass_publish" in seg, "quick_post должен исполняться через _exec_mass_publish"
+    assert op_worker.handler_for("quick_post") is op_worker._exec_mass_publish, (
+        "quick_post должен исполняться через _exec_mass_publish"
+    )
 
 
 def test_quick_post_ui_hints_spintax():

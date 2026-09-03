@@ -12,27 +12,32 @@
 Реестр приведён в полный паритет с диспетчером op_worker; тест это фиксирует,
 чтобы расхождение не вернулось при добавлении новых op_type.
 
-Диспетчер разбирается статически (без импорта op_worker — у него тяжёлые
-Telethon-зависимости), учитывая ОБЕ формы сравнения: `op_type == "x"` и
-`op_type in ("x","y")` (вторая форма — та самая, что даёт ложноотрицательные при
-наивном скане).
+Диспетчер спрашиваем НАПРЯМУЮ (`op_worker.dispatch_table()`), а не разбираем
+регэкспом по исходнику: пока исполнители жили в цепочке `elif op_type == ...`,
+скан был единственным способом и давал ложноотрицательные на форме
+`op_type in ("x","y")`. Теперь соответствие — обычный словарь, и сверка точна.
 """
 from __future__ import annotations
 
-import os
-import re
+import inspect
 
-from services import operation_bus
-
-_WORKER = os.path.join(os.path.dirname(__file__), "..", "services", "op_worker.py")
+from services import op_worker, operation_bus
 
 
 def _dispatched_op_types() -> set[str]:
-    src = open(_WORKER, encoding="utf-8").read()
-    disp = set(re.findall(r'op_type\s*==\s*"([a-z_]+)"', src))
-    for grp in re.findall(r"op_type\s+in\s+\(([^)]*)\)", src):
-        disp |= set(re.findall(r'"([a-z_]+)"', grp))
-    return disp
+    return set(op_worker.dispatch_table())
+
+
+def test_every_executor_is_a_coroutine():
+    """Исполнитель обязан быть корутиной: воркер зовёт его через await, и
+    обычная функция здесь упала бы только в проде, на живой операции."""
+    bad = sorted(op for op, fn in op_worker.dispatch_table().items()
+                 if not inspect.iscoroutinefunction(fn))
+    assert not bad, f"исполнитель должен быть корутиной: {bad}"
+
+
+def test_unknown_op_type_has_no_executor():
+    assert op_worker.handler_for("no_such_op_type_42") is None
 
 
 def test_every_registered_op_is_dispatched():

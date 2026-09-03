@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from services import op_worker
 
 ROOT = Path(__file__).resolve().parents[1]
 HANDLER = ROOT / "bot" / "handlers" / "global_presence.py"
@@ -259,7 +260,7 @@ def test_bulk_apply_registered_in_bus():
 
 def test_bulk_apply_dispatched_in_worker():
     src = _src(WORKER)
-    assert 'op_type == "gp_bulk_apply"' in src
+    assert op_worker.handler_for("gp_bulk_apply") is not None
     assert "_exec_gp_bulk_apply(" in src
 
 

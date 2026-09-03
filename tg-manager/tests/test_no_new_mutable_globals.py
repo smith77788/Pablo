@@ -150,6 +150,9 @@ CACHE: dict[str, str] = {
     "services/broadcaster.py:_bot_tier_cache": "тариф бота с TTL",
     "services/contacts_hub/search_engine.py:_cache": "кэш результатов поиска",
     "services/fleet_governor.py:_CACHE": "множитель темпа с TTL",
+    "services/op_worker.py:_DISPATCH": (
+        "таблица «op_type → исполнитель»; собирается один раз из кода модуля и "
+        "дальше только читается — расходиться между процессами нечему"),
     "services/geo_tempo.py:_CC_TZ": "страна→таймзона, справочник",
     "services/geo_tempo.py:_ZONE_WARNED": "де-дуп WARN о нерезолвящейся зоне, process-local",
     "services/invite_engine.py:_link_cache": "инвайт-ссылки, перевыпускаются",

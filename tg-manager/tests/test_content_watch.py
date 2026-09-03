@@ -13,6 +13,7 @@ import os
 
 from services.content_watch import classify_texts, CATEGORY_LABELS
 from services import content_safety
+from services import op_worker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -58,7 +59,7 @@ def test_category_labels_cover_detector_categories():
 
 def test_op_endpoint_route_and_ui_wired():
     ow = _read("services/op_worker.py")
-    assert 'op_type == "compliance_scan"' in ow and "_exec_compliance_scan(" in ow
+    assert op_worker.handler_for("compliance_scan") is not None and "_exec_compliance_scan(" in ow
     # исполнитель — детектор, НЕ авто-жалоба: не должен слать репорты/постить
     seg = ow[ow.index("async def _exec_compliance_scan"):ow.index("async def _exec_niche_growth_post")]
     assert "content_watch.scan_resource" in seg

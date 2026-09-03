@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from services import op_worker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -55,7 +56,7 @@ def test_deploy_creates_crosspost_rule():
 
 def test_crosspost_run_op_and_dispatch():
     ow = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
-    assert 'op_type == "crosspost_run"' in ow
+    assert op_worker.handler_for("crosspost_run") is not None
     assert "async def _exec_crosspost_run" in ow
     fn = _func_src(os.path.join(ROOT, "services", "op_worker.py"), "_exec_crosspost_run")
     assert "forward_new_posts" in fn

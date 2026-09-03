@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from services import op_worker
 
 ROOT = Path(__file__).resolve().parents[1]
 API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
@@ -28,7 +29,7 @@ def test_op_type_registered():
 
 
 def test_worker_routes_and_implements():
-    assert 'op_type == "contacts_sync"' in WORKER, "нет ветки диспетчера op_worker"
+    assert op_worker.handler_for("contacts_sync") is not None, "нет ветки диспетчера op_worker"
     assert "async def _exec_contacts_sync(" in WORKER, "нет исполнителя"
     m = re.search(r"async def _exec_contacts_sync\(.*?\n\n\nasync def ", WORKER, re.S)
     assert m, "не удалось выделить тело исполнителя"

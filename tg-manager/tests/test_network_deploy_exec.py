@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from services import op_worker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -16,7 +17,7 @@ def _api():
 
 def test_op_dispatch_wired():
     src = _ow()
-    assert 'op_type == "deploy_network"' in src
+    assert op_worker.handler_for("deploy_network") is not None
     assert "async def _exec_deploy_network" in src
 
 

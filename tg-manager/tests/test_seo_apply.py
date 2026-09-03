@@ -12,6 +12,7 @@ import inspect
 import re
 
 from services import mini_app_api
+from services import op_worker
 
 
 def _handler_src() -> str:
@@ -89,7 +90,7 @@ def test_bulk_seo_apply_registered_and_dispatched():
         "bulk_seo_apply должен быть в OP_REGISTRY"
     )
     wsrc = inspect.getsource(op_worker)
-    assert 'op_type == "bulk_seo_apply"' in wsrc, (
+    assert op_worker.handler_for("bulk_seo_apply") is not None, (
         "op_worker должен диспетчеризовать bulk_seo_apply"
     )
     assert "async def _exec_bulk_seo_apply" in wsrc

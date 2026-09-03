@@ -11,6 +11,7 @@ import os
 from services.ai_comment_engine import (
     build_comment_prompt, sanitize_comment, COMMENT_TONES,
 )
+from services import op_worker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,7 +53,7 @@ def test_sanitize_strips_quotes_prefix_and_caps_length():
 
 def test_op_and_endpoint_and_ui_wired():
     ow = _read("services/op_worker.py")
-    assert 'op_type == "ai_comment"' in ow and "_exec_ai_comment(" in ow
+    assert op_worker.handler_for("ai_comment") is not None and "_exec_ai_comment(" in ow
     # content-safety guard присутствует в исполнителе
     seg = ow[ow.index("async def _exec_ai_comment"):ow.index("async def _exec_niche_growth_post")]
     assert "content_safety.enforce" in seg

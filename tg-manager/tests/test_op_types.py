@@ -32,14 +32,11 @@ def _submitted_op_types() -> set[str]:
 
 
 def _dispatched_op_types() -> set[str]:
-    src = _read("services/op_worker.py")
-    types: set[str] = set()
-    for m in re.finditer(r'op_type\s*==\s*"([a-z_]+)"', src):
-        types.add(m.group(1))
-    for m in re.finditer(r'op_type\s+in\s*\(([^)]*)\)', src):
-        for a in re.findall(r'"([a-z_]+)"', m.group(1)):
-            types.add(a)
-    return types
+    """Спрашиваем воркер напрямую: соответствие «тип → исполнитель» это словарь,
+    а не форма кода, и скан регэкспом по исходнику здесь больше не нужен."""
+    from services import op_worker
+
+    return set(op_worker.dispatch_table())
 
 
 def test_all_submitted_op_types_are_dispatched():

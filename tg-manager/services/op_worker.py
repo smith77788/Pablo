@@ -1524,6 +1524,161 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         _op_task.add_done_callback(_active_op_tasks.discard)
 
 
+# ── Таблица исполнителей операций ────────────────────────────────────────────
+# Здесь была цепочка из ~70 веток `elif op_type == ...` внутри _run_op_task.
+# Она работала, но делала типы операций НЕАДРЕСУЕМЫМИ: нельзя было спросить у
+# модуля «кто исполняет этот op_type» и нельзя было проверить, что каждый
+# объявленный в OP_REGISTRY тип вообще исполним — эта связь держалась только на
+# том, что автор новой операции не забыл дописать ветку. Теперь соответствие
+# «тип → исполнитель» это данные: один словарь, который можно перечислить,
+# сверить с реестром (tests/test_op_dispatch.py) и разрезать на драйверы.
+#
+# Контракт исполнителя: async (pool, bot, op_id, owner_id, params) -> dict.
+# Функции с другой сигнатурой оборачиваются адаптером ниже — сигнатура остаётся
+# единой, а особенность видна на месте, а не в цепочке условий.
+#
+# Словарь строится ЛЕНИВО и кэшируется: сами _exec_* определены ниже по файлу,
+# и словарь-литерал на этом месте упал бы с NameError при импорте модуля.
+
+_DISPATCH: dict[str, "OpHandler"] | None = None
+
+
+async def _dispatch_gift_transfer(pool, bot, op_id, owner_id, params) -> dict:
+    """Подарки живут в отдельном модуле и берут укороченную сигнатуру."""
+    from services.gift_operation import _exec_gift_transfer
+
+    return await _exec_gift_transfer(pool, op_id, params)
+
+
+async def _dispatch_contacts_sync(pool, bot, op_id, owner_id, params) -> dict:
+    """Синхронизация контактов не шлёт сообщений — bot ей не нужен."""
+    return await _exec_contacts_sync(pool, op_id, owner_id, params)
+
+
+async def _dispatch_global_presence_group(pool, bot, op_id, owner_id, params) -> dict:
+    """asset_type форсируем: кривые params не должны молча создать канал вместо группы."""
+    return await _exec_global_presence_channel(
+        pool, bot, op_id, owner_id, {**params, "asset_type": "group"}
+    )
+
+
+async def _dispatch_create_channel(pool, bot, op_id, owner_id, params) -> dict:
+    """Channel Factory: один канал через аккаунт. params: {title, about, account_id}."""
+    adapted = {**params, "acc_id": params.get("account_id"),
+               "prefix": params.get("title"), "count": 1, "is_group": False}
+    return await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
+
+
+async def _dispatch_create_group(pool, bot, op_id, owner_id, params) -> dict:
+    """Group Factory: одна группа через аккаунт. params: {title, account_id, is_supergroup}."""
+    adapted = {**params, "acc_id": params.get("account_id"),
+               "prefix": params.get("title"), "count": 1, "is_group": True}
+    return await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
+
+
+def _build_dispatch() -> dict:
+    """Собрать таблицу «op_type → исполнитель». Вызывается один раз, лениво."""
+    return {
+        # ── Массовые операции по каналам и ботам ──────────────────────────────
+        "mass_publish": _exec_mass_publish,
+        "bulk_bot_edit": _exec_bulk_bot_edit,
+        "bulk_join": _exec_bulk_join,
+        "bulk_leave": _exec_bulk_leave,
+        "find_contact": _exec_find_contact,
+        "bulk_create_channels": _exec_bulk_create_channels,
+        "bot_factory": _exec_bot_factory,
+        "bulk_edit_channels": _exec_bulk_edit_channels,
+        "bulk_seo_apply": _exec_bulk_seo_apply,
+        "bulk_post_to_channel": _exec_bulk_post_to_channel,
+        "bulk_chan_exec": _exec_bulk_chan_exec,
+        "bulk_post_chans": _exec_bulk_post_chans,
+        "pin_last_post": _exec_pin_last_post,
+        "channel_import_all": _exec_channel_import_all,
+        "channel_add": _exec_channel_add,
+        "reclassify_channels": _exec_reclassify_channels,
+        "promote_all_admins": _exec_promote_all_admins,
+        "crosspost_run": _exec_crosspost_run,
+        # ── Global Presence ───────────────────────────────────────────────────
+        # Пакет = сначала каналы; бот создаётся отдельной операцией по плану.
+        "global_presence_channel": _exec_global_presence_channel,
+        "global_presence_package": _exec_global_presence_channel,
+        "global_presence_full_package": _exec_global_presence_channel,
+        "global_presence_group": _dispatch_global_presence_group,
+        "global_presence_bot": _exec_global_presence_bot,
+        "gp_bulk_apply": _exec_gp_bulk_apply,
+        "seed_presence_pack": _exec_seed_presence_pack,
+        "promote_presence_pack": _exec_promote_presence_pack,
+        "deploy_network": _exec_deploy_network,
+        # ── Группы и сообщества ───────────────────────────────────────────────
+        "group_import_all": _exec_group_import_all,
+        "group_announce": _exec_group_announce,
+        "community_add_channel": _exec_community_add_channel,
+        "community_liven": _exec_community_liven,
+        "community_set_staff": _exec_community_set_staff,
+        # ── Аккаунты ──────────────────────────────────────────────────────────
+        "bulk_update_profile": _exec_bulk_update_profile,
+        "check_accounts_health": _exec_check_accounts_health,
+        "scan_owned_resources": _exec_scan_owned_resources,
+        "account_warmup": _exec_account_warmup,
+        "auto_register": _exec_auto_register,
+        "leave_all_chats": _exec_leave_all_chats,
+        "read_all_dialogs": _exec_read_all_dialogs,
+        "delete_private_dialogs": _exec_delete_private_dialogs,
+        "delete_contacts": _exec_delete_contacts,
+        "reg_check": _exec_reg_check,
+        "phone_check": _exec_phone_check,
+        # bulk_set_profile — единственная реализация; profile_setter её псевдоним.
+        "bulk_set_profile": _exec_bulk_set_profile,
+        "profile_setter": _exec_bulk_set_profile,
+        # ── Рассылки и охват ──────────────────────────────────────────────────
+        "dm_campaign": _exec_dm_campaign,
+        "network_broadcast": _exec_network_broadcast,
+        "bulk_dm_adhoc": _exec_bulk_dm_adhoc,
+        "run_broadcast": _exec_run_broadcast,
+        "mass_invite": _exec_mass_invite,
+        "self_promo_blast": _exec_self_promo_blast,
+        # ── Накрутка ──────────────────────────────────────────────────────────
+        "boost_views": _exec_boost_views,
+        "boost_reactions": _exec_boost_reactions,
+        "boost_stories": _exec_boost_stories,
+        "boost_subscribers": _exec_boost_subscribers,
+        "boost_bot_starts": _exec_boost_bot_starts,
+        # ── Контент и ИИ ──────────────────────────────────────────────────────
+        "ai_comment": _exec_ai_comment,
+        "content_clone": _exec_content_clone,
+        "clone_adapt": _exec_clone_adapt,
+        "niche_growth_post": _exec_niche_growth_post,
+        # quick_post переиспользует mass_publish: тот уже умеет явный channel_ids.
+        "quick_post": _exec_mass_publish,
+        # ── Разведка, жалобы, подарки ─────────────────────────────────────────
+        "strike": _exec_strike,
+        "mass_report": _exec_mass_report,
+        "report_peer": _exec_report_peer,
+        "compliance_scan": _exec_compliance_scan,
+        "ad_intel_scan": _exec_ad_intel_scan,
+        "parse_audience": _exec_parse_audience,
+        "gift_scan": _exec_gift_scan,
+        "gift_transfer": _dispatch_gift_transfer,
+        # ── Прочее ────────────────────────────────────────────────────────────
+        "contacts_sync": _dispatch_contacts_sync,
+        "create_channel": _dispatch_create_channel,
+        "create_group": _dispatch_create_group,
+    }
+
+
+def dispatch_table() -> dict:
+    """Таблица «op_type → исполнитель» (ленивая сборка, кэш на модуль)."""
+    global _DISPATCH
+    if _DISPATCH is None:
+        _DISPATCH = _build_dispatch()
+    return _DISPATCH
+
+
+def handler_for(op_type: str):
+    """Исполнитель для типа операции или None, если тип неизвестен воркеру."""
+    return dispatch_table().get(op_type)
+
+
 async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     """Запустить одну операцию в отдельной asyncio-задаче."""
     op_id = row["id"]
@@ -1674,187 +1829,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     _progress_monitor(pool, bot, op_id, owner_id, op_type)
                 )
 
-            if op_type == "mass_publish":
-                result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_bot_edit":
-                result = await _exec_bulk_bot_edit(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_join":
-                result = await _exec_bulk_join(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_leave":
-                result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
-            elif op_type == "find_contact":
-                result = await _exec_find_contact(pool, bot, op_id, owner_id, params)
-            elif op_type == "global_presence_channel":
-                result = await _exec_global_presence_channel(
-                    pool, bot, op_id, owner_id, params
-                )
-            elif op_type in ("global_presence_package", "global_presence_full_package"):
-                # Package = channels first; bot creation follows as a separate op via the plan
-                result = await _exec_global_presence_channel(
-                    pool, bot, op_id, owner_id, params
-                )
-            elif op_type == "global_presence_group":
-                # Force asset_type="group" so wrong params can't silently create channels
-                result = await _exec_global_presence_channel(
-                    pool, bot, op_id, owner_id, {**params, "asset_type": "group"}
-                )
-            elif op_type == "global_presence_bot":
-                result = await _exec_global_presence_bot(
-                    pool, bot, op_id, owner_id, params
-                )
-            elif op_type == "gp_bulk_apply":
-                result = await _exec_gp_bulk_apply(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_create_channels":
-                result = await _exec_bulk_create_channels(
-                    pool, bot, op_id, owner_id, params
-                )
-            elif op_type == "bot_factory":
-                result = await _exec_bot_factory(
-                    pool, bot, op_id, owner_id, params
-                )
-            elif op_type == "strike":
-                result = await _exec_strike(pool, bot, op_id, owner_id, params)
-            elif op_type == "gift_transfer":
-                from services.gift_operation import _exec_gift_transfer
-
-                result = await _exec_gift_transfer(pool, op_id, params)
-            elif op_type == "dm_campaign":
-                result = await _exec_dm_campaign(pool, bot, op_id, owner_id, params)
-            elif op_type == "network_broadcast":
-                result = await _exec_network_broadcast(pool, bot, op_id, owner_id, params)
-            elif op_type == "seed_presence_pack":
-                result = await _exec_seed_presence_pack(pool, bot, op_id, owner_id, params)
-            elif op_type == "promote_presence_pack":
-                result = await _exec_promote_presence_pack(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_edit_channels":
-                result = await _exec_bulk_edit_channels(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_seo_apply":
-                result = await _exec_bulk_seo_apply(pool, bot, op_id, owner_id, params)
-            elif op_type == "group_import_all":
-                result = await _exec_group_import_all(pool, bot, op_id, owner_id, params)
-            elif op_type == "group_announce":
-                result = await _exec_group_announce(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_dm_adhoc":
-                result = await _exec_bulk_dm_adhoc(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_post_to_channel":
-                result = await _exec_bulk_post_to_channel(pool, bot, op_id, owner_id, params)
-            elif op_type == "pin_last_post":
-                result = await _exec_pin_last_post(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_update_profile":
-                result = await _exec_bulk_update_profile(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_chan_exec":
-                result = await _exec_bulk_chan_exec(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_post_chans":
-                result = await _exec_bulk_post_chans(pool, bot, op_id, owner_id, params)
-            elif op_type == "channel_import_all":
-                result = await _exec_channel_import_all(pool, bot, op_id, owner_id, params)
-            elif op_type == "channel_add":
-                result = await _exec_channel_add(pool, bot, op_id, owner_id, params)
-            elif op_type == "check_accounts_health":
-                result = await _exec_check_accounts_health(pool, bot, op_id, owner_id, params)
-            elif op_type == "scan_owned_resources":
-                result = await _exec_scan_owned_resources(pool, bot, op_id, owner_id, params)
-            elif op_type == "reclassify_channels":
-                result = await _exec_reclassify_channels(pool, bot, op_id, owner_id, params)
-            elif op_type == "promote_all_admins":
-                result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
-            elif op_type == "deploy_network":
-                result = await _exec_deploy_network(pool, bot, op_id, owner_id, params)
-            elif op_type == "crosspost_run":
-                result = await _exec_crosspost_run(pool, bot, op_id, owner_id, params)
-            elif op_type == "community_add_channel":
-                result = await _exec_community_add_channel(pool, bot, op_id, owner_id, params)
-            elif op_type == "community_liven":
-                result = await _exec_community_liven(pool, bot, op_id, owner_id, params)
-            elif op_type == "community_set_staff":
-                result = await _exec_community_set_staff(pool, bot, op_id, owner_id, params)
-            elif op_type == "boost_views":
-                result = await _exec_boost_views(pool, bot, op_id, owner_id, params)
-            elif op_type == "boost_reactions":
-                result = await _exec_boost_reactions(pool, bot, op_id, owner_id, params)
-            elif op_type == "boost_stories":
-                result = await _exec_boost_stories(pool, bot, op_id, owner_id, params)
-            elif op_type == "boost_subscribers":
-                result = await _exec_boost_subscribers(pool, bot, op_id, owner_id, params)
-            elif op_type == "boost_bot_starts":
-                result = await _exec_boost_bot_starts(pool, bot, op_id, owner_id, params)
-            elif op_type == "mass_invite":
-                result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
-            elif op_type == "contacts_sync":
-                result = await _exec_contacts_sync(pool, op_id, owner_id, params)
-            elif op_type == "ai_comment":
-                result = await _exec_ai_comment(pool, bot, op_id, owner_id, params)
-            elif op_type == "compliance_scan":
-                result = await _exec_compliance_scan(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_set_profile":
-                result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
-            elif op_type == "mass_report":
-                result = await _exec_mass_report(pool, bot, op_id, owner_id, params)
-            elif op_type == "content_clone":
-                result = await _exec_content_clone(pool, bot, op_id, owner_id, params)
-            elif op_type == "niche_growth_post":
-                result = await _exec_niche_growth_post(pool, bot, op_id, owner_id, params)
-            # ── Mini App op_types ──────────────────────────────────────────────
-            elif op_type == "quick_post":
-                # Quick Post: post text to specific channel_ids (managed_channels).
-                # params: {text, channel_ids: [int, ...]}
-                # Re-uses mass_publish which already supports explicit channel_ids filter.
-                result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
-            elif op_type == "create_channel":
-                # Channel Factory: create single channel via account.
-                # params: {title, about, account_id}
-                adapted = {**params, "acc_id": params.get("account_id"), "prefix": params.get("title"), "count": 1, "is_group": False}
-                result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
-            elif op_type == "create_group":
-                # Group Factory: create single group/supergroup via account.
-                # params: {title, account_id, is_supergroup}
-                adapted = {**params, "acc_id": params.get("account_id"), "prefix": params.get("title"), "count": 1, "is_group": True}
-                result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
-            elif op_type == "account_warmup":
-                # Account Warmup: start warmup plan for account.
-                # params: {account_id, plan_type}
-                result = await _exec_account_warmup(pool, bot, op_id, owner_id, params)
-            elif op_type == "parse_audience":
-                # Audience Parser: parse members/active from channel/group.
-                # params: {source_ref, parse_type, limit}
-                result = await _exec_parse_audience(pool, bot, op_id, owner_id, params)
-            elif op_type == "profile_setter":
-                # bulk_set_profile обрабатывается выше (единственная ветка) — здесь
-                # только псевдоним profile_setter, чтобы не было дубля диспетчера.
-                result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
-            elif op_type == "reg_check":
-                # params: {target: "username or @username or link"}
-                result = await _exec_reg_check(pool, bot, op_id, owner_id, params)
-            elif op_type == "ad_intel_scan":
-                # params: {channel: "username"}
-                result = await _exec_ad_intel_scan(pool, bot, op_id, owner_id, params)
-            elif op_type == "self_promo_blast":
-                # params: {template_id: int}
-                result = await _exec_self_promo_blast(pool, bot, op_id, owner_id, params)
-            elif op_type == "phone_check":
-                # params: {phones: list[str]}
-                result = await _exec_phone_check(pool, bot, op_id, owner_id, params)
-            elif op_type == "gift_scan":
-                # params: {} — scans all owner accounts
-                result = await _exec_gift_scan(pool, bot, op_id, owner_id, params)
-            elif op_type == "report_peer":
-                # params: {target: str, reason: str}
-                result = await _exec_report_peer(pool, bot, op_id, owner_id, params)
-            elif op_type == "auto_register":
-                result = await _exec_auto_register(pool, bot, op_id, owner_id, params)
-            elif op_type == "leave_all_chats":
-                result = await _exec_leave_all_chats(pool, bot, op_id, owner_id, params)
-            elif op_type == "read_all_dialogs":
-                result = await _exec_read_all_dialogs(pool, bot, op_id, owner_id, params)
-            elif op_type == "delete_private_dialogs":
-                result = await _exec_delete_private_dialogs(pool, bot, op_id, owner_id, params)
-            elif op_type == "delete_contacts":
-                result = await _exec_delete_contacts(pool, bot, op_id, owner_id, params)
-            elif op_type == "run_broadcast":
-                result = await _exec_run_broadcast(pool, bot, op_id, owner_id, params)
-            elif op_type == "clone_adapt":
-                result = await _exec_clone_adapt(pool, bot, op_id, owner_id, params)
-            else:
+            # Диспетчеризация по таблице (см. _build_dispatch выше): раньше здесь
+            # стояла цепочка из ~70 `elif op_type == ...`.
+            _handler = handler_for(op_type)
+            if _handler is None:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
                     op_type,
@@ -1866,6 +1844,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     "reason": f"unknown op_type: {op_type}",
                     "summary": f"⚠️ Неизвестный тип операции: {op_type}",
                 }
+            else:
+                result = await _handler(pool, bot, op_id, owner_id, params)
 
             # Флот временно занят другими операциями — не проваливаем, а мягко
             # возвращаем в очередь (запустится, когда освободятся аккаунты).
