@@ -16836,6 +16836,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def uch_contact_invite_history(request: web.Request) -> web.Response:
+        """Кому/куда/когда пытались пригласить этот контакт (по всем группам).
+
+        Закрывает изоляцию invite_target_log от CRM: раньше эта информация
+        технически была в БД, но негде было её увидеть рядом с контактом."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contact_invite_link import invite_history_for_contact, is_contact_opted_out
+            history = await invite_history_for_contact(pool, uid, cid)
+            opted_out = await is_contact_opted_out(pool, uid, cid)
+            return _json_resp({'history': history, 'opted_out': opted_out})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_opt_out(request: web.Request) -> web.Response:
+        """Пометить контакт «не приглашать» — сразу по всем его формам
+        (id/username/телефоны), не только по одной (см. contact_invite_link.py:
+        opt-out по одной форме давал ложное чувство защиты)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            body = await request.json() if request.can_read_body else {}
+            reason = validate_string(body.get('reason'), max_len=300) if body.get('reason') else None
+            from services.contact_invite_link import opt_out_contact
+            stored = await opt_out_contact(pool, uid, cid, reason=reason)
+            return _json_resp({'ok': bool(stored), 'targets': stored})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_contact_allow_invite(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            from services.contact_invite_link import allow_contact_invite
+            removed = await allow_contact_invite(pool, uid, cid)
+            return _json_resp({'ok': removed})
+        except Exception as e:
+            return _err(str(e), 500)
+
     async def uch_contact_versions(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -17367,6 +17410,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_add_to_group)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_remove_from_group)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/history", uch_contact_history)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/invite_history", uch_contact_invite_history)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", uch_contact_opt_out)
+    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/allow_invite", uch_contact_allow_invite)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/versions", uch_contact_versions)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", uch_timeline)
