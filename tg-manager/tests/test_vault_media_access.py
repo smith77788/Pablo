@@ -166,9 +166,25 @@ def test_ui_shows_media_only_when_downloadable():
     assert "m.has_media" in _UI
 
 
+def _func_body(path, name: str) -> str:
+    """Тело функции по границам AST, а не по окну фиксированной длины.
+
+    Окно в N символов промахивается, как только функция сдвинулась или подросла:
+    отрицательное утверждение «искомого нет» становится правдой само по себе, и
+    защита выключается молча — ровно это ловит tests/test_no_silently_disabled_guards.
+    """
+    import ast
+
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            lines = src.split("\n")
+            return "\n".join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"функция {name} не найдена в {path.name}")
+
+
 def test_service_exposes_has_media_flag_but_not_file_id():
-    src = (_ROOT / "services" / "vault_service.py").read_text(encoding="utf-8")
-    start = src.index("def _ui_message")
-    body = src[start:start + 1500]
+    body = _func_body(_ROOT / "services" / "vault_service.py", "_ui_message")
     assert '"has_media"' in body
     assert '"media_file_id":' not in body, "file_id наружу отдавать незачем"
