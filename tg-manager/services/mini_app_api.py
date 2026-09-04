@@ -16462,6 +16462,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             lang_code=info.get("lang_code"),
             system_lang_code=info.get("system_lang_code"),
         )
+        # Прокси не выбран — берём наименее загруженный ЖИВОЙ прокси владельца.
+        # Иначе каждый добавленный по одному аккаунт молча оставался на общем IP
+        # сервера, и флот собирался в одну когорту по самому сильному признаку
+        # связи. Стандарт продукта (proxy_selector.audit_proxy_isolation) —
+        # один аккаунт на один IP.
+        if not pid and acc_id:
+            try:
+                from services.proxy_balancer import plan_distribution
+
+                prows = await pool.fetch(
+                    """SELECT p.id,
+                              (SELECT COUNT(*) FROM tg_accounts a
+                                WHERE a.proxy_id = p.id) AS used
+                         FROM user_proxies p
+                        WHERE p.owner_id=$1 AND p.is_active
+                          AND COALESCE(p.is_alive, TRUE)""", _uid)
+                plan = plan_distribution(
+                    [(int(r["id"]), int(r["used"] or 0)) for r in prows], 1)
+                pid = plan[0] if plan else None
+            except Exception as e:
+                log.debug("auto proxy pick failed acc=%s: %s", acc_id, e)
         if pid and acc_id:
             try:
                 await pool.execute(

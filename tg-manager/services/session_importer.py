@@ -163,6 +163,37 @@ async def import_sessions(
     # закрепляем его. «Задать прокси перед подключением» без лишнего шага в UI.
     if proxy_id is None and proxy_url:
         proxy_id = await ensure_user_proxy(pool, owner_id, proxy_url)
+    # Прокси не выбран — РАСКЛАДЫВАЕМ партию по живым прокси владельца, а не
+    # оставляем всех на одном выходе. Раньше здесь было два одинаково плохих
+    # исхода: выбранный прокси прописывался КАЖДОМУ аккаунту партии, либо все
+    # получали NULL и уходили в сеть с одного реального IP сервера. Общий IP —
+    # сильнейший признак когорты: банят один аккаунт — уезжает вся партия.
+    # Собственный аудит продукта (proxy_selector.audit_proxy_isolation) считает
+    # нормой один аккаунт на один IP, то есть продукт сам создавал нарушение,
+    # о котором потом честно докладывал.
+    auto_pool: list[tuple] = []
+    if proxy_id is None:
+        try:
+            prows = await pool.fetch(
+                """SELECT p.id,
+                          (SELECT COUNT(*) FROM tg_accounts a
+                            WHERE a.proxy_id = p.id) AS used
+                     FROM user_proxies p
+                    WHERE p.owner_id=$1 AND p.is_active
+                      AND COALESCE(p.is_alive, TRUE)""",
+                owner_id)
+            auto_pool = [(int(r["id"]), int(r["used"] or 0)) for r in prows]
+        except Exception:
+            auto_pool = []   # нет прокси или база моргнула — импорт не рушим
+    else:
+        # Явный выбор пользователя уважаем, но считаем честно: сколько
+        # аккаунтов окажется за этим выходом ВСЕГО, включая уже стоявшие там.
+        try:
+            _used = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE proxy_id=$1", proxy_id)
+            auto_pool = [(int(proxy_id), int(_used or 0))]
+        except Exception:
+            auto_pool = [(int(proxy_id), 0)]
     lines = [l.strip() for l in raw_data.strip().splitlines() if l.strip()]
     if not lines:
         return {"imported": 0, "failed": 0, "errors": ["Пустые данные"]}
@@ -207,6 +238,20 @@ async def import_sessions(
 
     checked = dict(await _asyncio.gather(
         *[_validate(i, sess) for i, sess, err in parsed if sess]))
+
+    # Раскладку считаем на число реально прошедших проверку сессий, а не на
+    # число строк: иначе половина прокси «занялась бы» под битые строки.
+    from services.proxy_balancer import (
+        isolation_note, isolation_summary, plan_distribution,
+    )
+
+    _ok_count = sum(1 for i, sess, err in parsed
+                    if sess and (checked.get(i) or {}).get("valid"))
+    _prior_loads = {pid: used for pid, used in auto_pool}
+    _plan = (plan_distribution(auto_pool, _ok_count) if proxy_id is None
+             else [proxy_id] * _ok_count)
+    _plan_pos = 0
+    _assigned: list = []
 
     # Дальше — строго по порядку строк: и записи в БД, и нумерация ошибок.
     for i, session_str, parse_error in parsed:
@@ -260,6 +305,10 @@ async def import_sessions(
 
         phone = result.get('phone', '') or ''
         dev = generate_device_fingerprint(country_code_from_phone(phone))
+        # Свой прокси на аккаунт — из заранее посчитанной раскладки. Дубли и
+        # прочие отсеянные строки позиции в плане НЕ занимают: план сдвигается
+        # только на реально записанный аккаунт.
+        _acc_proxy = (_plan[_plan_pos] if _plan_pos < len(_plan) else proxy_id)
         try:
             await pool.execute(
                 """INSERT INTO tg_accounts
@@ -271,9 +320,11 @@ async def import_sessions(
                 owner_id, encrypt_token(session_str), _fp, phone,
                 dev["device_model"], dev["system_version"], dev["app_version"],
                 dev["lang_code"], dev["system_lang_code"],
-                _assign_api_id(_fp), proxy_id,
+                _assign_api_id(_fp), _acc_proxy,
             )
             imported += 1
+            _plan_pos += 1
+            _assigned.append(_acc_proxy)
         except Exception as e:
             failed += 1
             errors.append(f"Строка {i+1}: ошибка БД — {str(e)[:100]}")
@@ -286,4 +337,9 @@ async def import_sessions(
         errors.insert(0,
             f"Ещё {truncated} строк не обработано за раз — импортируйте порцией "
             f"до {MAX_PER_IMPORT} или загрузите файл сессий в боте.")
-    return {"imported": imported, "failed": failed, "errors": errors[:20]}
+    # Итог по изоляции — сразу, а не в отдельном аудите, который пользователь
+    # откроет когда-нибудь потом (или никогда). Объяснять общий IP после
+    # массового бана когорты уже поздно.
+    _iso = isolation_summary(_assigned, _prior_loads)
+    return {"imported": imported, "failed": failed, "errors": errors[:20],
+            "isolation": _iso, "isolation_note": isolation_note(_iso)}
