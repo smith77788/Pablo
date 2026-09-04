@@ -223,13 +223,46 @@ async def on_deleted_business_messages(event: BusinessMessagesDeleted, bot: Bot,
             return
         who = _esc((incoming[0].get("peer_name")) or "Собеседник")
         lines = [f"🗑 <b>{who}</b> удалил сообщений: {len(incoming)}"]
+        has_media = False
         for m in incoming[:5]:
             body = m["text"] or m["media_label"] or "—"
+            if m.get("media_label"):
+                has_media = True
             lines.append(f"• {_esc(_short(body))}")
+        if has_media:
+            # Подпись «📷 Фото» без самого файла бесполезна ровно в тот момент,
+            # когда он нужнее всего — вложение сохранено, и его можно открыть.
+            lines.append("\n📎 Вложение сохранено — откройте, чтобы посмотреть.")
         await bot.send_message(prefs["user_chat_id"] or owner_id,
-                               "\n".join(lines), parse_mode="HTML")
+                               "\n".join(lines), parse_mode="HTML",
+                               reply_markup=_open_chat_kb(chat_id))
     except Exception:
         log.debug("vault: delete-уведомление не отправлено owner=%s", owner_id)
+
+
+def _open_chat_kb(chat_id: int):
+    """Кнопка «открыть этот чат в Хранилище».
+
+    Без неё уведомление было тупиком: «собеседник удалил сообщение» — а чтобы
+    увидеть ЧТО (особенно вложение, которое теперь можно открыть), надо было
+    вручную зайти в приложение, найти раздел и нужный чат среди прочих.
+    Мини-апп понимает «#vault:<chat_id>» и открывает сразу переписку.
+    Возвращает None, если URL мини-аппа не настроен — тогда шлём как раньше.
+    """
+    try:
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+        from bot.handlers.botmother_menu import _valid_mini_app_url
+        from config import MINI_APP_URL
+
+        url = _valid_mini_app_url(MINI_APP_URL)
+        if not url:
+            return None
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔎 Открыть переписку",
+                                 web_app=WebAppInfo(url=f"{url}#vault:{int(chat_id)}"))
+        ]])
+    except Exception:
+        return None
 
 
 def _esc(s) -> str:

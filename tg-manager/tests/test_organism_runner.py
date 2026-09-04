@@ -101,5 +101,8 @@ def test_miniapp_deeplink_uses_runpulseaction():
     import os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     html = open(os.path.join(root, "mini_app", "index.html"), encoding="utf-8").read()
-    # deep-link разворачивает любой kind тем же runPulseAction (не только vault)
-    assert "runPulseAction({kind: _screen})" in html
+    # deep-link разворачивает любой kind тем же runPulseAction (не только vault).
+    # Ссылка может нести параметр после двоеточия («#vault:<chat_id>» из
+    # уведомления об удалённом сообщении), поэтому проверяем сам вызов, а не
+    # буквальную форму аргумента.
+    assert "runPulseAction({kind: _screen" in html

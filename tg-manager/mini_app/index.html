@@ -6402,8 +6402,13 @@ const FETCH_TIMEOUT_MS = 30000;
     // уведомления. web_app-кнопка не передаёт start_param → берём и #<kind> из URL.
     // Разворачиваем тем же runPulseAction, что и карточки Пульса — любой kind
     // (vault/health/invite/seo/…), не только Хранилище.
-    const _screen = (tg.initDataUnsafe?.start_param || (location.hash || '').replace('#','')).trim();
-    if (_screen) setTimeout(() => { try { runPulseAction({kind: _screen}); } catch(_){} }, 100);
+    // Формат «kind» либо «kind:параметр» — последнее нужно, чтобы уведомление
+    // об удалённом сообщении вело сразу в НУЖНЫЙ чат, а не просто в раздел.
+    const _raw = (tg.initDataUnsafe?.start_param || (location.hash || '').replace('#','')).trim();
+    const _ci = _raw.indexOf(':');
+    const _screen = _ci > 0 ? _raw.slice(0, _ci) : _raw;
+    const _param = _ci > 0 ? _raw.slice(_ci + 1) : null;
+    if (_screen) setTimeout(() => { try { runPulseAction({kind: _screen, param: _param}); } catch(_){} }, 100);
   } catch(e) {
     document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
@@ -7315,7 +7320,13 @@ function pulseActionLabel(a) {
 }
 function runPulseAction(a) {
   const k = a && a.kind;
-  if (k==='vault') return openVault();
+  if (k==='vault') {
+    // С параметром ведём прямо в чат: приходить из уведомления «клиент удалил
+    // сообщение» в общий список и искать его там — лишняя работа.
+    const cid = a && a.param;
+    if (cid && /^-?\d+$/.test(String(cid))) { openVault(); return openVaultChat(Number(cid)); }
+    return openVault();
+  }
   if (k==='governor' || k==='invite') return openMassInvite();
   if (k==='campaign') return openCampaignPlanner();
   if (k==='intents') return openIntentSensor();
