@@ -9975,6 +9975,11 @@ async def _exec_mass_invite(
     # событий/мин по чату, замораживает приём при chat-flood, стопит на «мёртвом»
     # чате и серии выходов/жалоб. См. services/smart_invite.py.
     _safe_mode = str(params.get("safe_mode") or "").strip().lower() in ("1", "true", "yes", "on")
+    # Пакетное добавление одним запросом (opt-in). Пер-операционный флаг поверх
+    # глобального INVITE_BULK_API: обкатывать такое нужно на ЧАСТИ флота, а не
+    # переключать сразу всем. None = взять значение из окружения.
+    _bulk_api = params.get("bulk_api")
+    _bulk_api = None if _bulk_api is None else bool(_bulk_api)
     # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер).
     _link_msg = params.get("link_message") or None
 
@@ -10717,7 +10722,8 @@ async def _exec_mass_invite(
                     # 2–4с на цель независимо от выбранного режима, и «быстро»
                     # не ускоряло ничего заметного.
                     res = await inv.invite_batch(
-                        acc["session_str"], dict(acc), group, batch, _pace_mult)
+                        acc["session_str"], dict(acc), group, batch, _pace_mult,
+                        bulk=_bulk_api)
             except Exception as exc:
                 # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
                 # другой аккаунт), а этот выводим из круга, чтобы не зациклиться.

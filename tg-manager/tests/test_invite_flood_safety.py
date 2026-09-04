@@ -51,7 +51,12 @@ async def _run(effects, refs):
     with patch("services.account_manager._make_client", return_value=client), \
          patch.object(inv, "_resolve_group_entity", AsyncMock(return_value=object())), \
          patch.object(inv.asyncio, "sleep", AsyncMock()):
-        return await inv.invite_batch("sess", {"id": 1}, "@group", refs)
+        # bulk=False закрепляет ПРЕДМЕТ этих проверок — поштучный путь, где у
+        # каждой цели свой исход. В пакетном режиме весь батч уходит одним
+        # запросом, и после пережидания короткого флуда добавляются оба: это не
+        # регрессия, а другая семантика, и она проверяется в
+        # tests/test_invite_bulk_api.py.
+        return await inv.invite_batch("sess", {"id": 1}, "@group", refs, bulk=False)
 
 
 @pytest.mark.asyncio

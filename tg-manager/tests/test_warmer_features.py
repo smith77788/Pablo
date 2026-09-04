@@ -4,6 +4,36 @@ import pytest
 from services.account_warmer import _time_of_day_multiplier, _actions_for_day_count
 
 
+# Документированный диапазон session_simulator.time_of_day_factor: 0.75 в пик
+# активности и до 5.0 в глубокую ночь (2–6 локальных). Прежняя граница `< 3`
+# держалась только вне ночного окна: тест зависел от того, в котором часу его
+# запустили, и падал примерно 26 раз из 30, когда в Киеве была ночь. Проверять
+# надо КОНТРАКТ, а не то, что множитель сейчас маленький.
+_TOD_MIN = 0.75
+_TOD_MAX = 5.0
+
+
+def test_time_of_day_multiplier_covers_its_whole_documented_range():
+    """Множитель обязан укладываться в контракт в ЛЮБОЙ час, а не в тот, когда
+    случился прогон тестов."""
+    from services import session_simulator
+
+    for hour in range(24):
+        for _ in range(20):
+            v = session_simulator.time_of_day_factor(hour)
+            assert _TOD_MIN <= v <= _TOD_MAX, f"час {hour}: множитель {v} вне контракта"
+
+
+def test_night_is_slower_than_peak():
+    """Смысл множителя: ночью паузы длиннее. Если это перестанет быть так,
+    поведенческая маскировка сломается молча."""
+    from services import session_simulator
+
+    night = max(session_simulator.time_of_day_factor(4) for _ in range(50))
+    peak = min(session_simulator.time_of_day_factor(15) for _ in range(50))
+    assert night > peak
+
+
 def test_time_of_day_multiplier_is_geo_aware_not_server_kyiv():
     """Множитель темпа считается по ЛОКАЛЬНОМУ времени гео аккаунта.
 
@@ -23,7 +53,7 @@ def test_time_of_day_multiplier_is_geo_aware_not_server_kyiv():
     assert geo_tempo.is_local_night("UA", now) != geo_tempo.is_local_night("US", now)
     # обёртка прогрева принимает гео аккаунта и отдаёт валидный множитель
     v = _time_of_day_multiplier("UA")
-    assert isinstance(v, float) and 0 < v < 3
+    assert isinstance(v, float) and _TOD_MIN <= v <= _TOD_MAX
 
 
 def test_time_of_day_multiplier_unknown_geo_falls_back():

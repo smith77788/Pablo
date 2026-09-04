@@ -71,12 +71,17 @@ class _Stand:
         self.responder = responder
         self.calls: list[tuple[int, list]] = []
         self.pace_seen: list[float] = []
+        # bulk: пакетное добавление одним запросом — opt-in, по умолчанию None
+        # (решает окружение), и стенд обязан это видеть.
+        self.bulk_seen: list = []
 
-    async def invite_batch(self, session_str, acc, group, refs, pace_mult=1.0):
+    async def invite_batch(self, session_str, acc, group, refs, pace_mult=1.0,
+                           bulk=None):
         # pace_mult: исполнитель прокидывает множитель темпа ВНУТРЬ батча —
         # до этого движок спал фиксированные 2–4с на цель, и режим «быстро»
         # не влиял на основную задержку прогона.
         self.pace_seen.append(float(pace_mult))
+        self.bulk_seen.append(bulk)
         self.calls.append((int(acc["id"]), list(refs)))
         return self.responder(int(acc["id"]), list(refs))
 
@@ -612,3 +617,19 @@ def test_failure_reasons_come_from_engine_structure(stand):
     assert "прочее" not in res["summary"], (
         "известная причина не должна попадать в корзину «прочее»"
     )
+
+
+def test_bulk_flag_defaults_to_environment_not_forced_off(stand):
+    """Отсутствие настройки у операции означает «как решит окружение»: иначе
+    глобальный INVITE_BULK_API нельзя было бы включить вообще."""
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    _run(_Pool(), TARGETS[:5])
+    assert s.bulk_seen and all(b is None for b in s.bulk_seen), (
+        f"операция без настройки не должна навязывать режим: {s.bulk_seen}"
+    )
+
+
+def test_bulk_flag_of_the_operation_reaches_the_engine(stand):
+    s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
+    _run(_Pool(), TARGETS[:5], bulk_api=True)
+    assert all(b is True for b in s.bulk_seen), f"флаг операции потерян: {s.bulk_seen}"

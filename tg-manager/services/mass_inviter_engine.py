@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import re
 from typing import Any
@@ -164,12 +165,154 @@ def classify_invite_error(exc: BaseException) -> str:
     return FAIL_OTHER
 
 
+# Пакетное добавление одним запросом: opt-in, по умолчанию ВЫКЛЮЧЕНО.
+#
+# Сейчас на каждую цель уходит два обращения к Telegram: get_entity + отдельный
+# InviteToChannelRequest. Между тем конструктор принимает СПИСОК пользователей, а
+# в ответе отдаёт missing_invitees — то есть поимённо сообщает, кого не добавил.
+# Один запрос вместо N это и вдвое меньше вызовов (значит меньше поводов для
+# PeerFlood), и более точная атрибуция, чем поштучный обход.
+#
+# Почему всё-таки за флагом. Проверить это можно только на живом Telegram, а
+# путь — самый баноопасный в продукте. Плюс у пакета есть своя цена: ошибка,
+# относящаяся к ОДНОЙ цели (удалённый аккаунт, приватность в старом слое),
+# роняет весь запрос. Поэтому при такой ошибке мы автоматически откатываемся на
+# поштучный путь для этого же батча — пакет не имеет права стоить целей.
+#
+# Включение: INVITE_BULK_API=1 в окружении либо bulk=True у вызывающего.
+_BULK_DEFAULT = (os.getenv("INVITE_BULK_API") or "").strip().lower() in ("1", "true", "yes", "on")
+
+# Ошибки, которые относятся к чату или аккаунту целиком: их пакет не «чинит»,
+# и откатываться на поштучный путь бессмысленно — результат будет тот же.
+_BULK_FATAL_NAMES = frozenset({
+    "PeerFloodError", "FloodWaitError", "ChatAdminRequiredError",
+    "ChatWriteForbiddenError", "ChannelPrivateError", "UsersTooMuchError",
+})
+
+
+async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
+    """Одним запросом добавить весь батч. None — пакет не подошёл, нужен поштучный.
+
+    Возвращает None ТОЛЬКО когда ошибка относится к одной цели: тогда вызывающий
+    повторяет батч поштучно и не теряет остальных. Ошибки про чат или аккаунт
+    (флуд, нет прав, чат закрыт) возвращаются как результат — поштучный обход дал
+    бы ровно то же, только N запросами вместо одного.
+    """
+    from telethon.tl.functions.channels import InviteToChannelRequest
+
+    resolved: list = []
+    errors: list[str] = []
+    privacy_failed: list = []
+    failed = 0
+    for ref in user_refs:
+        try:
+            ent = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
+        except Exception as e:
+            # Нерезолвящаяся цель — это её собственная беда, а не повод ломать
+            # пакет: просто не кладём её в запрос.
+            kind = classify_invite_error(e)
+            note(kind)
+            failed += 1
+            errors.append(f"{ref}: {FAIL_LABELS.get(kind, str(e)[:80])}")
+            continue
+        resolved.append((ref, ent))
+
+    if not resolved:
+        return {"ok": 0, "failed": failed, "errors": errors,
+                "privacy_failed": privacy_failed, "peer_flood": False,
+                "flood_wait": 0, "no_rights": False}
+
+    async def _send():
+        return await asyncio.wait_for(
+            client(InviteToChannelRequest(channel=group,
+                                          users=[e for _, e in resolved])),
+            timeout=_ACTION_TIMEOUT * 2)
+
+    try:
+        try:
+            res = await _send()
+        except Exception as first:
+            # Короткий флуд поштучный путь просто пережидает и продолжает.
+            # Пакет обязан вести себя так же: иначе 20-секундная пауза вернулась
+            # бы как flood_wait, исполнитель отправил бы аккаунт в cooldown и
+            # вывел из круга — режим «быстрее» превращался бы в «теряем аккаунты».
+            if (type(first).__name__ == "FloodWaitError"
+                    and int(getattr(first, "seconds", 0) or 0) <= _MAX_FLOOD_INLINE):
+                await asyncio.sleep(min(int(getattr(first, "seconds", 0) or 0), 60))
+                res = await _send()
+            else:
+                raise
+    except Exception as e:
+        name = type(e).__name__
+        if name not in _BULK_FATAL_NAMES:
+            # Ошибка относится к одной из целей — откатываемся на поштучный путь.
+            log.info("bulk invite: %s — откат на поштучный путь", name)
+            return None
+        if name == "PeerFloodError":
+            note(FAIL_FLOOD)
+            return {"ok": 0, "failed": failed + len(resolved), "errors":
+                    errors + ["batch: peer flood — аккаунт ограничен"],
+                    "privacy_failed": privacy_failed, "peer_flood": True,
+                    "flood_wait": 0, "no_rights": False}
+        if name == "FloodWaitError":
+            note(FAIL_FLOOD)
+            _fw = int(getattr(e, "seconds", 60) or 60)
+            return {"ok": 0, "failed": failed + len(resolved),
+                    "errors": errors + [f"batch: flood wait {_fw}s"],
+                    "privacy_failed": privacy_failed, "peer_flood": False,
+                    "flood_wait": _fw, "no_rights": False}
+        if name == "ChatAdminRequiredError":
+            return {"ok": 0, "failed": failed, "errors": errors + [
+                "account error: у аккаунта нет прав добавлять участников"],
+                "privacy_failed": privacy_failed, "peer_flood": False,
+                "flood_wait": 0, "no_rights": True}
+        note(FAIL_PERM)
+        return {"ok": 0, "failed": failed + len(resolved),
+                "errors": errors + [f"group error: {name}"],
+                "privacy_failed": privacy_failed, "peer_flood": False,
+                "flood_wait": 0, "no_rights": False}
+
+    # Кого Telegram не добавил — говорит поимённо. Это ТОЧНЕЕ поштучного обхода:
+    # там «не добавлен» приходилось выводить из отсутствия исключения.
+    _raw_missing = list(getattr(res, "missing_invitees", None) or [])
+    missing = set()
+    for m in _raw_missing:
+        # user_id — форма Telethon; на всякий случай принимаем и вложенного user.
+        uid = getattr(m, "user_id", None)
+        if uid is None:
+            uid = getattr(getattr(m, "user", None), "id", None)
+        if uid is not None:
+            missing.add(int(uid))
+    if _raw_missing and not missing:
+        # Telegram сказал, что добавил не всех, но сопоставить их с целями не
+        # вышло (незнакомая форма ответа). Засчитать успех всем — худшее, что
+        # можно сделать: отчёт соврёт, дневной бюджет уйдёт на фантомов, а
+        # промоут-трюк не получит тех, кого мог бы добрать. Откатываемся на
+        # поштучный путь: он определяет исход по каждой цели сам.
+        log.warning("bulk invite: %d missing_invitees не сопоставлены — "
+                    "откат на поштучный путь", len(_raw_missing))
+        return None
+    ok = 0
+    for ref, ent in resolved:
+        if int(getattr(ent, "id", 0) or 0) in missing:
+            failed += 1
+            note(FAIL_PRIVACY)
+            privacy_failed.append(ref)
+            errors.append(f"{ref}: not added (privacy/limit — missing_invitee)")
+        else:
+            ok += 1
+    return {"ok": ok, "failed": failed, "errors": errors,
+            "privacy_failed": privacy_failed, "peer_flood": False,
+            "flood_wait": 0, "no_rights": False}
+
+
 async def invite_batch(
     session_string: str,
     _acc: dict | None,
     group_ref: str,
     user_refs: list[str | int],
     pace_mult: float = 1.0,
+    bulk: bool | None = None,
 ) -> dict[str, Any]:
     """Добавить список пользователей (ID или @username) в группу.
 
@@ -222,6 +365,23 @@ async def invite_batch(
     try:
         client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref)
+
+        _use_bulk = _BULK_DEFAULT if bulk is None else bool(bulk)
+        if _use_bulk and len(user_refs) > 1:
+            _bulk = await _try_bulk_invite(client, group, user_refs, _note)
+            if _bulk is not None:
+                ok += _bulk["ok"]
+                failed += _bulk["failed"]
+                errors.extend(_bulk["errors"])
+                privacy_failed.extend(_bulk["privacy_failed"])
+                await asyncio.sleep(random.uniform(2.0, 4.0) * _pm)
+                return {"ok": ok, "failed": failed, "peer_flood": _bulk["peer_flood"],
+                        "flood_wait": _bulk["flood_wait"], "errors": errors,
+                        "privacy_failed": privacy_failed,
+                        "no_rights": _bulk["no_rights"], "fail_kinds": fail_kinds,
+                        "bulk": True}
+            # None — пакет не подошёл (ошибка про одну цель): идём поштучно ниже,
+            # НЕ теряя целей. Счётчики пакета при этом не применялись.
 
         for ref in user_refs:
             try:

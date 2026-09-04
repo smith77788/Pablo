@@ -8392,6 +8392,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 params["auto_promote"] = False
             if body.get("promote_trick") is False:
                 params["promote_trick"] = False
+            # Пакетное добавление одним запросом — обкатка на части флота.
+            # Явный True/False; отсутствие ключа = как решит окружение.
+            if body.get("bulk_api") is not None:
+                params["bulk_api"] = bool(body.get("bulk_api"))
             if account_ids:
                 params["account_ids"] = account_ids
             # Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.

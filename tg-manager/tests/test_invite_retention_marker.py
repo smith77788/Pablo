@@ -114,7 +114,7 @@ def _mk_stand(monkeypatch):
         return accounts if "tg_accounts" in q else []
     monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
 
-    async def _batch(session, acc, group, refs, pace_mult=1.0):
+    async def _batch(session, acc, group, refs, pace_mult=1.0, bulk=None):
         return {"ok": len(refs), "failed": 0, "errors": []}
     monkeypatch.setattr(inv, "invite_batch", _batch)
 

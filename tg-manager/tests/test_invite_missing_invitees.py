@@ -54,7 +54,10 @@ async def test_missing_invitee_is_failure_not_success(monkeypatch):
     monkeypatch.setattr(mie, "_resolve_group_entity", _group)
     monkeypatch.setattr(asyncio, "sleep", _fast)
 
-    res = await mie.invite_batch("sess", {"id": 1}, "@grp", ["@alice", "@bob"])
+    # bulk=False: проверяем поштучный путь (у пакетного своя атрибуция
+    # по missing_invitees — tests/test_invite_bulk_api.py)
+    res = await mie.invite_batch("sess", {"id": 1}, "@grp", ["@alice", "@bob"],
+                                 bulk=False)
     # alice добавлена (missing пуст), bob — в missing_invitees → провал
     assert res["ok"] == 1
     assert res["failed"] == 1
@@ -79,7 +82,8 @@ async def test_all_added_when_no_missing(monkeypatch):
     monkeypatch.setattr(mie, "_resolve_group_entity", _group)
     monkeypatch.setattr(asyncio, "sleep", _fast)
 
-    res = await mie.invite_batch("sess", {"id": 1}, "@grp", ["@a", "@b", "@c"])
+    res = await mie.invite_batch("sess", {"id": 1}, "@grp", ["@a", "@b", "@c"],
+                                 bulk=False)
     assert res["ok"] == 3
     assert res["failed"] == 0
     assert res["privacy_failed"] == []
