@@ -16191,6 +16191,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(f"Не удалось импортировать: {str(exc)[:140]}", 500)
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
+    app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
 
     # ── Добавление аккаунта: интерактивные способы входа (как в боте) ──────────
     # Раньше в мини-аппе был ТОЛЬКО импорт строки сессии. Добавляем вход по номеру
@@ -16794,6 +16795,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.warning("segment: pressure check failed", exc_info=True)
             return True, ""
+
+    async def fleet_warnings(request: web.Request) -> web.Response:
+        """Мягкие предупреждения перед массовой операцией.
+
+        Оба предупреждения давно существуют, но показывались ТОЛЬКО в боте:
+        основной интерфейс — мини-апп — запускал массовые операции вслепую.
+        Fail-open: предупреждения не должны мешать работать.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        warnings = []
+        try:
+            from services import infra_orchestrator as _io
+            for fn in (_io.get_pressure_warning, _io.get_readiness_warning):
+                try:
+                    w = await fn(pool, uid)
+                except Exception:
+                    w = None
+                if w:
+                    warnings.append(w)
+        except Exception:
+            log.debug("fleet_warnings uid=%s", uid, exc_info=True)
+        return _json_resp({"warnings": warnings})
 
     async def uch_segment_preview(request: web.Request) -> web.Response:
         """Превью до действия: размер среза, сколько адресуемо в ЛС/инвайт,

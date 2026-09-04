@@ -2224,6 +2224,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-massops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚡ Массовые операции</div></div>
   <div class="sub-sb">
+    <!-- Мягкие предупреждения перед запуском (давление флота, непрогретые
+         аккаунты). Раньше показывались только в боте — мини-апп запускал
+         массовые операции вслепую. -->
+    <div id="massopsWarn" style="display:none;margin:0 16px 10px"></div>
     <div class="sec">Вступление / выход по списку</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <textarea id="mjTargets" rows="3" placeholder="@channel1&#10;https://t.me/channel2&#10;@group3" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
@@ -18900,9 +18904,27 @@ async function submitMassMembership(kind) {
   } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
 }
 
+// Предупреждения перед массовой операцией. Fail-open: их отсутствие не должно
+// мешать работать, поэтому блок просто остаётся скрытым.
+async function loadFleetWarnings() {
+  const box = document.getElementById('massopsWarn');
+  if (!box) return;
+  box.style.display = 'none'; box.innerHTML = '';
+  try {
+    const d = await api('/api/miniapp/fleet/warnings');
+    const ws = d.warnings || [];
+    if (!ws.length) return;
+    box.innerHTML = ws.map(w =>
+      `<div style="background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:6px">${esc(w)}</div>`
+    ).join('');
+    box.style.display = '';
+  } catch(_) { /* предупреждения не критичны */ }
+}
+
 async function openMassOps() {
   push('s-massops');
   txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadFleetWarnings();
   // Аккаунты для вступления/выхода: показываем только живые — на выключенных
   // операция всё равно провалилась бы в воркере.
   try {

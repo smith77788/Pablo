@@ -134,11 +134,28 @@ def test_batch_truncation_still_reported(monkeypatch):
 
 # ── Бюджет времени ────────────────────────────────────────────────────────────
 
+def _func_source(relpath: str, name: str) -> str:
+    """Точные границы функции через AST.
+
+    Окно фиксированной длины здесь недопустимо: ниже стоит ОТРИЦАТЕЛЬНАЯ
+    проверка, и стоит коду сдвинуться — окно промахнётся, «искомого нет»
+    станет правдой, и защита выключится молча.
+    """
+    import ast
+
+    src = (_ROOT / relpath).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            seg = ast.get_source_segment(src, node)
+            assert seg is not None
+            return seg
+    raise AssertionError(f"{name} не найдена в {relpath}")
+
+
 def test_timeout_covers_the_whole_conversation():
     """Раньше ограничивался только connect, а get_me висел без предела."""
-    src = (_ROOT / "services" / "session_importer.py").read_text(encoding="utf-8")
-    start = src.index("async def validate_session")
-    body = src[start:start + 1400]
+    body = _func_source("services/session_importer.py", "validate_session")
     assert "async def _talk" in body and "wait_for(_talk()" in body
     assert "wait_for(client.connect()" not in body
 
