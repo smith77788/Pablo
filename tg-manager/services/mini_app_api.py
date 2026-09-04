@@ -153,6 +153,15 @@ INLINE_MIGRATIONS: list[str] = [
         meta           JSONB DEFAULT '{}'
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_warmup_account ON account_warmup_plans(account_id)",
+    # v196: память плана о том, ПОЧЕМУ он стоит. Без этих колонок экран прогрева
+    # показывал «🟢 Активен · День 3/21» на аккаунте, который умер на второй день,
+    # а паузу движка (бан/спам-блок) было не отличить от паузы человека.
+    "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_reason TEXT",
+    "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_detail TEXT",
+    "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ",
+    "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_notified_at TIMESTAMPTZ",
+    "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_reason TEXT",
+    "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_at TIMESTAMPTZ",
     # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
@@ -743,10 +752,16 @@ async def _warmup_bulk_core(
     target_days = days_map[plan_type]
     daily_actions = actions_map[plan_type]
 
+    # spamblock здесь так же смертелен, как бан: движок прогрева СПЕЦИАЛЬНО
+    # останавливает план на флагнутом аккаунте, чтобы не добивать его. Раньше
+    # «прогреть все подходящие» обходило это с чёрного хода — ON CONFLICT ниже
+    # возвращал такой план в active, и аккаунт снова шёл под нагрузку.
+    # Снятием спам-блока занимается реабилитация, а не прогрев.
     rows = await _safe_fetch(pool,
         """SELECT a.id FROM tg_accounts a
            WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-             AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')
+             AND COALESCE(a.acc_status,'active')
+                 NOT IN ('banned','deactivated','session_expired','spamblock')
              AND NOT EXISTS (
                  SELECT 1 FROM account_warmup_plans wp
                  WHERE wp.account_id=a.id AND wp.status='active')
@@ -773,7 +788,12 @@ async def _warmup_bulk_core(
             """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
                VALUES($1,$2,$3,$4,$5)
                ON CONFLICT (account_id) DO UPDATE
-               SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
+               SET plan_type=$3, target_days=$4, daily_actions=$5, status='active',
+                   started_at=now(),
+                   -- Старую жалобу снимаем вместе с перезапуском: иначе экран
+                   -- показывал бы «аккаунт был забанен» на плане, который уже идёт.
+                   pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
+                   pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL""",
             uid, acc_id, plan_type, target_days, daily_actions)
         started += 1
     return {"ok": True, "started": started, "plan_type": plan_type,
@@ -9307,32 +9327,131 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            plans = await pool.fetch(
-                """SELECT wp.id, wp.plan_type, wp.current_day, wp.target_days,
-                          wp.daily_actions, wp.status, wp.started_at,
-                          ta.phone, ta.first_name, ta.username
+            # Колонки причин добавляются inline-миграцией на старте. Если она
+            # почему-то не прошла, экран прогрева не должен исчезать целиком:
+            # откатываемся на старый набор полей — статус будет беднее, но
+            # список планов человек увидит. История с cf_relay_url показала,
+            # чем заканчивается жёсткая зависимость от свежей колонки.
+            _PLAN_COLS = """wp.id, wp.account_id, wp.plan_type, wp.current_day,
+                          wp.target_days, wp.daily_actions, wp.status,
+                          wp.started_at, wp.last_action_at,
+                          ta.phone, ta.first_name, ta.username"""
+            _PLAN_SQL = """SELECT {cols}
                    FROM account_warmup_plans wp
                    JOIN tg_accounts ta ON ta.id = wp.account_id
                    WHERE wp.owner_id=$1
-                   ORDER BY wp.started_at DESC LIMIT 50""",
-                uid,
-            )
+                   ORDER BY wp.started_at DESC LIMIT 50"""
+            try:
+                plans = await pool.fetch(
+                    _PLAN_SQL.format(cols=_PLAN_COLS + """,
+                          wp.pause_reason, wp.pause_detail,
+                          wp.last_skip_reason, wp.last_skip_at"""),
+                    uid,
+                )
+            except Exception:
+                log.warning("warmup_overview uid=%d: нет колонок причин, "
+                            "показываем план без диагностики", uid)
+                plans = await pool.fetch(_PLAN_SQL.format(cols=_PLAN_COLS), uid)
             total = await pool.fetchval(
                 "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1", uid
             )
             active = await pool.fetchval(
                 "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
             )
+            # Честное состояние каждого плана. Без этого «🟢 Активен · День 3/21»
+            # показывался и на плане, который стоит третью неделю, потому что
+            # аккаунт забанен, — и человек не имел ни одного способа это увидеть.
+            from services import warmup_status as _ws
+
+            out = []
+            attention = 0
+            for p in plans:
+                d = dict(p)
+                st = _ws.classify(d)
+                for _k in ("started_at", "last_action_at", "last_skip_at"):
+                    d[_k] = d[_k].isoformat() if d.get(_k) else None
+                d["health"] = st
+                if st["attention"]:
+                    attention += 1
+                out.append(d)
             return _json_resp({
                 "total": total, "active": active,
-                "plans": [
-                    {**dict(p), "started_at": p["started_at"].isoformat() if p["started_at"] else None}
-                    for p in plans
-                ],
+                "attention": attention,
+                "plans": out,
             })
         except Exception as exc:
             log.exception("warmup_overview uid=%d", uid)
             return _err(str(exc), 500)
+
+    async def warmup_plan_log(request: web.Request) -> web.Response:
+        """Журнал действий прогрева по плану.
+
+        `account_warmup_log` пишется с самого первого дня существования
+        прогрева и НИ РАЗУ не показывался пользователю. Из-за этого на вопрос
+        «он вообще греется?» ответить было нечем: экран знал только номер дня,
+        который движок мог не двигать неделями. Здесь — что именно делал
+        аккаунт, что получилось и на чём споткнулось.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        _BASE = """wp.id, wp.account_id, wp.status, wp.current_day,
+                      wp.target_days, wp.last_action_at, wp.started_at"""
+        _SQL = ("SELECT {cols} FROM account_warmup_plans wp "
+                "WHERE wp.id=$1 AND wp.owner_id=$2")
+        plan = await _safe_fetchrow(
+            pool,
+            _SQL.format(cols=_BASE + """, wp.pause_reason, wp.pause_detail,
+                      wp.last_skip_reason, wp.last_skip_at"""),
+            plan_id, uid)
+        if not plan:
+            # Либо плана правда нет, либо колонки диагностики ещё не накатились
+            # (см. warmup_overview). Второй случай не должен выглядеть как
+            # «план не найден» — журнал ценен и без причин.
+            plan = await _safe_fetchrow(pool, _SQL.format(cols=_BASE), plan_id, uid)
+        if not plan:
+            return _err("План не найден", 404)
+        rows = await _safe_fetch(
+            pool,
+            """SELECT action_type, target, success, error, performed_at
+                 FROM account_warmup_log
+                WHERE account_id=$1
+                ORDER BY performed_at DESC
+                LIMIT 60""",
+            plan["account_id"])
+        # Сводка за неделю — по ней сразу видно, идёт работа или только ошибки.
+        agg = await _safe_fetchrow(
+            pool,
+            """SELECT COUNT(*) FILTER (WHERE success) AS ok,
+                      COUNT(*) FILTER (WHERE NOT success) AS fail
+                 FROM account_warmup_log
+                WHERE account_id=$1 AND performed_at > NOW() - INTERVAL '7 days'""",
+            plan["account_id"])
+        from services import warmup_status as _ws
+
+        pd = dict(plan)
+        return _json_resp({
+            "ok": True,
+            "plan": {
+                "id": pd["id"], "status": pd["status"],
+                "current_day": pd["current_day"], "target_days": pd["target_days"],
+                "health": _ws.classify(pd),
+                "last_action_at": pd["last_action_at"].isoformat() if pd["last_action_at"] else None,
+                "skip_label": _ws.skip_label(pd.get("last_skip_reason")),
+            },
+            "week": {"ok": int(agg["ok"] or 0) if agg else 0,
+                     "fail": int(agg["fail"] or 0) if agg else 0},
+            "actions": [
+                {"action": r["action_type"], "target": r["target"],
+                 "success": bool(r["success"]), "error": r["error"],
+                 "at": r["performed_at"].isoformat() if r["performed_at"] else None}
+                for r in rows
+            ],
+        })
 
     async def warmup_create_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9365,7 +9484,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
         try:
             acc = await pool.fetchrow(
-                "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
+                "SELECT id, session_str, acc_status, is_active "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
             )
         except Exception as exc:
             log.exception("warmup_create_plan fetchrow uid=%d", uid)
@@ -9374,6 +9494,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Аккаунт не найден", 404)
         if not acc["session_str"]:
             return _err("Аккаунт не имеет активной сессии — сначала добавьте .session файл", 400)
+        # Пригодность аккаунта проверялась ТОЛЬКО в браузере (список в модалке
+        # фильтровался по status==='active'). Любой прямой запрос — или
+        # устаревший список на экране — заводил план на забаненном аккаунте:
+        # план создавался, показывал «День 0/21» и не двигался никогда.
+        from services import warmup_status as _ws
+
+        _ok, _why = _ws.can_resume(None, acc["acc_status"], acc["is_active"])
+        if not _ok:
+            return _err(_why, 409)
         try:
             days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
             actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
@@ -9426,7 +9555,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
                    VALUES($1,$2,$3,$4,$5)
                    ON CONFLICT (account_id) DO UPDATE
-                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
+                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active',
+                       started_at=now(),
+                       -- Перезапуск снимает старую жалобу: иначе новый план
+                       -- показывал бы причину, по которой встал предыдущий.
+                       pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
+                       pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL""",
                 uid, account_id, plan_type, target_days, daily_actions,
             )
             return _json_resp({
@@ -9494,8 +9628,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad plan_id", 400)
         try:
+            # pause_reason='user' + метка «уже сообщили»: о своей же паузе
+            # уведомлять человека незачем, а причина отличает её от паузы,
+            # которую движок ставит при бане или спам-блоке.
             row = await pool.fetchrow(
-                """UPDATE account_warmup_plans SET status='paused'
+                """UPDATE account_warmup_plans
+                      SET status='paused', pause_reason='user', pause_detail=NULL,
+                          paused_at=NOW(), pause_notified_at=NOW()
                    WHERE id=$1 AND owner_id=$2 AND status='active'
                    RETURNING id""",
                 plan_id, uid)
@@ -9515,8 +9654,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad plan_id", 400)
         try:
+            # Возобновление — не нейтральное действие: на забаненном или
+            # флагнутом аккаунте оно снова гонит действия и добивает его.
+            # Раньше пауза движка выглядела как обычная, и кнопка «▶» делала
+            # ровно это. Проверяем ДО записи.
+            pre = await pool.fetchrow(
+                """SELECT wp.pause_reason, a.acc_status, a.is_active
+                     FROM account_warmup_plans wp
+                     JOIN tg_accounts a ON a.id = wp.account_id
+                    WHERE wp.id=$1 AND wp.owner_id=$2 AND wp.status='paused'""",
+                plan_id, uid)
+            if not pre:
+                return _err("Приостановленный план не найден", 404)
+            from services import warmup_status as _ws
+
+            ok, why = _ws.can_resume(
+                pre["pause_reason"], pre["acc_status"], pre["is_active"])
+            if not ok:
+                return _err(why, 409)
             row = await pool.fetchrow(
-                """UPDATE account_warmup_plans SET status='active'
+                """UPDATE account_warmup_plans
+                      SET status='active', pause_reason=NULL, pause_detail=NULL,
+                          paused_at=NULL, pause_notified_at=NULL,
+                          last_skip_reason=NULL, last_skip_at=NULL
                    WHERE id=$1 AND owner_id=$2 AND status='paused'
                    RETURNING id, account_id""",
                 plan_id, uid)
@@ -15121,6 +15281,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
+    app.router.add_get("/api/miniapp/warmup/{plan_id}/log", warmup_plan_log)
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/pause", warmup_pause_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/resume", warmup_resume_plan)

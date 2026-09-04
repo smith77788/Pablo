@@ -11864,10 +11864,27 @@ async def _exec_account_warmup(
             account_id, owner_id,
         )
         if existing:
+            # Раньше здесь рапортовалось «Прогрев активен» ЛЮБОМУ существующему
+            # плану — включая отменённый и остановленный движком. Операция
+            # сообщала об успехе, а прогрев не шёл: классический ложный успех.
+            if (existing["status"] or "") == "active":
+                return {
+                    "status": "done",
+                    "plan_id": existing["id"],
+                    "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
+                }
+            await pool.execute(
+                """UPDATE account_warmup_plans
+                      SET status='active', started_at=now(),
+                          pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
+                          pause_notified_at=NULL,
+                          last_skip_reason=NULL, last_skip_at=NULL
+                    WHERE id=$1""",
+                existing["id"])
             return {
                 "status": "done",
                 "plan_id": existing["id"],
-                "summary": f"🌡️ Прогрев активен для {name} (план: {plan_type})",
+                "summary": f"🌡️ Прогрев возобновлён для {name} (план: {plan_type})",
             }
         # Plan not yet created (op triggered from bot handler or legacy path) — create it.
         plan_id = await account_warmer.create_warmup_plan(pool, owner_id, account_id, plan_type)

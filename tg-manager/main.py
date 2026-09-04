@@ -912,7 +912,9 @@ async def main() -> None:
             _resilient("behavioral_engine", behavioral_engine.run, pool, bot)
         )
         asyncio.create_task(
-            _resilient("account_warmer", account_warmer.run_warmup_loop, pool)
+            # bot нужен циклу, чтобы сообщать о планах, которые он останавливает
+            # сам (бан/спам-блок/длинный flood) — раньше это было немым.
+            _resilient("account_warmer", account_warmer.run_warmup_loop, pool, 1, bot)
         )
         asyncio.create_task(
             _resilient("account_health", account_health.run_health_check_loop, pool)

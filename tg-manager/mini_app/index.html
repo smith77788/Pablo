@@ -4717,9 +4717,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div id="warmupStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="warmupWarn" style="display:none;margin-bottom:8px"></div>
     <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
     <div class="sec">Активные планы</div>
     <div class="lst" id="warmupList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-warmuplog">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌱 Что делает аккаунт</div>
+  </div>
+  <div class="sub-sb">
+    <div id="wlogHead" style="padding:8px 0 4px"></div>
+    <div class="sec">Последние действия</div>
+    <div class="lst" id="wlogList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -16883,37 +16896,97 @@ async function submitWarmup() {
 }
 const WARMUP_PLAN = {gentle:'🌱 Gentle',standard:'🌿 Standard',aggressive:'🔥 Intensive'};
 const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён',failed:'❌ Ошибка',cancelled:'🚫 Отменён'};
+// Цвет рамки по честному состоянию плана: «стоит на месте» и «остановлен
+// движком» больше не выглядят как обычная работа.
+const WARMUP_STATE_COLOR = {running:'var(--green)', stalled:'var(--orange,#f59e0b)',
+                            blocked:'var(--red,#ef4444)', paused:'var(--hint)',
+                            completed:'var(--blue,#3b82f6)', cancelled:'var(--hint)'};
 async function openWarmup() {
   push('s-warmup');
   txt('warmupStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('warmupList','');
+  const warnBox = document.getElementById('warmupWarn');
+  if (warnBox) { warnBox.style.display='none'; warnBox.innerHTML=''; }
   try {
     const d = await api('/api/miniapp/warmup');
+    const att = d.attention||0;
     txt('warmupStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего планов</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:${att?'var(--orange,#f59e0b)':'var(--hint)'}">${att}</div><div class="kpi-lbl">Требуют внимания</div></div>
     `);
-    txt('m-warmup-val',`${d.active||0} активных · ${d.total||0} планов`);
+    txt('m-warmup-val',`${d.active||0} активных · ${d.total||0} планов${att?' · '+att+' ⚠️':''}`);
+    if (warnBox && att) {
+      warnBox.innerHTML = `<div style="background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:8px;padding:10px 12px;font-size:13px">
+        ⚠️ ${att} ${att===1?'план стоит':'планов стоят'} и сами не пойдут: аккаунт забанен, выключен, ограничен или не отвечает.
+        Такие планы отмечены ниже — откройте план, чтобы увидеть, на чём именно он споткнулся.</div>`;
+      warnBox.style.display = '';
+    }
     const plans = d.plans||[];
     if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить')); return; }
-    txt('warmupList', plans.map(p=>`
-      <div class="row">
+    txt('warmupList', plans.map(p=>{
+      const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
+      const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
+      return `
+      <div class="row" style="border-left:3px solid ${col}">
         <div class="row-ico" style="background:var(--bg-green-16)">🌱</div>
-        <div class="row-body">
+        <div class="row-body" onclick="openWarmupLog(${p.id})" style="cursor:pointer">
           <div class="row-name">${esc(p.first_name||p.phone)} ${WARMUP_PLAN[p.plan_type]||p.plan_type}</div>
-          <div class="row-val">${WARMUP_STATUS[p.status]||p.status} · День ${p.current_day||0}/${p.target_days||0}</div>
+          <div class="row-val">${esc(h.label)} · День ${p.current_day||0}/${p.target_days||0}</div>
+          ${h.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(h.hint)}</div>`:''}
         </div>
         <div class="row-right" style="display:flex;gap:5px">
           ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})">⏸</button>`:''}
-          ${p.status==='paused'?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})">▶</button>`:''}
+          ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})">▶</button>`:''}
           ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})">⏹</button>`:''}
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id})">🗑</button>
         </div>
-      </div>
-    `).join(''));
+      </div>`;
+    }).join(''));
   } catch(e) {
     txt('warmupStats','');
     txt('warmupList', empty('⚠️','Ошибка',e.message));
+  }
+}
+// Журнал прогрева: показывает, что аккаунт делал на самом деле. Раньше эти
+// записи копились в базе и не были видны нигде — на вопрос «он греется?»
+// ответить было нечем.
+const WLOG_ACTION = {
+  read_channel:'Читал канал', view_profile:'Смотрел профиль', open_chat:'Открывал чат',
+  send_reaction:'Ставил реакцию', dm_bot:'Писал боту', join_channel:'Вступал в канал',
+  search:'Искал', mark_read:'Отмечал прочитанным', update_presence:'Был в сети',
+  browse_dialogs:'Листал диалоги', forward_to_saved:'Пересылал в избранное',
+  vote_poll:'Голосовал в опросе', send_comment:'Комментировал',
+  smart_bot_cmd:'Команда боту', own_channel_read:'Читал свой канал',
+  story_view:'Смотрел сторис', check_notifications:'Проверял уведомления'};
+async function openWarmupLog(planId) {
+  push('s-warmuplog');
+  txt('wlogHead','');
+  txt('wlogList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/warmup/'+planId+'/log');
+    const p = d.plan||{}, h = p.health||{}, w = d.week||{};
+    const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
+    txt('wlogHead',`
+      <div style="background:var(--bg2);border-left:3px solid ${col};border-radius:8px;padding:11px 13px">
+        <div style="font-weight:600;font-size:14px">${esc(h.label||'')} · День ${p.current_day||0}/${p.target_days||0}</div>
+        ${h.hint?`<div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.4">${esc(h.hint)}</div>`:''}
+        <div style="font-size:12px;margin-top:7px">За 7 дней: <b style="color:var(--green)">${w.ok||0}</b> успешных · <b style="color:${(w.fail||0)?'var(--red,#ef4444)':'var(--hint)'}">${w.fail||0}</b> неудачных</div>
+        ${p.last_action_at?`<div style="font-size:11px;color:var(--hint);margin-top:3px">Последнее действие: ${esc(ago(p.last_action_at))}</div>`:'<div style="font-size:11px;color:var(--hint);margin-top:3px">Действий ещё не было</div>'}
+      </div>`);
+    const acts = d.actions||[];
+    if (!acts.length) { txt('wlogList', empty('🌱','Действий пока нет','План ещё ни разу не отработал день')); return; }
+    txt('wlogList', acts.map(a=>`
+      <div class="row">
+        <div class="row-ico" style="background:${a.success?'var(--bg-green-16)':'var(--bg2)'}">${a.success?'✅':'❌'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(WLOG_ACTION[a.action]||a.action)}${a.target?' · '+esc(String(a.target).substring(0,40)):''}</div>
+          <div class="row-val">${esc(ago(a.at))}${a.error?' · '+esc(String(a.error).substring(0,70)):''}</div>
+        </div>
+      </div>`).join(''));
+  } catch(e) {
+    txt('wlogHead','');
+    txt('wlogList', empty('⚠️','Ошибка',e.message));
   }
 }
 async function deleteWarmupPlan(id) {
@@ -16936,7 +17009,12 @@ async function resumeWarmupPlan(id) {
     await api(`/api/miniapp/warmup/${id}/resume`, {method:'POST'});
     tg.HapticFeedback?.notificationOccurred('success');
     toast('▶ Прогрев возобновлён'); openWarmup();
-  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+  } catch(e) {
+    // Отказ сервера здесь — содержательный («аккаунт забанен», «спам-блок»),
+    // его нельзя обрезать до 60 символов: именно он объясняет, что делать.
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,180));
+    openWarmup();
+  }
 }
 async function cancelWarmupPlan(id) {
   if (!await askConfirm('Отменить прогрев? Аккаунт вернётся в active.')) return;

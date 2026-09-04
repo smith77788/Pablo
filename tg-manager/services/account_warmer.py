@@ -1150,6 +1150,43 @@ async def _get_warmup_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
         return {"bots": [], "channels": []}
 
 
+async def _note_skip(pool: asyncpg.Pool, plan_id: int, reason: str) -> None:
+    """Запомнить, ПОЧЕМУ день прогрева пропущен.
+
+    Раньше все шесть путей пропуска писали только в серверный лог, а план
+    оставался «🟢 Активен · День 3/21». Снаружи мёртвый аккаунт был неотличим
+    от здорового, и человек узнавал правду через недели простоя.
+    """
+    try:
+        await pool.execute(
+            """UPDATE account_warmup_plans
+                  SET last_skip_reason=$2, last_skip_at=NOW()
+                WHERE id=$1""",
+            plan_id, reason)
+    except Exception:
+        log.debug("warmup: не удалось записать причину пропуска plan=%s", plan_id)
+
+
+async def _pause_plan(pool: asyncpg.Pool, plan_id: int, reason: str,
+                      detail: str | None = None) -> None:
+    """Остановить план С УКАЗАНИЕМ причины.
+
+    Пауза движка (бан, спам-блок, длинный FloodWait) и пауза человека — разные
+    вещи: первую нельзя молча предлагать «возобновить», иначе пользователь
+    своими руками добивает флагнутый аккаунт. Причина решает это на уровне
+    данных, а не подсказок в интерфейсе.
+    """
+    try:
+        await pool.execute(
+            """UPDATE account_warmup_plans
+                  SET status='paused', pause_reason=$2, pause_detail=$3,
+                      paused_at=NOW(), pause_notified_at=NULL
+                WHERE id=$1""",
+            plan_id, reason, (str(detail)[:300] if detail else None))
+    except Exception as e:
+        log.warning("warmup: пауза плана %s (%s) не записана: %s", plan_id, reason, e)
+
+
 async def run_daily_warmup(
     pool: asyncpg.Pool,
     plan: dict,
@@ -1214,6 +1251,7 @@ async def _run_daily_warmup_impl(
     acc_row = await db.get_account_for_telethon(pool, account_id)
     if not acc_row:
         log.warning("warmup: account %d not found or inactive", account_id)
+        await _note_skip(pool, plan_id, "not_found")
         return {
             "actions_done": 0,
             "actions_ok": 0,
@@ -1224,6 +1262,7 @@ async def _run_daily_warmup_impl(
 
     if not acc_row["session_str"]:
         log.warning("warmup: account %d has no session_str, skipping", account_id)
+        await _note_skip(pool, plan_id, "no_session")
         return {
             "actions_done": 0,
             "actions_ok": 0,
@@ -1249,6 +1288,7 @@ async def _run_daily_warmup_impl(
             log.info(
                 "warmup: acc=%d занят активной операцией — пропуск цикла", account_id
             )
+            await _note_skip(pool, plan_id, "busy")
             return _skip_result
     except Exception:
         log_exc_swallow(log, "warmup: is_account_in_use check failed")
@@ -1262,6 +1302,7 @@ async def _run_daily_warmup_impl(
     if acc_health:
         if acc_health["is_active"] is False:
             log.info("warmup: acc=%d неактивен — пропуск", account_id)
+            await _note_skip(pool, plan_id, "inactive")
             return _skip_result
         if (acc_health["acc_status"] or "active") in (
             "banned",
@@ -1277,6 +1318,7 @@ async def _run_daily_warmup_impl(
                 account_id,
                 acc_health["acc_status"],
             )
+            await _note_skip(pool, plan_id, str(acc_health["acc_status"]))
             return _skip_result
         # Очень свежий аккаунт: форсируем поведение дня 0 (минимум действий, read-only)
         added_at = acc_health["added_at"]
@@ -1311,6 +1353,7 @@ async def _run_daily_warmup_impl(
         _leased = True  # op_worker недоступен — best-effort как раньше
     if not _leased:
         log.info("warmup: acc=%d занят операцией/циклом — пропуск прогрева", account_id)
+        await _note_skip(pool, plan_id, "busy")
         return _skip_result
 
     # Профиль аккаунта из таблицы niche_profiles (если есть)
@@ -1560,13 +1603,7 @@ async def _run_daily_warmup_impl(
                         await db.apply_account_stage_event(pool, account_id, "banned")
                     except Exception:
                         log_exc_swallow(log, "warmup: stage(banned) failed")
-                    try:
-                        await pool.execute(
-                            "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
-                            plan_id,
-                        )
-                    except Exception as e:
-                        log.warning("warmup: pause plan on fatal failed plan=%d: %s", plan_id, e)
+                    await _pause_plan(pool, plan_id, "banned", error or etype)
                     await _log_warmup_action(
                         pool, account_id, action, target, False, error
                     )
@@ -1580,13 +1617,7 @@ async def _run_daily_warmup_impl(
                         etype,
                         account_id,
                     )
-                    try:
-                        await pool.execute(
-                            "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
-                            plan_id,
-                        )
-                    except Exception:
-                        log_exc_swallow(log, "warmup: pause plan on restriction failed")
+                    await _pause_plan(pool, plan_id, "restricted", error or etype)
                     await _log_warmup_action(
                         pool, account_id, action, target, False, error
                     )
@@ -1602,13 +1633,9 @@ async def _run_daily_warmup_impl(
                             fw_secs,
                             account_id,
                         )
-                        try:
-                            await pool.execute(
-                                "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
-                                plan_id,
-                            )
-                        except Exception:
-                            log_exc_swallow(log, "warmup: pause on long flood failed")
+                        await _pause_plan(
+                            pool, plan_id, "flood",
+                            f"Telegram просит подождать {fw_secs} с")
                         await _log_warmup_action(
                             pool, account_id, action, target, False, error
                         )
@@ -1745,14 +1772,20 @@ async def _run_daily_warmup_impl(
     completed = new_day >= plan["target_days"]
     new_status = "completed" if completed else "active"
 
+    # Причину пропуска ведём вместе с днём: успешный день её снимает, полностью
+    # проваленный — записывает. Иначе экран показывал бы старую жалобу на плане,
+    # который давно ожил, либо молчал бы о плане, который каждый день пустой.
     await pool.execute(
         """UPDATE account_warmup_plans
            SET current_day=$1, status=$2, last_action_at=NOW(),
+               last_skip_reason=$4,
+               last_skip_at=CASE WHEN $4 IS NULL THEN NULL ELSE NOW() END,
                completed_at=CASE WHEN $2='completed' THEN NOW() ELSE NULL END
            WHERE id=$3""",
         new_day,
         new_status,
         plan_id,
+        None if actions_ok > 0 else "all_failed",
     )
 
     if actions_ok > 0:
@@ -2317,7 +2350,63 @@ def _proxy_safe_batches(rows: list, batch_size: int) -> list[list]:
     return result
 
 
-async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
+async def notify_paused_plans(pool: asyncpg.Pool, bot) -> int:
+    """Сообщить владельцу о планах, которые движок остановил САМ.
+
+    До этого о самостоятельной остановке не сообщалось вообще: аккаунт ловил
+    бан на четвёртый день из двадцати одного, план вставал, и человек узнавал
+    об этом, только если случайно открывал экран прогрева — и то видел лишь
+    «⏸ Пауза», неотличимую от своей собственной.
+
+    Сообщаем ОДИН раз на остановку (метка `pause_notified_at`), иначе
+    уведомление повторялось бы каждый час и его перестали бы читать.
+    Возвращает число отправленных — для тестов и логов.
+    """
+    from services import warmup_status
+
+    try:
+        rows = await pool.fetch(
+            """SELECT wp.id, wp.owner_id, wp.pause_reason, wp.pause_detail,
+                      wp.current_day, wp.target_days,
+                      a.phone, a.first_name
+                 FROM account_warmup_plans wp
+                 JOIN tg_accounts a ON a.id = wp.account_id
+                WHERE wp.status='paused'
+                  AND wp.pause_notified_at IS NULL
+                  AND wp.pause_reason = ANY($1::text[])
+                LIMIT 50""",
+            list(warmup_status.AUTO_PAUSE_REASONS))
+    except Exception as e:
+        log.debug("warmup: выборка остановленных планов не удалась: %s", e)
+        return 0
+
+    sent = 0
+    for r in rows:
+        name = r["first_name"] or r["phone"] or f"аккаунт #{r['id']}"
+        text = warmup_status.build_pause_alert(
+            name, r["pause_reason"], r["current_day"], r["target_days"],
+            r["pause_detail"])
+        try:
+            from database import db as _db
+
+            await _db.notify_if_enabled(
+                pool, bot, r["owner_id"], "restriction", text,
+                dedup_key=f"warmup_pause:{r['id']}")
+            sent += 1
+        except Exception:
+            log.debug("warmup: уведомление о паузе не отправлено plan=%s", r["id"])
+        # Метку ставим в любом случае: если уведомление не ушло, повторять его
+        # каждый час бессмысленно — состояние всё равно видно на экране.
+        try:
+            await pool.execute(
+                "UPDATE account_warmup_plans SET pause_notified_at=NOW() WHERE id=$1",
+                r["id"])
+        except Exception:
+            log.debug("warmup: метка уведомления не записана plan=%s", r["id"])
+    return sent
+
+
+async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1, bot=None) -> None:
     """
     Фоновый цикл: каждый час проверяет активные планы И сессии разогрева.
     Один запуск в сутки на план/сессию (проверяем last_action_at > 20ч).
@@ -2330,6 +2419,14 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     import datetime
     while True:
         try:
+            # Сначала — рассказать о планах, которые движок остановил сам
+            # (бан/спам-блок/длинный flood). Раньше это состояние было немым.
+            if bot is not None:
+                try:
+                    await notify_paused_plans(pool, bot)
+                except Exception:
+                    log.debug("warmup loop: уведомления о паузах не отправлены")
+
             # Ночь считаем по ЛОКАЛЬНОМУ времени КАЖДОГО аккаунта (гео его прокси),
             # а не по серверному Киеву. Раньше весь цикл замирал в киевскую ночь:
             # US-аккаунты простаивали в свой вечер (естественно активное время), а
