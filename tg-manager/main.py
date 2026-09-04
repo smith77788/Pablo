@@ -531,7 +531,6 @@ async def main() -> None:
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
-    dp.include_router(budget_radar_handler.router)
     dp.error.register(_global_error_handler)
     install_error_monitoring(dp)
 
