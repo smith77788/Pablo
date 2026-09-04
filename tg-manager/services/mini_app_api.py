@@ -8878,6 +8878,77 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("dm_campaign_launch uid=%d cid=%d", uid, campaign_id)
             return _err(str(exc), 500)
 
+    async def dm_campaign_report(request: web.Request) -> web.Response:
+        """Отчёт по кампании: исходы, разбивка по аккаунтам, последние записи.
+
+        dm_campaign_log писался с самого начала, но не читался НИ ОДНИМ экраном:
+        пользователь видел только «✅ N ❌ M» и не мог узнать, кому не дошло,
+        почему и какой аккаунт даёт сбои. Данные собирались и выбрасывались.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            campaign_id = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        # IDOR: отчёт только по своей кампании.
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT id, name, status, sent_count, fail_count, total_targets, target_type "
+            "FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            campaign_id, uid,
+        )
+        if not row:
+            return _err("Не найдено", 404)
+
+        by_status = await _safe_fetch(
+            pool,
+            "SELECT status, COUNT(*) AS n FROM dm_campaign_log "
+            "WHERE campaign_id=$1 GROUP BY status ORDER BY n DESC",
+            campaign_id,
+        )
+        # Разбивка по аккаунтам: так виден аккаунт, который сыпет ошибками,
+        # пока остальные работают — иначе это тонет в общем счётчике.
+        by_account = await _safe_fetch(
+            pool,
+            """SELECT l.account_id,
+                      COALESCE(a.first_name, a.phone, 'acc #' || l.account_id) AS label,
+                      COUNT(*) FILTER (WHERE l.status='sent')  AS sent,
+                      COUNT(*) FILTER (WHERE l.status<>'sent') AS failed
+                 FROM dm_campaign_log l
+            LEFT JOIN tg_accounts a ON a.id = l.account_id
+                WHERE l.campaign_id=$1
+             GROUP BY l.account_id, a.first_name, a.phone
+             ORDER BY sent DESC NULLS LAST
+                LIMIT 50""",
+            campaign_id,
+        )
+        # Частые причины недоставки — сразу подсказывают, что чинить.
+        top_errors = await _safe_fetch(
+            pool,
+            "SELECT COALESCE(NULLIF(error_msg,''),'без описания') AS reason, COUNT(*) AS n "
+            "FROM dm_campaign_log WHERE campaign_id=$1 AND status<>'sent' "
+            "GROUP BY reason ORDER BY n DESC LIMIT 10",
+            campaign_id,
+        )
+        recent = await _safe_fetch(
+            pool,
+            "SELECT tg_user_id, status, error_msg, sent_at FROM dm_campaign_log "
+            "WHERE campaign_id=$1 ORDER BY sent_at DESC LIMIT 100",
+            campaign_id,
+        )
+        for r in recent:
+            if r.get("sent_at") is not None:
+                r["sent_at"] = r["sent_at"].isoformat()
+        return _json_resp({
+            "campaign": dict(row),
+            "by_status": by_status,
+            "by_account": by_account,
+            "top_errors": top_errors,
+            "recent": recent,
+        })
+
     async def dm_campaign_pause(request: web.Request) -> web.Response:
         """Поставить идущую кампанию на паузу.
 
@@ -14646,6 +14717,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/dm_campaigns", dm_campaign_create)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/launch", dm_campaign_launch)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/pause", dm_campaign_pause)
+    app.router.add_get("/api/miniapp/dm_campaign/{campaign_id}/report", dm_campaign_report)
     app.router.add_delete("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_delete)
     # Account Warmup
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
