@@ -880,6 +880,11 @@ async def main() -> None:
         # и один раз предупреждает владельца в ЛС (иначе узнаёт, только зайдя в архив).
         from services import vault_watchdog
         asyncio.create_task(_resilient("vault_watchdog", vault_watchdog.run, pool, bot))
+        # Сторож прокси: фоновой проверки не было вовсе — is_alive обновлялся
+        # только вручную, и молча умерший прокси продолжал раздавать аккаунтам
+        # сетевые ошибки. Снаружи это выглядит как «сломались аккаунты».
+        from services import proxy_watchdog
+        asyncio.create_task(_resilient("proxy_watchdog", proxy_watchdog.run, pool, bot))
         # Пульс организма: сердцебиение — смотрит на мир владельца и проактивно
         # подсказывает срочное в ЛС (с кулдауном). Система «живёт» между сессиями.
         from services.organism import runner as organism_runner
