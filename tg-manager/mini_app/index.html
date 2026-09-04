@@ -10279,12 +10279,22 @@ function buildFunnelDetail(d) {
   const steps = d.steps||[];
   const trig = f.trigger_type==='keyword'?`🔑 ${esc(f.keyword||'?')}`:'🚀 /start';
 
+  // Отвал по шагам: где именно люди уходят из цепочки — главный вопрос к любой
+  // воронке. Данные копились в current_step с самого начала, но не показывались.
+  const stats = d.step_stats||[];
+  const statFor = i => stats[i] || null;
+
   const stepsHtml = steps.length
     ? `<div class="funnel-flow">${steps.map((s,i)=>{
         const isLast = i===steps.length-1;
         const delayLbl = s.delay_minutes
           ? (s.delay_minutes>=60 ? Math.round(s.delay_minutes/60)+' ч' : s.delay_minutes+' мин')
           : 'сразу';
+        const st = statFor(i);
+        const statLine = st
+          ? `<div class="ffstep-delay">📊 дошли: <b>${num(st.delivered)}</b> (${st.conversion_pct}%)${
+               st.lost_after ? ` · <span style="color:var(--red)">отвал дальше: ${num(st.lost_after)}</span>` : ''}</div>`
+          : '';
         return `<div class="ffstep">
           <div class="ffstep-line">
             <div class="ffstep-dot">${i+1}</div>
@@ -10292,11 +10302,16 @@ function buildFunnelDetail(d) {
           </div>
           <div class="ffstep-body">
             <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''}${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
+            ${statLine}
             <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
             ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
           </div>
         </div>`;
       }).join('')}</div>`
+      + `<div class="lst" style="margin-top:8px"><div class="row"><div class="row-body">
+           <div class="row-name">Итог цепочки</div>
+           <div class="row-val">✅ прошли: ${num(d.completed_total||0)} · 🚪 ушли: ${num(d.dropped_total||0)} · ▶️ идут: ${num(d.subs_active||0)}</div>
+         </div></div></div>`
     : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Нет шагов.</div></div>`;
 
   const addStepForm = `

@@ -11042,11 +11042,52 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1 AND completed=false", funnel_id)
         subs_total = await _safe_count(pool,
             "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1", funnel_id)
+
+        # Отвал по шагам. funnel_subscriptions.current_step (сколько шагов уже
+        # доставлено) копится с самого начала, но нигде не агрегировался: было
+        # видно только «всего/активных», а на каком шаге люди уходят — главный
+        # вопрос к любой цепочке — узнать было негде.
+        _dist = await _safe_fetch(
+            pool,
+            """SELECT current_step,
+                      COUNT(*) AS n,
+                      COUNT(*) FILTER (WHERE dropped)   AS dropped_n,
+                      COUNT(*) FILTER (WHERE completed) AS completed_n
+                 FROM funnel_subscriptions
+                WHERE funnel_id=$1
+             GROUP BY current_step""",
+            funnel_id,
+        )
+        _by_step = {int(r["current_step"] or 0): r for r in _dist}
+        _delivered_at_least = {}   # сколько подписчиков получили >= i шагов
+        _max_step = max(_by_step) if _by_step else 0
+        _running = 0
+        for _i in range(_max_step, -1, -1):
+            _running += int((_by_step.get(_i) or {}).get("n") or 0)
+            _delivered_at_least[_i] = _running
+        step_stats = []
+        for _idx, _s in enumerate(steps, start=1):
+            _reached = _delivered_at_least.get(_idx, 0)
+            _next = _delivered_at_least.get(_idx + 1, 0)
+            step_stats.append({
+                "step_order": _s.get("step_order", _idx),
+                "delivered": _reached,
+                # Ушли, не получив следующий шаг: здесь и виден отвал.
+                "lost_after": max(0, _reached - _next) if _idx < len(steps) else 0,
+                "conversion_pct": (round(_reached * 100.0 / subs_total, 1)
+                                   if subs_total else 0.0),
+            })
+        dropped_total = sum(int(r["dropped_n"] or 0) for r in _dist)
+        completed_total = sum(int(r["completed_n"] or 0) for r in _dist)
+
         return _json_resp({
             "funnel": funnel,
             "steps": steps,
             "subs_active": subs_active,
             "subs_total": subs_total,
+            "step_stats": step_stats,
+            "dropped_total": dropped_total,
+            "completed_total": completed_total,
         })
 
     async def create_funnel(request: web.Request) -> web.Response:
