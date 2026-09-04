@@ -134,6 +134,7 @@ from bot.handlers import fleet_pulse as fleet_pulse_handler
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
+from services import audience_listener
 from services import chat_warmup
 from services import content_mesh
 from services import physics_engine
@@ -991,6 +992,9 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("ghost_engine", ghost_engine.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("audience_listener", audience_listener.run, pool, bot)
         )
         asyncio.create_task(
             _resilient("chat_warmup", chat_warmup.run, pool, bot)

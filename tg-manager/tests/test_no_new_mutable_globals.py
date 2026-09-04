@@ -162,6 +162,9 @@ CACHE: dict[str, str] = {
         "дальше только читается — расходиться между процессами нечему"),
     "services/geo_tempo.py:_CC_TZ": "страна→таймзона, справочник",
     "services/geo_tempo.py:_ZONE_WARNED": "де-дуп WARN о нерезолвящейся зоне, process-local",
+    "services/audience_listener.py:_listening": "acc_id->TelegramClient подключённых слушателей, "
+        "process-local; корректность держит op_worker.try_claim_account/release_accounts (в БД), "
+        "не этот словарь — при рестарте переустановится со следующего tick()",
     "services/invite_engine.py:_link_cache": "инвайт-ссылки, перевыпускаются",
     "services/mini_app_api.py:_bot_username_cache": "имя бота, неизменно",
     "services/mini_app_api.py:_cache": "ответы API с TTL",
