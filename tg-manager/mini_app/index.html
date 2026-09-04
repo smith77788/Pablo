@@ -10283,6 +10283,7 @@ async function openFunnelDetail(funnelId, funnelName) {
 function buildFunnelDetail(d) {
   const f = d.funnel||{};
   const steps = d.steps||[];
+  CUR_FUNNEL_STEPS = steps;   // кэш для правки шага (см. editFunnelStep)
   const trig = f.trigger_type==='keyword'?`🔑 ${esc(f.keyword||'?')}`:'🚀 /start';
 
   // Отвал по шагам: где именно люди уходят из цепочки — главный вопрос к любой
@@ -10307,7 +10308,7 @@ function buildFunnelDetail(d) {
             ${isLast?'':'<div class="ffstep-tail"></div>'}
           </div>
           <div class="ffstep-body">
-            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--btn);cursor:pointer;margin-left:8px" onclick='editFunnelStep(${JSON.stringify(s)})'>✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
+            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--btn);cursor:pointer;margin-left:8px" onclick="editFunnelStep(${s.id})">✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
             ${statLine}
             <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
             ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
@@ -10376,7 +10377,12 @@ async function addFunnelStep() {
 // опечатку в третьем шаге из пяти чинили удалением и повторным добавлением, а
 // добавление кладёт шаг В КОНЕЦ — порядок цепочки ломался.
 let FS_EDIT_ID = null;
-function editFunnelStep(step) {
+let CUR_FUNNEL_STEPS = [];
+function editFunnelStep(stepId) {
+  // Шаг берём из кэша: его текст почти наверняка содержит апострофы и кавычки,
+  // а встроенный в onclick JSON рвал бы атрибут.
+  const step = (CUR_FUNNEL_STEPS||[]).find(x=>String(x.id)===String(stepId));
+  if (!step) { toast('Шаг не найден — обновите экран'); return; }
   FS_EDIT_ID = step.id;
   const t = document.getElementById('fsText');
   if (t) { t.value = step.message_text || ''; t.focus(); }
@@ -16336,6 +16342,7 @@ async function openRegCheck() {
 // ── DM Campaigns ───────────────────────────────────────
 // Композер DM-кампаний единый — openCmpModal()/saveCmp() (см. выше).
 // Прежний тонкий openDmModal/submitDmCampaign удалён (дубль-путь).
+let CUR_DM_CAMPAIGNS = [];   // кэш списка: правка берёт кампанию отсюда
 const DM_STATUS = {draft:'📝 Черновик',running:'▶️ Выполняется',paused:'⏸ Пауза',done:'✅ Завершена',failed:'❌ Ошибка'};
 // Подпись аудитории: со списком в 20 кампаний по одному названию не понять,
 // куда какая целится. 'crm' — устаревшая цель (легаси-таблица), новые
@@ -16353,6 +16360,7 @@ async function openDmCampaigns() {
   try {
     const d = await api('/api/miniapp/dm_campaigns');
     const cmp = d.campaigns||[];
+    CUR_DM_CAMPAIGNS = cmp;
     const cmpTotal = (d.total!=null?d.total:cmp.length);
     const running = cmp.filter(c=>c.status==='running').length;
     const done = cmp.filter(c=>c.status==='done').length;
@@ -16388,7 +16396,7 @@ async function openDmCampaigns() {
           ${c.status==='paused'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Возобновить (продолжит с места остановки)" onclick="launchDm(${c.id},'paused')">▶ Возобновить</button>`:''}
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↻ Повторить</button>`:''}
-          ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick='editDm(${JSON.stringify(c)})'>✏️</button>`:''}
+          ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick="editDm(${c.id})">✏️</button>`:''}
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}')">🗑</button>
         </div>
       </div>`;
@@ -16459,7 +16467,12 @@ async function openDmReport(id) {
 
 // Правка неидущей кампании: раньше опечатка в тексте означала удалить её и
 // собрать заново — заново выбрать аудиторию, темп, лимит на аккаунт, медиа.
-function editDm(c) {
+function editDm(id) {
+  // Объект берём из кэша списка, а не из атрибута: встроенный в onclick
+  // JSON.stringify ломался на апострофе в названии («О'Брайен») — апостроф
+  // закрывал атрибут раньше времени.
+  const c = (CUR_DM_CAMPAIGNS||[]).find(x=>String(x.id)===String(id));
+  if (!c) { toast('Кампания не найдена — обновите список'); return; }
   openCmpModal();                      // сброс полей и CMP_EDIT_ID=null
   CMP_EDIT_ID = c.id;
   document.getElementById('cmpName').value = c.name || '';
