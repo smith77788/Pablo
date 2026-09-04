@@ -5825,6 +5825,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <input type="number" id="cmpPerAcc" min="1" max="200" placeholder="без лимита (1–200)">
       <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня. Защита от бана</div>
     </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="cmpQuiet" checked style="width:auto;margin:0">
+        <span>Не писать ночью</span>
+      </label>
+      <div class="field-note">Рассылка на тысячи получателей идёт сутками. Ночью (23:00–07:00 по стране аккаунта) отправка приостанавливается и продолжается утром: ночные ЛС дают низкий отклик и жалобы на спам</div>
+    </div>
     <div class="field-err" id="cmpErr"></div>
     <button class="btn btn-p" id="cmpBtn" onclick="saveCmp()" style="width:100%">📨 Создать черновик</button>
   </div>
@@ -12104,6 +12111,7 @@ function openCmpModal() {
   document.getElementById('cmpImport').value='';
   { const _m=document.getElementById('cmpMedia'); if(_m) _m.value=''; }
   document.getElementById('cmpPerAcc').value='';
+  { const _q=document.getElementById('cmpQuiet'); if(_q) _q.checked=true; }
   document.getElementById('cmpLen').textContent='0';
   const sp=document.getElementById('cmpSpinPreview'); sp.style.display='none'; sp.textContent='';
   document.getElementById('cmpErr').style.display='none';
@@ -12222,6 +12230,7 @@ async function saveCmp() {
     payload.import_list = imp;
   }
   if (perAccRaw) payload.per_account_daily = parseInt(perAccRaw);
+  payload.quiet_hours = !!document.getElementById('cmpQuiet')?.checked;
   const media = document.getElementById('cmpMedia')?.value.trim();
   if (media) payload.media_url = media;
   const btn = document.getElementById('cmpBtn');

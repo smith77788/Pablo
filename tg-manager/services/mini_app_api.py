@@ -8814,6 +8814,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if pace not in ("slow", "normal", "fast", "auto"):
             pace = "normal"
         _params = {"pace": pace}
+        # Тихие часы: по умолчанию включены (ночная рассылка живым людям — низкий
+        # отклик и жалобы на спам). Пишем в params только явное отключение,
+        # чтобы движок с его умолчанием остался источником правды.
+        if body.get("quiet_hours") is False:
+            _params["quiet_hours"] = False
         if cohort_type:
             _params["cohort_type"] = cohort_type
         if import_list:
