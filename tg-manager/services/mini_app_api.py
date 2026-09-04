@@ -16184,8 +16184,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # внутри import_sessions.
             result = await import_sessions(pool, uid, raw, proxy, proxy_id=proxy_id)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception as exc:
+            # Раньше сырой текст исключения уходил клиенту и никуда не писался:
+            # пользователю — непонятная внутренняя строка, разработчику — ничего.
+            log.exception("import_sessions uid=%s", uid)
+            return _err(f"Не удалось импортировать: {str(exc)[:140]}", 500)
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
 
