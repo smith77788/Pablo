@@ -572,6 +572,14 @@ def _vault_export_html(data: dict) -> str:
              ".out{background:#2a3550;margin-left:40px}.d{color:#f77;text-decoration:line-through}"
              ".meta{font-size:11px;color:#888;margin-top:3px}</style>",
              "<h1>🗄 Экспорт хранилища</h1>"]
+    # Молча урезанный экспорт хуже отсутствующего: человек будет думать, что
+    # сохранил всю переписку. Пишем предупреждение прямо в файл.
+    if data.get("truncated"):
+        parts.append(
+            "<p style='background:#4a2b12;border:1px solid #a15c1e;padding:10px 12px;"
+            "border-radius:10px;font-size:13px'>⚠️ Экспорт неполный: сохранены "
+            f"{data.get('exported', 0)} самых свежих сообщений из {data.get('total', 0)}. "
+            "Выгрузите отдельные чаты, чтобы получить их целиком.</p>")
     for c in data.get("chats", []):
         parts.append(f"<h2>{_html.escape(str(c.get('peer_name') or c.get('chat_id')))}</h2>")
         for m in c.get("messages", []):
@@ -4738,7 +4746,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return web.Response(
             body=body.encode("utf-8"), content_type=ctype.split(";")[0],
             charset="utf-8",
-            headers={"Content-Disposition": f'attachment; filename="vault_export.{ext}"'})
+            headers={
+                "Content-Disposition": f'attachment; filename="vault_export.{ext}"',
+                "X-Export-Truncated": "1" if data.get("truncated") else "0",
+                "X-Export-Count": str(data.get("exported", 0)),
+            })
 
     async def vault_search(request: web.Request) -> web.Response:
         uid = _get_uid(request)
