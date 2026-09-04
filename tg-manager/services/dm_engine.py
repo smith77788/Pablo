@@ -508,6 +508,22 @@ _SEGMENT_TARGET_LIMIT = 20000
 _PACE_MULTIPLIERS: dict[str, float] = {"slow": 2.0, "normal": 1.0, "fast": 0.5}
 
 
+async def _fleet_tempo_mult(pool, owner_id: int) -> float:
+    """Множитель темпа по давлению флота (>= 1.0). Fail-open → 1.0.
+
+    Тот же губернатор, под которым работают инвайт и разовая рассылка: если
+    флот уже ловит флуды и баны, кампания обязана замедлиться вместе со всеми,
+    а не добивать его своим темпом.
+    """
+    try:
+        from services import fleet_governor
+
+        mult = float(await fleet_governor.tempo_multiplier(pool, owner_id) or 1.0)
+        return mult if mult >= 1.0 else 1.0
+    except Exception:
+        return 1.0
+
+
 def accounts_awake(accounts: list[dict], now=None) -> list[dict]:
     """Аккаунты, у которых сейчас НЕ локальная ночь (по стране прокси).
 
@@ -1289,8 +1305,13 @@ async def run_campaign(
                             f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}",
                         )
 
-        # Humanized delay (per target-type range)
-        delay = random.uniform(_delay_min, _delay_max)
+        # Humanized delay (per target-type range), растянутая по давлению флота.
+        # DM-кампании были единственным массовым расходником ВНЕ губернатора:
+        # инвайт, разовая рассылка и ещё два десятка операций уважают общее
+        # давление, а кампания долбила своим темпом, даже когда флот уже ловил
+        # флуды и баны от других операций. Telegram смотрит на аккаунты как на
+        # группу — не замедлиться здесь значило добивать уже просевший флот.
+        delay = random.uniform(_delay_min, _delay_max) * await _fleet_tempo_mult(pool, owner_id)
         await asyncio.sleep(delay)
 
     # Учесть необработанные цели (напр., при исчерпании всех аккаунтов)

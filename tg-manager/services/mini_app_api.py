@@ -8819,6 +8819,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # чтобы движок с его умолчанием остался источником правды.
         if body.get("quiet_hours") is False:
             _params["quiet_hours"] = False
+        # Чем заменить {name}, если у получателя нет ни имени, ни ника. Движок
+        # читал этот параметр, но задать его было нечем — настройка без ввода.
+        _nf = (body.get("name_fallback") or "").strip()
+        if _nf:
+            _params["name_fallback"] = _nf[:32]
         if cohort_type:
             _params["cohort_type"] = cohort_type
         if import_list:
@@ -9006,6 +9011,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _p["media_url"] = media_url
             else:
                 _p.pop("media_url", None)
+            _params_touched = True
+
+        if "name_fallback" in body:
+            _nf = (body.get("name_fallback") or "").strip()
+            if _nf:
+                _p["name_fallback"] = _nf[:32]
+            else:
+                _p.pop("name_fallback", None)   # вернуться к умолчанию движка
             _params_touched = True
 
         if _params_touched:

@@ -5802,6 +5802,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="preset-row" id="cmpPresetRow"></div>
       <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Spintax: {Привет|Здравствуйте}, {name}!"></textarea>
       <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до Spintax</div>
+      <input type="text" id="cmpNameFb" maxlength="32" placeholder="Если имени нет, писать: друг">
+      <div class="field-note">Чем заменить {name}, когда у получателя нет ни имени, ни ника</div>
       <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
@@ -12135,6 +12137,7 @@ function openCmpModal() {
   { const _m=document.getElementById('cmpMedia'); if(_m) _m.value=''; }
   document.getElementById('cmpPerAcc').value='';
   { const _q=document.getElementById('cmpQuiet'); if(_q) _q.checked=true; }
+  { const _nf=document.getElementById('cmpNameFb'); if(_nf) _nf.value=''; }
   document.getElementById('cmpLen').textContent='0';
   const sp=document.getElementById('cmpSpinPreview'); sp.style.display='none'; sp.textContent='';
   document.getElementById('cmpErr').style.display='none';
@@ -12254,6 +12257,7 @@ async function saveCmp() {
   }
   if (perAccRaw) payload.per_account_daily = parseInt(perAccRaw);
   payload.quiet_hours = !!document.getElementById('cmpQuiet')?.checked;
+  { const _nf=(document.getElementById('cmpNameFb')?.value||'').trim(); if(_nf) payload.name_fallback=_nf; }
   const media = document.getElementById('cmpMedia')?.value.trim();
   if (media) payload.media_url = media;
   const btn = document.getElementById('cmpBtn');
@@ -12265,6 +12269,7 @@ async function saveCmp() {
         per_account_daily: perAccRaw ? parseInt(perAccRaw) : null,
         quiet_hours: !!document.getElementById('cmpQuiet')?.checked,
         media_url: document.getElementById('cmpMedia')?.value.trim() || '',
+        name_fallback: (document.getElementById('cmpNameFb')?.value||'').trim(),
       })});
       closeCmpModal();
       tg.HapticFeedback?.notificationOccurred('success');
@@ -16406,6 +16411,7 @@ function editDm(c) {
   const pa = document.getElementById('cmpPerAcc'); if (pa) pa.value = p.per_account_daily || '';
   const md = document.getElementById('cmpMedia'); if (md) md.value = p.media_url || '';
   const q = document.getElementById('cmpQuiet'); if (q) q.checked = p.quiet_hours !== false;
+  const nf = document.getElementById('cmpNameFb'); if (nf) nf.value = p.name_fallback || '';
   // Аудиторию не трогаем: показываем как есть и блокируем выбор.
   const tt = document.getElementById('cmpTargetType');
   if (tt) { tt.value = c.target_type || 'all_bots'; tt.disabled = true; }

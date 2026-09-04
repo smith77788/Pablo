@@ -133,3 +133,29 @@ def test_ui_preview_matches_engine_order():
     assert "{name\\}/g, 'Иван'" in ui or "\\{name\\}/g" in ui, (
         "предпросмотр обязан подставлять имя до spintax, иначе показывает «name»"
     )
+
+
+# ── Настройка запасного слова доведена до пользователя ────────────────────────
+
+def test_name_fallback_is_settable_end_to_end():
+    """Движок читал params.name_fallback, но задать его было нечем — настройка
+    без ввода. Проверяем весь путь: поле → создание → правка → движок."""
+    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = (_ROOT / "services" / "dm_engine.py").read_text(encoding="utf-8")
+    assert 'id="cmpNameFb"' in ui, "нет поля ввода"
+    assert "payload.name_fallback" in ui, "не отправляется при создании"
+    assert "name_fallback:" in ui, "не отправляется при правке"
+    assert '_params["name_fallback"]' in api, "не сохраняется при создании"
+    assert '_p["name_fallback"]' in api, "не сохраняется при правке"
+    assert '.get("name_fallback")' in src, "движок обязан его читать"
+
+
+def test_name_fallback_length_capped_in_api():
+    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert "_nf[:32]" in api
+
+
+def test_clearing_fallback_returns_to_engine_default():
+    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert '_p.pop("name_fallback", None)' in api
