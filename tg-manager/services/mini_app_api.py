@@ -12603,6 +12603,67 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("proxy_failover uid=%s", uid)
             return _err(str(e)[:160], 500)
 
+    async def proxy_evacuate(request: web.Request) -> web.Response:
+        """Переселить аккаунты с мёртвых прокси на живые.
+
+        Сторож прокси просит «замените прокси или переназначьте аккаунты на
+        рабочий», но единственное автоматическое переназначение (failover)
+        берёт только прокси, заранее помеченные резервными. У пользователя,
+        который просто держит несколько живых прокси, оно не делало ничего, и
+        аккаунты стояли намертво. Здесь — переезд на наименее загруженный
+        живой прокси; аккаунт на мёртвом прокси не делает ВООБЩЕ ничего,
+        поэтому переезд лучше простоя даже ценой неполной изоляции — но об
+        ухудшении изоляции мы говорим прямо.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services.proxy_balancer import (
+            isolation_note, isolation_summary, plan_evacuation,
+        )
+        from services.resource_selector import PROXY_DEAD_STREAK
+
+        stranded = await _safe_fetch(pool,
+            """SELECT a.id FROM tg_accounts a
+                 JOIN user_proxies p ON p.id = a.proxy_id
+                WHERE a.owner_id=$1 AND a.is_active
+                  AND p.is_alive IS FALSE
+                  AND COALESCE(p.consecutive_failures,0) >= $2
+                ORDER BY a.id""", uid, PROXY_DEAD_STREAK)
+        acc_ids = [int(r["id"]) for r in (stranded or [])]
+        if not acc_ids:
+            return _json_resp({"ok": True, "moved": 0,
+                               "note": "Аккаунтов на мёртвых прокси нет"})
+        live = await _safe_fetch(pool,
+            """SELECT p.id,
+                      (SELECT COUNT(*) FROM tg_accounts a
+                        WHERE a.proxy_id = p.id) AS used
+                 FROM user_proxies p
+                WHERE p.owner_id=$1 AND p.is_active
+                  AND COALESCE(p.is_alive, TRUE) IS TRUE""", uid)
+        loads = [(int(r["id"]), int(r["used"] or 0)) for r in (live or [])]
+        prior = dict(loads)
+        plan = plan_evacuation(acc_ids, loads)
+        moved = 0
+        for acc_id, pid in plan["moves"]:
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+                    pid, acc_id, uid)
+                moved += 1
+            except Exception:
+                log.warning("proxy_evacuate: не удалось переселить acc=%s", acc_id)
+        iso = isolation_summary([p for _a, p in plan["moves"]], prior)
+        return _json_resp({
+            "ok": True, "moved": moved,
+            "stranded": len(plan["stranded"]),
+            "isolation": iso,
+            "isolation_note": isolation_note(iso),
+            "note": (f"Переселено {moved} аккаунтов"
+                     + (f"; {len(plan['stranded'])} остались без прокси — "
+                        f"живых прокси не хватает" if plan["stranded"] else "")),
+        })
+
     async def proxies_isolation_check(request: web.Request) -> web.Response:
         """Проверка уникальности IP: активные аккаунты, делящие один IP прокси
         (нарушение изоляции → риск бана), + аккаунты без прокси."""
@@ -15244,6 +15305,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/check", check_proxy)
     app.router.add_post("/api/miniapp/proxy/{proxy_id}/backup", proxy_toggle_backup)
     app.router.add_post("/api/miniapp/proxy/failover", proxy_failover)
+    app.router.add_post("/api/miniapp/proxy/evacuate", proxy_evacuate)
     app.router.add_post("/api/miniapp/proxies/check_all", check_all_proxies)
     app.router.add_get("/api/miniapp/proxies/isolation_check", proxies_isolation_check)
     app.router.add_post("/api/miniapp/proxies/import", import_proxies)

@@ -61,6 +61,36 @@ def plan_distribution(proxy_loads: list[tuple], count: int) -> list:
     return out
 
 
+def plan_evacuation(stranded_ids: list, live_loads: list[tuple]) -> dict:
+    """Куда переселить аккаунты с мёртвых прокси.
+
+    Разрыв. Сторож прокси честно говорит «замените прокси или переназначьте
+    аккаунты на рабочий», но единственное автоматическое переназначение
+    (`proxy_selector.failover_dead_proxies`) берёт ТОЛЬКО прокси, заранее
+    помеченные как резервные. Пользователь, у которого просто есть живые
+    прокси со свободным местом, не помечал ничего резервным — и failover для
+    него не делал ничего, оставляя аккаунты стоять намертво.
+
+    Аккаунт на мёртвом прокси не делает вообще ничего, поэтому переезд на
+    живой прокси — улучшение даже когда изоляция при этом становится не 1:1.
+    Но молчать об ухудшении нельзя: об этом говорит `isolation_note`.
+
+    Возвращает {"moves": [(account_id, proxy_id), ...], "stranded": [ids...]}
+    — застрявшие остаются, если живых прокси нет вовсе.
+    """
+    ids = [i for i in (stranded_ids or []) if i is not None]
+    if not ids:
+        return {"moves": [], "stranded": []}
+    plan = plan_distribution(live_loads, len(ids))
+    moves, stranded = [], []
+    for acc_id, pid in zip(ids, plan):
+        if pid is None:
+            stranded.append(acc_id)
+        else:
+            moves.append((acc_id, pid))
+    return {"moves": moves, "stranded": stranded}
+
+
 def isolation_summary(assignments: list, prior_loads: dict | None = None) -> dict:
     """Что получилось: сколько аккаунтов делят один выход.
 

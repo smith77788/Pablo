@@ -11303,8 +11303,14 @@ async function loadProxies() {
     txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
     if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
     const backupCount = items.filter(p=>p.is_backup).length;
-    const failoverBar = `<div style="display:flex;gap:8px;margin-bottom:10px">
-        <button class="btn btn-p" style="flex:1" onclick="runProxyFailover()">🛟 Failover (резерв: ${backupCount})</button>
+    // Переселение показываем, только когда есть куда и откуда: failover умеет
+    // лишь прокси, помеченные резервными, и у пользователя без резерва
+    // аккаунты с мёртвого прокси просто стояли.
+    const deadCount = items.filter(p=>p.is_alive===false).length;
+    const liveCount = items.filter(p=>p.is_alive!==false).length;
+    const failoverBar = `<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="btn btn-p" style="flex:1 1 45%" onclick="runProxyFailover()">🛟 Failover (резерв: ${backupCount})</button>
+        ${(deadCount&&liveCount)?`<button class="btn btn-s" style="flex:1 1 45%" onclick="evacuateDeadProxies()">🚚 Переселить с мёртвых (${deadCount})</button>`:''}
       </div>`;
     txt('proxyList', failoverBar + items.map(p=>{
       const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
@@ -11351,6 +11357,17 @@ async function runProxyFailover(){
     toast(msg);
     loadProxies();
   }catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+async function evacuateDeadProxies(){
+  if(!await askConfirm('Перевести аккаунты с мёртвых прокси на живые?\nАккаунт на мёртвом прокси не работает вообще, поэтому переезд лучше простоя — но если живых прокси мало, изоляция по IP станет неполной.')) return;
+  toast('🚚 Переселяю…');
+  try{
+    const r=await api('/api/miniapp/proxy/evacuate',{method:'POST'});
+    toast('✅ '+(r.note||`Переселено: ${r.moved||0}`));
+    // Про ухудшение изоляции говорим отдельно и не в общем потоке тостов.
+    if(r.isolation_note) setTimeout(()=>toast(r.isolation_note.substring(0,180)), 1200);
+    loadProxies();
+  }catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 function openProxyModal() {
   document.getElementById('proxyUrl').value='';

@@ -163,3 +163,46 @@ def test_explicit_choice_is_still_honoured():
 def test_ui_no_longer_calls_the_default_no_proxy():
     assert "Авто — разложить по моим прокси" in _UI
     assert "Без прокси (прямое подключение)" not in _UI
+
+
+# ── Переселение с мёртвых прокси ───────────────────────────────────────────
+# Сторож прокси просит «переназначьте аккаунты на рабочий», но единственное
+# автоматическое переназначение (failover) берёт ТОЛЬКО прокси, заранее
+# помеченные резервными. У пользователя, который просто держит несколько живых
+# прокси, оно не делало ничего, и аккаунты стояли намертво.
+
+def test_stranded_accounts_move_to_the_least_loaded_live_proxy():
+    from services.proxy_balancer import plan_evacuation
+
+    res = plan_evacuation([10, 11], [(1, 5), (2, 0)])
+    assert res["moves"][0] == (10, 2)      # сначала свободный
+    assert not res["stranded"]
+
+
+def test_nothing_to_move_is_not_an_error():
+    from services.proxy_balancer import plan_evacuation
+
+    assert plan_evacuation([], [(1, 0)]) == {"moves": [], "stranded": []}
+
+
+def test_without_live_proxies_accounts_stay_and_are_reported():
+    """Молча «переселить в никуда» нельзя: пользователь должен узнать, что
+    живых прокси не хватает."""
+    from services.proxy_balancer import plan_evacuation
+
+    res = plan_evacuation([10, 11], [])
+    assert res["moves"] == [] and res["stranded"] == [10, 11]
+
+
+def test_evacuation_endpoint_targets_only_confirmed_dead_proxies():
+    src = _func_src(_API, "proxy_evacuate")
+    assert "is_alive IS FALSE" in src
+    assert "PROXY_DEAD_STREAK" in src   # одна неудача — не смерть
+    assert "owner_id=$1" in src
+
+
+def test_evacuation_tells_the_truth_about_isolation():
+    src = _func_src(_API, "proxy_evacuate")
+    assert "isolation_note" in src
+    assert "evacuateDeadProxies" in _UI
+    assert 'app.router.add_post("/api/miniapp/proxy/evacuate"' in _API
