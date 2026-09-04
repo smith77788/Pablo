@@ -569,7 +569,8 @@ DEFAULT_LINK_INVITE_TEXT = "Привет! Приглашаю в наш чат: {
 
 async def invite_via_link_batch(session_string: str, _acc: dict | None,
                                 invite_link: str, user_refs: list[str | int],
-                                message_text: str | None = None) -> dict[str, Any]:
+                                message_text: str | None = None,
+                                pace_mult: float = 1.0) -> dict[str, Any]:
     """«Мягкий» инвайт: разослать пользователям ссылку-приглашение в ЛС.
 
     Не добавляет насильно — отправляет каждому цель ссылку на вступление, человек
@@ -577,39 +578,70 @@ async def invite_via_link_batch(session_string: str, _acc: dict | None,
     вступает добровольно) и наименее опасен для аккаунтов из всех методов, но
     зависит от готовности человека кликнуть. `ok` здесь = ссылка ДОСТАВЛЕНА (не
     гарантирует вступление). Ограничитель — PeerFlood (лимит на рассылку в ЛС).
+
+    Текст разворачивается spintax'ом ДЛЯ КАЖДОЙ ЦЕЛИ отдельно. Раньше он
+    вычислялся один раз до цикла, и весь флот слал побайтово одинаковое
+    сообщение сотням людей — самая узнаваемая подпись спама, какая бывает, и
+    именно в методе, который продукт называет «безопаснее всего». Движок spintax
+    в проекте есть и используется рассылкой; здесь он просто не вызывался.
     """
     from services.account_manager import send_dm
+    from services.dm_engine import expand_spintax
 
     tpl = (message_text or DEFAULT_LINK_INVITE_TEXT)
     if "{link}" not in tpl:
         tpl = tpl.rstrip() + "\n{link}"
-    text = tpl.replace("{link}", invite_link)
+
+    # Тот же смысл, что у invite_batch: режим темпа обязан влиять на паузы, но не
+    # обнулять их — безпаузная рассылка в ЛС ловит PeerFlood мгновенно.
+    _pm = max(0.35, float(pace_mult or 1.0))
 
     ok, failed = 0, 0
     errors: list[str] = []
     privacy_failed: list = []
     peer_flood = False
     flood_wait = 0
+    fail_kinds: dict[str, int] = {}
+
+    def _note(kind: str) -> None:
+        fail_kinds[kind] = fail_kinds.get(kind, 0) + 1
+
+    # Плейсхолдер прячем от spintax'а меткой без фигурных скобок: для лексера
+    # `{link}` — это группа из одного варианта, и он честно раскрывает её в слово
+    # «link», съедая место под ссылку. Ссылку тоже нельзя подставлять до разбора:
+    # в хэше приват-ссылки встречаются символы, ломающие лексер.
+    _LINK_SLOT = "\x00LINKSLOT\x00"
+    _tpl_masked = tpl.replace("{link}", _LINK_SLOT)
+
     for ref in user_refs:
+        text = expand_spintax(_tpl_masked).replace(_LINK_SLOT, invite_link)
         try:
             res = await asyncio.wait_for(
                 send_dm(session_string, str(ref), text, _acc=_acc), timeout=45)
         except Exception as e:
             failed += 1
+            _note(classify_invite_error(e))
             errors.append(f"{ref}: {str(e)[:80]}")
+            # Пауза нужна и после отказа. Раньше sleep стоял только на успешной
+            # ветке, поэтому серия отказов (а приватность отвечает быстро)
+            # прогоняла цикл без единой задержки — ровно тот всплеск частоты,
+            # из-за которого прилетает PeerFlood.
+            await asyncio.sleep(random.uniform(2.5, 5.0) * _pm)
             continue
         if res.get("ok"):
             ok += 1
-            await asyncio.sleep(random.uniform(2.5, 5.0))
+            await asyncio.sleep(random.uniform(2.5, 5.0) * _pm)
             continue
         # Ошибки send_dm: privacy / peer_flood / flood_wait / прочее.
         failed += 1
         if res.get("peer_flood"):
             peer_flood = True
+            _note(FAIL_FLOOD)
             errors.append(f"{ref}: peer flood")
             break
         _fw = int(res.get("flood_wait") or 0)
         if _fw:
+            _note(FAIL_FLOOD)
             if _fw > _MAX_FLOOD_INLINE:
                 flood_wait = _fw
                 errors.append(f"{ref}: flood wait {_fw}s")
@@ -617,14 +649,23 @@ async def invite_via_link_batch(session_string: str, _acc: dict | None,
             await asyncio.sleep(min(_fw, 60))
             errors.append(f"{ref}: flood wait {_fw}s (переждали)")
             continue
+        # Причина отказа — той же классификацией, что у прямого инвайта: иначе
+        # отчёт по «ссылке в ЛС» остаётся в корзине «прочее», хотя в нём ровно
+        # те же случаи (приватность ЛС, мёртвая цель, блокировка).
         _err = str(res.get("error") or "")
+        _kind = classify_invite_error(ValueError(_err)) if _err else FAIL_OTHER
         if "приватн" in _err.lower() or "privacy" in _err.lower():
+            _kind = FAIL_PRIVACY
+        _note(_kind)
+        if _kind in (FAIL_PRIVACY, FAIL_NOT_MUTUAL):
             privacy_failed.append(ref)
-        errors.append(f"{ref}: {_err[:80]}")
+        errors.append(f"{ref}: {FAIL_LABELS.get(_kind) if _kind != FAIL_OTHER else _err[:80]}")
+        await asyncio.sleep(random.uniform(2.5, 5.0) * _pm)
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors,
-            "privacy_failed": privacy_failed, "no_rights": False}
+            "privacy_failed": privacy_failed, "no_rights": False,
+            "fail_kinds": fail_kinds}
 
 
 # ── Добавление по номерам телефонов ──────────────────────────────────────────

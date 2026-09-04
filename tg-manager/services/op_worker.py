@@ -10705,7 +10705,8 @@ async def _exec_mass_invite(
                     # Метод «ссылка в ЛС»: рассылаем цель ссылку-приглашение,
                     # человек вступает сам. Обходит приватность добавления.
                     res = await inv.invite_via_link_batch(
-                        acc["session_str"], dict(acc), _invite_link, batch, _link_msg)
+                        acc["session_str"], dict(acc), _invite_link, batch,
+                        _link_msg, _pace_mult)
                 else:
                     # Множитель темпа уходит ВНУТРЬ батча: раньше движок спал
                     # 2–4с на цель независимо от выбранного режима, и «быстро»

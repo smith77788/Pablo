@@ -34,6 +34,7 @@ class InviterFSM(StatesGroup):
     acc_count = State()    # кол-во аккаунтов
     preflight_group = State()  # проверка готовности флота: ждём группу
     optout_target = State()    # реестр «не приглашать»: ждём @username/id/телефон
+    link_message = State()     # метод «ссылка в ЛС»: свой текст приглашения
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────
@@ -778,8 +779,12 @@ async def msg_inviter_acc_count(
     )
 
 
-async def _inv_offer_pace(message: Message, data: dict) -> None:
-    """Экран выбора темпа (после выбора способа инвайта)."""
+async def _inv_offer_pace(message: Message, data: dict, note: str = "") -> None:
+    """Экран выбора темпа (после выбора способа инвайта).
+
+    note — необязательная строка сверху (например, превью текста приглашения).
+    Показываем её здесь, а не отдельным сообщением: экран без кнопок — тупик.
+    """
     group = data.get("group", "")
     use = data.get("acc_count", 1)
     total_users = data.get("total_users", 0)
@@ -803,7 +808,8 @@ async def _inv_offer_pace(message: Message, data: dict) -> None:
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
     kb.adjust(1, 1, 2, 1)
     await message.answer(
-        "👥 <b>Инвайтер — выбор темпа</b>\n\n"
+        (note + "\n\n" if note else "")
+        + "👥 <b>Инвайтер — выбор темпа</b>\n\n"
         f"🎯 Группа: <code>{html.escape(group)}</code>\n"
         f"⚙️ Способ: <b>{_m_ru}</b>\n"
         f"🔑 Аккаунтов: <b>{use}</b>\n"
@@ -878,6 +884,87 @@ async def cb_inviter_method(
     safe = _item == "safe"
     method = _item if _item in ("direct", "admin", "link") else "direct"
     await state.update_data(inv_method=method, inv_safe=safe)
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    if method == "link":
+        # Свой текст обязателен по смыслу метода: без него весь флот слал одну и
+        # ту же фразу по умолчанию сотням людей — самая узнаваемая подпись спама,
+        # и именно в методе, который продукт называет «безопаснее всего». В
+        # мини-аппе поле было, в боте — нет.
+        await state.set_state(InviterFSM.link_message)
+        await callback.message.answer(
+            "🔗 <b>Текст приглашения</b>\n\n"
+            "Пришлите сообщение, которое получат люди. Куда подставить ссылку — "
+            "укажите <code>{link}</code> (если не указать, ссылка добавится в конец).\n\n"
+            "Поддерживается <b>spintax</b>: <code>{Привет|Здравствуйте}</code> — "
+            "каждому уйдёт свой вариант, одинаковый текст от десятка аккаунтов "
+            "ловит ограничения быстрее всего.\n\n"
+            "Или нажмите «Взять стандартный» — тогда пойдёт текст по умолчанию.",
+            parse_mode="HTML",
+            reply_markup=_link_msg_kb(),
+        )
+        await callback.answer()
+        return
+    data = await state.get_data()
+    await _inv_offer_pace(callback.message, data)
+    await callback.answer()
+
+
+def _link_msg_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✳️ Взять стандартный", callback_data=InviterCb(action="link_default"))
+    kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+@router.message(InviterFSM.link_message)
+async def msg_inviter_link_message(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer(
+            "⚠️ Пришлите текст сообщения или нажмите «Взять стандартный».",
+            reply_markup=_link_msg_kb())
+        return
+    if len(text) > 1000:
+        await message.answer(
+            "⚠️ Слишком длинно (максимум 1000 символов). Сократите текст.",
+            reply_markup=_link_msg_kb())
+        return
+    # Проверяем spintax ДО запуска: незакрытая скобка в шаблоне означала бы, что
+    # каждому уходит текст с сырой разметкой — увидели бы это только получатели.
+    from services.mass_inviter_engine import DEFAULT_LINK_INVITE_TEXT  # noqa: F401
+    from services.dm_engine import expand_spintax
+    try:
+        sample = expand_spintax(text)
+    except Exception:
+        await message.answer(
+            "⚠️ Не удалось разобрать spintax. Проверьте, что все скобки "
+            "<code>{…}</code> закрыты.",
+            parse_mode="HTML", reply_markup=_link_msg_kb())
+        return
+    await state.update_data(inv_link_msg=text)
+    await state.set_state(None)
+    data = await state.get_data()
+    _preview = sample.replace("{link}", "https://t.me/…")
+    if "{link}" not in text:
+        _preview = _preview.rstrip() + "\nhttps://t.me/…"
+    # Превью показываем НА экране темпа, а не отдельным сообщением: лишний экран
+    # без кнопок — тупик, из которого выход только по /menu.
+    await _inv_offer_pace(
+        message, data,
+        note=("✅ <b>Текст сохранён.</b> Пример того, что получит человек:\n"
+              f"<i>{html.escape(_preview[:400])}</i>"))
+
+
+@router.callback_query(InviterCb.filter(F.action == "link_default"))
+async def cb_inviter_link_default(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await state.update_data(inv_link_msg=None)
+    await state.set_state(None)
     data = await state.get_data()
     try:
         await callback.message.delete()
@@ -1001,6 +1088,10 @@ async def cb_inviter_confirm(
         # стоп на мёртвом чате и серии выходов/жалоб).
         "safe_mode": bool(data.get("inv_safe")),
     }
+    # Свой текст приглашения для метода «ссылка в ЛС» (spintax разворачивается
+    # на каждую цель отдельно в движке).
+    if method == "link" and data.get("inv_link_msg"):
+        params["link_message"] = str(data["inv_link_msg"])[:1000]
     # .get, а не [pace]: значение приходит из состояния FSM, которое переживает
     # рестарты и обновления, и незнакомая строка роняла бы хендлер KeyError'ом
     # уже ПОСЛЕ того, как пользователь всё настроил.

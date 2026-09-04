@@ -118,7 +118,9 @@ def _mk_stand(monkeypatch):
         return {"ok": len(refs), "failed": 0, "errors": []}
     monkeypatch.setattr(inv, "invite_batch", _batch)
 
-    async def _links(session, acc, link, refs, msg):
+    async def _links(session, acc, link, refs, msg, pace_mult=1.0):
+        # pace_mult: режим темпа доходит и до метода «ссылка в ЛС» — раньше он
+        # спал фиксированные 2.5–5с и только после УСПЕХА.
         return {"ok": len(refs), "failed": 0, "errors": []}
     monkeypatch.setattr(inv, "invite_via_link_batch", _links)
 
