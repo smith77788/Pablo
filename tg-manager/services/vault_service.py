@@ -394,9 +394,24 @@ async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
 
 async def list_messages(pool, owner_id: int, chat_id: int,
                         limit: int = 200, offset: int = 0,
-                        filters: dict | None = None) -> list[dict]:
+                        filters: dict | None = None,
+                        newest_first: bool = False) -> dict:
     """Сообщения чата с опциональными фильтрами: media_only / deleted_only /
-    edited_only / direction ('in'|'out'). Всё скоупится по owner_id."""
+    edited_only / direction ('in'|'out'). Всё скоупится по owner_id.
+
+    `newest_first=True` — брать сообщения С КОНЦА переписки (как любой
+    мессенджер), а `offset` тогда означает «сколько последних пропустить»,
+    то есть шаг назад по истории. Результат ВСЕГДА возвращается в
+    хронологическом порядке — переворот делается здесь, чтобы вызывающий не
+    думал о направлении выборки.
+
+    Раньше выборка всегда шла с НАЧАЛА архива по возрастанию: в переписке из
+    500 сообщений экран показывал 200 самых СТАРЫХ, прокручивал их в конец —
+    и создавал полное впечатление, что это и есть весь чат. Свежие сообщения
+    были недостижимы.
+
+    Возвращает {"messages": [...], "has_more": bool}.
+    """
     f = filters or {}
     cond = ["owner_id=$1", "chat_id=$2"]
     if f.get("media_only"):
@@ -408,15 +423,25 @@ async def list_messages(pool, owner_id: int, chat_id: int,
     args = [owner_id, chat_id]
     if f.get("direction") in ("in", "out"):
         args.append(f["direction"]); cond.append(f"direction=${len(args)}")
-    args.append(min(int(limit), 1000)); lim_i = len(args)
+    lim = min(max(int(limit), 1), 1000)
+    # Берём на одну строку больше запрошенного — так узнаём про «есть ещё»
+    # без второго COUNT-запроса по чату.
+    args.append(lim + 1); lim_i = len(args)
     args.append(max(int(offset), 0)); off_i = len(args)
+    order = ("msg_date DESC NULLS LAST, msg_id DESC" if newest_first
+             else "msg_date ASC NULLS FIRST, msg_id ASC")
     rows = await pool.fetch(
         f"""SELECT msg_id, direction, text_enc, media_type, media_file_id, media_name,
                    media_size, msg_date, is_deleted, is_edited
             FROM vault_messages WHERE {' AND '.join(cond)}
-            ORDER BY msg_date ASC NULLS FIRST, msg_id ASC LIMIT ${lim_i} OFFSET ${off_i}""",
+            ORDER BY {order} LIMIT ${lim_i} OFFSET ${off_i}""",
         *args)
-    return [_ui_message(r) for r in rows]
+    has_more = len(rows) > lim
+    rows = rows[:lim]
+    out = [_ui_message(r) for r in rows]
+    if newest_first:
+        out.reverse()          # наружу — всегда хронологический порядок
+    return {"messages": out, "has_more": has_more}
 
 
 async def export_data(pool, owner_id: int, chat_id: int | None = None) -> dict:

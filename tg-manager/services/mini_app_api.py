@@ -4665,12 +4665,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         }
         from services import vault_service as _v
         try:
-            msgs = await _v.list_messages(pool, uid, chat_id, limit=limit, offset=offset,
-                                          filters=filters)
+            # По умолчанию отдаём КОНЕЦ переписки: раньше всегда шли первые 200
+            # с начала архива, и в длинном чате свежие сообщения были
+            # недостижимы вовсе. offset здесь — шаг назад по истории.
+            res = await _v.list_messages(pool, uid, chat_id, limit=limit, offset=offset,
+                                         filters=filters, newest_first=True)
         except Exception as exc:
             log.exception("vault_messages uid=%s chat=%s", uid, chat_id)
             return _err(f"Ошибка: {str(exc)[:140]}", 500)
-        return _json_resp({"messages": msgs, "limit": limit, "offset": offset})
+        return _json_resp({"messages": res["messages"], "has_more": res["has_more"],
+                           "limit": limit, "offset": offset})
 
     async def vault_recent(request: web.Request) -> web.Response:
         """Лента «Недавно удалённое/изменённое» по всем чатам (экран «ловца»)."""
