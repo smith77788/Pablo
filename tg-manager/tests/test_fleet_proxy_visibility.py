@@ -90,3 +90,50 @@ def test_dead_proxy_outranks_plain_active_but_not_a_ban():
     r = _render()
     assert r.index("'🚫 Бан'") < r.index("a.proxy_alive === false")
     assert r.index("a.proxy_alive === false") < r.index("status='Активен'")
+
+
+# ── Срез «простаивают из-за прокси» ───────────────────────────────────────────
+
+def test_filter_exists_and_is_strict():
+    """Видеть мало — нужен срез, чтобы починить оптом. Строго IS FALSE:
+    непроверенный прокси (NULL) не должен попадать в «мёртвые»."""
+    start = _API.index("def _accounts_where")
+    body = _API[start:start + 3000]
+    assert 'flt == "proxy_down"' in body
+    assert "p.is_alive IS FALSE" in body
+    assert "proxy_id IS NOT NULL" in body
+
+
+def test_filter_is_correlated_to_the_account_row():
+    start = _API.index("def _accounts_where")
+    body = _API[start:start + 3000]
+    assert "p.id = tg_accounts.proxy_id" in body
+
+
+def test_stats_expose_the_counter():
+    assert "AS proxy_down" in _API
+    assert '"proxy_down"' in _API
+
+
+def test_stats_key_lookup_survives_admin_query_without_the_column():
+    """Межтенантный (админский) запрос этот счётчик не считает — обращение к
+    отсутствующему ключу не должно ронять экран."""
+    assert "k in st.keys()" in _API
+
+
+def test_ui_has_the_card_and_fills_it():
+    assert "filterAcc('proxy_down'" in _UI
+    assert 'id="kpi-proxydown"' in _UI
+    assert "el('kpi-proxydown'" in _UI
+
+
+def test_card_is_hidden_when_nothing_is_wrong():
+    """Пустая карточка только занимает место в плотной строке KPI."""
+    assert 'querySelector(\'[data-filter="proxy_down"]\')' in _UI
+    assert "pdown > 0" in _UI
+
+
+def test_client_side_fallback_is_also_strict():
+    seg = _UI[_UI.index("function updateAccKpi"):]
+    seg = seg[:1800]
+    assert "a.proxy_alive === false" in seg

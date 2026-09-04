@@ -1866,6 +1866,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             clauses.append("COALESCE(acc_status,'ok') = 'banned'")
         elif flt == "spamblock":
             clauses.append("COALESCE(acc_status,'ok') = 'spamblock'")
+        elif flt == "proxy_down":
+            # Аккаунты, простаивающие ИЗ-ЗА ПРОКСИ, а не по своей вине: сами они
+            # целы, но каждая их операция падает по сети. Без этого среза мёртвый
+            # прокси нельзя было ни увидеть списком, ни починить оптом.
+            # Строго is_alive=FALSE: непроверенный прокси (NULL) — не мёртвый.
+            clauses.append(
+                "proxy_id IS NOT NULL AND EXISTS ("
+                "SELECT 1 FROM user_proxies p WHERE p.id = tg_accounts.proxy_id "
+                "AND p.is_alive IS FALSE)")
         elif flt == "dead":
             # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
             # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)
@@ -1983,9 +1992,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                               WHERE is_active
                                 AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
                                 AND (cooldown_until IS NULL OR cooldown_until <= now())
-                          ) AS active
+                          ) AS active,
+                          -- Простаивают из-за прокси: аккаунт цел, чинить надо
+                          -- прокси. Строго IS FALSE — непроверенный не считаем.
+                          COUNT(*) FILTER (
+                              WHERE proxy_id IS NOT NULL AND EXISTS (
+                                  SELECT 1 FROM user_proxies p
+                                   WHERE p.id = tg_accounts.proxy_id AND p.is_alive IS FALSE)
+                          ) AS proxy_down
                    FROM tg_accounts WHERE owner_id=$1""", uid)
-        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "spamblock", "cooldown", "dead", "active")} if st else {}
+        stats = {k: int((st[k] if st and k in st.keys() else 0) or 0)
+                 for k in ("total", "banned", "spamblock", "cooldown", "dead",
+                           "active", "proxy_down")} if st else {}
         # by_stage скоупим по owner_id для не-админа (иначе — межтенантная утечка
         # разбивки стадий по ВСЕЙ платформе). Админ видит всё, как в основной статистике.
         if admin:

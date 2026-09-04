@@ -908,6 +908,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="acc-kpi-card" onclick="filterAcc('dead',this)" data-filter="dead">
         <div class="acc-kpi-num" id="kpi-dead" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Мёртвые</div>
       </div>
+      <!-- Простаивают из-за прокси: сами аккаунты целы, чинить надо прокси. -->
+      <div class="acc-kpi-card" onclick="filterAcc('proxy_down',this)" data-filter="proxy_down">
+        <div class="acc-kpi-num" id="kpi-proxydown" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Прокси мёртв</div>
+      </div>
     </div>
     <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
     <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(239,68,68,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
@@ -8706,8 +8710,17 @@ function updateAccKpi(list, stats) {
   const spam   = (stats && stats.spamblock!=null)? stats.spamblock: list.filter(a=>a.acc_status==='spamblock').length;
   const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
   const dead   = (stats && stats.dead!=null)     ? stats.dead     : list.filter(a=>['banned','deactivated','session_expired'].includes(a.acc_status)).length;
+  // Простаивают из-за прокси. Запасной подсчёт по загруженной странице —
+  // строго proxy_alive === false: непроверенный прокси мёртвым не считаем.
+  const pdown  = (stats && stats.proxy_down!=null) ? stats.proxy_down
+                 : list.filter(a=>a.has_proxy && a.proxy_alive === false).length;
   const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
   el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-spam', spam); el('kpi-ban', banned); el('kpi-dead', dead);
+  el('kpi-proxydown', pdown);
+  // Карточку показываем только когда есть о чём говорить — иначе она просто
+  // занимает место в и без того плотной строке.
+  const pdc = document.querySelector('[data-filter="proxy_down"]');
+  if (pdc) pdc.style.display = pdown > 0 ? '' : 'none';
   const pb = document.getElementById('purgeDeadBtn');
   if (pb) { pb.style.display = dead>0 ? 'block' : 'none'; el('purgeDeadN', dead); }
 }
