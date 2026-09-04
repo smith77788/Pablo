@@ -112,3 +112,29 @@ def test_ui_edit_skips_bot_validation():
 
 def test_ui_warns_when_part_of_audience_already_received_old_text():
     assert "им ушёл прежний текст" in _UI
+
+
+# ── Устаревшие цели не должны ломать экран ────────────────────────────────────
+
+def test_legacy_target_is_still_displayed_on_edit():
+    """Цель 'crm' убрана из списка выбора (она читает легаси-таблицу), но
+    кампании с ней ещё живут. Без подстановки такой опции поле в режиме правки
+    показало бы пустоту вместо аудитории."""
+    assert "tt.add(new Option(" in _UI
+    assert "DM_TARGET" in _UI
+
+
+def test_list_shows_which_audience_each_campaign_targets():
+    """Со списком в 20 кампаний по одному названию не понять, куда какая целится."""
+    assert "DM_TARGET[c.target_type]" in _UI
+
+
+def test_target_labels_cover_every_type_the_api_accepts():
+    import re
+    m = re.search(r"_ALLOWED_TARGETS = \{(.*?)\}", _API, re.DOTALL)
+    assert m
+    types = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    labels = _UI[_UI.index("const DM_TARGET"):]
+    labels = labels[:labels.index("};")]
+    missing = [t for t in types if f"{t}:" not in labels]
+    assert not missing, f"нет подписи для целей: {missing}"

@@ -16337,6 +16337,15 @@ async function openRegCheck() {
 // Композер DM-кампаний единый — openCmpModal()/saveCmp() (см. выше).
 // Прежний тонкий openDmModal/submitDmCampaign удалён (дубль-путь).
 const DM_STATUS = {draft:'📝 Черновик',running:'▶️ Выполняется',paused:'⏸ Пауза',done:'✅ Завершена',failed:'❌ Ошибка'};
+// Подпись аудитории: со списком в 20 кампаний по одному названию не понять,
+// куда какая целится. 'crm' — устаревшая цель (легаси-таблица), новые
+// кампании её не предлагают, но старые обязаны отображаться честно.
+const DM_TARGET = {
+  all_bots:'все подписчики ботов', bot_users:'подписчики бота',
+  cohort:'когорта по активности', contacts:'все контакты',
+  segment:'сегмент контактов', parsed_audience:'аудитория парсера',
+  import_list:'свой список', crm:'CRM-контакты (устар.)',
+};
 async function openDmCampaigns() {
   push('s-dmcampaigns');
   txt('dmStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -16371,7 +16380,7 @@ async function openDmCampaigns() {
         <div class="row-ico" style="background:var(--bg-blue-16)">✉️</div>
         <div class="row-body tap" onclick="openDmReport(${c.id})" title="Показать отчёт: кому дошло и почему нет">
           <div class="row-name">${esc(c.name)}</div>
-          <div class="row-val">${DM_STATUS[c.status]||c.status} · ${snt}/${tot} отправлено${failTxt}${etaTxt}</div>
+          <div class="row-val">${DM_STATUS[c.status]||c.status} · 🎯 ${esc(DM_TARGET[c.target_type]||c.target_type||'—')} · ${snt}/${tot} отправлено${failTxt}${etaTxt}</div>
           ${bar}
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
@@ -16464,7 +16473,16 @@ function editDm(c) {
   const nf = document.getElementById('cmpNameFb'); if (nf) nf.value = p.name_fallback || '';
   // Аудиторию не трогаем: показываем как есть и блокируем выбор.
   const tt = document.getElementById('cmpTargetType');
-  if (tt) { tt.value = c.target_type || 'all_bots'; tt.disabled = true; }
+  if (tt) {
+    const want = c.target_type || 'all_bots';
+    // Устаревшие цели (например 'crm') из списка убраны, но кампании с ними
+    // ещё живут — без этого поле показало бы пустоту вместо аудитории.
+    if (!Array.from(tt.options).some(o=>o.value===want)) {
+      tt.add(new Option(DM_TARGET[want] || want, want));
+    }
+    tt.value = want;
+    tt.disabled = true;
+  }
   updateCmpTargetBot();
   document.getElementById('cmpBtn').textContent = '💾 Сохранить изменения';
   const sent = c.sent_count || 0;
