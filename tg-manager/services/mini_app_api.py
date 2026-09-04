@@ -8436,6 +8436,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # мёртвом чате). Флаг независим от способа добавления.
             if str(body.get("safe_mode")).lower() in ("1", "true", "yes", "on"):
                 params["safe_mode"] = True
+            # «Мать-Дочка»: инвайт идёт в одноразовую дочернюю группу с редиректом
+            # на боевую — риск бана инвайта поглощает расходник, а не боевой канал.
+            if str(body.get("use_daughter_groups")).lower() in ("1", "true", "yes", "on"):
+                params["use_daughter_groups"] = True
             # «Из парсера»: инвайтим ИМЕННО этот запуск (parse_run_id), симметрично
             # DM-мосту. Без него source=parsed брал всю аудиторию парсера.
             _pr = body.get("parse_run_id")

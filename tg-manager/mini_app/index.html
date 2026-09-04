@@ -4453,6 +4453,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="hint" style="padding:4px 2px 0">Отсеять ботов/удалённых/приватные аккаунты до запуска — меньше «пустых» приглашений и риска.</div>
       </div>
       <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invDaughterGroups"> 🛡 Мать-Дочка (инвайт через одноразовую группу)</label>
+        <div class="hint" style="padding:4px 2px 0">Приглашённые сначала попадают в одноразовую дочернюю группу с закреплённой ссылкой на ваш канал. Если Telegram её закроет — сгорит расходник, а не боевой канал; система создаст новую и продолжит прогон.</div>
+      </div>
+      <div class="field">
         <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invSafeMode"> 🛡 Безопасный режим (умный темп по чату)</label>
         <div class="hint" style="padding:4px 2px 0">Держит частоту вступлений/мин под лимитом, замораживает приём при флуде чата, оценивает «живость» чата и останавливается, если приглашённые массово выходят/жалуются.</div>
       </div>
@@ -16457,6 +16461,7 @@ async function submitMassInvite() {
   }
   const body = {group, source};
   if (document.getElementById('invSafeMode')?.checked) body.safe_mode = true;
+  if (document.getElementById('invDaughterGroups')?.checked) body.use_daughter_groups = true;
   // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;

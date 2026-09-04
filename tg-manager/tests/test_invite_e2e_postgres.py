@@ -66,7 +66,11 @@ class _Stand:
         self.flooder = None
         self.last_op_id = None
 
-    async def _engine(self, session, acc, group, refs):
+    async def _engine(self, session, acc, group, refs, *args, **kwargs):
+        # *args/**kwargs: invite_batch и invite_by_phones расходятся в позиционных/
+        # именованных параметрах (pace_mult, bulk=...) — стенд подменяет обе, и
+        # жёсткая сигнатура ловит TypeError молча свёрнутым в "batch error" при
+        # каждом добавлении опции движку (см. bulk=), а не падением теста.
         self.sent.extend(refs)
         self.per_acc.setdefault(int(acc["id"]), []).extend(refs)
         if self.mode == "flood" and int(acc["id"]) == self.flooder:
@@ -335,6 +339,47 @@ def test_closed_group_stops_the_fleet(stand):
             "причина отказа не сохранена в operation_log"
     finally:
         stand.mode = "ok"
+
+
+def test_daughter_group_rotation_survives_closed_group(stand):
+    """«Мать-Дочка»: закрытая дочерняя группа сжигается и заменяется следующей —
+    прогон продолжается, вместо мгновенной остановки как в test_closed_group_stops_the_fleet.
+
+    Реальный op_worker._exec_mass_invite целиком (без Telethon): движок стенда
+    возвращает "group error" на КАЖДЫЙ батч, поэтому дочерняя группа сгорает
+    рано и часто — прогон обязан упереться в MAX_ROTATIONS_PER_RUN и только
+    тогда остановиться, а не на первом же закрытии.
+    """
+    from services import daughter_groups as dg
+
+    _run(stand.seed())
+    stand.mode = "group_closed"
+    calls = {"create": 0, "burn": 0}
+    _orig_create = dg.get_or_create_active
+    _orig_burn = dg.mark_burned
+
+    async def _fake_create(pool, owner_id, mother_ref, creator_acc):
+        calls["create"] += 1
+        return {"ok": True, "group_ref": f"https://t.me/+FAKE{calls['create']}", "id": calls["create"]}
+
+    async def _fake_burn(pool, daughter_id, reason):
+        calls["burn"] += 1
+
+    dg.get_or_create_active = _fake_create
+    dg.mark_burned = _fake_burn
+    try:
+        refs = [f"@d{i}" for i in range(20)]
+        r = _run(stand.run({"group": "@g", "source": "import_list", "user_refs": refs,
+                            "use_daughter_groups": True}, total=20))
+        # 1 создание до цикла + MAX_ROTATIONS_PER_RUN ротаций после сгорания.
+        assert calls["create"] == 1 + dg.MAX_ROTATIONS_PER_RUN, calls
+        assert calls["burn"] == dg.MAX_ROTATIONS_PER_RUN, calls
+        assert ("Причина" in (r["summary"] or "") or "недоступ" in (r["summary"] or "")), \
+            "после исчерпания ротаций остановка обязана назвать причину, как и без дочерних групп"
+    finally:
+        stand.mode = "ok"
+        dg.get_or_create_active = _orig_create
+        dg.mark_burned = _orig_burn
 
 
 def test_engine_exception_does_not_kill_the_operation(stand):
