@@ -167,11 +167,20 @@ async def count_already_invited(pool: asyncpg.Pool, owner_id: int, group: str,
         return 0
     try:
         from services.mass_inviter_engine import parse_group_ref
+        from services.contact_opt_out import compare_key
+
         gk = parse_group_ref(group) or group
+        # Сравнение регистронезависимое — ровно то же, чем дедупит исполнитель.
+        # Пока здесь стояло сырое `target = ANY(...)`, пре-флайт занижал число
+        # «уже приглашено» для username'ов, чей регистр в списке отличался от
+        # записанного в журнал, и обещал оператору больше новых целей, чем
+        # операция потом реально брала. Цифра пре-флайта обязана совпадать с тем,
+        # что сделает прогон, иначе она хуже, чем её отсутствие.
+        keys = list({compare_key(x) for x in items})
         n = await pool.fetchval(
             "SELECT COUNT(*) FROM invite_target_log "
-            "WHERE owner_id=$1 AND group_key=$2 AND target = ANY($3::text[])",
-            owner_id, gk, [str(x) for x in items])
+            "WHERE owner_id=$1 AND group_key=$2 AND lower(target) = ANY($3::text[])",
+            owner_id, gk, keys)
         return int(n or 0)
     except Exception:
         return 0
