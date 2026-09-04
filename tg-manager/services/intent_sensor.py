@@ -105,6 +105,103 @@ async def add_rule(pool: asyncpg.Pool, owner_id: int, phrase: str,
         owner_id, phrase, stage, tag, bool(notify)))
 
 
+async def update_rule(pool: asyncpg.Pool, owner_id: int, rule_id: int, *,
+                      phrase: str | None = None, stage: str | None = ...,
+                      tag: str | None = ..., notify: bool | None = None) -> bool:
+    """Изменить правило на месте.
+
+    Правки не было вовсе: чтобы исправить опечатку во фразе, правило удаляли и
+    создавали заново — вместе со счётчиком срабатываний и журналом, то есть
+    теряя ровно ту историю, по которой правило и настраивают.
+
+    `stage`/`tag` принимают None как ОСМЫСЛЕННОЕ значение (снять), поэтому
+    «не передано» обозначено сентинелом `...`.
+    """
+    sets: list[str] = []
+    args: list = []
+    if phrase is not None:
+        p = (phrase or "").strip()[:120]
+        if p[:3].lower() != "re:":
+            p = p.lower()
+        if not p:
+            raise ValueError("Пустая фраза")
+        if p[:3].lower() == "re:":
+            pat = p[3:].strip()
+            if not pat:
+                raise ValueError("Пустой регэксп после re:")
+            try:
+                _re.compile(pat)
+            except _re.error as e:
+                raise ValueError(f"Некорректный регэксп: {e}") from e
+        args.append(p); sets.append(f"phrase=${len(args)}")
+    if stage is not ...:
+        args.append(stage if stage in VALID_STAGES else None)
+        sets.append(f"stage=${len(args)}")
+    if tag is not ...:
+        args.append((tag or "").strip()[:60] or None)
+        sets.append(f"tag=${len(args)}")
+    if notify is not None:
+        args.append(bool(notify)); sets.append(f"notify=${len(args)}")
+    if not sets:
+        raise ValueError("Нечего изменять")
+
+    # Правило без действия бесполезно: проверяем ИТОГОВОЕ состояние, а не только
+    # присланные поля — иначе можно было снять и стадию, и тег по отдельности.
+    cur = await pool.fetchrow(
+        "SELECT stage, tag FROM vault_intent_rules WHERE id=$1 AND owner_id=$2",
+        rule_id, owner_id)
+    if not cur:
+        return False
+    new_stage = (stage if stage in VALID_STAGES else None) if stage is not ... else cur["stage"]
+    new_tag = ((tag or "").strip()[:60] or None) if tag is not ... else cur["tag"]
+    if not new_stage and not new_tag:
+        raise ValueError("Правило без действия: укажите стадию или тег")
+
+    args.extend([rule_id, owner_id])
+    res = await pool.execute(
+        f"UPDATE vault_intent_rules SET {', '.join(sets)} "
+        f"WHERE id=${len(args) - 1} AND owner_id=${len(args)}", *args)
+    return not str(res).endswith(" 0")
+
+
+async def recent_hits(pool: asyncpg.Pool, owner_id: int, rule_id: int | None = None,
+                      limit: int = 50) -> list[dict]:
+    """Последние срабатывания правил — чтобы их можно было отлаживать.
+
+    Fail-open: журнал появился позже правил, и его отсутствие (лаг миграции)
+    не должно ронять экран.
+    """
+    try:
+        if rule_id:
+            rows = await pool.fetch(
+                """SELECT h.id, h.rule_id, r.phrase, h.peer_name, h.chat_id,
+                          h.text_preview, h.stage_to, h.tags_added, h.created_at
+                     FROM vault_intent_hits h
+                     JOIN vault_intent_rules r ON r.id = h.rule_id
+                    WHERE h.owner_id=$1 AND h.rule_id=$2
+                 ORDER BY h.created_at DESC LIMIT $3""",
+                owner_id, rule_id, min(int(limit), 200))
+        else:
+            rows = await pool.fetch(
+                """SELECT h.id, h.rule_id, r.phrase, h.peer_name, h.chat_id,
+                          h.text_preview, h.stage_to, h.tags_added, h.created_at
+                     FROM vault_intent_hits h
+                     JOIN vault_intent_rules r ON r.id = h.rule_id
+                    WHERE h.owner_id=$1
+                 ORDER BY h.created_at DESC LIMIT $2""",
+                owner_id, min(int(limit), 200))
+    except Exception:
+        log.debug("intent_sensor: журнал недоступен owner=%s", owner_id)
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
+        d["tags_added"] = list(r["tags_added"] or [])
+        out.append(d)
+    return out
+
+
 async def delete_rule(pool: asyncpg.Pool, owner_id: int, rule_id: int) -> bool:
     res = await pool.execute(
         "DELETE FROM vault_intent_rules WHERE id=$1 AND owner_id=$2", rule_id, owner_id)
@@ -281,6 +378,20 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
     await pool.execute(
         "UPDATE vault_intent_rules SET hits = hits + 1 WHERE id = ANY($1::bigint[])",
         [m["id"] for m in matched])
+    # Журнал: голый счётчик не позволял понять, НА ЧТО сработало правило, и
+    # ложные срабатывания оставались невидимыми — контакт молча уезжал не в ту
+    # стадию. Fail-open: сбой записи журнала не должен ломать саму обработку.
+    try:
+        await pool.executemany(
+            """INSERT INTO vault_intent_hits
+                   (owner_id, rule_id, chat_id, peer_name, text_preview, stage_to, tags_added)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+            [(owner_id, m["id"], peer.get("peer_user_id"),
+              peer.get("peer_name") or peer.get("peer_username"),
+              (text or "")[:300], target_stage if stage_changed else None, added_tags)
+             for m in matched])
+    except Exception:
+        log.debug("intent_sensor: журнал срабатываний не записан owner=%s", owner_id)
 
     notified = False
     if want_notify and (added_tags or stage_changed):
