@@ -622,12 +622,16 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
     if not variants and not text:
         return
     try:
+        # Отбираем по МАРКЕРУ ИСХОДА, а не по голому 'ok'. Раньше фильтр
+        # исключал мета-цель 'promote', но НЕ 'promote_trick' — и приветствие
+        # уходило в личку несуществующему пользователю с таким именем: пустая
+        # трата отправки, мусор в журнале и лишний повод для флуда.
         rows = await _safe_fetch(
             pool,
             "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='ok' "
-            "AND target IS NOT NULL AND target <> 'promote'", op_id)
-        # 'promote' — мета-цель промоут-трюка, не получатель (фильтруем и в Python).
-        targets = [r["target"] for r in (rows or []) if r["target"] and r["target"] != "promote"]
+            "AND message='joined' AND target IS NOT NULL", op_id)
+        _meta = {"promote", "promote_trick"}
+        targets = [r["target"] for r in (rows or []) if r["target"] and r["target"] not in _meta]
         if not targets:
             return
         acc_ids = [int(x) for x in (params.get("account_ids") or []) if str(x).isdigit()]
@@ -10849,10 +10853,22 @@ async def _exec_mass_invite(
                 _succ = _succ[:max(0, _OK_LOG_CAP - _ok_logged)]
                 if _succ:
                     try:
+                        # МАРКЕР ИСХОДА. Ретеншен инвайта (экран мини-аппа и
+                        # подсказка организма) считает вступивших запросом
+                        # `status='ok' AND message='joined'` — а маркер не писал
+                        # НИКТО. Обе функции показывали «нет данных» с самого
+                        # своего появления: приток всегда выходил нулём.
+                        #
+                        # Маркер не декоративный: голого 'ok' для этого мало.
+                        # У метода «ссылка в ЛС» успех означает доставленную
+                        # ссылку, а не вступление (человек ещё может не войти),
+                        # и складывать их в один счётчик значило бы завышать
+                        # ретеншен. Поэтому исход называется явно.
+                        _outcome = "link_sent" if _invite_method == "link" else "joined"
                         await pool.executemany(
-                            "INSERT INTO operation_log(op_id, step_num, target, status) "
-                            "VALUES($1,$2,$3,'ok')",
-                            [(op_id, step, s[:120]) for s in _succ])
+                            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                            "VALUES($1,$2,$3,'ok',$4)",
+                            [(op_id, step, s[:120], _outcome) for s in _succ])
                         _ok_logged += len(_succ)
                     except Exception:
                         log_exc_swallow(log, "invite: ok per-target log")
