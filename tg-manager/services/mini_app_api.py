@@ -2089,6 +2089,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """SELECT id, current_day, target_days, status, started_at
                FROM account_warmup_plans WHERE account_id=$1
                ORDER BY started_at DESC LIMIT 1""", acc_id)
+        # Состояние восстановления. Без него карточка аккаунта со спам-блоком
+        # была тупиком: статус «ограничен» и ни слова о том, что система уже
+        # который день вытаскивает этот аккаунт (или давно сдалась и ждёт
+        # решения человека).
+        rehab = None
+        _rh_row = await _safe_fetchrow(pool,
+            """SELECT phase, note, attempts, next_action_at
+                 FROM account_rehab_state WHERE acc_id=$1""", acc_id)
+        if _rh_row:
+            try:
+                from services import account_rehab as _rh
+
+                rehab = _rh.describe(dict(_rh_row))
+            except Exception:
+                log.debug("account_detail rehab acc=%s", acc_id)
         recent_ops = await _safe_fetch(pool,
             """SELECT op_type, status, done_items, total_items, created_at
                FROM operation_queue WHERE owner_id=$1
@@ -2154,6 +2169,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "account": acc,
             "capabilities": caps,
             "warmup": warmup,
+            "rehab": rehab,
             "recent_ops": recent_ops,
             "health": health,
             "transport": transport,
@@ -9453,6 +9469,57 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ],
         })
 
+    # ── Восстановление аккаунтов (авто-реабилитация) ───────────────────────────
+    # Разрыв: модуль работал сутками и был невидим. Аккаунт со спам-блоком
+    # пропадал из операций, фоновый цикл его вытягивал (или сдавался и ставил
+    # в очередь «нужен ручной разбор»), а в интерфейсе не было ни экрана, ни
+    # строчки — при том что подпись раздела обещала «восстановление».
+
+    async def rehab_overview_ep(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import account_rehab as _rh
+
+        try:
+            counts = await _rh.rehab_overview(pool, uid)
+        except Exception:
+            log.warning("rehab_overview uid=%d", uid, exc_info=True)
+            counts = {"in_progress": 0, "freed": 0, "stuck": 0, "gone": 0, "by_phase": {}}
+        return _json_resp({"ok": True, **counts,
+                           "accounts": await _rh.list_for_owner(pool, uid)})
+
+    async def rehab_action(request: web.Request) -> web.Response:
+        """Ручное управление восстановлением одного аккаунта.
+
+        `now` — не ждать бэк-офф (он доходит до 72 часов, а человек может уже
+        знать, что блок снят); `off` — не тратить действия флота на аккаунт,
+        который решено заменить; `restart` — второй шанс тому, что автоматика
+        отдала на ручной разбор.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("bad acc_id", 400)
+        action = (request.match_info.get("action") or "").lower()
+        from services import account_rehab as _rh
+
+        if action == "now":
+            ok = await _rh.force_now(pool, uid, acc_id)
+            if not ok:
+                return _err("Аккаунт не в активной фазе восстановления", 404)
+            return _json_resp({"ok": True, "note": "Следующий шаг — в ближайшем цикле"})
+        if action in ("off", "restart"):
+            ok = await _rh.set_enabled(pool, uid, acc_id, action == "restart")
+            if not ok:
+                return _err("Аккаунт не найден в восстановлении", 404)
+            return _json_resp({"ok": True,
+                               "phase": "appeal" if action == "restart" else "off"})
+        return _err("Неизвестное действие", 400)
+
     async def warmup_create_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -15281,6 +15348,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
+    app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
+    app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     app.router.add_get("/api/miniapp/warmup/{plan_id}/log", warmup_plan_log)
     app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/pause", warmup_pause_plan)
@@ -16974,7 +17043,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         warnings = []
         try:
             from services import infra_orchestrator as _io
-            for fn in (_io.get_pressure_warning, _io.get_readiness_warning):
+            for fn in (_io.get_pressure_warning, _io.get_readiness_warning,
+                       _io.get_dead_proxy_warning):
                 try:
                     w = await fn(pool, uid)
                 except Exception:

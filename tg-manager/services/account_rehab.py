@@ -92,10 +92,15 @@ async def _sync_enrollment(pool) -> None:
                updated_at = now()
            FROM tg_accounts a
            WHERE a.id = r.acc_id
-             AND r.phase IN ('appeal','warming','recheck')
+             AND r.phase IN ('appeal','warming','recheck','off')
              AND COALESCE(a.acc_status,'active') <> 'spamblock'""",
         list(_DEAD_STATUSES),
     )
+    # 'off' в списке намеренно: пока аккаунт под блоком, выключенное вручную
+    # восстановление остаётся выключенным (условие выше это гарантирует).
+    # Но как только ограничение снято, отметка снимается — и если аккаунт
+    # заблокируют СНОВА через месяц, восстановление подхватит его как обычно,
+    # а не промолчит из-за давно забытого выключения.
 
 
 async def _due_rows(pool, limit: int) -> list[dict]:
@@ -351,7 +356,7 @@ async def run_rehab_cycle(pool) -> int:
     return handled
 
 
-async def run_rehab_loop(pool) -> None:
+async def run_rehab_loop(pool, bot=None) -> None:
     """Фоновый цикл авто-реабилитации. Запускать один раз на процесс."""
     if _disabled():
         log.info("rehab: отключён через INFRAGRAM_DISABLE_REHAB")
@@ -364,11 +369,241 @@ async def run_rehab_loop(pool) -> None:
             n = await run_rehab_cycle(pool)
             if n:
                 log.info("rehab: обработано аккаунтов за тик: %d", n)
+            # Итог восстановления — новость, которую человек обязан услышать:
+            # вернувшийся аккаунт иначе будет списан, а застрявший так и
+            # останется ждать разбора, которого никто не назначал.
+            if bot is not None:
+                try:
+                    await notify_terminal(pool, bot)
+                except Exception:
+                    log.debug("rehab: уведомления об итогах не отправлены")
         except asyncio.CancelledError:
             raise
         except Exception:
             log.warning("rehab: тик упал", exc_info=True)
         await asyncio.sleep(_jitter(_TICK_SEC, frac=0.15))
+
+
+# ── Человеческое описание фазы ────────────────────────────────────────────────
+# Разрыв: реабилитация работала как чёрный ящик. Аккаунт ловил спам-блок,
+# исчезал из операций — и всё. Фоновый цикл сутками пытался его вернуть,
+# аккаунты уходили в `stuck` («нужен ручной разбор») и вставали в очередь,
+# которую НЕКОМУ было увидеть: ни экрана, ни уведомления, а `rehab_overview`
+# не вызывался ни из одного места продукта. Пользователь считал аккаунт
+# потерянным, хотя тот восстанавливался, — или ждал вечно того, что уже
+# требовало его рук.
+
+PHASE_LABEL = {
+    "appeal":  "📨 Запрос на снятие",
+    "warming": "🌱 Тихий прогрев",
+    "recheck": "🔍 Перепроверка",
+    "freed":   "✅ Восстановлен",
+    "stuck":   "🛠 Нужен ваш разбор",
+    "gone":    "🚫 Восстанавливать нечего",
+    "off":     "⏹ Восстановление выключено",
+}
+PHASE_HINT = {
+    "appeal":  "Аккаунт просит @SpamBot снять ограничение — это штатная"
+               " аппеляция от лица самого аккаунта.",
+    "warming": "Идут только пассивные действия — чтение каналов и профилей."
+               " Ничего никому не рассылается: при спам-блоке это единственное"
+               " безопасное поведение, и именно оно возвращает доверие.",
+    "recheck": "Проверяем у @SpamBot, снято ли ограничение. Интервал между"
+               " проверками растёт намеренно: частые проверки выглядят"
+               " подозрительно и делу не помогают.",
+    "freed":   "Ограничение снято, аккаунт вернулся в строй и снова участвует"
+               " в операциях.",
+    "stuck":   "Автоматика исчерпала попытки — ограничение не снимается."
+               " Обычно это постоянный блок: аккаунт стоит заменить."
+               " Можно запустить восстановление заново, если хотите ещё попытку.",
+    "gone":    "Аккаунт забанен, удалён или его сессия недействительна —"
+               " восстанавливать нечего.",
+    "off":     "Вы остановили автоматическое восстановление для этого аккаунта.",
+}
+ACTIVE_PHASES = ("appeal", "warming", "recheck")
+# Фазы, в которых дальше без человека не сдвинется.
+ATTENTION_PHASES = ("stuck",)
+
+
+def describe(row: dict, now=None) -> dict[str, Any]:
+    """Что происходит с аккаунтом в реабилитации и когда следующий шаг.
+
+    Чистая функция: строка состояния → то, что видит человек.
+    """
+    from datetime import datetime, timezone
+
+    now = now or datetime.now(timezone.utc)
+    phase = (row.get("phase") or "appeal").lower()
+    label = PHASE_LABEL.get(phase, phase)
+    hint = PHASE_HINT.get(phase, "")
+    nxt = row.get("next_action_at")
+    wait_s = None
+    if phase in ACTIVE_PHASES and nxt is not None:
+        try:
+            if nxt.tzinfo is None:
+                nxt = nxt.replace(tzinfo=timezone.utc)
+            wait_s = max(0, int((nxt - now).total_seconds()))
+        except (AttributeError, TypeError, ValueError):
+            wait_s = None
+    return {
+        "phase": phase,
+        "label": label,
+        "hint": hint,
+        "note": row.get("note") or "",
+        "attempts": int(row.get("attempts") or 0),
+        "max_attempts": _MAX_RECHECKS,
+        "next_in_seconds": wait_s,
+        "active": phase in ACTIVE_PHASES,
+        "attention": phase in ATTENTION_PHASES,
+        # Перезапуск имеет смысл только там, где автоматика уже сдалась.
+        "restartable": phase in ("stuck", "off"),
+    }
+
+
+def build_terminal_alert(name: str, phase: str, attempts: int) -> str:
+    """Сообщение об итоге восстановления. Оба итога важны и оба молчали.
+
+    `freed` — аккаунт вернулся в строй, и человек должен об этом знать, иначе
+    он уже списал его и купил замену. `stuck` — автоматика сдалась и передаёт
+    аккаунт человеку; без сообщения эта передача была в пустоту.
+    """
+    if phase == "freed":
+        return (
+            "✅ <b>Аккаунт восстановлен</b>\n\n"
+            f"<b>{name}</b> — спам-блок снят, аккаунт снова участвует в операциях.\n\n"
+            "Не нагружайте его сразу: дайте пару дней спокойного режима,"
+            " иначе ограничение вернётся."
+        )
+    return (
+        "🛠 <b>Аккаунт не удалось восстановить</b>\n\n"
+        f"<b>{name}</b> — ограничение держится после {int(attempts or 0)} перепроверок.\n\n"
+        "Похоже на постоянный блок: автоматика больше ничего сделать не может."
+        " Замените аккаунт или запустите восстановление заново вручную,"
+        " если хотите дать ему ещё шанс."
+    )
+
+
+async def notify_terminal(pool, bot) -> int:
+    """Сообщить владельцам об аккаунтах, чьё восстановление завершилось.
+
+    Один раз на итог (метка `notified_phase`) — тот же приём, что у сторожа
+    прокси и у прогрева: повторяющееся уведомление перестают читать.
+    """
+    try:
+        rows = await pool.fetch(
+            """SELECT r.acc_id, r.owner_id, r.phase, r.attempts,
+                      a.phone, a.first_name
+                 FROM account_rehab_state r
+                 JOIN tg_accounts a ON a.id = r.acc_id
+                WHERE r.phase IN ('freed','stuck')
+                  AND COALESCE(r.notified_phase,'') <> r.phase
+                LIMIT 50""")
+    except Exception as e:
+        log.debug("rehab: выборка завершённых не удалась: %s", e)
+        return 0
+
+    sent = 0
+    for r in rows:
+        name = r["first_name"] or r["phone"] or f"аккаунт #{r['acc_id']}"
+        try:
+            from database import db as _db
+
+            await _db.notify_if_enabled(
+                pool, bot, r["owner_id"], "restriction",
+                build_terminal_alert(name, r["phase"], r["attempts"]),
+                dedup_key=f"rehab:{r['acc_id']}:{r['phase']}")
+            sent += 1
+        except Exception:
+            log.debug("rehab: уведомление не отправлено acc=%s", r["acc_id"])
+        try:
+            await pool.execute(
+                "UPDATE account_rehab_state SET notified_phase=$2 WHERE acc_id=$1",
+                r["acc_id"], r["phase"])
+        except Exception:
+            log.debug("rehab: метка уведомления не записана acc=%s", r["acc_id"])
+    return sent
+
+
+async def force_now(pool, owner_id: int, acc_id: int) -> bool:
+    """Сделать следующий шаг восстановления немедленно.
+
+    Бэк-офф перепроверок доходит до 72 часов — разумно для автоматики, но
+    невыносимо, когда человек знает, что блок уже снят, и хочет вернуть
+    аккаунт в строй сейчас. Раньше ждать приходилось молча и до конца.
+    """
+    try:
+        row = await pool.fetchrow(
+            """UPDATE account_rehab_state
+                  SET next_action_at=now(), updated_at=now()
+                WHERE acc_id=$1 AND owner_id=$2
+                  AND phase IN ('appeal','warming','recheck')
+             RETURNING acc_id""",
+            acc_id, owner_id)
+        return row is not None
+    except Exception as e:
+        log.warning("rehab: ускорить шаг acc=%s не удалось: %s", acc_id, e)
+        return False
+
+
+async def set_enabled(pool, owner_id: int, acc_id: int, enabled: bool) -> bool:
+    """Включить/выключить авто-восстановление для одного аккаунта.
+
+    Выключение нужно, когда человек решил заменить аккаунт и не хочет, чтобы
+    флот тратил на него действия. Включение — второй шанс для того, что
+    автоматика уже отдала на ручной разбор.
+    """
+    phase = "appeal" if enabled else "off"
+    note = ("перезапущено вручную" if enabled
+            else "восстановление выключено вручную")
+    try:
+        row = await pool.fetchrow(
+            """UPDATE account_rehab_state
+                  SET phase=$3, note=$4, next_action_at=now(),
+                      notified_phase=NULL, updated_at=now(),
+                      attempts = CASE WHEN $3='appeal' THEN 0 ELSE attempts END,
+                      appeal_count = CASE WHEN $3='appeal' THEN 0 ELSE appeal_count END,
+                      warm_cycles = CASE WHEN $3='appeal' THEN 0 ELSE warm_cycles END
+                WHERE acc_id=$1 AND owner_id=$2
+                  -- Перезапускать имеет смысл только то, что автоматика уже
+                  -- отдала человеку. Поднимать 'gone' (забанен/удалён) нельзя:
+                  -- цикл его всё равно не возьмёт, а экран показывал бы
+                  -- «идёт восстановление» там, где восстанавливать нечего.
+                  AND ($3 <> 'appeal' OR phase IN ('stuck','off'))
+             RETURNING acc_id""",
+            acc_id, owner_id, phase, note)
+        return row is not None
+    except Exception as e:
+        log.warning("rehab: смена режима acc=%s не удалась: %s", acc_id, e)
+        return False
+
+
+async def list_for_owner(pool, owner_id: int, limit: int = 100) -> list[dict]:
+    """Аккаунты владельца в реабилитации — с человеческим описанием фазы."""
+    try:
+        rows = await pool.fetch(
+            """SELECT r.acc_id, r.phase, r.kind, r.attempts, r.appeal_count,
+                      r.warm_cycles, r.note, r.first_seen, r.last_action_at,
+                      r.next_action_at, r.freed_at,
+                      a.phone, a.first_name, a.username, a.acc_status
+                 FROM account_rehab_state r
+                 JOIN tg_accounts a ON a.id = r.acc_id
+                WHERE r.owner_id=$1
+                ORDER BY (r.phase = 'stuck') DESC,
+                         (r.phase IN ('appeal','warming','recheck')) DESC,
+                         r.updated_at DESC
+                LIMIT $2""",
+            owner_id, limit)
+    except Exception as e:
+        log.debug("rehab: список для владельца %s не получен: %s", owner_id, e)
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["state"] = describe(d)
+        for k in ("first_seen", "last_action_at", "next_action_at", "freed_at"):
+            d[k] = d[k].isoformat() if d.get(k) else None
+        out.append(d)
+    return out
 
 
 # ── Сводка для UI/диагностики ──────────────────────────────────────────────────

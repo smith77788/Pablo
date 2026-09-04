@@ -1598,6 +1598,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Прогрев</div>
         <div class="mgmt-tile-val" id="m-warmup-val"></div>
       </div>
+      <!-- Восстановление было обещано подписью раздела, но входа в него не
+           существовало: модуль сутками возвращал аккаунты из спам-блока и
+           складывал безнадёжные в очередь «нужен ручной разбор» — незримо. -->
+      <div class="mgmt-tile" onclick="openRehab()">
+        <div class="mgmt-tile-ico">🩹</div>
+        <div class="mgmt-tile-lbl">Восстановление</div>
+        <div class="mgmt-tile-val" id="m-rehab-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openProfileSetter()">
         <div class="mgmt-tile-ico">🎨</div>
         <div class="mgmt-tile-lbl">Профили</div>
@@ -4721,6 +4729,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
     <div class="sec">Активные планы</div>
     <div class="lst" id="warmupList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-rehab">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🩹 Восстановление аккаунтов</div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Аккаунт со спам-блоком не выбрасывается: система сама просит снятия у @SpamBot,
+      держит аккаунт живым только пассивными действиями и перепроверяет статус.
+      Ничего никому не рассылается.
+    </div>
+    <div id="rehabStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
+    <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -9286,6 +9310,26 @@ function buildAccDetail(d) {
       ${warmup&&warmup.status==='active'?`<button class="btn btn-o" onclick="pauseWarmup(${a.id})">⏸ Пауза</button>`:''}
     </div>`;
 
+  // Восстановление. Карточка ограниченного аккаунта была тупиком: статус
+  // «ограничен» — и ни слова о том, что система его уже вытаскивает (или
+  // давно сдалась и ждёт решения человека).
+  const rh = d.rehab;
+  const rehabHtml = rh ? `
+    <div class="sec" style="margin-top:8px">Восстановление</div>
+    <div class="lst">
+      <div class="row" style="border-left:3px solid ${REHAB_COLOR[rh.phase]||'var(--hint)'}">
+        <div class="row-ico" style="background:var(--bg2)">${rh.attention?'🛠':'🩹'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(rh.label||'')}</div>
+          ${(rh.active&&rh.next_in_seconds!=null)?`<div class="row-val">следующий шаг ${rh.next_in_seconds<60?'вот-вот':'через '+humanDur(rh.next_in_seconds)}</div>`:''}
+          ${rh.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(rh.hint)}</div>`:''}
+        </div>
+      </div>
+    </div>
+    <div class="actions" style="padding-top:4px">
+      <button class="btn btn-g" onclick="openRehab()">🩹 Открыть восстановление</button>
+    </div>` : '';
+
   function cap(ico, name2, val, cls) {
     const vc = val===true?'cap-yes':val===false?'cap-no':'cap-prem';
     const vs = val===true?'✓ Да':val===false?'✗ Нет':String(val);
@@ -9422,6 +9466,7 @@ function buildAccDetail(d) {
 
     ${capsHtml}
     ${limitsHtml}
+    ${rehabHtml}
     ${warmupHtml}
     ${recentOpsHtml}
     <div style="height:16px"></div>`;
@@ -16936,6 +16981,7 @@ async function openWarmup() {
           ${h.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(h.hint)}</div>`:''}
         </div>
         <div class="row-right" style="display:flex;gap:5px">
+          ${p.pause_reason==='restricted'?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openRehab()" title="Восстановление">🩹</button>`:''}
           ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})">⏸</button>`:''}
           ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})">▶</button>`:''}
           ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})">⏹</button>`:''}
@@ -16947,6 +16993,65 @@ async function openWarmup() {
     txt('warmupStats','');
     txt('warmupList', empty('⚠️','Ошибка',e.message));
   }
+}
+// ── Восстановление аккаунтов ───────────────────────────────────────────
+// Модуль существовал и работал, но был невидим целиком: ни экрана, ни
+// уведомления. Аккаунт со спам-блоком выглядел потерянным, хотя система его
+// вытягивала; а те, что уходили в «нужен ручной разбор», ждали человека,
+// который никогда не узнавал, что его ждут.
+const REHAB_COLOR = {appeal:'var(--blue,#3b82f6)', warming:'var(--green)',
+                     recheck:'var(--blue,#3b82f6)', freed:'var(--green)',
+                     stuck:'var(--orange,#f59e0b)', gone:'var(--hint)',
+                     off:'var(--hint)'};
+async function openRehab() {
+  push('s-rehab');
+  txt('rehabStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('rehabList','');
+  try {
+    const d = await api('/api/miniapp/rehab');
+    txt('rehabStats',`
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${d.in_progress||0}</div><div class="kpi-lbl">Восстанавливаются</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.freed||0}</div><div class="kpi-lbl">Возвращены</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${d.stuck||0}</div><div class="kpi-lbl">Нужен разбор</div></div>
+    `);
+    txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
+    const accs = d.accounts||[];
+    if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого','Ни один аккаунт не под спам-блоком — это хорошая новость')); return; }
+    txt('rehabList', accs.map(a=>{
+      const s = a.state||{};
+      const col = REHAB_COLOR[s.phase] || 'var(--hint)';
+      const wait = (s.next_in_seconds!=null && s.active)
+        ? (s.next_in_seconds<60 ? 'следующий шаг вот-вот' : 'следующий шаг через '+humanDur(s.next_in_seconds)) : '';
+      return `
+      <div class="row" style="border-left:3px solid ${col}">
+        <div class="row-ico" style="background:var(--bg2)">${s.attention?'🛠':'🩹'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(a.first_name||a.phone||('#'+a.acc_id))}</div>
+          <div class="row-val">${esc(s.label||'')}${s.attempts?` · попытка ${s.attempts}/${s.max_attempts}`:''}</div>
+          ${wait?`<div style="font-size:11px;color:var(--hint);margin-top:2px">${esc(wait)}</div>`:''}
+          ${s.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(s.hint)}</div>`:''}
+        </div>
+        <div class="row-right" style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
+          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')">⏩</button>`:''}
+          ${s.active?`<button class="btn btn-o" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'off')">⏹</button>`:''}
+          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')">🔁</button>`:''}
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('rehabStats','');
+    txt('rehabList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function rehabAct(accId, action) {
+  if (action==='off' && !await askConfirm('Выключить авто-восстановление для этого аккаунта?\nСистема перестанет пытаться снять с него ограничение.')) return;
+  if (action==='restart' && !await askConfirm('Запустить восстановление заново?\nПопытки обнулятся, аккаунт снова пройдёт аппеляцию и тихий прогрев.')) return;
+  try {
+    await api(`/api/miniapp/rehab/${accId}/${action}`, {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast({now:'⏩ Шаг будет сделан в ближайшем цикле', off:'⏹ Восстановление выключено', restart:'🔁 Восстановление перезапущено'}[action]||'Готово');
+    openRehab();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 // Журнал прогрева: показывает, что аккаунт делал на самом деле. Раньше эти
 // записи копились в базе и не были видны нигде — на вопрос «он греется?»

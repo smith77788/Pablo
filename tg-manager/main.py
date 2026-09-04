@@ -665,6 +665,10 @@ async def main() -> None:
         "CREATE INDEX IF NOT EXISTS idx_account_rehab_due "
         "ON account_rehab_state(next_action_at) "
         "WHERE phase IN ('appeal', 'warming', 'recheck')",
+        # Метка «об итоге восстановления уже сообщили» (schema_v197). Без неё
+        # выборка уведомлений падает и итог восстановления снова становится
+        # немым — то есть ровно то, что эта колонка и лечит.
+        "ALTER TABLE account_rehab_state ADD COLUMN IF NOT EXISTS notified_phase TEXT",
         # Починка CHECK плана подписки (schema_v189): код перешёл на тариф 'paid',
         # а базовая схема разрешала только старые 'starter'/'pro'/'enterprise' —
         # из-за чего ВСЯ выдача 'paid' (мини-апп, billing, восстановление подписок)
@@ -923,7 +927,9 @@ async def main() -> None:
         # перепроверка → возврат в строй (иначе аккаунт замирал навсегда).
         from services import account_rehab
         asyncio.create_task(
-            _resilient("account_rehab", account_rehab.run_rehab_loop, pool)
+            # bot нужен циклу, чтобы сообщать об итоге: вернувшийся аккаунт
+            # иначе будет списан, а застрявший — вечно ждать разбора.
+            _resilient("account_rehab", account_rehab.run_rehab_loop, pool, bot)
         )
         # Автобэкап БД во внешнее хранилище (Telegram). После инцидента с потерей
         # эфемерной базы: система сама регулярно снимает дамп и кладёт его ЗА

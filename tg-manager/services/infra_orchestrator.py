@@ -282,6 +282,53 @@ async def get_readiness_warning(pool: asyncpg.Pool, owner_id: int) -> str | None
     )
 
 
+async def get_dead_proxy_warning(pool: asyncpg.Pool, owner_id: int) -> str | None:
+    """Мягкое предупреждение: часть флота сидит на прокси, который не отвечает.
+
+    Такие аккаунты выбор операций теперь пропускает (resource_selector), то есть
+    масштаб операции окажется меньше ожидаемого — и человек должен понимать,
+    почему. А если не отвечают ВСЕ прокси, операция пойдёт и упадёт по сети:
+    об этом надо предупредить до запуска, а не после отчёта с ошибками.
+
+    Fail-open: сбой расчёта не мешает работать.
+    """
+    from services.resource_selector import PROXY_DEAD_STREAK
+
+    try:
+        row = await pool.fetchrow(
+            """SELECT COUNT(*) FILTER (WHERE a.proxy_id IS NOT NULL) AS with_proxy,
+                      COUNT(*) FILTER (
+                          WHERE p.is_alive IS FALSE
+                            AND COALESCE(p.consecutive_failures,0) >= $2
+                      ) AS on_dead
+                 FROM tg_accounts a
+                 LEFT JOIN user_proxies p ON p.id = a.proxy_id
+                WHERE a.owner_id=$1 AND a.is_active
+                  AND COALESCE(a.acc_status,'ok')
+                      NOT IN ('banned','spamblock','deactivated','session_expired')""",
+            owner_id, PROXY_DEAD_STREAK)
+    except Exception as e:
+        log.debug("get_dead_proxy_warning failed owner=%s: %s", owner_id, e)
+        return None
+    if not row:
+        return None
+    dead = int(row["on_dead"] or 0)
+    if not dead:
+        return None
+    with_proxy = int(row["with_proxy"] or 0)
+    if dead >= with_proxy:
+        return (
+            f"🔌 Прокси не отвечает у ВСЕХ {dead} аккаунтов с прокси. Операция "
+            f"запустится, но упадёт по сети. Аккаунты при этом целы — замените "
+            f"прокси или переназначьте аккаунты на рабочий."
+        )
+    return (
+        f"🔌 {dead} из {with_proxy} аккаунтов сидят на прокси, который не отвечает — "
+        f"они будут пропущены, и операция охватит меньше, чем вы ожидаете. "
+        f"Аккаунты целы: дело в прокси."
+    )
+
+
 async def get_pressure_warning(
     pool: asyncpg.Pool,
     owner_id: int,

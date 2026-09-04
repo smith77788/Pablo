@@ -29,6 +29,41 @@ from services import flood_engine
 
 log = logging.getLogger(__name__)
 
+# Серия неудачных проверок, после которой прокси считается мёртвым.
+# Согласовано со сторожем прокси (proxy_watchdog.FAIL_STREAK_TO_ALERT): именно
+# при этой серии владельцу сообщают о смерти прокси. Одна-две неудачи — моргание.
+PROXY_DEAD_STREAK = 3
+
+
+def _proxy_is_dead(row) -> bool:
+    """Заведомо ли мёртв прокси этого аккаунта.
+
+    Аккаунт без прокси мёртвым НЕ считается: работа с реального IP хоста —
+    законный режим, а не поломка.
+    """
+    try:
+        alive = row["proxy_alive"]
+        streak = row["proxy_fail_streak"]
+    except (KeyError, TypeError, IndexError):
+        return False   # старая выборка без этих полей — не наше дело
+    return alive is False and int(streak or 0) >= PROXY_DEAD_STREAK
+
+
+def split_by_dead_proxy(rows: list) -> tuple[list, list]:
+    """Разделить аккаунты на пригодные и «сидящие на мёртвом прокси».
+
+    Разрыв, который это закрывает: единая дверь выбора аккаунтов не смотрела на
+    живость прокси вообще. Аккаунт, чей прокси перестал отвечать, продолжал
+    попадать в КАЖДУЮ операцию; каждая попытка падала сетевой ошибкой, съедала
+    слот и попадала в отчёт как ошибка аккаунта. Снаружи это выглядит как
+    «аккаунты сломались», и человек идёт чинить аккаунты — самое дорогое, что
+    у него есть, — вместо замены дешёвого прокси.
+    """
+    usable, blocked = [], []
+    for r in rows:
+        (blocked if _proxy_is_dead(r) else usable).append(r)
+    return usable, blocked
+
 
 async def select_account(
     pool: asyncpg.Pool,
@@ -210,13 +245,35 @@ async def select_all_active(
                    a.tags, a.pool, a.labels, a.warnings, a.project,
                    a.trust_score, a.cooldown_until,
                    COALESCE(a.acc_status, 'active') AS acc_status,
-                   p.proxy_url, p.geo_country
+                   p.proxy_url, p.geo_country,
+                   p.is_alive AS proxy_alive,
+                   COALESCE(p.consecutive_failures, 0) AS proxy_fail_streak
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
             WHERE {where}
             ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
         *params,
     )
+
+    # Аккаунты на заведомо мёртвом прокси убираем: сеть до Telegram у них нет,
+    # каждая попытка — гарантированная ошибка. Но если так выглядит ВЕСЬ флот,
+    # операцию не рушим (иначе это читается как «аккаунтов нет», что неверно и
+    # уводит человека не туда) — работаем и предупреждаем. Тот же приём, что у
+    # фильтра дневного бюджета ниже.
+    if rows:
+        _usable, _dead = split_by_dead_proxy(rows)
+        if _dead and _usable:
+            log.info(
+                "select_all_active: пропущено %d аккаунтов на мёртвых прокси "
+                "(owner=%d)", len(_dead), owner_id,
+            )
+            rows = _usable
+        elif _dead and not _usable:
+            log.warning(
+                "select_all_active: у ВСЕХ %d аккаунтов прокси не отвечает "
+                "(owner=%d) — операция пойдёт, но упадёт по сети: замените прокси",
+                len(_dead), owner_id,
+            )
 
     if respect_daily_budget and rows:
         try:
