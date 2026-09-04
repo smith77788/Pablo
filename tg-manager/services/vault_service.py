@@ -394,9 +394,24 @@ async def list_chats(pool, owner_id: int, limit: int = 100) -> list[dict]:
 
 async def list_messages(pool, owner_id: int, chat_id: int,
                         limit: int = 200, offset: int = 0,
-                        filters: dict | None = None) -> list[dict]:
+                        filters: dict | None = None,
+                        newest_first: bool = False) -> dict:
     """Сообщения чата с опциональными фильтрами: media_only / deleted_only /
-    edited_only / direction ('in'|'out'). Всё скоупится по owner_id."""
+    edited_only / direction ('in'|'out'). Всё скоупится по owner_id.
+
+    `newest_first=True` — брать сообщения С КОНЦА переписки (как любой
+    мессенджер), а `offset` тогда означает «сколько последних пропустить»,
+    то есть шаг назад по истории. Результат ВСЕГДА возвращается в
+    хронологическом порядке — переворот делается здесь, чтобы вызывающий не
+    думал о направлении выборки.
+
+    Раньше выборка всегда шла с НАЧАЛА архива по возрастанию: в переписке из
+    500 сообщений экран показывал 200 самых СТАРЫХ, прокручивал их в конец —
+    и создавал полное впечатление, что это и есть весь чат. Свежие сообщения
+    были недостижимы.
+
+    Возвращает {"messages": [...], "has_more": bool}.
+    """
     f = filters or {}
     cond = ["owner_id=$1", "chat_id=$2"]
     if f.get("media_only"):
@@ -408,32 +423,65 @@ async def list_messages(pool, owner_id: int, chat_id: int,
     args = [owner_id, chat_id]
     if f.get("direction") in ("in", "out"):
         args.append(f["direction"]); cond.append(f"direction=${len(args)}")
-    args.append(min(int(limit), 1000)); lim_i = len(args)
+    lim = min(max(int(limit), 1), 1000)
+    # Берём на одну строку больше запрошенного — так узнаём про «есть ещё»
+    # без второго COUNT-запроса по чату.
+    args.append(lim + 1); lim_i = len(args)
     args.append(max(int(offset), 0)); off_i = len(args)
+    order = ("msg_date DESC NULLS LAST, msg_id DESC" if newest_first
+             else "msg_date ASC NULLS FIRST, msg_id ASC")
     rows = await pool.fetch(
         f"""SELECT msg_id, direction, text_enc, media_type, media_file_id, media_name,
                    media_size, msg_date, is_deleted, is_edited
             FROM vault_messages WHERE {' AND '.join(cond)}
-            ORDER BY msg_date ASC NULLS FIRST, msg_id ASC LIMIT ${lim_i} OFFSET ${off_i}""",
+            ORDER BY {order} LIMIT ${lim_i} OFFSET ${off_i}""",
         *args)
-    return [_ui_message(r) for r in rows]
+    has_more = len(rows) > lim
+    rows = rows[:lim]
+    out = [_ui_message(r) for r in rows]
+    if newest_first:
+        out.reverse()          # наружу — всегда хронологический порядок
+    return {"messages": out, "has_more": has_more}
 
 
-async def export_data(pool, owner_id: int, chat_id: int | None = None) -> dict:
+# Потолок экспорта. Раньше выборка была неограниченной: «Экспорт всего архива»
+# на большой переписке тянул В ПАМЯТЬ каждую строку, расшифровывал её и собирал
+# из этого одну HTML-страницу — предсказуемый способ уронить процесс. При
+# упирании в потолок берём САМОЕ СВЕЖЕЕ (оно нужнее) и честно это помечаем.
+_EXPORT_LIMIT = 50000
+
+
+async def export_data(pool, owner_id: int, chat_id: int | None = None,
+                      limit: int = _EXPORT_LIMIT) -> dict:
     """Данные для экспорта архива (весь или один чат): расшифрованные сообщения,
-    сгруппированные по чатам. Owner-scoped."""
+    сгруппированные по чатам. Owner-scoped.
+
+    Возвращает {..., "truncated": bool, "exported": int, "total": int}.
+    """
     if chat_id is not None:
+        total = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM vault_messages WHERE owner_id=$1 AND chat_id=$2",
+            owner_id, chat_id) or 0)
         rows = await pool.fetch(
             """SELECT chat_id, peer_name, peer_username, msg_id, direction, text_enc,
                       media_type, media_name, msg_date, is_deleted, is_edited
                FROM vault_messages WHERE owner_id=$1 AND chat_id=$2
-               ORDER BY msg_date ASC NULLS FIRST, msg_id ASC""", owner_id, chat_id)
+               ORDER BY msg_date DESC NULLS LAST, msg_id DESC LIMIT $3""",
+            owner_id, chat_id, limit + 1)
     else:
+        total = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM vault_messages WHERE owner_id=$1", owner_id) or 0)
         rows = await pool.fetch(
             """SELECT chat_id, peer_name, peer_username, msg_id, direction, text_enc,
                       media_type, media_name, msg_date, is_deleted, is_edited
                FROM vault_messages WHERE owner_id=$1
-               ORDER BY chat_id, msg_date ASC NULLS FIRST, msg_id ASC""", owner_id)
+               ORDER BY msg_date DESC NULLS LAST, msg_id DESC LIMIT $2""",
+            owner_id, limit + 1)
+    truncated = len(rows) > limit
+    rows = list(rows[:limit])
+    # Выбирали с конца (чтобы при усечении досталось самое свежее), но в файле
+    # переписка должна читаться сверху вниз — возвращаем хронологический порядок.
+    rows.reverse()
     chats: dict = {}
     for r in rows:
         c = chats.setdefault(r["chat_id"], {
@@ -449,7 +497,15 @@ async def export_data(pool, owner_id: int, chat_id: int | None = None) -> dict:
             "date": r["msg_date"].isoformat() if r["msg_date"] else None,
             "deleted": bool(r["is_deleted"]), "edited": bool(r["is_edited"]),
         })
-    return {"owner_id": owner_id, "chats": list(chats.values())}
+    return {
+        "owner_id": owner_id,
+        "chats": list(chats.values()),
+        "exported": len(rows),
+        "total": total,
+        # Молча урезанный экспорт хуже отсутствующего: человек будет думать,
+        # что сохранил всю переписку.
+        "truncated": truncated,
+    }
 
 
 # Поиск идёт страницами: текст зашифрован, ILIKE по нему невозможен, поэтому

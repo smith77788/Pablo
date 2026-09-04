@@ -13667,7 +13667,13 @@ function setVaultFilter(f) {
   reloadVaultChat();
 }
 
+// Сколько последних сообщений уже показано: offset = шаг назад по истории.
+// Раньше грузились ПЕРВЫЕ 200 с начала архива и прокручивались в конец — в
+// длинном чате это выглядело как весь чат, а свежие сообщения были недоступны.
+let VAULT_CHAT_OFFSET = 0;
+
 async function reloadVaultChat() {
+  VAULT_CHAT_OFFSET = 0;
   const body = document.getElementById('vchatBody');
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
@@ -13675,9 +13681,34 @@ async function reloadVaultChat() {
     const d = await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+qs);
     const msgs = d.messages || [];
     if (!msgs.length) { body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px 12px">Нет сохранённых сообщений</div>'; return; }
-    body.innerHTML = msgs.map(m => vaultBubble(m)).join('');
+    VAULT_CHAT_OFFSET = msgs.length;
+    const older = d.has_more
+      ? `<div id="vchatMore" style="text-align:center;padding:8px"><button class="btn btn-s" style="font-size:12px" onclick="loadOlderVaultMessages()">↑ Показать более ранние</button></div>`
+      : '';
+    body.innerHTML = older + msgs.map(m => vaultBubble(m)).join('');
     body.scrollTop = body.scrollHeight;
   } catch(e) { body.innerHTML = errHtml(e.message,'reloadVaultChat()'); }
+}
+
+async function loadOlderVaultMessages() {
+  const body = document.getElementById('vchatBody');
+  const more = document.getElementById('vchatMore');
+  if (more) more.innerHTML = '<div style="font-size:12px;color:var(--hint)">Загружаю…</div>';
+  try {
+    const base = VAULT_FILTER !== 'all' ? ('?'+VAULT_FILTER+'=1&') : '?';
+    const d = await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+base+'offset='+VAULT_CHAT_OFFSET);
+    const msgs = d.messages || [];
+    VAULT_CHAT_OFFSET += msgs.length;
+    // Сохраняем позицию прокрутки: иначе дозагрузка «прыгает» под пальцем.
+    const before = body.scrollHeight;
+    const olderBtn = d.has_more
+      ? `<div id="vchatMore" style="text-align:center;padding:8px"><button class="btn btn-s" style="font-size:12px" onclick="loadOlderVaultMessages()">↑ Показать более ранние</button></div>`
+      : '<div style="text-align:center;padding:8px;font-size:12px;color:var(--hint)">Начало переписки</div>';
+    if (more) more.outerHTML = olderBtn + msgs.map(m => vaultBubble(m)).join('');
+    body.scrollTop += body.scrollHeight - before;
+  } catch(e) {
+    if (more) more.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(e.message||'Ошибка')}</div>`;
+  }
 }
 
 function fmtBytes(n) {

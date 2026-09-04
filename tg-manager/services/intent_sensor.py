@@ -34,6 +34,41 @@ DEFAULT_RULES = [
 
 _STAGE_RANK = {s: i for i, s in enumerate(VALID_STAGES)}
 
+# Воронка продаж: lost — не «продвинутее» won, это отдельный терминальный исход.
+# Общий _STAGE_RANK ставил lost на самый верх (5) просто по позиции в кортеже,
+# из-за чего фраза-отказ перебивала уже закрытую сделку.
+_PIPELINE = ("lead", "contact", "proposal", "negotiation", "won")
+_PIPELINE_RANK = {s: i for i, s in enumerate(_PIPELINE)}
+
+
+def decide_stage(current: str | None, matched_stages: list[str]) -> str | None:
+    """Куда двигать стадию по совпавшим правилам. None — не двигать.
+
+    Правила движения (раньше их не было вовсе — стадия просто менялась на
+    совпавшую, из-за чего клиент из «Выиграно», спросивший «а какая цена на
+    второй заказ», откатывался в «Предложение» и портил воронку):
+      • только ВПЕРЁД по воронке, назад — никогда;
+      • «Проиграно» — терминальный отказ, ставится с любой стадии, кроме
+        «Выиграно»: закрытую сделку одной фразой отменять нельзя;
+      • из «Проиграно» клиент может вернуться в воронку (передумал).
+
+    Чистая функция — проверяется отдельно от БД.
+    """
+    stages = [s for s in matched_stages if s in _STAGE_RANK]
+    if not stages:
+        return None
+    if "lost" in stages:
+        # Явный отказ информативнее любого позитивного совпадения в том же
+        # сообщении, но закрытую сделку он не трогает.
+        return None if current == "won" else ("lost" if current != "lost" else None)
+    target = max(stages, key=lambda s: _PIPELINE_RANK.get(s, -1))
+    if target == current:
+        return None
+    # Из lost — возвращаем в воронку (человек передумал), иначе только вперёд.
+    if current in (None, "lost"):
+        return target
+    return target if _PIPELINE_RANK.get(target, -1) > _PIPELINE_RANK.get(current, -1) else None
+
 
 async def list_rules(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     rows = await pool.fetch(
@@ -118,6 +153,46 @@ async def _ensure_contact(pool: asyncpg.Pool, owner_id: int, peer: dict) -> str 
     })
 
 
+# Частицы отрицания перед фразой. Подстрочное совпадение без этой проверки
+# трактовало «не готов» как готовность купить и двигало клиента в «Переговоры» —
+# ровно наоборот сказанному. Фраза «готов» входит в рекомендованный набор, так
+# что срабатывало это постоянно.
+_NEGATIONS = frozenset({"не", "нет", "без", "никогда", "вряд"})
+_WORD_BEFORE_RE = _re.compile(r"([а-яёa-z]+)[\s,]*$")
+
+
+def _negated_before(low: str, idx: int) -> bool:
+    """Стоит ли прямо перед совпадением частица отрицания?
+
+    Сравниваем ЦЕЛОЕ предыдущее слово, а не хвост строки: иначе «мне» в
+    «мне не интересно» сам выглядел бы как «не» и глушил бы верное совпадение.
+    """
+    if idx <= 0:
+        return False
+    m = _WORD_BEFORE_RE.search(low[:idx])
+    return bool(m and m.group(1) in _NEGATIONS)
+
+
+def _contains(needle: str, low: str) -> bool:
+    """Вхождение подстроки, не считая случаев с отрицанием перед ней.
+
+    Если сама фраза начинается с отрицания («не интересно»), проверку не
+    применяем — отрицание в ней и есть смысл правила.
+    """
+    if not needle:
+        return False
+    first = needle.split(None, 1)[0] if needle.split() else ""
+    self_negated = first in _NEGATIONS
+    start = 0
+    while True:
+        idx = low.find(needle, start)
+        if idx < 0:
+            return False
+        if self_negated or not _negated_before(low, idx):
+            return True
+        start = idx + 1        # это вхождение отрицали — ищем следующее
+
+
 def _phrase_matches(phrase: str, low: str) -> bool:
     """Совпадает ли правило с текстом (уже в нижнем регистре)?
 
@@ -126,6 +201,10 @@ def _phrase_matches(phrase: str, low: str) -> bool:
       • несколько альтернатив через | — «цена|стоимость|прайс» (любая)
       • регэксп с префиксом re: — «re:\\d{4,}\\s*руб» (гибкие шаблоны)
     Битый регэксп никогда не роняет сканер — просто не матчит.
+
+    Подстрочные формы не срабатывают, если прямо перед фразой стоит отрицание
+    («не готов» ≠ «готов»). На регэксп-правила это не распространяется: там
+    автор выражает условие сам.
     """
     p = (phrase or "").strip()
     if not p:
@@ -139,8 +218,8 @@ def _phrase_matches(phrase: str, low: str) -> bool:
         except _re.error:
             return False
     if "|" in p:
-        return any(a.strip() and a.strip().lower() in low for a in p.split("|"))
-    return p.lower() in low
+        return any(_contains(a.strip().lower(), low) for a in p.split("|") if a.strip())
+    return _contains(p.lower(), low)
 
 
 def _match(text: str, rules: list[dict]) -> list[dict]:
@@ -167,9 +246,6 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
     if not contact_id:
         return {"matched": len(matched), "error": "no_contact"}
 
-    # Целевая стадия — самая «продвинутая» среди совпавших (proposal > lead).
-    stages = [m["stage"] for m in matched if m["stage"] in _STAGE_RANK]
-    target_stage = max(stages, key=lambda s: _STAGE_RANK[s]) if stages else None
     new_tags = [m["tag"] for m in matched if m["tag"]]
     want_notify = any(m["notify"] for m in matched)
 
@@ -182,7 +258,11 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
         owner_id, contact_id)
 
     added_tags = [t for t in dict.fromkeys(new_tags) if t not in cur_tags]
-    stage_changed = bool(target_stage) and target_stage != cur_stage
+    # Движение стадии решает чистая функция: только вперёд по воронке, отказ не
+    # отменяет закрытую сделку. Иначе любая фраза перекидывала клиента куда
+    # попало, в том числе назад.
+    target_stage = decide_stage(cur_stage, [m["stage"] for m in matched if m["stage"]])
+    stage_changed = bool(target_stage)
 
     if added_tags:
         await pool.execute(
