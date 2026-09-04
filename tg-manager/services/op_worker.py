@@ -9999,6 +9999,7 @@ async def _exec_mass_invite(
     """
     from collections import deque
 
+    from services import daughter_groups
     from services import mass_inviter_engine as inv
 
     group = params.get("group", "")
@@ -10054,6 +10055,11 @@ async def _exec_mass_invite(
     _bulk_api = None if _bulk_api is None else bool(_bulk_api)
     # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер).
     _link_msg = params.get("link_message") or None
+    # «Мать-Дочка»: приглашать не в боевую (мать) группу, а в одноразовую дочернюю
+    # с закреплённым редиректом на мать — риск бана инвайта поглощает расходник.
+    # Если Telegram закрывает дочернюю группу, op_worker подставляет следующую и
+    # продолжает прогон вместо полной остановки кампании (см. _rotate_daughter).
+    _use_daughter = bool(params.get("use_daughter_groups"))
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
@@ -10342,6 +10348,50 @@ async def _exec_mass_invite(
                         "повторите — параллельно одну сессию использовать нельзя "
                         "(риск AUTH_KEY_DUPLICATED)."),
         }
+
+    # ── «Мать-Дочка»: подменяем group дочерней, пока она жива ──────────────────
+    _mother_ref = group if _use_daughter else ""
+    _daughter_id: int | None = None
+    _daughter_rotations = 0
+    if _use_daughter:
+        _dg = await daughter_groups.get_or_create_active(
+            pool, owner_id, _mother_ref, dict(accounts[0]))
+        if not _dg.get("ok"):
+            return {"status": "failed",
+                    "summary": f"⚠️ Не удалось подготовить дочернюю группу: {_dg.get('error')}"}
+        group = _dg["group_ref"]
+        _daughter_id = _dg["id"]
+        log.info("mass_invite op=%d: инвайт идёт в дочернюю группу (мать %s)",
+                 op_id, _mother_ref[:80])
+
+    async def _rotate_daughter(reason: str) -> bool:
+        """Дочерняя группа сгорела: пробуем следующую вместо остановки прогона.
+
+        True — group заменена, можно продолжать текущий прогон. False — не в
+        режиме дочерних групп, лимит ротаций исчерпан или создание не вышло;
+        вызывающий код останавливает прогон как раньше (group_broken).
+        """
+        nonlocal group, _daughter_id, _daughter_rotations
+        if not _use_daughter or _daughter_id is None:
+            return False
+        if _daughter_rotations >= daughter_groups.MAX_ROTATIONS_PER_RUN:
+            log.warning("mass_invite op=%d: лимит ротаций дочерних групп исчерпан (%d)",
+                        op_id, daughter_groups.MAX_ROTATIONS_PER_RUN)
+            return False
+        await daughter_groups.mark_burned(pool, _daughter_id, reason)
+        _creator = next((a for a in accounts if int(a["id"]) not in retired), accounts[0])
+        _dg = await daughter_groups.get_or_create_active(
+            pool, owner_id, _mother_ref, dict(_creator))
+        if not _dg.get("ok"):
+            log.warning("mass_invite op=%d: следующую дочернюю группу создать не удалось: %s",
+                        op_id, _dg.get("error"))
+            return False
+        _daughter_rotations += 1
+        group = _dg["group_ref"]
+        _daughter_id = _dg["id"]
+        log.info("mass_invite op=%d: дочерняя группа сожжена (%s) — переключились на новую",
+                 op_id, reason[:120])
+        return True
 
     async def _rest_invite_account(acc_id: int, res: dict) -> None:
         """Дать флагнутому/зафлуженному инвайт-аккаунту cooldown через ЕДИНЫЙ
@@ -10760,6 +10810,12 @@ async def _exec_mass_invite(
                 if not _dec.allowed:
                     _give_back(queue, batch)
                     if _dec.abort:
+                        # Ключ governor'а — от МАТЕРИ (см. _group_key), а не текущей
+                        # дочерней: после ротации история liveness/частоты новой
+                        # дочерней группы отсутствует, поэтому новая проверка увидит
+                        # «нет данных» и поведёт себя ОСТОРОЖНЕЕ, а не рискованнее.
+                        if await _rotate_daughter(_dec.reason):
+                            continue
                         group_broken = True
                         _group_broken_reason = _dec.reason
                         log.warning("mass_invite op=%d: safe-режим СТОП по чату: %s",
@@ -10984,13 +11040,15 @@ async def _exec_mass_invite(
             _gerr = next((str(e) for e in (res.get("errors") or [])
                           if str(e).startswith("group error")), "")
             if _gerr:
-                group_broken = True
                 _group_reason = _gerr.split("group error:", 1)[-1].strip()
+                await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
+                if await _rotate_daughter(_group_reason):
+                    continue
+                group_broken = True
                 log.warning(
                     "mass_invite op=%d: группа %s недоступна (%s) — остановка, чтобы не жечь флот",
                     op_id, group, _group_reason[:120],
                 )
-                await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
                 break
 
             if res.get("peer_flood") or res.get("flood_wait"):
