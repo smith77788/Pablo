@@ -4465,7 +4465,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="field">
         <label>Способ инвайта</label>
-        <select id="massInviteMethod" class="sel">
+        <select id="massInviteMethod" class="sel" onchange="massInviteMethodToggle()">
           <option value="direct" selected>➕ Обычный (нужны права приглашать)</option>
           <option value="admin">👑 Через админку (обход приватности)</option>
           <option value="link">🔗 Рассылка ссылки в ЛС</option>
@@ -4473,6 +4473,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div style="font-size:12px;color:var(--hint);margin-top:4px">
           «Через админку»: цель делается админом (попадает в чат) и тут же лишается
           прав → остаётся участником. «Ссылка в ЛС»: человек вступает сам.
+        </div>
+      </div>
+      <div class="field" id="massInviteLinkMsgField" style="display:none">
+        <label>Текст приглашения (метод «ссылка в ЛС»)</label>
+        <textarea id="massInviteLinkMsg" rows="3" placeholder="{Привет|Здравствуйте}! Заходите к нам: {link}" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px">
+          <code>{link}</code> — куда подставить ссылку (без него добавится в конец).
+          Поддерживается <b>spintax</b>: <code>{Привет|Здравствуйте}</code> — каждому
+          уйдёт свой вариант. Пусто — текст по умолчанию, одинаковый для всех:
+          десяток аккаунтов с одинаковым сообщением ловит ограничения быстрее всего.
         </div>
       </div>
       <div class="field">
@@ -4526,6 +4536,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           <input type="checkbox" id="massInviteOnePass" onchange="loadInvitePreflight(INV_AUDIENCE)">
           <span>🚀 Один проход (макс. интенсивность)</span>
         </label>
+        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+          <input type="checkbox" id="massInviteReinvite">
+          <span>♻️ Приглашать повторно (не пропускать уже приглашённых)</span>
+        </label>
+        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+          <input type="checkbox" id="massInviteAutoPromote" checked>
+          <span>🛡 Выдавать инвайтерам права приглашать</span>
+        </label>
+        <div class="field-note" style="margin-top:-6px">Аккаунт-админ вашего чата
+          автоматически выдаёт остальным инвайтерам право «Добавлять участников».
+          Без этого инвайтить сможет только он один. <b>Ваши аккаунты станут
+          админами чата</b> — снимите галочку, если этого не нужно.</div>
+        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+          <input type="checkbox" id="massInvitePromoteTrick" checked>
+          <span>👑 Добирать закрытых приватностью через админку</span>
+        </label>
+        <div class="field-note" style="margin-top:-6px">Кого не пустила приватность,
+          пробуем добавить трюком: цель на мгновение делается админом (это и
+          добавляет её в чат) и тут же лишается прав. <b>Посторонний на секунды
+          получает админку вашего чата</b> — снимите галочку, если это неприемлемо.</div>
+        <div class="field-note" style="margin-top:-6px">По умолчанию тех, кого уже
+          приглашали в эту группу, инвайт пропускает. Включайте, только если человек
+          не увидел прошлое приглашение — повторный инвайт раздражает получателя и
+          повышает шанс жалобы на аккаунт.</div>
         <div class="field-note" style="margin-top:-6px">Закрыть аудиторию за один прогон до потолка ёмкости (≈50/аккаунт), полагаясь на живые сигналы флуда, а не на предсказанный суточный лимит. <b style="color:var(--red)">Выше риск бана.</b> Реальную защиту держат FloodWait/PeerFlood и стоп-кран флота.</div>
       </details>
       <div class="field-err" id="massInviteErr"></div>
@@ -15778,6 +15812,15 @@ async function openMassInvite() {
     txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||''));
   }
 }
+function massInviteMethodToggle() {
+  // Поле текста нужно только методу «ссылка в ЛС»; остальным оно ничего не
+  // значит, а лишнее поле на экране запуска читается как настройка, которая
+  // на что-то влияет.
+  const m = document.getElementById('massInviteMethod')?.value;
+  const f = document.getElementById('massInviteLinkMsgField');
+  if (f) f.style.display = (m === 'link') ? '' : 'none';
+}
+
 function massInviteSrcToggle() {
   const src = document.getElementById('massInviteSrc').value;
   const f = document.getElementById('massInviteImportField');
@@ -16182,6 +16225,20 @@ async function submitMassInvite() {
   if (_onePass) body.one_pass = true;
   // Паритет с ботом: способ инвайта + режим объёма.
   body.invite_method = document.getElementById('massInviteMethod')?.value || 'direct';
+  // Свой текст для «ссылки в ЛС»: без него весь флот шлёт одну и ту же фразу.
+  if (body.invite_method === 'link') {
+    const _lm = (document.getElementById('massInviteLinkMsg')?.value||'').trim();
+    if (_lm) body.link_message = _lm;
+  }
+  // Повторный инвайт: итог операции прямо советует «отключите дедуп» —
+  // до этого контрола для такого не было ни на одной поверхности.
+  if (document.getElementById('massInviteReinvite')?.checked) body.skip_invited = false;
+  // Обе механики МЕНЯЮТ состав админов чата и включены по умолчанию — отправляем
+  // явно, чтобы снятая галочка действительно выключала их, а не молча теряла.
+  if (document.getElementById('massInviteAutoPromote') &&
+      !document.getElementById('massInviteAutoPromote').checked) body.auto_promote = false;
+  if (document.getElementById('massInvitePromoteTrick') &&
+      !document.getElementById('massInvitePromoteTrick').checked) body.promote_trick = false;
   const _vm = document.getElementById('massInviteVolMode')?.value;
   if (_vm === 'progressive') body.volume_mode = 'progressive';
   // Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.

@@ -8378,6 +8378,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Режим объёма на аккаунт: "progressive" — по возрасту/доверию аккаунта.
             if str(body.get("volume_mode") or "").strip().lower() == "progressive":
                 params["volume_mode"] = "progressive"
+            # Повторный инвайт уже приглашённым. Исполнитель этот флаг читает и
+            # прямо советует его в итоге («или отключите дедуп»), но передать его
+            # было неоткуда: ни одна поверхность не давала контрола. Совет,
+            # указывающий на несуществующую настройку, хуже отсутствия совета.
+            if body.get("skip_invited") is False:
+                params["skip_invited"] = False
+            # Автовыдача админки инвайтерам и промоут-трюк включены в исполнителе
+            # по умолчанию и МЕНЯЮТ состав админов чата: первая делает админами
+            # аккаунты оператора, второй на секунды выдаёт админку постороннему.
+            # Отключить их было нечем — теперь можно.
+            if body.get("auto_promote") is False:
+                params["auto_promote"] = False
+            if body.get("promote_trick") is False:
+                params["promote_trick"] = False
             if account_ids:
                 params["account_ids"] = account_ids
             # Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.
