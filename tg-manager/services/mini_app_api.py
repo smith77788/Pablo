@@ -11334,6 +11334,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("delete_funnel_step step=%d uid=%d", step_id, uid)
             return _err("Не удалось удалить шаг", 500)
 
+    async def update_funnel_step(request: web.Request) -> web.Response:
+        """Изменить текст и задержку существующего шага воронки.
+
+        Правки шага в мини-приложении не было вовсе — только добавить и удалить.
+        Опечатка в третьем шаге из пяти означала удалить его и добавить заново,
+        а добавление кладёт шаг В КОНЕЦ: пользователь чинил опечатку ценой
+        поломанного порядка цепочки. В боте правка при этом давно есть.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            step_id = int(request.match_info["step_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid step_id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        # Владение — тем же JOIN, что у удаления.
+        step = await _safe_fetchrow(pool,
+            """SELECT fs.id FROM funnel_steps fs
+               JOIN funnels f ON f.id=fs.funnel_id
+               JOIN managed_bots mb ON mb.bot_id=f.bot_id
+               WHERE fs.id=$1 AND mb.added_by=$2""", step_id, uid)
+        if not step:
+            return _err("Шаг не найден", 404)
+
+        sets: list[str] = []
+        args: list = []
+        if body.get("message_text") is not None:
+            text = validate_string(body.get("message_text"), max_len=4096)
+            if not text:
+                return _err("Текст шага не может быть пустым", 400)
+            if check_sql_suspicious(text):
+                return _err("Недопустимые символы в тексте", 400)
+            args.append(text)
+            sets.append(f"message_text=${len(args)}")
+        if body.get("delay_minutes") is not None:
+            _d = validate_integer(body.get("delay_minutes"), min_val=0, max_val=100000)
+            if _d is None:
+                return _err("Задержка должна быть числом", 400)
+            args.append(int(_d))
+            sets.append(f"delay_minutes=${len(args)}")
+        if not sets:
+            return _err("Нечего изменять", 400)
+        args.append(step_id)
+        try:
+            await pool.execute(
+                f"UPDATE funnel_steps SET {', '.join(sets)} WHERE id=${len(args)}", *args)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("update_funnel_step step=%d uid=%d", step_id, uid)
+            return _err("Не удалось изменить шаг", 500)
+
     # ── Competitors ────────────────────────────────────────────────────────────
 
     async def competitors_list(request: web.Request) -> web.Response:
@@ -14790,6 +14845,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/funnel/{funnel_id}/steps", funnel_steps)
     app.router.add_post("/api/miniapp/funnel/{funnel_id}/step", add_funnel_step)
     app.router.add_delete("/api/miniapp/funnel/step/{step_id}", delete_funnel_step)
+    app.router.add_patch("/api/miniapp/funnel/step/{step_id}", update_funnel_step)
     app.router.add_post("/api/miniapp/bot/{bot_id}/funnel", create_funnel)
     # Competitors
     app.router.add_get("/api/miniapp/competitors", competitors_list)

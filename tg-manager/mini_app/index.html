@@ -10307,7 +10307,7 @@ function buildFunnelDetail(d) {
             ${isLast?'':'<div class="ffstep-tail"></div>'}
           </div>
           <div class="ffstep-body">
-            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''}${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
+            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--btn);cursor:pointer;margin-left:8px" onclick='editFunnelStep(${JSON.stringify(s)})'>✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
             ${statLine}
             <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
             ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
@@ -10321,7 +10321,7 @@ function buildFunnelDetail(d) {
     : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Нет шагов.</div></div>`;
 
   const addStepForm = `
-    <div class="sec" style="margin-top:12px">➕ Добавить шаг</div>
+    <div class="sec" style="margin-top:12px" id="fsTitle">➕ Добавить шаг</div>
     <div class="lst" style="margin:0 16px">
       <div class="field"><textarea id="fsText" rows="3" maxlength="4096" placeholder="Текст следующего сообщения…"></textarea></div>
       <div class="field">
@@ -10335,7 +10335,8 @@ function buildFunnelDetail(d) {
           <option value="10080">Через 7 дней</option>
         </select>
       </div>
-      <button class="btn btn-p" style="width:100%" onclick="addFunnelStep()">➕ Добавить шаг</button>
+      <button class="btn btn-p" style="width:100%" id="fsBtn" onclick="addFunnelStep()">➕ Добавить шаг</button>
+      <div id="fsCancel" style="display:none;text-align:center;padding:8px;color:var(--hint);cursor:pointer;font-size:13px" onclick="cancelEditFunnelStep()">Отменить правку</div>
     </div>`;
 
   return `
@@ -10371,6 +10372,51 @@ async function addFunnelStep() {
     openFunnelDetail(CUR_FUNNEL_ID, document.getElementById('fd-name')?.textContent);
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
+// Правка шага переиспользует форму добавления. Раньше правки не было вовсе:
+// опечатку в третьем шаге из пяти чинили удалением и повторным добавлением, а
+// добавление кладёт шаг В КОНЕЦ — порядок цепочки ломался.
+let FS_EDIT_ID = null;
+function editFunnelStep(step) {
+  FS_EDIT_ID = step.id;
+  const t = document.getElementById('fsText');
+  if (t) { t.value = step.message_text || ''; t.focus(); }
+  const d = document.getElementById('fsDelay');
+  if (d) {
+    const v = String(step.delay_minutes ?? 0);
+    // Задержка могла быть выставлена из бота значением не из списка —
+    // добавляем его как вариант, иначе правка молча сменила бы задержку.
+    if (!Array.from(d.options).some(o=>o.value===v)) {
+      d.add(new Option(v+' мин', v));
+    }
+    d.value = v;
+  }
+  const ti = document.getElementById('fsTitle'); if (ti) ti.textContent = '✏️ Изменить шаг';
+  const b = document.getElementById('fsBtn');
+  if (b) { b.textContent = '💾 Сохранить шаг'; b.setAttribute('onclick','saveFunnelStep()'); }
+  const c = document.getElementById('fsCancel'); if (c) c.style.display = 'block';
+}
+function cancelEditFunnelStep() {
+  FS_EDIT_ID = null;
+  const t = document.getElementById('fsText'); if (t) t.value = '';
+  const ti = document.getElementById('fsTitle'); if (ti) ti.textContent = '➕ Добавить шаг';
+  const b = document.getElementById('fsBtn');
+  if (b) { b.textContent = '➕ Добавить шаг'; b.setAttribute('onclick','addFunnelStep()'); }
+  const c = document.getElementById('fsCancel'); if (c) c.style.display = 'none';
+}
+async function saveFunnelStep() {
+  if (!FS_EDIT_ID) return;
+  const text = document.getElementById('fsText').value.trim();
+  if (!text) { toast('Введите текст шага'); return; }
+  const delay = parseInt(document.getElementById('fsDelay').value)||0;
+  try {
+    await api('/api/miniapp/funnel/step/'+FS_EDIT_ID, {method:'PATCH',
+      body:JSON.stringify({message_text:text, delay_minutes:delay})});
+    toast('💾 Шаг изменён');
+    FS_EDIT_ID = null;
+    openFunnelDetail(CUR_FUNNEL_ID, document.getElementById('fd-name')?.textContent);
+  } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
 async function deleteFunnelStep(stepId) {
   if (!await askConfirm('Удалить этот шаг?')) return;
   try {
