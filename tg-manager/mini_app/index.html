@@ -16325,7 +16325,7 @@ async function openDmCampaigns() {
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↻ Повторить</button>`:''}
           ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick='editDm(${JSON.stringify(c)})'>✏️</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id})">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}')">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -16445,8 +16445,14 @@ async function launchDm(id, status) {
     openDmCampaigns();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
-async function deleteDm(id) {
-  if (!await askConfirm('Удалить кампанию?')) return;
+async function deleteDm(id, status) {
+  // Удаление идущей кампании останавливает рассылку (движок видит исчезнувшую
+  // строку и выходит) и стирает журнал отправок — значит и отчёт, и защиту от
+  // повторной отправки тем же людям. Об этом надо предупредить.
+  const msg = status==='running'
+    ? 'Удалить ИДУЩУЮ кампанию?\n\nРассылка остановится, а журнал отправок будет стёрт — отчёт пропадёт, и при новой кампании эти люди смогут получить сообщение повторно.\n\nЕсли нужно просто прерваться — используйте паузу.'
+    : 'Удалить кампанию?\n\nЖурнал отправок будет стёрт вместе с ней: отчёт пропадёт, и при новой кампании эти люди смогут получить сообщение повторно.';
+  if (!await askConfirm(msg)) return;
   try {
     await api(`/api/miniapp/dm_campaign/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
