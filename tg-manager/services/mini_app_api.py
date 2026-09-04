@@ -1915,7 +1915,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       -- (фронт рендерит как «${{trust}}%»). Без *100 всё было ~1%.
                       ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until, cluster, stage
+                      cooldown_until, cluster, stage,
+                      -- Живость прокси СКАЛЯРНЫМ подзапросом, а не JOIN: у
+                      -- tg_accounts и user_proxies совпадают id/owner_id/
+                      -- is_active, и после JOIN условия из _accounts_where
+                      -- стали бы неоднозначными — запрос упал бы, а список
+                      -- аккаунтов молча опустел.
+                      (proxy_id IS NOT NULL) AS has_proxy,
+                      (SELECT p.is_alive FROM user_proxies p
+                        WHERE p.id = tg_accounts.proxy_id) AS proxy_alive,
+                      (SELECT COALESCE(p.label, p.geo_country) FROM user_proxies p
+                        WHERE p.id = tg_accounts.proxy_id) AS proxy_label
                FROM tg_accounts WHERE {where}
                ORDER BY is_active DESC, last_used DESC NULLS LAST
                LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)

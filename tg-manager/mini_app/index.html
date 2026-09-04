@@ -8737,7 +8737,14 @@ function renderAccounts(list) {
     // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
     else if (a.health_status==='quarantine') { status='🛑 На паузе'; cls='b-rd'; ava_cls='ava-red'; }
     else if (a.health_status==='at_risk') { status='⚠️ Под риском'; cls='b-or'; ava_cls='ava-orange'; }
+    // Мёртвый прокси: аккаунт цел, но каждая его операция падает по сети. Без
+    // этого он показывался «Активен», и человек шёл чинить аккаунт вместо
+    // замены прокси. Аккаунты БЕЗ прокси работают с адреса хоста — это норма.
+    else if (a.has_proxy && a.proxy_alive === false) { status='🔌 Прокси'; cls='b-rd'; ava_cls='ava-red'; }
     else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
+    const proxyNote = (a.has_proxy && a.proxy_alive === false)
+      ? `<div class="acc-phone" style="color:var(--red)">🔌 прокси не отвечает${a.proxy_label?' · '+esc(a.proxy_label):''} — аккаунт цел, замените прокси</div>`
+      : '';
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
@@ -8752,6 +8759,7 @@ function renderAccounts(list) {
       <div class="acc-body">
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
+        ${proxyNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
       </div>
       ${right}
