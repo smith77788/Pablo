@@ -8688,8 +8688,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not name or not text:
             return _err("Заполните название и текст", 400)
         # Полный список типов таргета, поддержанных dm_engine._get_targets.
+        # 'crm' читает ЛЕГАСИ-таблицу crm_contacts, которую не показывает ни один
+        # экран — оставлен рабочим только ради уже созданных кампаний. Новые
+        # кампании целятся в 'contacts' (то, что пользователь видит в «Контактах»).
         _ALLOWED_TARGETS = {
-            "all_bots", "bot_users", "cohort", "crm", "segment",
+            "all_bots", "bot_users", "cohort", "crm", "contacts", "segment",
             "parsed_audience", "import_list",
         }
         if target_type not in _ALLOWED_TARGETS:
@@ -8767,6 +8770,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             elif target_type == "segment" and _segment_filters is not None:
                 from services.contacts_hub import repository as _repo
                 total_targets = await _repo.count_segment(pool, uid, _segment_filters)
+            elif target_type == "contacts":
+                # Тем же счётчиком, что показывает экран «Контакты», — иначе
+                # обещанное число получателей разошлось бы с видимым списком.
+                from services.contacts_hub import repository as _repo
+                total_targets = await _repo.count_segment(pool, uid, {})
             elif target_type == "parsed_audience":
                 if target_id:
                     total_targets = await _safe_count(pool,
