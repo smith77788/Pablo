@@ -7090,6 +7090,9 @@ async def _exec_bulk_dm_adhoc(
     # Исходы отправки различаем общим классификатором: флуд-вейт, флаг PeerFlood,
     # мёртвая сессия и «получатель закрыл ЛС» требуют РАЗНОЙ реакции.
     from services.dm_engine import classify_send_result as _classify_send_result
+    # Тот же отбор аккаунта по лимиту, что в кампаниях: чистая, отдельно
+    # протестированная функция вместо второго кустарного round-robin.
+    from services.dm_engine import pick_account_under_cap as _pick_acc
 
     # PeerFlood — флаг на аккаунте, а не на получателе: короткой паузы мало,
     # иначе следующая операция добьёт помеченный аккаунт (паритет с dm_engine).
@@ -7111,6 +7114,13 @@ async def _exec_bulk_dm_adhoc(
         usernames = _uniq
     text: str = params.get("text") or ""
     delay: float = float(params.get("delay") or 2.5)
+    # Потолок сообщений с ОДНОГО аккаунта за эту рассылку. У кампаний дневной
+    # лимит есть давно, у разовой рассылки не было ничего: 1000 получателей на
+    # двух аккаунтах — это по 500 ЛС с каждого и почти верный бан.
+    try:
+        per_acc_cap = int(params.get("per_account_cap") or 0) or None
+    except (TypeError, ValueError):
+        per_acc_cap = None
 
     # Медиа (опц.): файл лежит на диске контейнера, читаем один раз. С медиа
     # текст становится ПОДПИСЬЮ и может быть пустым.
@@ -7190,6 +7200,7 @@ async def _exec_bulk_dm_adhoc(
         skip_count = 0     # получатель недостижим (приватность/блок/удалён) — не наша ошибка
         flood_wait_total = 0.0
         acc_idx = 0
+        sent_by_acc: dict[int, int] = {}
 
         async def _log_step(step: int, target: str, status: str, message: str) -> None:
             """Построчный аудит в «📋 Лог» операции.
@@ -7225,8 +7236,17 @@ async def _exec_bulk_dm_adhoc(
             # Явный вращающийся индекс вместо i % len: при выбывании аккаунта
             # из ротации модуль по счётчику получателей перескакивал через
             # оставшиеся аккаунты и грузил одни сильнее других.
-            acc = active_accounts[acc_idx % len(active_accounts)]
-            acc_idx += 1
+            acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
+            if acc is None:
+                # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
+                # ошибка: честно сообщаем и не дожимаем флот.
+                _left = total - i
+                skip_count += _left
+                await _log_step(i + 1, username, "skip",
+                                f"лимит {per_acc_cap} на аккаунт исчерпан")
+                log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
+                         op_id, _left)
+                break
             _msg = _expand_spintax(text)  # свой вариант текста этому получателю
 
             try:
@@ -7247,6 +7267,7 @@ async def _exec_bulk_dm_adhoc(
 
                 if kind == "sent":
                     ok_count += 1
+                    sent_by_acc[int(acc["id"])] = sent_by_acc.get(int(acc["id"]), 0) + 1
                     await _log_step(i + 1, username, "ok", f"отправлено · акк {acc['id']}")
                 elif kind == "flood":
                     # Флуд-вейт — ограничение КОНКРЕТНОГО аккаунта. Ставим cooldown

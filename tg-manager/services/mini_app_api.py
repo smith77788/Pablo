@@ -7163,6 +7163,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте", 400)
         delay = min(max(validate_integer(data.get("delay", 30), min_val=5, max_val=600) or 30, 5), 600)
+        # Потолок сообщений с одного аккаунта за эту рассылку. Раньше его не
+        # было вовсе: 1000 получателей на двух аккаунтах = по 500 ЛС с каждого.
+        per_account_cap = None
+        if data.get("per_account_cap") not in (None, "", 0):
+            per_account_cap = min(max(
+                validate_integer(data.get("per_account_cap"), min_val=1, max_val=500) or 1,
+                1), 500)
 
         acc_ids = await _alive_accounts(
             uid, [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()])
@@ -7174,7 +7181,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await operation_bus.submit(
                 pool, uid, "bulk_dm_adhoc",
                 {"account_ids": acc_ids, "usernames": usernames,
-                 "text": text, "delay": delay},
+                 "text": text, "delay": delay,
+                 "per_account_cap": per_account_cap},
                 total_items=len(usernames),
                 label=f"Рассылка ЛС: {len(usernames)} получателей × {len(acc_ids)} акк.",
             )
