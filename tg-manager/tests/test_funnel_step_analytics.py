@@ -129,3 +129,54 @@ def test_ui_renders_dropoff():
     assert "step_stats" in seg
     assert "отвал дальше" in seg
     assert "Итог цепочки" in seg
+
+
+# ── Правка шага ───────────────────────────────────────────────────────────────
+
+def _update_step() -> str:
+    start = _API.index("async def update_funnel_step")
+    return _API[start:start + 3000]
+
+
+def test_step_edit_endpoint_exists_and_is_routed():
+    """Правки шага в мини-приложении не было вовсе — только добавить и удалить.
+    Опечатка в третьем шаге из пяти чинилась удалением и повторным
+    добавлением, а добавление кладёт шаг В КОНЕЦ: порядок цепочки ломался.
+    В боте правка при этом давно есть."""
+    assert "async def update_funnel_step" in _API
+    assert 'add_patch("/api/miniapp/funnel/step/{step_id}"' in _API
+
+
+def test_step_edit_is_owner_scoped():
+    body = _update_step()
+    assert "mb.added_by=$2" in body and "404" in body
+
+
+def test_step_edit_validates_text():
+    body = _update_step()
+    assert "validate_string" in body and "check_sql_suspicious" in body
+    assert "Текст шага не может быть пустым" in body
+
+
+def test_step_edit_validates_delay():
+    body = _update_step()
+    assert "min_val=0" in body
+
+
+def test_step_edit_supports_partial_update():
+    body = _update_step()
+    assert "Нечего изменять" in body
+
+
+def test_ui_has_step_edit_and_can_cancel():
+    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    assert "editFunnelStep(" in ui and "saveFunnelStep" in ui
+    assert "cancelEditFunnelStep" in ui, "из режима правки нужен выход"
+    assert "method:'PATCH'" in ui
+
+
+def test_ui_preserves_unlisted_delay_value():
+    """Задержка могла быть выставлена из бота значением не из списка — правка
+    не должна молча её менять."""
+    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    assert "d.add(new Option(" in ui
