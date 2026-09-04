@@ -10767,10 +10767,11 @@ async def _exec_mass_invite(
             # Безопасный режим: копим состояние по чату и держим темп.
             if _safe_mode:
                 from services import smart_invite as _si
-                for _ in range(attempted):
-                    await _si.note_sent(pool, owner_id, _group_key)
-                for _ in range(ok_n):
-                    await _si.note_outcome(pool, owner_id, _group_key, "joined")
+                # Пакетно: раньше здесь было по вызову на цель, и учёт съедал до
+                # двадцати обращений к БД на батч из пяти — последовательно,
+                # внутри цикла инвайта, то есть прямо замедляя прогон.
+                await _si.note_sent(pool, owner_id, _group_key, n=attempted)
+                await _si.note_outcome(pool, owner_id, _group_key, "joined", n=ok_n)
                 # Флуд при инвайте в чат трактуем и как сигнал заморозки ПРИЁМА —
                 # чат отвечает flood не только аккаунту. Ставим паузу чата.
                 if res.get("peer_flood") or res.get("flood_wait"):

@@ -166,9 +166,19 @@ async def can_invite(pool, owner_id: int, chat_key: str,
                               cfg.inter_invite_base_sec)
 
 
-async def note_sent(pool, owner_id: int, chat_key: str) -> None:
-    """Отметить факт отправки инвайта: +1 в окно частоты и в invited_total.
-    Окно сбрасывается, если прошло больше 60 с."""
+async def note_sent(pool, owner_id: int, chat_key: str, n: int = 1) -> None:
+    """Отметить отправку n инвайтов: +n в окно частоты и в invited_total.
+    Окно сбрасывается, если прошло больше 60 с.
+
+    Параметр n не косметика. Исполнитель вызывал эту функцию в цикле «по разу на
+    цель», и на батч из пяти целей уходило до двадцати обращений к БД чисто на
+    учёт — последовательно, внутри цикла инвайта, то есть прямо замедляя прогон.
+    На аудитории в 2000 целей это тысячи лишних round-trip'ов. Семантика от
+    пакетного инкремента не меняется: пять вызовов подряд и один с n=5
+    происходят в одном и том же окне частоты.
+    """
+    if n <= 0:
+        return
     try:
         await _ensure(pool, owner_id, chat_key)
         await pool.execute(
@@ -178,30 +188,33 @@ async def note_sent(pool, owner_id: int, chat_key: str) -> None:
                      THEN now() ELSE window_start END,
                  window_count = CASE
                      WHEN window_start IS NULL OR now() - window_start >= interval '60 seconds'
-                     THEN 1 ELSE window_count + 1 END,
-                 invited_total = invited_total + 1,
+                     THEN $3 ELSE window_count + $3 END,
+                 invited_total = invited_total + $3,
                  updated_at = now()
                WHERE owner_id=$1 AND chat_key=$2""",
-            owner_id, chat_key)
+            owner_id, chat_key, int(n))
     except Exception:
         log_exc_swallow(log, f"smart_invite.note_sent chat={chat_key}")
 
 
 async def note_outcome(pool, owner_id: int, chat_key: str, outcome: str,
-                       cfg: InviteGuardConfig = DEFAULT_CFG) -> None:
-    """Обновить исход: joined|left|reported|chat_flood.
+                       cfg: InviteGuardConfig = DEFAULT_CFG, n: int = 1) -> None:
+    """Обновить исход: joined|left|reported|chat_flood (n штук разом).
 
     chat_flood — ставит заморозку чата с экспоненциальным backoff по числу
-    повторов (чат ответил, что приём заморожен).
+    повторов (чат ответил, что приём заморожен); для него n игнорируется, потому
+    что это одно событие чата, а не счётчик участников.
     """
+    if n <= 0:
+        return
     col = {"joined": "joined_total", "left": "left_total",
            "reported": "reported_total"}.get(outcome)
     try:
         await _ensure(pool, owner_id, chat_key)
         if col:
             await pool.execute(
-                f"UPDATE chat_invite_state SET {col} = {col} + 1, updated_at = now() "
-                "WHERE owner_id=$1 AND chat_key=$2", owner_id, chat_key)
+                f"UPDATE chat_invite_state SET {col} = {col} + $3, updated_at = now() "
+                "WHERE owner_id=$1 AND chat_key=$2", owner_id, chat_key, int(n))
         elif outcome == "chat_flood":
             st = await _load(pool, owner_id, chat_key)
             hits = int(st.get("flood_hits") or 0) + 1
