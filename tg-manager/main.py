@@ -10,6 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from services.pg_fsm_storage import PostgresFSMStorage
 from aiogram.types import ErrorEvent, CallbackQuery
@@ -360,52 +361,23 @@ async def _create_pool_resilient():
     raise last  # type: ignore[misc]
 
 
-async def main() -> None:
-    install_button_style_patch()
+def build_dispatcher(storage: BaseStorage) -> Dispatcher:
+    """Собирает Dispatcher: middleware, все роутеры, обработчик ошибок.
 
-    bot_session = AiohttpSession()
-    bot_session._connector_init["ssl"] = False
+    Вынесено из main() ровно ради проверяемости. Сборка диспетчера — единственный
+    крупный кусок старта, который ничего не ждёт и ни к чему не подключается: ему
+    нужно только FSM-хранилище. При этом ошибка здесь фатальна — процесс падает
+    ДО dp.start_polling, платформа рапортует об успешном деплое (контейнер-то
+    запустился), а бот не отвечает вообще ни на что.
 
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=bot_session,
-    )
-    # Health-first: биндим $PORT МИНИМАЛЬНЫМ сервером ДО create_pool (миграции могут
-    # быть медленными на холодной/большой БД). Railway health-check проходит сразу —
-    # «Application failed to respond» становится невозможным. Реальный сервер займёт
-    # порт после готовности (bootstrap останавливается перед его стартом).
-    await _start_bootstrap_health_server()
-    _set_boot_phase("db-pool+migrations")
-    pool = await _create_pool_resilient()
-    _set_boot_phase("init")
-    # Диагностика подключения к БД — печатает host и число записей в ключевых
-    # таблицах в ЛОГ. Нужна при инциденте «данные пропали»: видно, в ту ли базу
-    # смотрим и есть ли данные — без SQL-клиента. КРИТИЧНО: только в ФОНЕ и с
-    # таймаутом. Синхронно в пути старта она вешала бы бот, если count(*) на
-    # большой/залоченной таблице тормозит — старт бота важнее диагностики.
-    async def _db_diag() -> None:
-        try:
-            async def _run():
-                async with pool.acquire() as _dc:
-                    _dbname = await _dc.fetchval("SELECT current_database()")
-                    _host = await _dc.fetchval("SELECT inet_server_addr()::text")
-                    _counts = {}
-                    for _t in ("tg_accounts", "user_proxies", "operation_queue",
-                               "managed_channels", "managed_bots", "users"):
-                        try:
-                            _counts[_t] = await _dc.fetchval(
-                                f"SELECT count(*) FROM {_t}")
-                        except Exception:
-                            _counts[_t] = "нет таблицы"
-                    log.warning("DB-DIAG ▸ database=%s host=%s ▸ %s", _dbname, _host,
-                                " ".join(f"{k}={v}" for k, v in _counts.items()))
-            await asyncio.wait_for(_run(), timeout=20)
-        except Exception:
-            log.warning("DB-DIAG: диагностика не отработала (таймаут/ошибка)", exc_info=True)
-    asyncio.create_task(_db_diag())
-    fsm_storage = await PostgresFSMStorage.create(pool)
-    dp = Dispatcher(storage=fsm_storage)
+    Пока этот код жил внутри main(), проверить его не мог ни один тест: тесты
+    импортируют модули и вызывают функции, а main() не вызывает никто. Так
+    2026-09-04 прод пролежал пять часов из-за одной лишней строки
+    include_router — при 4540 зелёных тестах и зелёном CI на каждом коммите.
+
+    Теперь это обычная функция, и tests/test_dispatcher_builds.py её вызывает.
+    """
+    dp = Dispatcher(storage=storage)
     activity_log_middleware = UserActivityLogMiddleware()
     gate_middleware = SubscriptionGateMiddleware()
     latency_middleware = LatencyMiddleware()
@@ -533,6 +505,55 @@ async def main() -> None:
     dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)
     install_error_monitoring(dp)
+    return dp
+
+
+async def main() -> None:
+    install_button_style_patch()
+
+    bot_session = AiohttpSession()
+    bot_session._connector_init["ssl"] = False
+
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=bot_session,
+    )
+    # Health-first: биндим $PORT МИНИМАЛЬНЫМ сервером ДО create_pool (миграции могут
+    # быть медленными на холодной/большой БД). Railway health-check проходит сразу —
+    # «Application failed to respond» становится невозможным. Реальный сервер займёт
+    # порт после готовности (bootstrap останавливается перед его стартом).
+    await _start_bootstrap_health_server()
+    _set_boot_phase("db-pool+migrations")
+    pool = await _create_pool_resilient()
+    _set_boot_phase("init")
+    # Диагностика подключения к БД — печатает host и число записей в ключевых
+    # таблицах в ЛОГ. Нужна при инциденте «данные пропали»: видно, в ту ли базу
+    # смотрим и есть ли данные — без SQL-клиента. КРИТИЧНО: только в ФОНЕ и с
+    # таймаутом. Синхронно в пути старта она вешала бы бот, если count(*) на
+    # большой/залоченной таблице тормозит — старт бота важнее диагностики.
+    async def _db_diag() -> None:
+        try:
+            async def _run():
+                async with pool.acquire() as _dc:
+                    _dbname = await _dc.fetchval("SELECT current_database()")
+                    _host = await _dc.fetchval("SELECT inet_server_addr()::text")
+                    _counts = {}
+                    for _t in ("tg_accounts", "user_proxies", "operation_queue",
+                               "managed_channels", "managed_bots", "users"):
+                        try:
+                            _counts[_t] = await _dc.fetchval(
+                                f"SELECT count(*) FROM {_t}")
+                        except Exception:
+                            _counts[_t] = "нет таблицы"
+                    log.warning("DB-DIAG ▸ database=%s host=%s ▸ %s", _dbname, _host,
+                                " ".join(f"{k}={v}" for k, v in _counts.items()))
+            await asyncio.wait_for(_run(), timeout=20)
+        except Exception:
+            log.warning("DB-DIAG: диагностика не отработала (таймаут/ошибка)", exc_info=True)
+    asyncio.create_task(_db_diag())
+    fsm_storage = await PostgresFSMStorage.create(pool)
+    dp = build_dispatcher(fsm_storage)
 
     # Load persistent platform settings
     from database import db as _db
