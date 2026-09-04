@@ -154,11 +154,16 @@ async def cb_inviter_preflight(callback: CallbackQuery, state: FSMContext) -> No
 async def msg_inviter_preflight(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    from services.mass_inviter_engine import parse_group_ref
-    group = parse_group_ref(message.text or "")
-    if not group:
-        await message.answer("⚠️ Не удалось распознать группу. Введите @username или t.me/...")
+    # Проверяем СЫРОЙ ввод: parse_group_ref для любого текста возвращает
+    # «@текст», поэтому прежняя проверка `if not group` не срабатывала никогда —
+    # «мой чат» принимался как «✅ Группа: @мой чат», и негодная ссылка доезжала
+    # до операции, где сжигала прогон и суточные лимиты аккаунтов.
+    from services.mass_inviter_engine import parse_group_ref, validate_group_ref
+    _ok, _why = validate_group_ref(message.text or "")
+    if not _ok:
+        await message.answer(f"⚠️ {_why}")
         return
+    group = parse_group_ref(message.text or "")
     # Не чистим data — сохраняем группу для возможного «Вступить всеми».
     await state.set_state(None)
     await state.update_data(pf_group=group)
@@ -217,11 +222,16 @@ async def cb_inviter_start(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(InviterFSM.group)
 async def msg_inviter_group(message: Message, state: FSMContext) -> None:
-    from services.mass_inviter_engine import parse_group_ref
-    group = parse_group_ref(message.text or "")
-    if not group:
-        await message.answer("⚠️ Не удалось распознать группу. Введите @username или t.me/...")
+    # Проверяем СЫРОЙ ввод: parse_group_ref для любого текста возвращает
+    # «@текст», поэтому прежняя проверка `if not group` не срабатывала никогда —
+    # «мой чат» принимался как «✅ Группа: @мой чат», и негодная ссылка доезжала
+    # до операции, где сжигала прогон и суточные лимиты аккаунтов.
+    from services.mass_inviter_engine import parse_group_ref, validate_group_ref
+    _ok, _why = validate_group_ref(message.text or "")
+    if not _ok:
+        await message.answer(f"⚠️ {_why}")
         return
+    group = parse_group_ref(message.text or "")
     await state.update_data(group=group)
     await state.set_state(InviterFSM.source)
     kb = InlineKeyboardBuilder()

@@ -8154,8 +8154,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON", 400)
         group = (body.get("group") or "").strip()
-        if not group:
-            return _err("Укажите группу/канал", 400)
+        # Форма ссылки проверяется ЗДЕСЬ: иначе опечатка уезжает в очередь,
+        # клеймит аккаунты, подключается ими и падает на резолве — прогон и
+        # суточные лимиты сгорают на том, что видно на входе.
+        from services.mass_inviter_engine import validate_group_ref as _vgr
+        _gok, _gwhy = _vgr(group)
+        if not _gok:
+            return _err(_gwhy, 400)
         source = body.get("source", "parsed")
         if source not in ("parsed", "crm", "bot_users", "import_list", "segment"):
             return _err("Неизвестный источник аудитории", 400)
