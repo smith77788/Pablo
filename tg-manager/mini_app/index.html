@@ -5539,9 +5539,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field">
       <label>Прокси аккаунта (рекомендуется)</label>
       <select id="accImportProxy" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
-        <option value="">Без прокси (прямое подключение)</option>
+        <option value="">Авто — разложить по моим прокси</option>
       </select>
-      <div class="field-note">Закрепляется за аккаунтом сразу (изоляция с первого шага). Без прокси — прямой выход с IP сервера.</div>
+      <div class="field-note">Авто раскладывает партию по вашим живым прокси, по одному аккаунту на прокси, пока их хватает — общий IP связывает аккаунты между собой. Если выбрать один прокси, за ним окажется вся партия.</div>
       <div style="display:flex;gap:6px;margin-top:8px">
         <input type="text" id="accImportProxyNew" placeholder="или вставьте новый: socks5://user:pass@host:port" style="flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;box-sizing:border-box">
         <button type="button" class="btn" id="accImportProxyAddBtn" onclick="addAccImportProxy()" style="white-space:nowrap;padding:9px 12px">＋ Добавить</button>
@@ -11303,8 +11303,14 @@ async function loadProxies() {
     txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
     if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
     const backupCount = items.filter(p=>p.is_backup).length;
-    const failoverBar = `<div style="display:flex;gap:8px;margin-bottom:10px">
-        <button class="btn btn-p" style="flex:1" onclick="runProxyFailover()">🛟 Failover (резерв: ${backupCount})</button>
+    // Переселение показываем, только когда есть куда и откуда: failover умеет
+    // лишь прокси, помеченные резервными, и у пользователя без резерва
+    // аккаунты с мёртвого прокси просто стояли.
+    const deadCount = items.filter(p=>p.is_alive===false).length;
+    const liveCount = items.filter(p=>p.is_alive!==false).length;
+    const failoverBar = `<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="btn btn-p" style="flex:1 1 45%" onclick="runProxyFailover()">🛟 Failover (резерв: ${backupCount})</button>
+        ${(deadCount&&liveCount)?`<button class="btn btn-s" style="flex:1 1 45%" onclick="evacuateDeadProxies()">🚚 Переселить с мёртвых (${deadCount})</button>`:''}
       </div>`;
     txt('proxyList', failoverBar + items.map(p=>{
       const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
@@ -11352,6 +11358,17 @@ async function runProxyFailover(){
     loadProxies();
   }catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
+async function evacuateDeadProxies(){
+  if(!await askConfirm('Перевести аккаунты с мёртвых прокси на живые?\nАккаунт на мёртвом прокси не работает вообще, поэтому переезд лучше простоя — но если живых прокси мало, изоляция по IP станет неполной.')) return;
+  toast('🚚 Переселяю…');
+  try{
+    const r=await api('/api/miniapp/proxy/evacuate',{method:'POST'});
+    toast('✅ '+(r.note||`Переселено: ${r.moved||0}`));
+    // Про ухудшение изоляции говорим отдельно и не в общем потоке тостов.
+    if(r.isolation_note) setTimeout(()=>toast(r.isolation_note.substring(0,180)), 1200);
+    loadProxies();
+  }catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
 function openProxyModal() {
   document.getElementById('proxyUrl').value='';
   document.getElementById('proxyLabel').value='';
@@ -11394,7 +11411,7 @@ async function openAccImportModal() {
   const btn=document.getElementById('accImportBtn'); btn.disabled=false; btn.textContent='➕ Импортировать';
   // Наполняем список прокси (для проверки сессии) из уже добавленных
   const sel=document.getElementById('accImportProxy');
-  sel.innerHTML='<option value="">Без прокси (прямое подключение)</option>';
+  sel.innerHTML='<option value="">Авто — разложить по моим прокси</option>';
   try {
     const d=await api('/api/miniapp/proxies');
     (d.proxies||[]).forEach(p=>{
@@ -11594,6 +11611,16 @@ async function submitAccImport() {
     // «рапорт об успехе без эффекта»).
     let html=`<div style="color:${imp?'var(--green)':'var(--hint)'}">✅ Импортировано: <b>${imp}</b></div>`;
     if (fail) html+=`<div style="color:var(--red)">✕ Не удалось: <b>${fail}</b></div>`;
+    // Изоляция по IP — итог, который раньше нигде не показывался: партия
+    // садилась за один выход, и человек узнавал об этом только из отдельного
+    // аудита прокси, если вообще открывал его.
+    const iso=r.isolation;
+    if (imp && iso) {
+      html += iso.proxies_used
+        ? `<div style="margin-top:6px;opacity:.85">🔌 Разложено по прокси: <b>${iso.proxies_used}</b>${iso.without_proxy?` · без прокси: <b>${iso.without_proxy}</b>`:''}</div>`
+        : `<div style="margin-top:6px;opacity:.85">🔌 Все аккаунты без прокси — выходят с общего IP сервера</div>`;
+    }
+    if (r.isolation_note) html+=`<div style="margin-top:6px;padding:8px 10px;background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:6px;font-size:12px;line-height:1.4">${esc(r.isolation_note)}</div>`;
     if (errs.length) html+=`<div style="margin-top:6px;opacity:.8">${errs.map(e=>'• '+esc(String(e))).join('<br>')}</div>`;
     res.innerHTML=html; res.style.display='block';
     if (imp) {
@@ -11601,7 +11628,9 @@ async function submitAccImport() {
       toast('✅ Добавлено аккаунтов: '+imp);
       if (typeof loadAccounts==='function') loadAccounts(); else if (typeof loadTab==='function') loadTab('accounts');
       try { loadOnboarding(); } catch(_) {}   // закрывает шаг «Подключить аккаунты»
-      if (!fail) setTimeout(closeAccImportModal, 900);
+      // Не закрываем окно, если есть что сказать про изоляцию: предупреждение
+      // об общем IP важнее скорости закрытия.
+      if (!fail && !r.isolation_note) setTimeout(closeAccImportModal, 900);
     } else {
       tg.HapticFeedback?.notificationOccurred('error');
     }
