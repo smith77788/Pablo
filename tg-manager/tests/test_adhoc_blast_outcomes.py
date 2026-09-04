@@ -130,3 +130,37 @@ def test_adhoc_reports_skipped_separately_from_errors():
     assert "skip_count" in src and '"skipped"' in src, (
         "недоступные получатели не должны попадать в счётчик ошибок"
     )
+
+
+# ── Честное превью до запуска ─────────────────────────────────────────────────
+
+def _endpoint_source() -> str:
+    src = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    start = src.index("async def dm_adhoc_send")
+    return src[start:start + 3500]
+
+
+def test_endpoint_deduplicates_before_counting():
+    """Иначе возвращаемое число получателей врёт, а человек получает два ЛС."""
+    body = _endpoint_source()
+    assert "duplicates" in body and "_seen" in body
+
+
+def test_silent_truncation_is_reported():
+    """Вставив 2000 адресатов, пользователь получал отправку по 1000 и ни слова."""
+    body = _endpoint_source()
+    assert "truncated" in body
+
+
+def test_endpoint_returns_duration_estimate():
+    body = _endpoint_source()
+    assert "eta_seconds" in body
+
+
+def test_ui_confirm_shows_duration_and_duplicates():
+    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    seg = ui[ui.index("async function submitDmAdhoc"):]
+    seg = seg[:2500]
+    assert "humanDur(" in seg, "подтверждение обязано показывать срок рассылки"
+    assert "Дублей в списке" in seg
+    assert "первая 1000" in seg, "молчаливое усечение списка недопустимо"

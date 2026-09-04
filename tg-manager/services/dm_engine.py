@@ -508,6 +508,32 @@ _SEGMENT_TARGET_LIMIT = 20000
 _PACE_MULTIPLIERS: dict[str, float] = {"slow": 2.0, "normal": 1.0, "fast": 0.5}
 
 
+def accounts_awake(accounts: list[dict], now=None) -> list[dict]:
+    """Аккаунты, у которых сейчас НЕ локальная ночь (по стране прокси).
+
+    Кампания на тысячи получателей идёт сутками, поэтому неизбежно попадает на
+    ночь: раньше движок слал ЛС живым людям в 4 утра — это и низкий отклик, и
+    жалобы на спам, от которых горят аккаунты.
+
+    Гео неизвестно (нет прокси/страны) → аккаунт считается бодрствующим: молча
+    останавливать рассылку из-за незаполненного поля нельзя.
+    """
+    if not accounts:
+        return []
+    try:
+        from services import geo_tempo
+    except Exception:
+        return list(accounts)
+    awake = []
+    for a in accounts:
+        try:
+            if not geo_tempo.is_local_night(a.get("geo_country"), now):
+                awake.append(a)
+        except Exception:
+            awake.append(a)  # сбой определения — не повод пропускать аккаунт
+    return awake
+
+
 def estimate_duration_seconds(target_type: str, pace: str | None, remaining: int) -> int:
     """Сколько примерно займёт рассылка на `remaining` получателей.
 
@@ -532,6 +558,9 @@ def estimate_duration_seconds(target_type: str, pace: str | None, remaining: int
     return int(n * ((dmin + dmax) / 2.0) * mult)
 _DEFAULT_DELAY_RANGE: tuple[float, float] = (45.0, 110.0)
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
+# Предохранитель ночного ожидания: если гео у всех аккаунтов заполнено криво,
+# кампания не должна встать навсегда — через 10 часов продолжаем.
+_QUIET_MAX_WAIT_S = 10 * 3600
 _PEER_FLOOD_COOLDOWN = 48 * 3600  # PeerFlood — аккаунт-флаг: длинный cooldown (48ч)
 
 
@@ -881,6 +910,9 @@ async def run_campaign(
             _cp = {}
     # Чем заменить {name}, если у получателя нет ни имени, ни ника.
     _name_fallback = (_cp or {}).get("name_fallback") or None
+    # Тихие часы включены по умолчанию: ночная рассылка живым людям — это и
+    # низкий отклик, и жалобы на спам. Отключается явным quiet_hours=false.
+    _quiet_hours = (_cp or {}).get("quiet_hours", True) is not False
     _media_url = (_cp or {}).get("media_url") or None
     # Массовая рассылка с медиа: скачиваем файл ОДИН раз, дальше уникализируем под
     # каждого получателя (анти-детект — иначе у всех одинаковый серверный хэш).
@@ -998,7 +1030,44 @@ async def run_campaign(
                 return
 
         # Выбираем следующий аккаунт, пропуская достигших дневного лимита.
-        acc, acc_idx = pick_account_under_cap(acc_cycle, acc_idx, _sent_by_acc, _per_acc_cap)
+        # Тихие часы: не пишем живым людям среди ночи. Берём только аккаунты,
+        # у которых сейчас не локальная ночь (страна прокси); если ночь у всех —
+        # ждём, а не шлём. Ожидание дробим по минуте, чтобы пауза и отмена
+        # кампании продолжали работать, а не блокировались до утра.
+        _pool_now = acc_cycle
+        if _quiet_hours:
+            _awake = accounts_awake(acc_cycle)
+            _slept = 0
+            while not _awake and acc_cycle:
+                if _slept == 0:
+                    log.info("dm_engine campaign=%d: у всех аккаунтов ночь — ждём утра",
+                             campaign_id)
+                await asyncio.sleep(60)
+                _slept += 60
+                _cur = await pool.fetchrow(
+                    "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id)
+                if _cur and _cur["status"] == "paused":
+                    log.info("dm_engine: campaign %d paused во время ночного ожидания",
+                             campaign_id)
+                    return
+                if op_id:
+                    _oq = await pool.fetchrow(
+                        "SELECT status FROM operation_queue WHERE id=$1", op_id)
+                    if _oq and _oq["status"] == "cancelled":
+                        await pool.execute(
+                            "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id)
+                        return
+                if _slept >= _QUIET_MAX_WAIT_S:
+                    # Предохранитель: гео у всех могло оказаться кривым — лучше
+                    # продолжить, чем встать навсегда.
+                    log.warning("dm_engine campaign=%d: ночное ожидание превысило предел — продолжаем",
+                                campaign_id)
+                    break
+                _awake = accounts_awake(acc_cycle)
+            if _awake:
+                _pool_now = _awake
+
+        acc, acc_idx = pick_account_under_cap(_pool_now, acc_idx, _sent_by_acc, _per_acc_cap)
         if acc is None:
             # Все аккаунты исчерпали дневной лимит — пауза до следующего дня
             # (кампания возобновляема). Не failed: это штатная защита, не ошибка.
