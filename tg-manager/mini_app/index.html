@@ -18260,12 +18260,25 @@ async function submitDmAdhoc() {
   if (!usernames.length) { errEl.textContent = 'Укажите хотя бы один @username'; return; }
   if (!text) { errEl.textContent = 'Введите текст сообщения'; return; }
   const accIds = [...document.querySelectorAll('.mj-acc-cb:checked')].map(cb=>+cb.value);
-  if (!await askConfirm(`Разослать сообщение ${usernames.length} получателям?\n\nСообщения уйдут реальным людям — отменить отправку нельзя.\nЗадержка: ${delay}с между отправками.`)) return;
+  // Уникальных — столько же посчитает сервер (дубли схлопываются): показывать
+  // до подтверждения нужно честное число и честный срок. Отправка идёт
+  // последовательно, поэтому число аккаунтов срок не сокращает.
+  const uniq = [...new Set(usernames.map(u=>u.replace(/^@/,'').toLowerCase()))];
+  const dupNote = uniq.length < usernames.length
+    ? `\nДублей в списке: ${usernames.length-uniq.length} — будут отправлены один раз.` : '';
+  const capNote = uniq.length > 1000
+    ? `\n⚠️ За раз уйдёт только первая 1000 из ${uniq.length}.` : '';
+  const willSend = Math.min(uniq.length, 1000);
+  if (!await askConfirm(
+      `Разослать сообщение ${willSend} получателям?\n\n`+
+      `Сообщения уйдут реальным людям — отменить отправку нельзя.\n`+
+      `Задержка: ${delay}с · займёт около ${humanDur(willSend*delay)}.`+
+      dupNote + capNote)) return;
   try {
     const r = await api('/api/miniapp/dm/adhoc_send', {method:'POST', body:JSON.stringify({
       usernames, text, delay, account_ids: accIds,
     })});
-    toast(`✉️ Рассылка запущена · ${r.recipients} получателей × ${r.accounts} акк. · #${r.op_id}`);
+    toast(`✉️ Рассылка запущена · ${r.recipients} получателей × ${r.accounts} акк. · ~${humanDur(r.eta_seconds||0)} · #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Рассылка в ЛС');
     document.getElementById('daUsers').value = '';
     openMassOps();

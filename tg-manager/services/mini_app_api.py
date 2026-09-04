@@ -7137,8 +7137,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         raw = data.get("usernames") or []
         if isinstance(raw, str):
             raw = re.split(r"[\s,;]+", raw)
-        usernames = [u.strip().lstrip("@") for u in raw
-                     if isinstance(u, str) and u.strip()][:1000]
+        _cleaned = [u.strip().lstrip("@") for u in raw
+                    if isinstance(u, str) and u.strip()]
+        # Дедуп на входе: два одинаковых ЛС одному человеку — самая заметная
+        # спам-сигнатура, и без этого возвращаемое число получателей врало бы.
+        _seen: set[str] = set()
+        _uniq: list[str] = []
+        for _u in _cleaned:
+            _k = _u.lower()
+            if _k in _seen:
+                continue
+            _seen.add(_k)
+            _uniq.append(_u)
+        duplicates = len(_cleaned) - len(_uniq)
+        # Потолок был молчаливым: вставив 2000 адресатов, пользователь получал
+        # отправку по 1000 и ни слова об этом.
+        _LIMIT = 1000
+        truncated = max(0, len(_uniq) - _LIMIT)
+        usernames = _uniq[:_LIMIT]
         if not usernames:
             return _err("Укажите хотя бы один @username", 400)
         text = validate_string(data.get("text"), max_len=4096)
@@ -7163,7 +7179,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 label=f"Рассылка ЛС: {len(usernames)} получателей × {len(acc_ids)} акк.",
             )
             return _json_resp({"ok": True, "op_id": op_id,
-                               "recipients": len(usernames), "accounts": len(acc_ids)})
+                               "recipients": len(usernames), "accounts": len(acc_ids),
+                               "duplicates": duplicates, "truncated": truncated,
+                               # Отправка последовательная: срок задаёт задержка,
+                               # число аккаунтов его не сокращает.
+                               "eta_seconds": int(len(usernames) * delay)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
