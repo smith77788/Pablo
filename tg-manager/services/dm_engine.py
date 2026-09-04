@@ -492,8 +492,9 @@ _DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
     "bot_users":       (35.0, 90.0),    # свои подписчики — наиболее безопасно
     "cohort":          (35.0, 90.0),
     "all_bots":        (40.0, 100.0),   # агрегат всех своих ботов
-    "crm":             (45.0, 110.0),   # crm-контакты
-    "segment":         (45.0, 110.0),   # срез crm-контактов — тот же класс риска
+    "crm":             (45.0, 110.0),   # легаси-таблица crm_contacts
+    "contacts":        (45.0, 110.0),   # все контакты из «Контактов»
+    "segment":         (45.0, 110.0),   # срез контактов — тот же класс риска
     "parsed_audience": (55.0, 130.0),   # спарсенные — незнакомые
     "import_list":     (70.0, 160.0),   # внешний список — максимальная осторожность
 }
@@ -581,18 +582,28 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
-    elif target_type == "segment" and target_id:
-        # Сохранённый сегмент CRM как аудитория кампании. Раньше единственным
-        # CRM-таргетом был «все контакты»: пользователь строил срез («Горячие»,
-        # «Молчуны 30д») в контактах, но написать именно ему не мог. Резолвим тем
-        # же движком сегментов, что и список контактов, — «вижу = пишу».
+    elif target_type in ("segment", "contacts"):
+        # Аудитория из «Контактов» (unified_contacts) — тем же движком сегментов,
+        # что питает экран контактов, поэтому «вижу = пишу».
+        #
+        # 'contacts' — ВСЕ контакты, 'segment' — сохранённый срез («Горячие»,
+        # «Молчуны 30д»). Раньше единственным контактным таргетом был 'crm',
+        # который читает ЛЕГАСИ-таблицу crm_contacts: её не показывает ни один
+        # экран, так что пользователь целился в одно, а письма уходили в другое
+        # (обычно — никому). 'crm' оставлен рабочим ради уже созданных кампаний.
         from services.contacts_hub import repository as _repo
 
-        filters = await _repo.get_segment_filters(pool, campaign["owner_id"], int(target_id))
-        if filters is None:
-            # Сегмент удалён или принадлежит другому владельцу — не молчим,
-            # иначе кампания «успешно» уйдёт в пустоту.
-            raise ValueError(f"Сегмент #{target_id} не найден")
+        if target_type == "segment":
+            if not target_id:
+                return []
+            filters = await _repo.get_segment_filters(
+                pool, campaign["owner_id"], int(target_id))
+            if filters is None:
+                # Сегмент удалён или принадлежит другому владельцу — не молчим,
+                # иначе кампания «успешно» уйдёт в пустоту.
+                raise ValueError(f"Сегмент #{target_id} не найден")
+        else:
+            filters = {}  # весь список контактов
         rows = await _repo.resolve_segment(
             pool, campaign["owner_id"], filters, limit=_SEGMENT_TARGET_LIMIT
         )

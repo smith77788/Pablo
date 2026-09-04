@@ -171,3 +171,53 @@ def test_api_allows_segment_target_type():
     assert '"segment"' in src and "get_segment_filters" in src, (
         "эндпоинт создания кампании обязан принимать сегмент и проверять владение им"
     )
+
+
+# ── «Все контакты» целятся в то, что видно на экране ──────────────────────────
+
+def test_contacts_target_uses_the_visible_contact_store(monkeypatch):
+    """Ловушка, которую это закрывает: цель «CRM-контакты» читала легаси-таблицу
+    crm_contacts, которую не показывает ни один экран. Пользователь целился в
+    свой список контактов, а письма уходили в другую (обычно пустую) таблицу.
+
+    'contacts' обязан резолвиться тем же движком сегментов, что питает экран
+    «Контакты», — с пустым фильтром, то есть «весь список».
+    """
+    seen = {}
+
+    def _capture(filters):
+        seen["filters"] = filters
+
+    mod = _install_repo(
+        monkeypatch, filters={},
+        rows=[{"telegram_user_id": 1, "username": "a", "first_name": "А"}],
+    )
+
+    async def resolve_segment(pool, owner_id, f, limit=5000):
+        _capture(f)
+        return [{"telegram_user_id": 1, "username": "a", "first_name": "А"}]
+
+    mod.resolve_segment = resolve_segment
+
+    c = _campaign(target_id=None)
+    c["target_type"] = "contacts"
+    targets = asyncio.run(dm_engine._get_targets(_FakePool(), c))
+    assert seen["filters"] == {}, "«все контакты» = сегмент без фильтров"
+    assert [t["user_id"] for t in targets] == [1]
+
+
+def test_contacts_target_needs_no_segment_id(monkeypatch):
+    """В отличие от сегмента, «все контакты» не требуют target_id."""
+    _install_repo(monkeypatch, filters={},
+                  rows=[{"telegram_user_id": 5, "username": None, "first_name": None}])
+    c = _campaign(target_id=None)
+    c["target_type"] = "contacts"
+    assert len(asyncio.run(dm_engine._get_targets(_FakePool(), c))) == 1
+
+
+def test_legacy_crm_target_still_accepted():
+    """Уже созданные кампании с target_type='crm' обязаны продолжать работать."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert '"crm", "contacts"' in src
