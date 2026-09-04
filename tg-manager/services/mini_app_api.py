@@ -900,6 +900,9 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
         msg = f"Назначено прокси: {r.get('rotated', 0)}"
         if r.get("skipped_no_proxy"):
             msg += f" (не хватило прокси для {r['skipped_no_proxy']} — добавьте прокси в пул)"
+        # Иначе «не хватило прокси» при полном пуле выглядит беспричинным.
+        if r.get("skipped_dead"):
+            msg += f" · {r['skipped_dead']} прокси не взяты: не отвечают"
         return {"ok": True, "message": msg}
 
     if action_id == "build_ecosystem":
@@ -1866,6 +1869,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             clauses.append("COALESCE(acc_status,'ok') = 'banned'")
         elif flt == "spamblock":
             clauses.append("COALESCE(acc_status,'ok') = 'spamblock'")
+        elif flt == "proxy_down":
+            # Аккаунты, простаивающие ИЗ-ЗА ПРОКСИ, а не по своей вине: сами они
+            # целы, но каждая их операция падает по сети. Без этого среза мёртвый
+            # прокси нельзя было ни увидеть списком, ни починить оптом.
+            # Строго is_alive=FALSE: непроверенный прокси (NULL) — не мёртвый.
+            clauses.append(
+                "proxy_id IS NOT NULL AND EXISTS ("
+                "SELECT 1 FROM user_proxies p WHERE p.id = tg_accounts.proxy_id "
+                "AND p.is_alive IS FALSE)")
         elif flt == "dead":
             # Невоскрешаемые: забанен / удалён-деактивирован / сессия отозвана.
             # Именно их массово удаляют «в один тап». Конфликт двух IP (cooldown)
@@ -1915,7 +1927,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       -- (фронт рендерит как «${{trust}}%»). Без *100 всё было ~1%.
                       ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
-                      cooldown_until, cluster, stage
+                      cooldown_until, cluster, stage,
+                      -- Живость прокси СКАЛЯРНЫМ подзапросом, а не JOIN: у
+                      -- tg_accounts и user_proxies совпадают id/owner_id/
+                      -- is_active, и после JOIN условия из _accounts_where
+                      -- стали бы неоднозначными — запрос упал бы, а список
+                      -- аккаунтов молча опустел.
+                      (proxy_id IS NOT NULL) AS has_proxy,
+                      (SELECT p.is_alive FROM user_proxies p
+                        WHERE p.id = tg_accounts.proxy_id) AS proxy_alive,
+                      (SELECT COALESCE(p.label, p.geo_country) FROM user_proxies p
+                        WHERE p.id = tg_accounts.proxy_id) AS proxy_label
                FROM tg_accounts WHERE {where}
                ORDER BY is_active DESC, last_used DESC NULLS LAST
                LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)
@@ -1973,9 +1995,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                               WHERE is_active
                                 AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
                                 AND (cooldown_until IS NULL OR cooldown_until <= now())
-                          ) AS active
+                          ) AS active,
+                          -- Простаивают из-за прокси: аккаунт цел, чинить надо
+                          -- прокси. Строго IS FALSE — непроверенный не считаем.
+                          COUNT(*) FILTER (
+                              WHERE proxy_id IS NOT NULL AND EXISTS (
+                                  SELECT 1 FROM user_proxies p
+                                   WHERE p.id = tg_accounts.proxy_id AND p.is_alive IS FALSE)
+                          ) AS proxy_down
                    FROM tg_accounts WHERE owner_id=$1""", uid)
-        stats = {k: int((st[k] if st else 0) or 0) for k in ("total", "banned", "spamblock", "cooldown", "dead", "active")} if st else {}
+        stats = {k: int((st[k] if st and k in st.keys() else 0) or 0)
+                 for k in ("total", "banned", "spamblock", "cooldown", "dead",
+                           "active", "proxy_down")} if st else {}
         # by_stage скоупим по owner_id для не-админа (иначе — межтенантная утечка
         # разбивки стадий по ВСЕЙ платформе). Админ видит всё, как в основной статистике.
         if admin:
@@ -16157,10 +16188,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # внутри import_sessions.
             result = await import_sessions(pool, uid, raw, proxy, proxy_id=proxy_id)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception as exc:
+            # Раньше сырой текст исключения уходил клиенту и никуда не писался:
+            # пользователю — непонятная внутренняя строка, разработчику — ничего.
+            log.exception("import_sessions uid=%s", uid)
+            return _err(f"Не удалось импортировать: {str(exc)[:140]}", 500)
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
+    app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
 
     # ── Добавление аккаунта: интерактивные способы входа (как в боте) ──────────
     # Раньше в мини-аппе был ТОЛЬКО импорт строки сессии. Добавляем вход по номеру
@@ -16764,6 +16799,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.warning("segment: pressure check failed", exc_info=True)
             return True, ""
+
+    async def fleet_warnings(request: web.Request) -> web.Response:
+        """Мягкие предупреждения перед массовой операцией.
+
+        Оба предупреждения давно существуют, но показывались ТОЛЬКО в боте:
+        основной интерфейс — мини-апп — запускал массовые операции вслепую.
+        Fail-open: предупреждения не должны мешать работать.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        warnings = []
+        try:
+            from services import infra_orchestrator as _io
+            for fn in (_io.get_pressure_warning, _io.get_readiness_warning):
+                try:
+                    w = await fn(pool, uid)
+                except Exception:
+                    w = None
+                if w:
+                    warnings.append(w)
+        except Exception:
+            log.debug("fleet_warnings uid=%s", uid, exc_info=True)
+        return _json_resp({"warnings": warnings})
 
     async def uch_segment_preview(request: web.Request) -> web.Response:
         """Превью до действия: размер среза, сколько адресуемо в ЛС/инвайт,

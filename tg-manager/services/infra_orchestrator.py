@@ -189,6 +189,12 @@ async def estimate_capacity(
         }
 
 
+# Порог «свежести» аккаунта и когда о нём предупреждать.
+_FRESH_DAYS = 3
+_FRESH_MIN_ALERT = 3       # столько непрогретых — уже повод сказать
+_FRESH_SHARE_PCT = 30      # либо такая доля от доступных
+
+
 async def is_ready_for_op(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -222,6 +228,58 @@ async def is_ready_for_op(
         log.debug("infra_orchestrator.is_ready_for_op account check failed: %s", e)
 
     return True, ""
+
+
+async def get_readiness_warning(pool: asyncpg.Pool, owner_id: int) -> str | None:
+    """Мягкое предупреждение: массовая операция пойдёт по НЕПРОГРЕТЫМ аккаунтам.
+
+    Жёсткий гейт (is_ready_for_op) смотрит на давление инфраструктуры и наличие
+    свободных аккаунтов. У свежеимпортированного флота давление НУЛЕВОЕ (ничего
+    ещё не происходило) и аккаунты свободны — гейт пропускает, и массовая
+    операция сжигает всю партию разом. Это самая дорогая ошибка в продукте:
+    аккаунты стоят денег и восстановлению не подлежат.
+
+    Блокировать нельзя: часть пользователей заводит уже отлежавшиеся купленные
+    аккаунты, и запрет сломал бы им работу. Поэтому — предупреждение, а решение
+    за человеком.
+
+    Возвращает текст или None. Fail-open: сбой расчёта не мешает работать.
+    """
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) FILTER (
+                       WHERE is_active
+                         AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock','deactivated')
+                         AND (cooldown_until IS NULL OR cooldown_until <= now())
+                   ) AS available,
+                   COUNT(*) FILTER (
+                       WHERE is_active
+                         AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock','deactivated')
+                         AND (cooldown_until IS NULL OR cooldown_until <= now())
+                         AND last_used IS NULL
+                         AND added_at > now() - ($2 * INTERVAL '1 day')
+                   ) AS fresh
+               FROM tg_accounts WHERE owner_id=$1""",
+            owner_id, _FRESH_DAYS)
+    except Exception as e:
+        log.debug("get_readiness_warning failed owner=%s: %s", owner_id, e)
+        return None
+    if not row:
+        return None
+    available = int(row["available"] or 0)
+    fresh = int(row["fresh"] or 0)
+    if not fresh or not available:
+        return None
+    # Один свежий аккаунт среди полусотни обкатанных — не повод для тревоги.
+    # Тревожим, когда непрогретых заметная доля либо их просто много.
+    if fresh < _FRESH_MIN_ALERT and fresh * 100 < available * _FRESH_SHARE_PCT:
+        return None
+    return (
+        f"🌱 {fresh} из {available} аккаунтов ни разу не использовались и добавлены "
+        f"недавно. Массовая операция на непрогретых аккаунтах часто заканчивается их "
+        f"блокировкой — прогрейте их или запустите операцию на обкатанных."
+    )
 
 
 async def get_pressure_warning(

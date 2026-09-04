@@ -111,16 +111,35 @@ async def apply_rotation(
             skipped_busy = len(accs) - len(free)
             free_ids = [a["account_id"] for a in free]
 
-            # 2. Пул: владелец + активные; вычесть прокси, занятые ЛЮБЫМ
-            # не-ротируемым аккаунтом (иначе потеря изоляции).
+            # 2. Пул: владелец + активные; ИСКЛЮЧАЯ подтверждённо мёртвые;
+            # вычесть прокси, занятые ЛЮБЫМ не-ротируемым аккаунтом (иначе
+            # потеря изоляции).
+            #
+            # `is_alive IS NOT FALSE` — строго: NULL значит «ещё не проверяли»,
+            # и такие прокси остаются в пуле, иначе на свежем флоте (проверок
+            # не было) пул оказался бы пуст. Отсекаем только те, которые сторож
+            # ПОДТВЕРДИЛ мёртвыми: без этого ротация переселяла здоровые
+            # аккаунты на заведомо нерабочий прокси — то есть делала ровно
+            # обратное тому, ради чего её запускают.
             if pool_ids_in:
                 prows = await conn.fetch(
-                    "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE "
+                    "SELECT id, is_alive FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE "
                     "AND id = ANY($2::int[])", owner_id, pool_ids_in)
             else:
                 prows = await conn.fetch(
-                    "SELECT id FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE", owner_id)
-            pool_available = [int(r["id"]) for r in prows]
+                    "SELECT id, is_alive FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+                    owner_id)
+            # .get, а не [...]: значение может отсутствовать (старые подставные
+            # пулы в тестах, урезанные выборки) — и «нет значения» здесь
+            # равнозначно «ещё не проверяли», то есть прокси остаётся в пуле.
+            def _alive(row):
+                try:
+                    return row.get("is_alive")
+                except AttributeError:
+                    return row["is_alive"]
+
+            skipped_dead = sum(1 for r in prows if _alive(r) is False)
+            pool_available = [int(r["id"]) for r in prows if _alive(r) is not False]
             blocked_rows = await conn.fetch(
                 "SELECT DISTINCT proxy_id FROM tg_accounts "
                 "WHERE owner_id=$1 AND proxy_id = ANY($2::int[]) "
@@ -145,5 +164,8 @@ async def apply_rotation(
         "ok": True, "rotated": applied,
         "skipped_busy": skipped_busy,
         "skipped_no_proxy": result["skipped_no_proxy"],
+        # Сколько прокси не взяли в пул как подтверждённо мёртвые — чтобы
+        # «не хватило прокси» не выглядело беспричинным.
+        "skipped_dead": skipped_dead,
         "accounts": len(group_ids), "pool": len(pool_final),
     }

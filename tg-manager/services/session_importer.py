@@ -18,6 +18,12 @@ SESSION_FORMATS = {
 }
 
 
+# Бюджет на одну сессию и сколько проверяем одновременно. Подобрано под
+# 30-секундный тайм-аут мини-аппа: порция в 20 строк укладывается в две волны.
+VALIDATE_TIMEOUT_S = 10.0
+VALIDATE_CONCURRENCY = 10
+
+
 def _proxy_type(proxy_url: str) -> str | None:
     """Тип прокси по схеме URL (socks5/socks4/http) или None. Инлайн-копия
     parse_proxy_type — чтобы не тянуть тяжёлый mini_app_api в импортёр сессий."""
@@ -59,15 +65,26 @@ def extract_session_string(data: str, fmt: str) -> str | None:
     return None
 
 
-async def validate_session(session_string: str, proxy_url: str | None = None) -> dict:
+async def validate_session(session_string: str, proxy_url: str | None = None,
+                           timeout_s: float = VALIDATE_TIMEOUT_S) -> dict:
+    """Проверить сессию живым подключением.
+
+    Тайм-аут покрывает ВЕСЬ разговор, а не только connect: раньше wait_for
+    оборачивал лишь установку соединения, а последующий get_me мог висеть без
+    ограничения — одна такая сессия подвешивала весь импорт.
+    """
     from services.account_manager import _make_client
     import asyncio
     client = None
     try:
         device = {"proxy_url": proxy_url} if proxy_url else None
         client = _make_client(session_string, device)
-        await asyncio.wait_for(client.connect(), timeout=15)
-        me = await client.get_me()
+
+        async def _talk():
+            await client.connect()
+            return await client.get_me()
+
+        me = await asyncio.wait_for(_talk(), timeout=timeout_s)
         return {
             "valid": True,
             "phone": me.phone or "",
@@ -160,18 +177,44 @@ async def import_sessions(
     if len(lines) > MAX_PER_IMPORT:
         truncated = len(lines) - MAX_PER_IMPORT
         lines = lines[:MAX_PER_IMPORT]
+    # Разбор формата — чистый и мгновенный, делаем его первым проходом; сетевую
+    # проверку запускаем ПАРАЛЛЕЛЬНО с ограничением. Раньше сессии проверялись
+    # строго по очереди по 15 с каждая: три медленные строки уже перекрывали
+    # 30-секундный тайм-аут мини-аппа, и пользователь видел «нет соединения»,
+    # хотя импорт на сервере продолжался. Это ломало самый первый шаг продукта.
+    import asyncio as _asyncio
+
+    parsed: list[tuple[int, str | None, str | None]] = []   # (i, session_str, error)
     for i, line in enumerate(lines):
         fmt = detect_format(line)
         if fmt == 'unknown':
-            failed += 1
-            errors.append(f"Строка {i+1}: неизвестный формат")
+            parsed.append((i, None, "неизвестный формат"))
             continue
         session_str = extract_session_string(line, fmt)
         if not session_str:
-            failed += 1
-            errors.append(f"Строка {i+1}: не удалось извлечь сессию")
+            parsed.append((i, None, "не удалось извлечь сессию"))
             continue
-        result = await validate_session(session_str, proxy_url)
+        parsed.append((i, session_str, None))
+
+    _sem = _asyncio.Semaphore(VALIDATE_CONCURRENCY)
+
+    async def _validate(idx: int, sess: str):
+        async with _sem:
+            try:
+                return idx, await validate_session(sess, proxy_url)
+            except Exception as exc:      # проверка одной строки не рвёт импорт
+                return idx, {"valid": False, "error": str(exc)[:200]}
+
+    checked = dict(await _asyncio.gather(
+        *[_validate(i, sess) for i, sess, err in parsed if sess]))
+
+    # Дальше — строго по порядку строк: и записи в БД, и нумерация ошибок.
+    for i, session_str, parse_error in parsed:
+        if parse_error:
+            failed += 1
+            errors.append(f"Строка {i+1}: {parse_error}")
+            continue
+        result = checked.get(i) or {"valid": False, "error": "проверка не выполнена"}
         if not result['valid']:
             failed += 1
             # Классифицируем причину, а не сваливаем всё в «невалидная сессия»:

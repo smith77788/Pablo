@@ -898,7 +898,12 @@ async def cb_proxy_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"• Переназначено: <b>{res['rotated']}</b>\n"
         f"• Пропущено (заняты операцией): {res['skipped_busy']}\n"
         f"• Не хватило прокси в пуле: {res['skipped_no_proxy']}\n"
-        f"• Аккаунтов в группе: {res['accounts']} · Пул: {res['pool']}",
+        # Мёртвые в пул не берём — иначе ротация переселила бы аккаунты на
+        # заведомо нерабочий прокси. Без этой строки «не хватило прокси» при
+        # полном списке выглядит беспричинным.
+        + (f"• Не взяты (не отвечают): {res.get('skipped_dead', 0)}\n"
+           if res.get("skipped_dead") else "")
+        + f"• Аккаунтов в группе: {res['accounts']} · Пул: {res['pool']}",
         parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
     )
 

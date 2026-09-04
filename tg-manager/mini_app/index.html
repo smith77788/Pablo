@@ -908,6 +908,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="acc-kpi-card" onclick="filterAcc('dead',this)" data-filter="dead">
         <div class="acc-kpi-num" id="kpi-dead" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Мёртвые</div>
       </div>
+      <!-- Простаивают из-за прокси: сами аккаунты целы, чинить надо прокси. -->
+      <div class="acc-kpi-card" onclick="filterAcc('proxy_down',this)" data-filter="proxy_down">
+        <div class="acc-kpi-num" id="kpi-proxydown" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Прокси мёртв</div>
+      </div>
     </div>
     <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
     <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(239,68,68,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
@@ -2220,6 +2224,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-massops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚡ Массовые операции</div></div>
   <div class="sub-sb">
+    <!-- Мягкие предупреждения перед запуском (давление флота, непрогретые
+         аккаунты). Раньше показывались только в боте — мини-апп запускал
+         массовые операции вслепую. -->
+    <div id="massopsWarn" style="display:none;margin:0 16px 10px"></div>
     <div class="sec">Вступление / выход по списку</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <textarea id="mjTargets" rows="3" placeholder="@channel1&#10;https://t.me/channel2&#10;@group3" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
@@ -8706,8 +8714,17 @@ function updateAccKpi(list, stats) {
   const spam   = (stats && stats.spamblock!=null)? stats.spamblock: list.filter(a=>a.acc_status==='spamblock').length;
   const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
   const dead   = (stats && stats.dead!=null)     ? stats.dead     : list.filter(a=>['banned','deactivated','session_expired'].includes(a.acc_status)).length;
+  // Простаивают из-за прокси. Запасной подсчёт по загруженной странице —
+  // строго proxy_alive === false: непроверенный прокси мёртвым не считаем.
+  const pdown  = (stats && stats.proxy_down!=null) ? stats.proxy_down
+                 : list.filter(a=>a.has_proxy && a.proxy_alive === false).length;
   const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
   el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-spam', spam); el('kpi-ban', banned); el('kpi-dead', dead);
+  el('kpi-proxydown', pdown);
+  // Карточку показываем только когда есть о чём говорить — иначе она просто
+  // занимает место в и без того плотной строке.
+  const pdc = document.querySelector('[data-filter="proxy_down"]');
+  if (pdc) pdc.style.display = pdown > 0 ? '' : 'none';
   const pb = document.getElementById('purgeDeadBtn');
   if (pb) { pb.style.display = dead>0 ? 'block' : 'none'; el('purgeDeadN', dead); }
 }
@@ -8737,7 +8754,14 @@ function renderAccounts(list) {
     // а не ложное «Активен» (иначе «аккаунты не работают, хотя активны»).
     else if (a.health_status==='quarantine') { status='🛑 На паузе'; cls='b-rd'; ava_cls='ava-red'; }
     else if (a.health_status==='at_risk') { status='⚠️ Под риском'; cls='b-or'; ava_cls='ava-orange'; }
+    // Мёртвый прокси: аккаунт цел, но каждая его операция падает по сети. Без
+    // этого он показывался «Активен», и человек шёл чинить аккаунт вместо
+    // замены прокси. Аккаунты БЕЗ прокси работают с адреса хоста — это норма.
+    else if (a.has_proxy && a.proxy_alive === false) { status='🔌 Прокси'; cls='b-rd'; ava_cls='ava-red'; }
     else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
+    const proxyNote = (a.has_proxy && a.proxy_alive === false)
+      ? `<div class="acc-phone" style="color:var(--red)">🔌 прокси не отвечает${a.proxy_label?' · '+esc(a.proxy_label):''} — аккаунт цел, замените прокси</div>`
+      : '';
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
@@ -8752,6 +8776,7 @@ function renderAccounts(list) {
       <div class="acc-body">
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
+        ${proxyNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
       </div>
       ${right}
@@ -11589,12 +11614,15 @@ async function toggleProxyStats() {
   } catch(e) { box.innerHTML = errHtml(e.message,'toggleProxyStats()'); }
 }
 async function rotateProxies() {
-  if (!await askConfirm('Перемешать назначения прокси по всем активным аккаунтам? Изоляция (1 аккаунт = 1 прокси) сохраняется; занятые операцией аккаунты пропускаются.')) return;
+  if (!await askConfirm('Перемешать назначения прокси по всем активным аккаунтам?\n\nИзоляция (1 аккаунт = 1 прокси) сохраняется; занятые операцией аккаунты пропускаются, а прокси, которые не отвечают, в пул не берутся.')) return;
   try {
     const r = await api('/api/miniapp/proxy/rotate', {method:'POST', body: JSON.stringify({})});
     let msg = `🔁 Ротировано: ${r.rotated}`;
     if (r.skipped_busy) msg += ` · занято: ${r.skipped_busy}`;
     if (r.skipped_no_proxy) msg += ` · без прокси: ${r.skipped_no_proxy}`;
+    // Мёртвые прокси в пул не берём — иначе ротация переселила бы аккаунты
+    // на заведомо нерабочий. Говорим об этом, чтобы их заменили.
+    if (r.skipped_dead) msg += ` · не отвечают: ${r.skipped_dead}`;
     toast(msg);
     loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
@@ -18876,9 +18904,27 @@ async function submitMassMembership(kind) {
   } catch(e) { errEl.textContent = e.message || 'Ошибка'; }
 }
 
+// Предупреждения перед массовой операцией. Fail-open: их отсутствие не должно
+// мешать работать, поэтому блок просто остаётся скрытым.
+async function loadFleetWarnings() {
+  const box = document.getElementById('massopsWarn');
+  if (!box) return;
+  box.style.display = 'none'; box.innerHTML = '';
+  try {
+    const d = await api('/api/miniapp/fleet/warnings');
+    const ws = d.warnings || [];
+    if (!ws.length) return;
+    box.innerHTML = ws.map(w =>
+      `<div style="background:var(--bg2);border-left:3px solid var(--orange,#f59e0b);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:6px">${esc(w)}</div>`
+    ).join('');
+    box.style.display = '';
+  } catch(_) { /* предупреждения не критичны */ }
+}
+
 async function openMassOps() {
   push('s-massops');
   txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadFleetWarnings();
   // Аккаунты для вступления/выхода: показываем только живые — на выключенных
   // операция всё равно провалилась бы в воркере.
   try {

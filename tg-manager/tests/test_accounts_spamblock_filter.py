@@ -40,8 +40,10 @@ def test_stats_counts_spamblock_separately():
     api = _read("services/mini_app_api.py")
     assert "COALESCE(acc_status,'ok')='spamblock') AS spamblock" in api
     assert "NOT IN ('banned','spamblock')\n" in api or "NOT IN ('banned','spamblock')" in api
-    # ключ выведен наружу в stats-словарь
-    assert '"total", "banned", "spamblock", "cooldown", "dead", "active"' in api
+    # ключ выведен наружу в stats-словарь. Проверяем сам ключ, а не точный
+    # список: набор счётчиков расширяется (добавился, например, proxy_down —
+    # аккаунты, простаивающие из-за мёртвого прокси).
+    assert '"spamblock"' in api and '"cooldown"' in api and '"active"' in api
 
 
 def test_frontend_has_spamblock_kpi_and_honest_active():
