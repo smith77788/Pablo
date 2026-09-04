@@ -900,6 +900,9 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
         msg = f"Назначено прокси: {r.get('rotated', 0)}"
         if r.get("skipped_no_proxy"):
             msg += f" (не хватило прокси для {r['skipped_no_proxy']} — добавьте прокси в пул)"
+        # Иначе «не хватило прокси» при полном пуле выглядит беспричинным.
+        if r.get("skipped_dead"):
+            msg += f" · {r['skipped_dead']} прокси не взяты: не отвечают"
         return {"ok": True, "message": msg}
 
     if action_id == "build_ecosystem":

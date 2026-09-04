@@ -11610,12 +11610,15 @@ async function toggleProxyStats() {
   } catch(e) { box.innerHTML = errHtml(e.message,'toggleProxyStats()'); }
 }
 async function rotateProxies() {
-  if (!await askConfirm('Перемешать назначения прокси по всем активным аккаунтам? Изоляция (1 аккаунт = 1 прокси) сохраняется; занятые операцией аккаунты пропускаются.')) return;
+  if (!await askConfirm('Перемешать назначения прокси по всем активным аккаунтам?\n\nИзоляция (1 аккаунт = 1 прокси) сохраняется; занятые операцией аккаунты пропускаются, а прокси, которые не отвечают, в пул не берутся.')) return;
   try {
     const r = await api('/api/miniapp/proxy/rotate', {method:'POST', body: JSON.stringify({})});
     let msg = `🔁 Ротировано: ${r.rotated}`;
     if (r.skipped_busy) msg += ` · занято: ${r.skipped_busy}`;
     if (r.skipped_no_proxy) msg += ` · без прокси: ${r.skipped_no_proxy}`;
+    // Мёртвые прокси в пул не берём — иначе ротация переселила бы аккаунты
+    // на заведомо нерабочий. Говорим об этом, чтобы их заменили.
+    if (r.skipped_dead) msg += ` · не отвечают: ${r.skipped_dead}`;
     toast(msg);
     loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
