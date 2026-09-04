@@ -13792,9 +13792,18 @@ async function vaultDoSearch() {
   try {
     const d = await api('/api/miniapp/vault/search?q='+encodeURIComponent(q));
     const res = d.results || [];
-    if (!res.length) { txt('vaultList', empty('🔍','Ничего не найдено','Попробуйте другой запрос')); return; }
+    // Архив мог быть просмотрен не до конца — тогда «ничего не найдено» неправда.
+    const partial = d.complete === false;
+    const scanNote = partial
+      ? `<div class="field-note" style="padding:6px 2px">Просмотрено ${num(d.scanned||0)} из ${num(d.archive_total||0)} сообщений — архив большой. Уточните запрос или ищите внутри нужного чата.</div>`
+      : '';
+    if (!res.length) {
+      txt('vaultList', scanNote + empty('🔍','Ничего не найдено',
+        partial ? 'Поиск не дошёл до конца архива' : 'Искали и в тексте, и в имени собеседника'));
+      return;
+    }
     res.forEach(m => { VAULT_NAMES[m.chat_id] = m.peer_name; });
-    txt('vaultList', res.map(m => {
+    txt('vaultList', scanNote + res.map(m => {
       const del = m.deleted ? '<span class="badge b-rd" style="margin-left:6px">🗑</span>' : '';
       return `<div class="li tap" onclick="openVaultChat(${m.chat_id})">
         <div class="row-ico" style="background:var(--bg-blue-16)">💬</div>

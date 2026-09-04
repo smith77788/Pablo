@@ -452,30 +452,70 @@ async def export_data(pool, owner_id: int, chat_id: int | None = None) -> dict:
     return {"owner_id": owner_id, "chats": list(chats.values())}
 
 
-async def search_messages(pool, owner_id: int, query: str, limit: int = 100) -> list[dict]:
-    """Поиск по расшифрованному тексту. Текст зашифрован (нельзя ILIKE в SQL),
-    поэтому тянем недавние строки owner'а и фильтруем в приложении после расшифровки.
-    Ограничиваем окно, чтобы не расшифровывать весь архив на каждый запрос."""
+# Поиск идёт страницами: текст зашифрован, ILIKE по нему невозможен, поэтому
+# строки расшифровываются в приложении. Раньше бралось ЖЁСТКОЕ окно из 4000
+# последних сообщений — молча: письмо годичной давности «не находилось», и
+# понять, что поиск до него просто не дошёл, было нельзя.
+_SEARCH_PAGE = 2000
+_SEARCH_MAX_SCAN = 40000   # потолок на один запрос, чтобы не жечь CPU впустую
+
+
+async def search_messages(pool, owner_id: int, query: str, limit: int = 100,
+                          max_scan: int = _SEARCH_MAX_SCAN) -> dict:
+    """Поиск по архиву. Возвращает {results, scanned, total, complete}.
+
+    Совпадением считается вхождение в текст сообщения ЛИБО в имя/ник
+    собеседника: искать переписку по имени клиента — самый частый способ, а
+    раньше работал только текст.
+
+    `complete=False` означает, что архив просмотрен не до конца (упёрлись в
+    потолок) — вызывающий обязан сказать об этом пользователю, иначе «ничего не
+    найдено» будет неправдой.
+    """
     q = (query or "").strip().lower()
     if not q:
-        return []
-    rows = await pool.fetch(
-        """SELECT chat_id, msg_id, direction, text_enc, media_type, media_name,
-                  peer_name, peer_username, msg_date, is_deleted, is_edited
-           FROM vault_messages WHERE owner_id=$1 AND text_enc IS NOT NULL
-           ORDER BY msg_date DESC NULLS LAST LIMIT 4000""",
-        owner_id)
-    out = []
-    for r in rows:
-        text = decrypt_token(r["text_enc"]) if r["text_enc"] else ""
-        if q in (text or "").lower():
-            d = _ui_message(r)
-            d["chat_id"] = r["chat_id"]
-            d["peer_name"] = r["peer_name"] or (f"@{r['peer_username']}" if r["peer_username"] else str(r["chat_id"]))
-            out.append(d)
-            if len(out) >= limit:
-                break
-    return out
+        return {"results": [], "scanned": 0, "total": 0, "complete": True}
+
+    total = int(await pool.fetchval(
+        "SELECT COUNT(*) FROM vault_messages WHERE owner_id=$1", owner_id) or 0)
+
+    out: list[dict] = []
+    scanned = 0
+    offset = 0
+    while scanned < max_scan and len(out) < limit:
+        rows = await pool.fetch(
+            """SELECT chat_id, msg_id, direction, text_enc, media_type, media_name,
+                      peer_name, peer_username, msg_date, is_deleted, is_edited
+                 FROM vault_messages WHERE owner_id=$1
+             ORDER BY msg_date DESC NULLS LAST, msg_id DESC
+                LIMIT $2 OFFSET $3""",
+            owner_id, _SEARCH_PAGE, offset)
+        if not rows:
+            break
+        for r in rows:
+            scanned += 1
+            text = decrypt_token(r["text_enc"]) if r["text_enc"] else ""
+            peer = " ".join(filter(None, (r["peer_name"], r["peer_username"])))
+            if q in (text or "").lower() or q in peer.lower():
+                d = _ui_message(r)
+                d["chat_id"] = r["chat_id"]
+                d["peer_name"] = r["peer_name"] or (
+                    f"@{r['peer_username']}" if r["peer_username"] else str(r["chat_id"]))
+                out.append(d)
+                if len(out) >= limit:
+                    break
+        if len(rows) < _SEARCH_PAGE:
+            break          # архив кончился
+        offset += _SEARCH_PAGE
+
+    return {
+        "results": out,
+        "scanned": scanned,
+        "total": total,
+        # Просмотрели всё либо набрали лимит совпадений — в обоих случаях
+        # «ничего не найдено дальше» не вводит в заблуждение.
+        "complete": scanned >= total or len(out) >= limit,
+    }
 
 
 # ── Медиа из архива ───────────────────────────────────────────────────────────

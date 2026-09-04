@@ -4749,7 +4749,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.exception("vault_search uid=%s", uid)
             return _err(f"Ошибка: {str(exc)[:140]}", 500)
-        return _json_resp({"results": res, "total": len(res)})
+        # complete=False → архив просмотрен не до конца. Без этого «ничего не
+        # найдено» было бы неправдой: раньше поиск молча брал только последние
+        # 4000 сообщений.
+        return _json_resp({
+            "results": res["results"],
+            "total": len(res["results"]),
+            "scanned": res["scanned"],
+            "archive_total": res["total"],
+            "complete": res["complete"],
+        })
 
     async def vault_media(request: web.Request) -> web.Response:
         """Отдать вложение из архива.
