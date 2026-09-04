@@ -501,6 +501,11 @@ _DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
 # Потолок выборки сегмента на кампанию: аудитория целиком грузится в память,
 # а при задержке 45–110 с даже 20k получателей — это недели отправки.
 _SEGMENT_TARGET_LIMIT = 20000
+# Тот же потолок для остальных источников аудитории. Раньше выборка была
+# неограниченной: аккаунт с сотнями тысяч спарсенных контактов грузил их все в
+# память на старте кампании. Практического смысла в большем нет — при паузе
+# 45–110 с на сообщение даже 20k получателей это недели отправки.
+_MAX_CAMPAIGN_TARGETS = 20000
 
 # Множители пользовательского темпа. Держим рядом с таблицей задержек: расчёт
 # срока и сам send-цикл обязаны использовать ОДНИ и те же числа, иначе UI будет
@@ -590,6 +595,16 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
     target_type = campaign["target_type"]
     target_id = campaign["target_id"]
 
+    # Отсечение уже обработанных перенесено в SQL (подзапрос ниже): раньше вся
+    # аудитория грузилась в память целиком и фильтровалась в Python — на базе в
+    # сотни тысяч контактов это тяжёлый старт кампании и лишние десятки МБ.
+    # Python-фильтр по sent_ids оставлен вторым рубежом: он дешёв (SQL уже
+    # отсеял) и страхует источники, где подзапрос неприменим (import_list).
+    _EXCLUDE_SENT = (
+        "NOT IN (SELECT tg_user_id FROM dm_campaign_log "
+        "WHERE campaign_id=$%d AND status IN ('sent','blocked','skip'))"
+    )
+
     # Исключить уже успешно отправленных, заблокированных и пропущенных (не retry)
     sent_ids = {
         r["tg_user_id"]
@@ -606,8 +621,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         rows = await pool.fetch(
             "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name "
             "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
-            "WHERE bu.bot_id=$1 AND mb.added_by=$2 AND bu.user_id > 0",
-            target_id, campaign["owner_id"],
+            "WHERE bu.bot_id=$1 AND mb.added_by=$2 AND bu.user_id > 0 "
+            "AND bu.user_id " + (_EXCLUDE_SENT % 3) +
+            f" ORDER BY bu.user_id LIMIT {_MAX_CAMPAIGN_TARGETS}",
+            target_id, campaign["owner_id"], campaign_id,
         )
         return [
             {"user_id": r["user_id"], "username": r["username"] or None,
@@ -618,8 +635,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
     elif target_type == "crm":
         rows = await pool.fetch(
             "SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
-            "FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
-            campaign["owner_id"],
+            "FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0 "
+            "AND tg_user_id " + (_EXCLUDE_SENT % 2) +
+            f" ORDER BY tg_user_id LIMIT {_MAX_CAMPAIGN_TARGETS}",
+            campaign["owner_id"], campaign_id,
         )
         return [
             {"user_id": r["tg_user_id"], "username": r["username"] or None,
@@ -694,8 +713,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             f"FROM user_activity ua "
             f"JOIN managed_bots mb ON mb.bot_id = ua.bot_id AND mb.added_by=$2 "
             f"LEFT JOIN bot_users bu ON bu.bot_id = ua.bot_id AND bu.user_id = ua.user_id "
-            f"WHERE ua.bot_id=$1 AND {cohort_sql}",
-            target_id, campaign["owner_id"],
+            f"WHERE ua.bot_id=$1 AND {cohort_sql} "
+            f"AND ua.user_id {_EXCLUDE_SENT % 3} "
+            f"ORDER BY ua.user_id LIMIT {_MAX_CAMPAIGN_TARGETS}",
+            target_id, campaign["owner_id"], campaign_id,
         )
         return [
             {"user_id": r["user_id"], "username": r["username"] or None,
@@ -724,9 +745,12 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         if gender_filter in ("m", "f"):
             params_list.append(gender_filter)
             conditions += f" AND gender=${len(params_list)}"
+        params_list.append(campaign_id)
         rows = await pool.fetch(
             f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
-            f"FROM parsed_audiences WHERE {conditions}",
+            f"FROM parsed_audiences WHERE {conditions} "
+            f"AND tg_user_id {_EXCLUDE_SENT % len(params_list)} "
+            f"ORDER BY tg_user_id LIMIT {_MAX_CAMPAIGN_TARGETS}",
             *params_list,
         )
         return [
@@ -737,12 +761,12 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         ]
     elif target_type == "all_bots":
         rows = await pool.fetch(
-            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name
-               FROM bot_users bu
-               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-               WHERE mb.added_by=$1 AND bu.user_id > 0
-               ORDER BY bu.user_id, bu.added_at DESC""",
-            campaign["owner_id"],
+            "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name "
+            "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
+            "WHERE mb.added_by=$1 AND bu.user_id > 0 "
+            "AND bu.user_id " + (_EXCLUDE_SENT % 2) +
+            f" ORDER BY bu.user_id, bu.added_at DESC LIMIT {_MAX_CAMPAIGN_TARGETS}",
+            campaign["owner_id"], campaign_id,
         )
         return [
             {"user_id": r["user_id"], "username": r["username"] or None,
