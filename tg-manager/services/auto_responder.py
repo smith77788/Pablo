@@ -107,6 +107,26 @@ def _match_rule(rule: dict, text: str) -> bool:
     return False
 
 
+# Слова, которыми человек просит прекратить цепочку. Сознательно узкий и
+# ТОЧНЫЙ список: срабатывание по вхождению («стоп» внутри «стоп-кран»,
+# «остановка») отписывало бы людей, которые об этом не просили. Поэтому —
+# сравнение целой (очищенной) строки, а не поиск подстроки.
+_STOP_WORDS = frozenset({
+    "стоп", "стоп!", "/stop", "stop", "отписаться", "отписка", "отписаться!",
+    "unsubscribe", "не писать", "отпишите", "отпишись",
+})
+
+
+def _is_stop_word(text: str) -> bool:
+    """Просьба прекратить рассылку — команда или короткая фраза целиком."""
+    if not text:
+        return False
+    s = text.strip().lower().rstrip(".!… ")
+    if not s or len(s) > 32:   # длинное сообщение — это разговор, а не команда
+        return False
+    return s in _STOP_WORDS
+
+
 def _within_active_window(hour: int, from_hour, to_hour) -> bool:
     """True, если час `hour` (0-23, UTC) попадает в рабочее окно правила.
 
@@ -255,6 +275,32 @@ async def _process_bot(
                 continue
 
             is_start = text.strip().lower().startswith("/start")
+
+            # Отписка от drip-цепочек. Раньше выйти из воронки было нечем:
+            # единственный способ перестать получать шаги — заблокировать бота.
+            # Человек, написавший «стоп», продолжал получать цепочку — это и
+            # жалобы на спам, и безвозвратная потеря контакта для владельца.
+            # Проверяем ДО всех правил автоответчика: на просьбу прекратить
+            # нельзя отвечать очередным маркетинговым сообщением.
+            if _is_stop_word(text):
+                try:
+                    _dropped = await db.unsubscribe_user_from_funnels(pool, bot_id, chat_id)
+                except Exception:
+                    log.exception("auto_responder: отписка от воронок bot=%s user=%s",
+                                  bot_id, chat_id)
+                    _dropped = 0
+                try:
+                    await bot_api.send_message(
+                        http, token, chat_id,
+                        "✅ Вы отписаны — цепочка сообщений остановлена."
+                        if _dropped else
+                        "✅ Активных цепочек сообщений нет — вам ничего не приходит.",
+                    )
+                except Exception:
+                    log_exc_swallow(log, "auto_responder: подтверждение отписки")
+                log.info("auto_responder: bot=%s user=%s отписан от %d воронок",
+                         bot_id, chat_id, _dropped)
+                continue
 
             # Extract user info once (used for notification + registration below)
             from_user = msg.get("from") or {}

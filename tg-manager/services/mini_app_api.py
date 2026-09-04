@@ -8837,7 +8837,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not row:
             return _err("Не найдено", 404)
         if row["status"] == "running":
-            return _err("Кампания уже выполняется", 409)
+            # Статус 'running' мог залипнуть: операция упала с исключением или
+            # контейнер перезапустился, а строка кампании осталась в работе.
+            # Тогда запуск отвечал 409 навсегда — кампанию было не спасти, только
+            # удалить. Считаем её идущей, ТОЛЬКО если под неё есть живая операция.
+            _alive = await _safe_count(
+                pool,
+                """SELECT COUNT(*) FROM operation_queue
+                   WHERE owner_id=$1 AND op_type='dm_campaign'
+                     AND status IN ('pending','running')
+                     AND (params->>'campaign_id') = $2""",
+                uid, str(campaign_id),
+            )
+            if _alive:
+                return _err("Кампания уже выполняется", 409)
+            log.warning(
+                "dm_campaign_launch: кампания %d висела в 'running' без операции — перезапускаем",
+                campaign_id,
+            )
         try:
             label = f"DM-кампания: {row['name']}"
             op_id = await _obus.submit(

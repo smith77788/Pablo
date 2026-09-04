@@ -5788,7 +5788,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field">
       <label>Текст сообщения</label>
       <div class="preset-row" id="cmpPresetRow"></div>
-      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Поддержка Spintax: {Привет|Здравствуйте}!"></textarea>
+      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Spintax: {Привет|Здравствуйте}, {name}!"></textarea>
+      <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до Spintax</div>
       <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
@@ -12160,11 +12161,19 @@ function previewCmpSpintax() {
   const raw = document.getElementById('cmpText').value;
   const el = document.getElementById('cmpSpinPreview');
   if (!raw.trim()) { el.style.display='none'; return; }
-  let t = raw, guard = 0;
+  // Порядок обязан совпадать с движком: сначала персонализация, потом spintax.
+  // Иначе предпросмотр показывал бы «Привет, name!» — ровно тот текст, который
+  // раньше и уходил получателям.
+  let t = raw
+    .replace(/\{name\}/g, 'Иван')
+    .replace(/\{first_name\}/g, 'Иван')
+    .replace(/\{last_name\}/g, 'Петров')
+    .replace(/\{username\}/g, '@ivan');
+  let guard = 0;
   while (t.indexOf('{')>=0 && t.indexOf('}')>=0 && guard++ < 50) {
     t = t.replace(/\{([^{}]+)\}/g, (m,g)=>{ const p=g.split('|'); return p[Math.floor(Math.random()*p.length)]; });
   }
-  el.textContent = '🎲 ' + t;
+  el.textContent = '🎲 ' + t + '  (имя — пример)';
   el.style.display = 'block';
 }
 

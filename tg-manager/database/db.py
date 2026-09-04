@@ -1694,6 +1694,43 @@ async def advance_funnel_step(
         )
 
 
+async def unsubscribe_user_from_funnels(
+    pool: asyncpg.Pool, bot_id: int, user_id: int
+) -> int:
+    """Снять пользователя со всех активных воронок этого бота. Возвращает число.
+
+    До этого выйти из drip-цепочки было НЕЧЕМ: единственным способом перестать
+    получать шаги было заблокировать бота (403 → dropped). Человек, написавший
+    «стоп», продолжал получать цепочку — это и причина жалоб на спам, и потеря
+    контакта для владельца бота, потому что блокировка необратима.
+
+    Помечаем dropped (а не completed): воронка НЕ пройдена, и статистика
+    завершений не должна врать. Тот же признак ставит funnel_runner при 403,
+    поэтому get_due_funnel_steps такие подписки уже не выбирает.
+    """
+    rows = await pool.fetch(
+        """UPDATE funnel_subscriptions fs
+              SET dropped = true, completed_at = now()
+             FROM funnels f
+            WHERE fs.funnel_id = f.id
+              AND f.bot_id = $1
+              AND fs.user_id = $2
+              AND fs.completed = false
+              AND fs.dropped = false
+        RETURNING fs.funnel_id""",
+        bot_id, user_id,
+    )
+    for r in rows or []:
+        try:
+            await pool.execute(
+                "UPDATE funnels SET dropped_count = dropped_count + 1 WHERE id=$1",
+                r["funnel_id"],
+            )
+        except Exception:
+            pass  # счётчик — наблюдаемость, не должен ломать отписку
+    return len(rows or [])
+
+
 async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     """Get aggregated statistics for a bot (concurrent queries)."""
     with timed(log, "get_bot_stats", extra={"bot_id": bot_id}):

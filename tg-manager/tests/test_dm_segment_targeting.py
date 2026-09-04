@@ -72,15 +72,14 @@ def test_segment_targets_resolved_through_segment_engine(monkeypatch):
         monkeypatch,
         filters={"crm_stage": "hot"},
         rows=[
-            {"telegram_user_id": 100, "username": "alice"},
-            {"telegram_user_id": 200, "username": None},
+            {"telegram_user_id": 100, "username": "alice", "first_name": "Алиса"},
+            {"telegram_user_id": 200, "username": None, "first_name": None},
         ],
     )
     targets = asyncio.run(dm_engine._get_targets(_FakePool(), _campaign()))
-    assert targets == [
-        {"user_id": 100, "username": "alice"},
-        {"user_id": 200, "username": None},
-    ]
+    assert [(t["user_id"], t["username"]) for t in targets] == [(100, "alice"), (200, None)]
+    # Имя обязано доехать до отправки — на нём держится персонализация {name}.
+    assert targets[0]["first_name"] == "Алиса"
 
 
 def test_segment_skips_contacts_without_any_address(monkeypatch):

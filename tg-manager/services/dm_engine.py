@@ -116,6 +116,65 @@ def expand_spintax(text: str) -> str:
         return _expand_spintax_naive(text)
 
 
+# ── Персонализация ────────────────────────────────────────────────────────────
+
+# Значение по умолчанию, когда имени у получателя нет. Пустая строка ломала бы
+# фразу («Привет, !»), поэтому нужен нейтральный запасной вариант.
+_DEFAULT_NAME_FALLBACK = "друг"
+_PERSONAL_PLACEHOLDERS = ("name", "first_name", "last_name", "username")
+_PLACEHOLDER_RE = re.compile(r"\{(name|first_name|last_name|username)\}")
+# Подставляемое значение не должно превращаться в spintax-разметку или в
+# полстраницы текста: имя в Telegram задаёт сам получатель.
+_MAX_NAME_LEN = 64
+
+
+def _clean_name_value(value: str | None) -> str:
+    if not value:
+        return ""
+    s = str(value)
+    for ch in "{}|":
+        s = s.replace(ch, "")
+    return s.strip()[:_MAX_NAME_LEN]
+
+
+def personalize(template: str, target: dict | None, fallback: str | None = None) -> str:
+    """Подставить имя получателя в шаблон ДО разворота spintax.
+
+    Порядок обязателен: spintax-движок видит `{name}` как группу из одного
+    варианта и превращает её в голое слово «name». То есть до этого фикса
+    очевидный синтаксис персонализации молча портил текст — пользователь
+    рассылал «Привет, name!» тысячам людей.
+
+    Поддерживает {name}, {first_name}, {last_name}, {username}. {name} — самый
+    удобный: имя, иначе @username, иначе запасное слово.
+
+    Чистая функция: тестируется отдельно от send-цикла.
+    """
+    if not template or "{" not in template:
+        return template or ""
+    if not _PLACEHOLDER_RE.search(template):
+        return template
+    t = target or {}
+    fb = _clean_name_value(fallback) or _DEFAULT_NAME_FALLBACK
+    first = _clean_name_value(t.get("first_name"))
+    last = _clean_name_value(t.get("last_name"))
+    uname = _clean_name_value(t.get("username")).lstrip("@")
+
+    values = {
+        "first_name": first or fb,
+        "last_name": last or fb,
+        "username": ("@" + uname) if uname else fb,
+        # Живое обращение: имя → ник → нейтральное слово.
+        "name": first or (("@" + uname) if uname else fb),
+    }
+    return _PLACEHOLDER_RE.sub(lambda m: values[m.group(1)], template)
+
+
+def template_uses_personalization(template: str) -> bool:
+    """Есть ли в тексте плейсхолдеры персонализации (для превью и подсказок)."""
+    return bool(template) and bool(_PLACEHOLDER_RE.search(template))
+
+
 def parse_import_list(raw, limit: int = 5000) -> list[dict]:
     """Разбирает пользовательский список получателей → [{user_id, username}].
 
@@ -499,24 +558,26 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         # JOIN managed_bots ... added_by — защита от IDOR: рассылка только по
         # подписчикам бота, принадлежащего владельцу кампании.
         rows = await pool.fetch(
-            "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username "
+            "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name "
             "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
             "WHERE bu.bot_id=$1 AND mb.added_by=$2 AND bu.user_id > 0",
             target_id, campaign["owner_id"],
         )
         return [
-            {"user_id": r["user_id"], "username": r["username"] or None}
+            {"user_id": r["user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["user_id"] not in sent_ids
         ]
     elif target_type == "crm":
         rows = await pool.fetch(
-            "SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
+            "SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
             "FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
             campaign["owner_id"],
         )
         return [
-            {"user_id": r["tg_user_id"], "username": r["username"] or None}
+            {"user_id": r["tg_user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
@@ -548,7 +609,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
                 continue
             if uid:
                 seen_uids.add(uid)
-            out.append({"user_id": uid, "username": uname})
+            out.append({
+                "user_id": uid, "username": uname,
+                "first_name": r.get("first_name"), "last_name": r.get("last_name"),
+            })
         return out
     elif target_type == "cohort" and target_id:
         # target_id = bot_id, params.cohort_type = hot|warm|cold|lost
@@ -570,7 +634,7 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         }.get(cohort, "ua.last_seen >= now() - INTERVAL '7 days'")
         # JOIN bot_users to get username for reliable entity resolution
         rows = await pool.fetch(
-            f"SELECT ua.user_id, bu.username "
+            f"SELECT ua.user_id, bu.username, bu.first_name "
             f"FROM user_activity ua "
             f"JOIN managed_bots mb ON mb.bot_id = ua.bot_id AND mb.added_by=$2 "
             f"LEFT JOIN bot_users bu ON bu.bot_id = ua.bot_id AND bu.user_id = ua.user_id "
@@ -578,7 +642,8 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             target_id, campaign["owner_id"],
         )
         return [
-            {"user_id": r["user_id"], "username": r["username"] or None}
+            {"user_id": r["user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["user_id"] not in sent_ids
         ]
@@ -604,18 +669,19 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             params_list.append(gender_filter)
             conditions += f" AND gender=${len(params_list)}"
         rows = await pool.fetch(
-            f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
+            f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
             f"FROM parsed_audiences WHERE {conditions}",
             *params_list,
         )
         return [
-            {"user_id": r["tg_user_id"], "username": r["username"] or None}
+            {"user_id": r["tg_user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
     elif target_type == "all_bots":
         rows = await pool.fetch(
-            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username
+            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name
                FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by=$1 AND bu.user_id > 0
@@ -623,7 +689,8 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             campaign["owner_id"],
         )
         return [
-            {"user_id": r["user_id"], "username": r["username"] or None}
+            {"user_id": r["user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["user_id"] not in sent_ids
         ]
@@ -801,6 +868,8 @@ async def run_campaign(
         except Exception:
             log.debug('campaign params parse error')
             _cp = {}
+    # Чем заменить {name}, если у получателя нет ни имени, ни ника.
+    _name_fallback = (_cp or {}).get("name_fallback") or None
     _media_url = (_cp or {}).get("media_url") or None
     # Массовая рассылка с медиа: скачиваем файл ОДИН раз, дальше уникализируем под
     # каждого получателя (анти-детект — иначе у всех одинаковый серверный хэш).
@@ -931,7 +1000,9 @@ async def run_campaign(
             )
             return
 
-        text = expand_spintax(template)
+        # Персонализация ДО spintax: иначе spintax-движок увидит `{name}` как
+        # группу из одного варианта и подставит голое слово «name».
+        text = expand_spintax(personalize(template, target, _name_fallback))
         t0_dm = time.monotonic()
         result = await send_dm(
             acc["session_str"], user_id, text, _acc=acc, username=username,
