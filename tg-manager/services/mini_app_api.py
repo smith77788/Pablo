@@ -17239,6 +17239,60 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ok = await intent_sensor.delete_rule(pool, uid, rid)
         return _json_resp({"ok": ok})
 
+    async def uch_intent_rule_update(request: web.Request) -> web.Response:
+        """Правка правила на месте: раньше опечатку во фразе чинили удалением и
+        пересозданием — вместе со счётчиком срабатываний и журналом, то есть
+        теряя ровно ту историю, по которой правило и настраивают."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info["rule_id"])
+            body = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        from services import intent_sensor
+        kwargs = {}
+        if "phrase" in body:
+            kwargs["phrase"] = body.get("phrase")
+        # stage/tag: None здесь — осмысленное «снять», поэтому различаем
+        # «поле не прислали» и «прислали пустое».
+        if "stage" in body:
+            kwargs["stage"] = body.get("stage") or None
+        if "tag" in body:
+            kwargs["tag"] = body.get("tag") or None
+        if "notify" in body:
+            kwargs["notify"] = bool(body.get("notify"))
+        try:
+            ok = await intent_sensor.update_rule(pool, uid, rid, **kwargs)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        except Exception as exc:
+            log.exception("uch_intent_rule_update uid=%s rule=%s", uid, rid)
+            return _err(str(exc), 500)
+        if not ok:
+            return _err("Правило не найдено", 404)
+        return _json_resp({"ok": True})
+
+    async def uch_intent_hits(request: web.Request) -> web.Response:
+        """Последние срабатывания правил — чтобы их можно было отлаживать."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rid = None
+        if request.query.get("rule_id"):
+            try:
+                rid = int(request.query["rule_id"])
+            except (TypeError, ValueError):
+                return _err("bad rule_id", 400)
+        from services import intent_sensor
+        try:
+            hits = await intent_sensor.recent_hits(pool, uid, rid, limit=50)
+        except Exception as exc:
+            log.exception("uch_intent_hits uid=%s", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"hits": hits})
+
     async def uch_intent_rule_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -17993,6 +18047,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/intent/rule", uch_intent_rule_create)
     app.router.add_delete("/api/miniapp/uch/intent/rule/{rule_id}", uch_intent_rule_delete)
     app.router.add_post("/api/miniapp/uch/intent/rule/{rule_id}/toggle", uch_intent_rule_toggle)
+    app.router.add_patch("/api/miniapp/uch/intent/rule/{rule_id}", uch_intent_rule_update)
+    app.router.add_get("/api/miniapp/uch/intent/hits", uch_intent_hits)
     app.router.add_post("/api/miniapp/uch/intent/seed", uch_intent_seed)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
     app.router.add_get("/api/miniapp/uch/search", uch_search)

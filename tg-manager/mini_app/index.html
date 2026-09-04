@@ -3246,9 +3246,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <input type="checkbox" id="intNotify" checked style="width:16px;height:16px"> Уведомлять в ЛС при срабатывании
       </label>
       <div id="intErr" style="color:var(--red);font-size:13px;min-height:16px"></div>
-      <button class="btn btn-p" style="width:100%" onclick="addIntentRule()">Добавить правило</button>
+      <button class="btn btn-p" style="width:100%" id="intAddBtn" onclick="addIntentRule()">➕ Добавить правило</button>
+      <div id="intCancelEdit" style="display:none;text-align:center;padding:8px;color:var(--hint);cursor:pointer;font-size:13px" onclick="cancelIntentEdit()">Отменить правку</div>
     </div>
-    <div class="sec">Правила</div>
+    <div class="sec" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Правила</span>
+      <span class="sec-btn" onclick="openIntentHits(null)" title="Все срабатывания">📜 Журнал</span>
+    </div>
     <div class="lst" id="intentRules"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -14382,6 +14386,7 @@ async function loadIntentRules() {
   try {
     const d = await api('/api/miniapp/uch/intent/rules');
     const rules = d.rules || [];
+    CUR_INTENT_RULES = rules;   // правка берёт правило отсюда, а не из атрибута
     document.getElementById('intentSeedBox').style.display = rules.length ? 'none' : 'block';
     if (!rules.length) { box.innerHTML = empty('🎯','Правил пока нет','Добавьте своё или включите рекомендованные'); return; }
     box.innerHTML = rules.map(r=>{
@@ -14392,6 +14397,8 @@ async function loadIntentRules() {
           <div class="li-sub">${act||'— без действия —'} · сработ.: ${r.hits||0}</div>
         </div>
         <div class="li-right" style="display:flex;gap:8px;align-items:center">
+          ${r.hits ? `<span style="cursor:pointer;font-size:15px" onclick="openIntentHits(${r.id})" title="Показать, на что сработало">📜</span>` : ''}
+          <span style="cursor:pointer;font-size:15px" onclick="editIntentRule(${r.id})" title="Изменить">✏️</span>
           <span style="cursor:pointer;font-size:15px" onclick="toggleIntentRule(${r.id})" title="Вкл/выкл">${r.is_active?'⏸':'▶️'}</span>
           <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id})" title="Удалить">🗑</span>
         </div>
@@ -14399,6 +14406,63 @@ async function loadIntentRules() {
     }).join('');
   } catch(e){ box.innerHTML = errHtml(e.message,'loadIntentRules()'); }
 }
+let CUR_INTENT_RULES = [];
+let INTENT_EDIT_ID = null;
+
+// Правка правила переиспользует форму добавления: раньше опечатку во фразе
+// чинили удалением и пересозданием — вместе со счётчиком срабатываний и
+// журналом, то есть теряя ровно ту историю, по которой правило и настраивают.
+function editIntentRule(id) {
+  const r = (CUR_INTENT_RULES||[]).find(x=>String(x.id)===String(id));
+  if (!r) { toast('Правило не найдено — обновите экран'); return; }
+  INTENT_EDIT_ID = r.id;
+  document.getElementById('intPhrase').value = r.phrase || '';
+  document.getElementById('intStage').value = r.stage || '';
+  document.getElementById('intTag').value = r.tag || '';
+  document.getElementById('intNotify').checked = !!r.notify;
+  const b = document.getElementById('intAddBtn');
+  if (b) { b.textContent = '💾 Сохранить правило'; }
+  const c = document.getElementById('intCancelEdit');
+  if (c) c.style.display = 'block';
+  document.getElementById('intErr').textContent = '';
+}
+function cancelIntentEdit() {
+  INTENT_EDIT_ID = null;
+  document.getElementById('intPhrase').value = '';
+  document.getElementById('intTag').value = '';
+  const b = document.getElementById('intAddBtn');
+  if (b) b.textContent = '➕ Добавить правило';
+  const c = document.getElementById('intCancelEdit');
+  if (c) c.style.display = 'none';
+  document.getElementById('intErr').textContent = '';
+}
+
+// Журнал: голый счётчик срабатываний не давал понять, НА ЧТО сработало
+// правило, поэтому ложные срабатывания оставались невидимыми.
+async function openIntentHits(ruleId) {
+  const box = document.getElementById('intentRules');
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/uch/intent/hits' + (ruleId ? ('?rule_id='+ruleId) : ''));
+    const hits = d.hits || [];
+    const back = `<div style="padding:6px 2px"><span class="sec-btn" onclick="loadIntentRules()">← К правилам</span></div>`;
+    if (!hits.length) {
+      box.innerHTML = back + empty('📜','Срабатываний пока нет','Журнал заполнится, когда правило поймает сообщение');
+      return;
+    }
+    box.innerHTML = back + hits.map(h=>{
+      const when = h.created_at ? new Date(h.created_at).toLocaleString('ru-RU') : '';
+      const act = [h.stage_to?('→ '+(INTENT_STAGE_LABELS[h.stage_to]||h.stage_to)):'',
+                   (h.tags_added||[]).length?('🏷 '+h.tags_added.map(esc).join(', ')):''].filter(Boolean).join(' · ');
+      return `<div class="li"><div class="li-body">
+          <div class="li-name">«${esc(h.phrase||'')}» · ${esc(h.peer_name||('#'+(h.chat_id||'')))}</div>
+          <div class="li-sub" style="white-space:pre-wrap">${esc((h.text_preview||'').slice(0,160))}</div>
+          <div class="li-sub" style="opacity:.7">${when}${act?' · '+act:''}</div>
+        </div></div>`;
+    }).join('');
+  } catch(e){ box.innerHTML = errHtml(e.message,'openIntentHits()'); }
+}
+
 async function addIntentRule() {
   const phrase = (document.getElementById('intPhrase').value||'').trim();
   const stage = document.getElementById('intStage').value || null;
@@ -14408,8 +14472,14 @@ async function addIntentRule() {
   if (!phrase) { err.textContent = 'Введите фразу'; return; }
   if (!stage && !tag) { err.textContent = 'Укажите стадию или тег — иначе правило ничего не делает'; return; }
   try {
-    await api('/api/miniapp/uch/intent/rule', {method:'POST', body:JSON.stringify({phrase, stage, tag, notify})});
-    document.getElementById('intPhrase').value = ''; document.getElementById('intTag').value = '';
+    if (INTENT_EDIT_ID) {
+      await api('/api/miniapp/uch/intent/rule/'+INTENT_EDIT_ID,
+                {method:'PATCH', body:JSON.stringify({phrase, stage, tag, notify})});
+      cancelIntentEdit();
+    } else {
+      await api('/api/miniapp/uch/intent/rule', {method:'POST', body:JSON.stringify({phrase, stage, tag, notify})});
+      document.getElementById('intPhrase').value = ''; document.getElementById('intTag').value = '';
+    }
     err.textContent = '';
     loadIntentRules();
   } catch(e){ err.textContent = e.message || 'Ошибка'; }
