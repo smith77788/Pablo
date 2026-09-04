@@ -161,6 +161,89 @@ async def _init_offset(
     return max_id
 
 
+async def _record_bot_error(pool: asyncpg.Pool, bot_id: int,
+                            description: str, error_code=None) -> None:
+    """Запомнить, ПОЧЕМУ бот не отвечает.
+
+    Раньше это знал только серверный лог: на экране бот оставался «активным»,
+    подписчики ему писали, ответа не было, и владельцу никто не сообщал.
+    Запись состояния — вспомогательная: её сбой не должен ломать опрос.
+    """
+    try:
+        from services.bot_health import classify_error
+
+        kind = classify_error(description, error_code)
+        await pool.execute(
+            """UPDATE managed_bots
+                  SET last_error=$2, last_error_at=now(),
+                      fail_streak = fail_streak + 1
+                WHERE bot_id=$1""",
+            bot_id, kind)
+    except Exception:
+        log.debug("auto_responder: состояние бота %s не записано", bot_id)
+
+
+async def _record_bot_ok(pool: asyncpg.Pool, bot_id: int) -> None:
+    """Успешный опрос снимает жалобу и метку «уже сообщили».
+
+    Метку снимаем тоже: если бота починили, а он сломается снова — об этом
+    нужно предупредить заново, а не промолчать из-за старой отметки.
+    """
+    try:
+        await pool.execute(
+            """UPDATE managed_bots
+                  SET fail_streak=0, last_error=NULL, last_ok_at=now(),
+                      dead_notified_at=NULL
+                WHERE bot_id=$1 AND (fail_streak > 0 OR last_ok_at IS NULL)""",
+            bot_id)
+    except Exception:
+        log.debug("auto_responder: отметка успеха бота %s не записана", bot_id)
+
+
+async def notify_broken_bots(pool: asyncpg.Pool, bot) -> int:
+    """Сообщить владельцам о ботах, которые молчат и сами не починятся.
+
+    Один раз на поломку (метка `dead_notified_at`) — тот же приём, что у
+    сторожа прокси и у прогрева: повторяющееся уведомление перестают читать.
+    Возвращает число отправленных.
+    """
+    from services.bot_health import build_alert, decide_alert
+
+    try:
+        rows = await pool.fetch(
+            """SELECT bot_id, added_by, username, first_name,
+                      last_error, fail_streak
+                 FROM managed_bots
+                WHERE is_active AND fail_streak > 0
+                  AND dead_notified_at IS NULL
+                LIMIT 50""")
+    except Exception as e:
+        log.debug("auto_responder: выборка сломанных ботов не удалась: %s", e)
+        return 0
+
+    sent = 0
+    for r in rows:
+        if not decide_alert(r["last_error"] or "", r["fail_streak"], False):
+            continue
+        name = (f"@{r['username']}" if r["username"]
+                else (r["first_name"] or f"бот #{r['bot_id']}"))
+        try:
+            await db.notify_if_enabled(
+                pool, bot, r["added_by"], "restriction",
+                build_alert(name, r["last_error"] or "", r["fail_streak"]),
+                dedup_key=f"bot_broken:{r['bot_id']}")
+            sent += 1
+        except Exception:
+            log.debug("auto_responder: уведомление о боте %s не ушло", r["bot_id"])
+        try:
+            await pool.execute(
+                "UPDATE managed_bots SET dead_notified_at=now() WHERE bot_id=$1",
+                r["bot_id"])
+        except Exception:
+            log.debug("auto_responder: метка уведомления бота %s не записана", r["bot_id"])
+    return sent
+
+
 async def _process_bot(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
@@ -215,7 +298,12 @@ async def _process_bot(
                     )
             else:
                 log.warning("auto_responder: bot=%d getUpdates вернул ошибку: %s", bot_id, err_desc[:200])
+            # Состояние бота — В БАЗУ, а не только в лог. Раньше молчащий бот
+            # выглядел на экране «активным»: подписчики ему писали, он не
+            # отвечал, и владельцу об этом никто не говорил.
+            await _record_bot_error(pool, bot_id, err_desc, data.get("error_code"))
             return
+        await _record_bot_ok(pool, bot_id)
         _dead_token_cooldown.pop(bot_id, None)
         updates = data.get("result", [])
         if not updates:
@@ -942,8 +1030,18 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
     _inactivity_sweep_task = asyncio.create_task(run_inactivity_sweep(pool, http))
     # Stagger startup — don't hammer DB immediately alongside other services
     await asyncio.sleep(10)
+    _cycle = 0
     while True:
         try:
+            # Раз в ~5 минут — рассказать о ботах, которые молчат и сами не
+            # починятся. Чаще незачем: метка «уже сообщили» всё равно не даст
+            # повторить, а лишний запрос каждые 10 секунд бессмысленен.
+            _cycle += 1
+            if main_bot is not None and _cycle % 30 == 1:
+                try:
+                    await notify_broken_bots(pool, main_bot)
+                except Exception:
+                    log.debug("auto_responder: уведомления о сломанных ботах не отправлены")
             bots = await db.get_bots_for_polling(pool)
             if bots:
                 now = time.monotonic()

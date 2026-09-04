@@ -7798,14 +7798,21 @@ function renderBots() {
         <span class="badge ${sel?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${sel?'✓ Выбран':'Выбрать'}</span>
       </div>`;
     }
-    return `<div class="bot-card" onclick="openBot(${b.bot_id})">
+    // Честное состояние: бот с отозванным токеном выглядел здесь ровно как
+    // рабочий — «🟢 Активен», — пока подписчики писали ему и не получали
+    // ответа. Знал об этом только серверный лог.
+    const h = b.health || {};
+    const badge = (active && h.label && h.state && h.state!=='ok')
+      ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex;background:var(--bg2);color:${h.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(h.label)}</span>`
+      : `<span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>`;
+    return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
       <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
       ${handleHtml}
       <div class="bot-card-subs">${num(subs)}</div>
       <div class="bot-card-lbl">подписчиков</div>
-      <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
+      ${badge}
     </div>`;
   }).join('');
 }
@@ -7894,10 +7901,25 @@ async function submitQuickBot() {
   if(!token){ errEl.textContent='Введите токен бота'; return; }
   try {
     const r=await api('/api/miniapp/bot/add',{method:'POST',body:JSON.stringify({token})});
-    toast(r.already_exists?`✅ Бот @${r.username} уже добавлен`:`✅ Бот @${r.username} добавлен!`);
+    // Вставленный токен уже существующего бота — это замена отозванного.
+    // Говорим об этом прямо и подчёркиваем, что аудитория цела: раньше в этом
+    // месте отвечали «уже добавлен», токен не менялся, и бот молчал дальше.
+    toast(!r.already_exists ? `✅ Бот @${r.username} добавлен!`
+          : (r.token_replaced ? `🔑 Токен @${r.username} заменён — подписчики и воронки сохранены`
+                              : `✅ Бот @${r.username} уже добавлен`));
     document.getElementById('quickBotToken').value='';
     loadBots();
   } catch(e){ errEl.textContent=e.message||'Ошибка'; }
+}
+
+// Починка молчащего бота: ведём туда, где вставляется токен. Отдельной формы
+// не заводим — «добавить бота» теперь и есть замена токена, и раздваивать
+// путь значило бы держать две двери в одну комнату.
+function openBotTokenFix(){
+  back();
+  const inp=document.getElementById('quickBotToken');
+  if(inp){ inp.focus(); inp.scrollIntoView({behavior:'smooth', block:'center'}); }
+  toast('🔑 Получите новый токен у @BotFather и вставьте его сюда');
 }
 
 async function openBot(botId) {
@@ -7932,6 +7954,19 @@ function buildBotDetail(d) {
   const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
   const bid = b.bot_id;
   const bn = esc(CUR_BOT.name);
+
+  // Почему бот молчит — и что с этим делать. Раньше карточка молчащего бота
+  // выглядела как карточка рабочего: «🟢 Активен», подписчики пишут, ответа
+  // нет, и объяснения нигде. Восстановление тоже не подсказывалось, а
+  // единственный доступный путь (удалить и добавить заново) стирал аудиторию.
+  const bh = b.health || {};
+  const bhBanner = (bh.state && bh.state!=='ok' && bh.hint)
+    ? `<div style="margin:8px 0;padding:11px 13px;background:var(--bg2);border-left:3px solid ${bh.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'};border-radius:8px">
+         <div style="font-weight:600;font-size:14px">${esc(bh.label)}</div>
+         <div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.45">${esc(bh.hint)}</div>
+         ${bh.kind==='unauthorized'?`<button class="btn btn-p" style="width:100%;margin-top:9px;font-size:13px;padding:9px" onclick="openBotTokenFix()">🔑 Вставить новый токен</button>`:''}
+       </div>`
+    : '';
 
   // Management sections as tile grids
   const mgmtSections = [
@@ -7990,9 +8025,11 @@ function buildBotDetail(d) {
       <div class="bot-phdr-body">
         <div class="bot-phdr-name">${esc(bname)}</div>
         <div class="bot-phdr-sub">${num(d.active_subscribers)} активных · ${num(d.total_subscribers)} всего</div>
-        ${b.is_active?'<span class="badge b-gr">🟢 Активен</span>':'<span class="badge b-gy">Выключен</span>'}
+        ${(bh.state&&bh.state!=='ok')?`<span class="badge b-gy" style="background:var(--bg2);color:${bh.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(bh.label)}</span>`
+          : (b.is_active?'<span class="badge b-gr">🟢 Активен</span>':'<span class="badge b-gy">Выключен</span>')}
       </div>
     </div>
+    ${bhBanner}
     <div class="kpi-bar">
       <div class="kpi-col"><div class="kpi-val" style="color:var(--green)">${num(d.active_subscribers)}</div><div class="kpi-lbl">Активных</div></div>
       <div class="kpi-col"><div class="kpi-val">${num(d.total_subscribers)}</div><div class="kpi-lbl">Всего подп.</div></div>
