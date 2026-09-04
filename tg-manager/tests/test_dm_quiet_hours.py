@@ -107,3 +107,25 @@ def test_api_only_persists_explicit_opt_out():
     """Умолчание живёт в движке — API не должен его дублировать."""
     api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
     assert 'body.get("quiet_hours") is False' in api
+
+
+# ── Губернатор темпа флота ────────────────────────────────────────────────────
+
+def test_campaign_delay_is_governed_by_fleet_pressure():
+    """DM-кампании были единственным массовым расходником ВНЕ губернатора:
+    инвайт, разовая рассылка и ещё два десятка операций уважают общее давление
+    флота, а кампания долбила своим темпом, даже когда флот уже ловил флуды и
+    баны от других операций."""
+    src = _run_campaign_src()
+    assert "_fleet_tempo_mult(pool, owner_id)" in src
+
+
+def test_governor_multiplier_never_speeds_up_and_fails_open():
+    """Губернатор может только замедлять. Его сбой не должен ронять рассылку."""
+    import asyncio
+    from services.dm_engine import _fleet_tempo_mult
+
+    class _Boom:
+        pass
+
+    assert asyncio.run(_fleet_tempo_mult(_Boom(), 1)) == 1.0

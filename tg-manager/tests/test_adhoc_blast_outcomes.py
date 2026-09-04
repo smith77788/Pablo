@@ -164,3 +164,46 @@ def test_ui_confirm_shows_duration_and_duplicates():
     assert "humanDur(" in seg, "подтверждение обязано показывать срок рассылки"
     assert "Дублей в списке" in seg
     assert "первая 1000" in seg, "молчаливое усечение списка недопустимо"
+
+
+# ── Лимит на аккаунт (защита от бана) ─────────────────────────────────────────
+
+def test_adhoc_has_per_account_cap():
+    """У кампаний дневной лимит есть давно, у разовой рассылки не было ничего:
+    1000 получателей на двух аккаунтах — это по 500 ЛС с каждого и почти
+    верный бан."""
+    src = _adhoc_source()
+    assert "per_acc_cap" in src and "sent_by_acc" in src
+
+
+def test_adhoc_reuses_tested_rotator_not_a_second_homegrown_one():
+    src = _adhoc_source()
+    assert "_pick_acc(" in src, "должен переиспользоваться pick_account_under_cap"
+    assert "active_accounts[acc_idx % len(active_accounts)]" not in src
+
+
+def test_exhausted_cap_is_reported_not_counted_as_errors():
+    """Исчерпанный лимит — штатная защита, а не сбой отправки."""
+    src = _adhoc_source()
+    seg = src[src.index("_pick_acc("):]
+    seg = seg[:900]
+    assert "skip_count" in seg and "лимит" in seg
+
+
+def test_cap_counts_only_successful_sends():
+    """Иначе неудачные попытки съедали бы лимит здорового аккаунта."""
+    src = _adhoc_source()
+    idx = src.index('if kind == "sent":')
+    assert "sent_by_acc[int(acc[\"id\"])]" in src[idx:idx + 400]
+
+
+def test_api_validates_and_forwards_cap():
+    body = _endpoint_source()
+    assert "per_account_cap" in body
+    assert "min_val=1, max_val=500" in body
+
+
+def test_ui_exposes_cap():
+    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    assert 'id="daPerAcc"' in ui
+    assert "per_account_cap" in ui

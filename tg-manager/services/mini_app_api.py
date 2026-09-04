@@ -7163,6 +7163,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте", 400)
         delay = min(max(validate_integer(data.get("delay", 30), min_val=5, max_val=600) or 30, 5), 600)
+        # Потолок сообщений с одного аккаунта за эту рассылку. Раньше его не
+        # было вовсе: 1000 получателей на двух аккаунтах = по 500 ЛС с каждого.
+        per_account_cap = None
+        if data.get("per_account_cap") not in (None, "", 0):
+            per_account_cap = min(max(
+                validate_integer(data.get("per_account_cap"), min_val=1, max_val=500) or 1,
+                1), 500)
 
         acc_ids = await _alive_accounts(
             uid, [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()])
@@ -7174,7 +7181,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_id = await operation_bus.submit(
                 pool, uid, "bulk_dm_adhoc",
                 {"account_ids": acc_ids, "usernames": usernames,
-                 "text": text, "delay": delay},
+                 "text": text, "delay": delay,
+                 "per_account_cap": per_account_cap},
                 total_items=len(usernames),
                 label=f"Рассылка ЛС: {len(usernames)} получателей × {len(acc_ids)} акк.",
             )
@@ -8819,6 +8827,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # чтобы движок с его умолчанием остался источником правды.
         if body.get("quiet_hours") is False:
             _params["quiet_hours"] = False
+        # Чем заменить {name}, если у получателя нет ни имени, ни ника. Движок
+        # читал этот параметр, но задать его было нечем — настройка без ввода.
+        _nf = (body.get("name_fallback") or "").strip()
+        if _nf:
+            _params["name_fallback"] = _nf[:32]
         if cohort_type:
             _params["cohort_type"] = cohort_type
         if import_list:
@@ -9006,6 +9019,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _p["media_url"] = media_url
             else:
                 _p.pop("media_url", None)
+            _params_touched = True
+
+        if "name_fallback" in body:
+            _nf = (body.get("name_fallback") or "").strip()
+            if _nf:
+                _p["name_fallback"] = _nf[:32]
+            else:
+                _p.pop("name_fallback", None)   # вернуться к умолчанию движка
             _params_touched = True
 
         if _params_touched:

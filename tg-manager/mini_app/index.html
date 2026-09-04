@@ -2244,6 +2244,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <input type="number" id="daDelay" value="30" min="5" max="600" title="Задержка между сообщениями, сек" style="flex:0 0 100px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · spintax обязателен</div>
       </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">макс. с одного аккаунта за рассылку · защита от бана (пусто — без лимита)</div>
+      </div>
       <button class="btn btn-p" style="width:100%" onclick="submitDmAdhoc()">✉️ Разослать в ЛС</button>
       <div id="daErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -5802,6 +5806,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="preset-row" id="cmpPresetRow"></div>
       <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Spintax: {Привет|Здравствуйте}, {name}!"></textarea>
       <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до Spintax</div>
+      <input type="text" id="cmpNameFb" maxlength="32" placeholder="Если имени нет, писать: друг">
+      <div class="field-note">Чем заменить {name}, когда у получателя нет ни имени, ни ника</div>
       <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
@@ -12135,6 +12141,7 @@ function openCmpModal() {
   { const _m=document.getElementById('cmpMedia'); if(_m) _m.value=''; }
   document.getElementById('cmpPerAcc').value='';
   { const _q=document.getElementById('cmpQuiet'); if(_q) _q.checked=true; }
+  { const _nf=document.getElementById('cmpNameFb'); if(_nf) _nf.value=''; }
   document.getElementById('cmpLen').textContent='0';
   const sp=document.getElementById('cmpSpinPreview'); sp.style.display='none'; sp.textContent='';
   document.getElementById('cmpErr').style.display='none';
@@ -12254,6 +12261,7 @@ async function saveCmp() {
   }
   if (perAccRaw) payload.per_account_daily = parseInt(perAccRaw);
   payload.quiet_hours = !!document.getElementById('cmpQuiet')?.checked;
+  { const _nf=(document.getElementById('cmpNameFb')?.value||'').trim(); if(_nf) payload.name_fallback=_nf; }
   const media = document.getElementById('cmpMedia')?.value.trim();
   if (media) payload.media_url = media;
   const btn = document.getElementById('cmpBtn');
@@ -12265,6 +12273,7 @@ async function saveCmp() {
         per_account_daily: perAccRaw ? parseInt(perAccRaw) : null,
         quiet_hours: !!document.getElementById('cmpQuiet')?.checked,
         media_url: document.getElementById('cmpMedia')?.value.trim() || '',
+        name_fallback: (document.getElementById('cmpNameFb')?.value||'').trim(),
       })});
       closeCmpModal();
       tg.HapticFeedback?.notificationOccurred('success');
@@ -16406,6 +16415,7 @@ function editDm(c) {
   const pa = document.getElementById('cmpPerAcc'); if (pa) pa.value = p.per_account_daily || '';
   const md = document.getElementById('cmpMedia'); if (md) md.value = p.media_url || '';
   const q = document.getElementById('cmpQuiet'); if (q) q.checked = p.quiet_hours !== false;
+  const nf = document.getElementById('cmpNameFb'); if (nf) nf.value = p.name_fallback || '';
   // Аудиторию не трогаем: показываем как есть и блокируем выбор.
   const tt = document.getElementById('cmpTargetType');
   if (tt) { tt.value = c.target_type || 'all_bots'; tt.disabled = true; }
@@ -18342,6 +18352,7 @@ async function submitDmAdhoc() {
   const usernames = raw.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean);
   const text = (document.getElementById('daText')?.value || '').trim();
   const delay = parseInt(document.getElementById('daDelay')?.value) || 30;
+  const perAccCap = parseInt(document.getElementById('daPerAcc')?.value) || 0;
   if (!usernames.length) { errEl.textContent = 'Укажите хотя бы один @username'; return; }
   if (!text) { errEl.textContent = 'Введите текст сообщения'; return; }
   const accIds = [...document.querySelectorAll('.mj-acc-cb:checked')].map(cb=>+cb.value);
@@ -18362,6 +18373,7 @@ async function submitDmAdhoc() {
   try {
     const r = await api('/api/miniapp/dm/adhoc_send', {method:'POST', body:JSON.stringify({
       usernames, text, delay, account_ids: accIds,
+      per_account_cap: perAccCap || null,
     })});
     toast(`✉️ Рассылка запущена · ${r.recipients} получателей × ${r.accounts} акк. · ~${humanDur(r.eta_seconds||0)} · #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Рассылка в ЛС');
