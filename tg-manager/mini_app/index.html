@@ -4644,6 +4644,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: DM CAMPAIGN REPORT ══════════════════════ -->
+<div class="screen" id="s-dmreport">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📊 Отчёт кампании</div>
+    <div class="hdr-meta"><div class="hdr-user" id="dmr-title"></div></div>
+  </div>
+  <div class="sub-sb">
+    <div id="dmrBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: ACCOUNT WARMUP ══════════════════════ -->
 <div class="screen" id="s-warmup">
   <div class="hdr">
@@ -16250,7 +16262,7 @@ async function openDmCampaigns() {
       return `
       <div class="row">
         <div class="row-ico" style="background:var(--bg-blue-16)">✉️</div>
-        <div class="row-body">
+        <div class="row-body tap" onclick="openDmReport(${c.id})" title="Показать отчёт: кому дошло и почему нет">
           <div class="row-name">${esc(c.name)}</div>
           <div class="row-val">${DM_STATUS[c.status]||c.status} · ${snt}/${tot} отправлено${failTxt}${etaTxt}</div>
           ${bar}
@@ -16279,6 +16291,53 @@ function humanDur(sec) {
   if (d >= 1) { const rh = h%24; return d+' дн'+(rh?' '+rh+' ч':''); }
   if (h >= 1) { const rm = m%60; return h+' ч'+(rm?' '+rm+' мин':''); }
   return m+' мин';
+}
+
+// Отчёт по кампании. dm_campaign_log писался с самого начала, но не читался
+// ни одним экраном: пользователь видел «✅ N ❌ M» и не мог узнать, кому не
+// дошло, почему и какой аккаунт сыпет ошибками.
+const DM_LOG_STATUS = {
+  sent:'✅ доставлено', blocked:'🚫 заблокирован', skip:'🔒 недоступен',
+  auth:'🔑 сессия мертва', peer_flood:'⛔ PeerFlood', retry:'⚠️ сбой', failed:'⚠️ сбой',
+};
+async function openDmReport(id) {
+  push('s-dmreport');
+  txt('dmrBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/dm_campaign/'+id+'/report');
+    const c = d.campaign||{};
+    txt('dmr-title', c.name || ('Кампания #'+id));
+    const statuses = d.by_status||[];
+    const accs = d.by_account||[];
+    const errs = d.top_errors||[];
+    const rec = d.recent||[];
+    let h = '';
+    if (!statuses.length) {
+      h = empty('📭','Отправок ещё не было','Отчёт заполнится, как только кампания начнёт отправлять');
+    } else {
+      h += `<div class="sec-t">Исходы</div><div class="lst">` + statuses.map(s=>
+        `<div class="row"><div class="row-body"><div class="row-name">${esc(DM_LOG_STATUS[s.status]||s.status)}</div></div>
+         <div class="row-right"><span class="badge b-bl">${num(s.n)}</span></div></div>`).join('') + `</div>`;
+      if (errs.length) {
+        h += `<div class="sec-t">Частые причины недоставки</div><div class="lst">` + errs.map(e=>
+          `<div class="row"><div class="row-body"><div class="row-name" style="font-weight:400">${esc(e.reason)}</div></div>
+           <div class="row-right"><span class="badge b-rd">${num(e.n)}</span></div></div>`).join('') + `</div>`;
+      }
+      if (accs.length) {
+        h += `<div class="sec-t">По аккаунтам</div><div class="lst">` + accs.map(a=>
+          `<div class="row"><div class="row-body"><div class="row-name">${esc(a.label||('acc #'+a.account_id))}</div>
+             <div class="row-val">✅ ${num(a.sent||0)} · ❌ ${num(a.failed||0)}</div></div></div>`).join('') + `</div>`;
+      }
+      if (rec.length) {
+        h += `<div class="sec-t">Последние отправки</div><div class="lst">` + rec.map(r=>
+          `<div class="row"><div class="row-body"><div class="row-name" style="font-weight:400">id ${esc(String(r.tg_user_id))}</div>
+             <div class="row-val">${esc(DM_LOG_STATUS[r.status]||r.status)}${r.error_msg?' · '+esc(String(r.error_msg).slice(0,80)):''}</div></div></div>`).join('') + `</div>`;
+      }
+    }
+    txt('dmrBody', h);
+  } catch(e) {
+    txt('dmrBody', errHtml(e.message,'openDmReport('+id+')'));
+  }
 }
 
 async function pauseDm(id) {
