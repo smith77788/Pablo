@@ -83,7 +83,11 @@ CI (`.github/workflows/tests.yml`) гоняет то же самое и толь
   Ни одна не исполняла операции. Решение и обоснование — `docs/adr/0001-one-kernel.md`.
 * `basicfood-fixes/`, корневые `main.py`, `orchestrator.py`, `agents/`, `tools/`,
   `src/`, `supabase/`, `database/` — это **BASIC.FOOD**, другой продукт
-  (ИИ-агенты магазина зоотоваров). Живёт в ветке `claude/ai-agents-business-LCLnI`.
+  (ИИ-агенты магазина зоотоваров). Его историю с Infragram не связывает ничего:
+  у веток нет общего предка. Переезжает в собственный репозиторий, пока лежит в
+  `claude/ai-agents-business-LCLnI` — порядок выноса в
+  [`docs/BASIC_FOOD_SEPARATION.md`](docs/BASIC_FOOD_SEPARATION.md).
+  **Работать над ним в этом репозитории не нужно.**
 * корневой `tests/` — 18 тестов вне CI, проверявших текст исходников; пять были
   красными, а «найденная» ими мёртвая кнопка оказалась ложным срабатыванием.
 

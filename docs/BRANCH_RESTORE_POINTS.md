@@ -46,7 +46,7 @@ git push origin --delete \
 |---|---|
 | `claude/telegram-bot-services-xfAh6` | Ствол, с него деплой |
 | `main` | Ветка по умолчанию в GitHub |
-| `claude/ai-agents-business-LCLnI` | **BASIC.FOOD** — другой продукт, это его единственный дом |
+| `claude/ai-agents-business-LCLnI` | **BASIC.FOOD** — другой продукт; пока это его единственный дом. Переезжает в свой репозиторий, порядок — `docs/BASIC_FOOD_SEPARATION.md`. Удалять **только после** успешного переезда |
 | `claude/modeling-agency-website-jp2Qd` | Сайт модельного агентства — посторонний проект, других копий нет |
 | `claude/telegram-csam-blocking-v53d9q` | Модуль детской безопасности для BASIC.FOOD; этих четырёх файлов нет даже в ветке самого BASIC.FOOD |
 

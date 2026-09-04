@@ -1,6 +1,7 @@
-"""Pablo personal assistant — Telegram bot for chatting with Claude.
+"""Личный ассистент владельца — Telegram-бот для диалога с ИИ.
 
-Separate from the customer-facing BASIC.FOOD bot (tools/telegram_tools.py):
-this bot talks only to whitelisted admins and gives them a full Claude
-assistant with access to all Pablo business tools.
+Спутник Infragram: едет в том же контейнере (start-all.sh), но полностью
+изолирован — свой venv, свой токен (ASSISTANT_BOT_TOKEN), свой список
+допущенных (ASSISTANT_ADMIN_IDS). К базе и операциям Infragram не ходит,
+на продукт повлиять не может.
 """

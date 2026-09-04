@@ -1,7 +1,7 @@
 """Thin Telegram Bot API client for the personal assistant bot.
 
 Uses its own token (ASSISTANT_BOT_TOKEN) so it never collides with the
-customer-facing bot token in TELEGRAM_BOT_TOKEN.
+product bot token in MANAGER_BOT_TOKEN.
 """
 
 from __future__ import annotations
