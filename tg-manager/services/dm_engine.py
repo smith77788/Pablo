@@ -116,6 +116,65 @@ def expand_spintax(text: str) -> str:
         return _expand_spintax_naive(text)
 
 
+# ── Персонализация ────────────────────────────────────────────────────────────
+
+# Значение по умолчанию, когда имени у получателя нет. Пустая строка ломала бы
+# фразу («Привет, !»), поэтому нужен нейтральный запасной вариант.
+_DEFAULT_NAME_FALLBACK = "друг"
+_PERSONAL_PLACEHOLDERS = ("name", "first_name", "last_name", "username")
+_PLACEHOLDER_RE = re.compile(r"\{(name|first_name|last_name|username)\}")
+# Подставляемое значение не должно превращаться в spintax-разметку или в
+# полстраницы текста: имя в Telegram задаёт сам получатель.
+_MAX_NAME_LEN = 64
+
+
+def _clean_name_value(value: str | None) -> str:
+    if not value:
+        return ""
+    s = str(value)
+    for ch in "{}|":
+        s = s.replace(ch, "")
+    return s.strip()[:_MAX_NAME_LEN]
+
+
+def personalize(template: str, target: dict | None, fallback: str | None = None) -> str:
+    """Подставить имя получателя в шаблон ДО разворота spintax.
+
+    Порядок обязателен: spintax-движок видит `{name}` как группу из одного
+    варианта и превращает её в голое слово «name». То есть до этого фикса
+    очевидный синтаксис персонализации молча портил текст — пользователь
+    рассылал «Привет, name!» тысячам людей.
+
+    Поддерживает {name}, {first_name}, {last_name}, {username}. {name} — самый
+    удобный: имя, иначе @username, иначе запасное слово.
+
+    Чистая функция: тестируется отдельно от send-цикла.
+    """
+    if not template or "{" not in template:
+        return template or ""
+    if not _PLACEHOLDER_RE.search(template):
+        return template
+    t = target or {}
+    fb = _clean_name_value(fallback) or _DEFAULT_NAME_FALLBACK
+    first = _clean_name_value(t.get("first_name"))
+    last = _clean_name_value(t.get("last_name"))
+    uname = _clean_name_value(t.get("username")).lstrip("@")
+
+    values = {
+        "first_name": first or fb,
+        "last_name": last or fb,
+        "username": ("@" + uname) if uname else fb,
+        # Живое обращение: имя → ник → нейтральное слово.
+        "name": first or (("@" + uname) if uname else fb),
+    }
+    return _PLACEHOLDER_RE.sub(lambda m: values[m.group(1)], template)
+
+
+def template_uses_personalization(template: str) -> bool:
+    """Есть ли в тексте плейсхолдеры персонализации (для превью и подсказок)."""
+    return bool(template) and bool(_PLACEHOLDER_RE.search(template))
+
+
 def parse_import_list(raw, limit: int = 5000) -> list[dict]:
     """Разбирает пользовательский список получателей → [{user_id, username}].
 
@@ -153,6 +212,83 @@ def parse_import_list(raw, limit: int = 5000) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+# ── Реестр «не писать» (opt-out) ──────────────────────────────────────────────
+#
+# `contact_opt_out` наполняется явным действием оператора («человек попросил
+# больше не писать») и до сих пор применялся ТОЛЬКО в масс-инвайте. Рассылки
+# его не знали: тот, кто просил не писать, получал следующую кампанию — это и
+# юридический риск, и прямая причина спам-репортов, от которых горят аккаунты.
+# Фильтр ниже — общая точка для кампаний и разовой рассылки.
+
+
+def opt_out_keys(user_id=None, username: str | None = None) -> list[str]:
+    """Ключи, под которыми получатель мог попасть в реестр отказов.
+
+    Реестр хранит нормализованные строки ('@username' в нижнем регистре,
+    голый numeric id, телефон в E.164). У получателя рассылки есть id и/или
+    username, поэтому проверяем оба ключа. Дополнительно прогоняем id через
+    normalize_target: у него своя граница id/телефон (11+ цифр → '+...'), и без
+    этого длинный id, занесённый оператором, тихо не совпал бы.
+    """
+    keys: list[str] = []
+    try:
+        uid = int(user_id or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    if uid > 0:
+        keys.append(str(uid))
+        try:
+            from services.contact_opt_out import normalize_target
+
+            norm = normalize_target(str(uid))
+            if norm and norm not in keys:
+                keys.append(norm)
+        except Exception:
+            pass
+    if username:
+        uname = str(username).lstrip("@").strip().lower()
+        if uname:
+            keys.append("@" + uname)
+    return keys
+
+
+def filter_opted_out(targets: list[dict], opted_out: set[str]) -> tuple[list[dict], int]:
+    """Убрать из списка получателей тех, кто просил не писать.
+
+    Чистая функция (без БД) — тестируется отдельно от send-цикла.
+    Возвращает (оставшиеся, сколько убрано).
+    """
+    if not opted_out or not targets:
+        return list(targets or []), 0
+    remaining = [
+        t for t in targets
+        if not any(k in opted_out for k in opt_out_keys(t.get("user_id"), t.get("username")))
+    ]
+    return remaining, len(targets) - len(remaining)
+
+
+def filter_opted_out_refs(refs: list, opted_out: set[str]) -> tuple[list, int]:
+    """То же для плоского списка ссылок (@username / id) — разовая рассылка.
+
+    Отдельная функция, а не contact_opt_out.filter_targets: та сравнивает
+    строки как есть и не приводит к канону голый 'ivan' без «собаки», из-за
+    чего отказ по '@ivan' для такого ввода не срабатывал бы.
+    """
+    if not opted_out or not refs:
+        return list(refs or []), 0
+    remaining = []
+    for ref in refs:
+        s = str(ref).strip()
+        if s.lstrip("-").isdigit():
+            keys = opt_out_keys(user_id=s.lstrip("-"))
+        else:
+            keys = opt_out_keys(username=s)
+        if any(k in opted_out for k in keys):
+            continue
+        remaining.append(ref)
+    return remaining, len(refs) - len(remaining)
 
 
 def pick_account_under_cap(acc_cycle: list, start_idx: int, sent_by_acc: dict, cap):
@@ -211,6 +347,66 @@ def _classify_error(exc: Exception) -> str:
         return "skip"
     if "AUTH_KEY" in exc_str or "SESSION_REVOKED" in exc_str or "Unauthorized" in name:
         return "auth"
+    return "retry"
+
+
+# Ошибки уровня ПОЛУЧАТЕЛЯ: доставить нельзя никогда, но аккаунт здоров и
+# обязан продолжать работу. Строки — ровно те, что формирует
+# account_manager.send_dm; имена Telethon-классов добавлены на случай, когда
+# наверх просачивается сырой текст исключения.
+_PERMANENT_TARGET_MARKERS = (
+    "приватность",
+    "заблокирован",
+    "нет доступа",
+    "аккаунт удалён",
+    "username не существует",
+    "userprivacyrestricted",
+    "userisblocked",
+    "chatwriteforbidden",
+    "inputuserdeactivated",
+    "usernamenotoccupied",
+    "usernameinvalid",
+)
+
+
+def classify_send_result(result: dict) -> str:
+    """Свести ответ account_manager.send_dm к исходу.
+
+    Возвращает 'sent' | 'flood' | 'peer_flood' | 'auth' | 'skip' | 'retry'.
+
+    Нужна потому, что разовая рассылка складывала ВСЁ в «ошибку»: флуд-вейт,
+    флаг PeerFlood (аккаунт помечен за спам) и мёртвую сессию было не отличить
+    от «у получателя закрыты личные сообщения». Аккаунт под PeerFlood при этом
+    оставался в ротации и продолжал слать — самый быстрый способ его потерять.
+
+    Отдельно: send_dm НИКОГДА не возвращает ключ 'banned', поэтому проверять
+    его бессмысленно — мёртвая сессия распознаётся по тексту ошибки.
+    """
+    if not isinstance(result, dict):
+        return "retry"
+    if result.get("ok"):
+        return "sent"
+    if result.get("flood_wait"):
+        return "flood"
+    if result.get("peer_flood"):
+        return "peer_flood"
+    err = str(result.get("error") or "")
+    low = err.lower()
+    if "peer_flood" in low or "peerflood" in low:
+        return "peer_flood"
+    if "flood_wait" in low or "floodwait" in low:
+        return "flood"
+    try:
+        from services.account_manager import is_dead_session_error
+
+        if is_dead_session_error(err):
+            return "auth"
+    except Exception:
+        pass
+    if any(m in low for m in ("auth_key", "session_revoked", "unauthorized")):
+        return "auth"
+    if any(m in low for m in _PERMANENT_TARGET_MARKERS):
+        return "skip"
     return "retry"
 
 
@@ -297,9 +493,42 @@ _DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
     "cohort":          (35.0, 90.0),
     "all_bots":        (40.0, 100.0),   # агрегат всех своих ботов
     "crm":             (45.0, 110.0),   # crm-контакты
+    "segment":         (45.0, 110.0),   # срез crm-контактов — тот же класс риска
     "parsed_audience": (55.0, 130.0),   # спарсенные — незнакомые
     "import_list":     (70.0, 160.0),   # внешний список — максимальная осторожность
 }
+# Потолок выборки сегмента на кампанию: аудитория целиком грузится в память,
+# а при задержке 45–110 с даже 20k получателей — это недели отправки.
+_SEGMENT_TARGET_LIMIT = 20000
+
+# Множители пользовательского темпа. Держим рядом с таблицей задержек: расчёт
+# срока и сам send-цикл обязаны использовать ОДНИ и те же числа, иначе UI будет
+# обещать одно, а движок делать другое.
+_PACE_MULTIPLIERS: dict[str, float] = {"slow": 2.0, "normal": 1.0, "fast": 0.5}
+
+
+def estimate_duration_seconds(target_type: str, pace: str | None, remaining: int) -> int:
+    """Сколько примерно займёт рассылка на `remaining` получателей.
+
+    Отправка идёт последовательно: аккаунты чередуются, но пауза выдерживается
+    между сообщениями глобально — поэтому число аккаунтов срок НЕ сокращает.
+
+    Нужна потому, что пользователь запускал кампанию на тысячи получателей, не
+    имея никакого представления о сроке: при паузе 45–110 с это недели, а на
+    экране было только «0/5000 отправлено».
+
+    'auto' считаем как обычный темп: реальный множитель движок берёт из
+    состояния флота на старте, заранее он неизвестен.
+    """
+    try:
+        n = max(0, int(remaining))
+    except (TypeError, ValueError):
+        return 0
+    if not n:
+        return 0
+    dmin, dmax = _DELAYS_BY_TARGET_TYPE.get(target_type or "", _DEFAULT_DELAY_RANGE)
+    mult = _PACE_MULTIPLIERS.get(pace or "normal", 1.0)
+    return int(n * ((dmin + dmax) / 2.0) * mult)
 _DEFAULT_DELAY_RANGE: tuple[float, float] = (45.0, 110.0)
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
 _PEER_FLOOD_COOLDOWN = 48 * 3600  # PeerFlood — аккаунт-флаг: длинный cooldown (48ч)
@@ -329,27 +558,62 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         # JOIN managed_bots ... added_by — защита от IDOR: рассылка только по
         # подписчикам бота, принадлежащего владельцу кампании.
         rows = await pool.fetch(
-            "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username "
+            "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name "
             "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
             "WHERE bu.bot_id=$1 AND mb.added_by=$2 AND bu.user_id > 0",
             target_id, campaign["owner_id"],
         )
         return [
-            {"user_id": r["user_id"], "username": r["username"] or None}
+            {"user_id": r["user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["user_id"] not in sent_ids
         ]
     elif target_type == "crm":
         rows = await pool.fetch(
-            "SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
+            "SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
             "FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
             campaign["owner_id"],
         )
         return [
-            {"user_id": r["tg_user_id"], "username": r["username"] or None}
+            {"user_id": r["tg_user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
+    elif target_type == "segment" and target_id:
+        # Сохранённый сегмент CRM как аудитория кампании. Раньше единственным
+        # CRM-таргетом был «все контакты»: пользователь строил срез («Горячие»,
+        # «Молчуны 30д») в контактах, но написать именно ему не мог. Резолвим тем
+        # же движком сегментов, что и список контактов, — «вижу = пишу».
+        from services.contacts_hub import repository as _repo
+
+        filters = await _repo.get_segment_filters(pool, campaign["owner_id"], int(target_id))
+        if filters is None:
+            # Сегмент удалён или принадлежит другому владельцу — не молчим,
+            # иначе кампания «успешно» уйдёт в пустоту.
+            raise ValueError(f"Сегмент #{target_id} не найден")
+        rows = await _repo.resolve_segment(
+            pool, campaign["owner_id"], filters, limit=_SEGMENT_TARGET_LIMIT
+        )
+        out: list[dict] = []
+        seen_uids: set[int] = set()
+        for r in rows:
+            uid = int(r.get("telegram_user_id") or 0)
+            uname = (r.get("username") or "").lstrip("@").strip() or None
+            # Для ЛС нужен user_id или @username: контакт, у которого есть только
+            # телефон, адресовать нечем — молча пропускаем, он не «ошибка».
+            if uid <= 0 and not uname:
+                continue
+            if uid and (uid in sent_ids or uid in seen_uids):
+                continue
+            if uid:
+                seen_uids.add(uid)
+            out.append({
+                "user_id": uid, "username": uname,
+                "first_name": r.get("first_name"), "last_name": r.get("last_name"),
+            })
+        return out
     elif target_type == "cohort" and target_id:
         # target_id = bot_id, params.cohort_type = hot|warm|cold|lost
         import json as _json
@@ -370,7 +634,7 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         }.get(cohort, "ua.last_seen >= now() - INTERVAL '7 days'")
         # JOIN bot_users to get username for reliable entity resolution
         rows = await pool.fetch(
-            f"SELECT ua.user_id, bu.username "
+            f"SELECT ua.user_id, bu.username, bu.first_name "
             f"FROM user_activity ua "
             f"JOIN managed_bots mb ON mb.bot_id = ua.bot_id AND mb.added_by=$2 "
             f"LEFT JOIN bot_users bu ON bu.bot_id = ua.bot_id AND bu.user_id = ua.user_id "
@@ -378,7 +642,8 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             target_id, campaign["owner_id"],
         )
         return [
-            {"user_id": r["user_id"], "username": r["username"] or None}
+            {"user_id": r["user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["user_id"] not in sent_ids
         ]
@@ -404,18 +669,19 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             params_list.append(gender_filter)
             conditions += f" AND gender=${len(params_list)}"
         rows = await pool.fetch(
-            f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
+            f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username, first_name "
             f"FROM parsed_audiences WHERE {conditions}",
             *params_list,
         )
         return [
-            {"user_id": r["tg_user_id"], "username": r["username"] or None}
+            {"user_id": r["tg_user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
     elif target_type == "all_bots":
         rows = await pool.fetch(
-            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username
+            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name
                FROM bot_users bu
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by=$1 AND bu.user_id > 0
@@ -423,7 +689,8 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             campaign["owner_id"],
         )
         return [
-            {"user_id": r["user_id"], "username": r["username"] or None}
+            {"user_id": r["user_id"], "username": r["username"] or None,
+             "first_name": r.get("first_name")}
             for r in rows
             if r["user_id"] not in sent_ids
         ]
@@ -474,6 +741,27 @@ async def run_campaign(
         campaign_id,
     )
 
+    async def _fail(reason: str, hint: str = "") -> None:
+        """Пометить кампанию упавшей И СКАЗАТЬ, почему.
+
+        Раньше все три пути отказа молча ставили status='failed': пользователь
+        видел в списке «ошибка» без единого слова причины и не мог понять, чинить
+        ему аккаунты, аудиторию или сегмент.
+        """
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
+        )
+        try:
+            from database import db as _db
+
+            await _db.notify_if_enabled(
+                pool, bot, owner_id, "op_complete",
+                f"⚠️ <b>DM «{campaign.get('name') or campaign_id}» не запущена</b>\n\n"
+                f"{reason}" + (f"\n\n💡 {hint}" if hint else ""),
+            )
+        except Exception:
+            log_exc_swallow(log, "dm_engine: failure notification failed")
+
     try:
         from services.flood_engine import get_active_accounts
 
@@ -482,9 +770,8 @@ async def run_campaign(
         log.exception(
             "dm_engine: get_active_accounts failed for campaign %d", campaign_id
         )
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
-        )
+        await _fail("Не удалось получить список аккаунтов для отправки.",
+                    "Попробуйте запустить кампанию ещё раз.")
         return
 
     if not accounts:
@@ -493,19 +780,36 @@ async def run_campaign(
             campaign_id,
             owner_id,
         )
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
-        )
+        await _fail("Нет активных аккаунтов для отправки ЛС.",
+                    "Подключите аккаунт или снимите с них паузу/кулдаун.")
         return
 
     try:
         targets = await _get_targets(pool, campaign)
-    except Exception:
+    except Exception as _texc:
         log.exception("dm_engine: _get_targets failed for campaign %d", campaign_id)
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
-        )
+        await _fail(f"Не удалось собрать аудиторию: {str(_texc)[:150]}",
+                    "Проверьте выбранную аудиторию — она могла быть удалена.")
         return
+
+    # Реестр «не писать»: тот, кто явно просил больше не писать, не должен
+    # получить НИ ОДНУ следующую кампанию. Fail-open — сбой реестра не срывает
+    # рассылку (тот же принцип, что в масс-инвайте).
+    opt_out_removed = 0
+    try:
+        from services import contact_opt_out as _coo
+
+        _opted = await _coo.load_opted_out(pool, owner_id)
+        if _opted:
+            targets, opt_out_removed = filter_opted_out(targets, _opted)
+            if opt_out_removed:
+                log.info(
+                    "dm_engine campaign=%d: отфильтровано %d получателей из реестра «не писать»",
+                    campaign_id, opt_out_removed,
+                )
+    except Exception:
+        log_exc_swallow(log, "dm_engine: opt-out filter failed")
+
     total = len(targets)
     await pool.execute(
         "UPDATE dm_campaigns SET total_targets=$1 WHERE id=$2", total, campaign_id
@@ -523,6 +827,24 @@ async def run_campaign(
             "UPDATE dm_campaigns SET status='done', finished_at=now() WHERE id=$1",
             campaign_id,
         )
+        # Пустая аудитория без объяснения выглядит как поломка. Если её обнулил
+        # реестр отказов — говорим об этом прямо, иначе пользователь будет
+        # перезапускать кампанию и гадать, почему «0 отправлено».
+        try:
+            from database import db as _db
+
+            _why = (
+                f"\n\n🚫 Все {opt_out_removed} получателей в реестре «не писать»."
+                if opt_out_removed else
+                "\n\nВ выбранной аудитории нет новых получателей "
+                "(всем уже отправляли или список пуст)."
+            )
+            await _db.notify_if_enabled(
+                pool, bot, owner_id, "op_complete",
+                f"📨 <b>DM «{campaign['name']}»</b> — отправлять некому{_why}",
+            )
+        except Exception:
+            log_exc_swallow(log, "dm_engine: empty-audience notification failed")
         return
 
     template = campaign["text_template"]
@@ -546,6 +868,8 @@ async def run_campaign(
         except Exception:
             log.debug('campaign params parse error')
             _cp = {}
+    # Чем заменить {name}, если у получателя нет ни имени, ни ника.
+    _name_fallback = (_cp or {}).get("name_fallback") or None
     _media_url = (_cp or {}).get("media_url") or None
     # Массовая рассылка с медиа: скачиваем файл ОДИН раз, дальше уникализируем под
     # каждого получателя (анти-детект — иначе у всех одинаковый серверный хэш).
@@ -577,7 +901,9 @@ async def run_campaign(
             _delay_min *= _pace_mult
             _delay_max *= _pace_mult
         else:
-            _pace_mult = {"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)
+            # Те же множители, по которым UI считает срок кампании, — иначе
+            # экран обещал бы одно, а движок выдерживал другое.
+            _pace_mult = _PACE_MULTIPLIERS.get(_pace)
             if _pace_mult:
                 _delay_min *= _pace_mult
                 _delay_max *= _pace_mult
@@ -674,7 +1000,9 @@ async def run_campaign(
             )
             return
 
-        text = expand_spintax(template)
+        # Персонализация ДО spintax: иначе spintax-движок увидит `{name}` как
+        # группу из одного варианта и подставит голое слово «name».
+        text = expand_spintax(personalize(template, target, _name_fallback))
         t0_dm = time.monotonic()
         result = await send_dm(
             acc["session_str"], user_id, text, _acc=acc, username=username,
@@ -908,7 +1236,9 @@ async def run_campaign(
             f"📨 <b>DM-кампания «{campaign['name']}» завершена</b>\n\n"
             f"✅ Отправлено: <b>{sent}</b>\n"
             f"❌ Ошибок: <b>{failed}</b>\n"
-            f"📊 Всего целей: <b>{total}</b>",
+            f"📊 Всего целей: <b>{total}</b>"
+            + (f"\n🚫 Пропущено по реестру «не писать»: <b>{opt_out_removed}</b>"
+               if opt_out_removed else ""),
         )
     except Exception:
         log_exc_swallow(

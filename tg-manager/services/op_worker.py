@@ -2443,12 +2443,19 @@ async def _exec_dm_campaign(
         failed = final["fail_count"] or 0
         total = final["total_targets"] or 0
         name = campaign["name"] or f"#{campaign_id}"
-        summary = f"📨 DM «{name}»: ✅ {sent} sent, ❌ {failed} errors, 📊 {total} total"
+        # Кампанию могли поставить на паузу (кнопкой или дневным лимитом) —
+        # тогда операция «выполнена», но рассылка НЕ завершена. Раньше в панели
+        # операций это выглядело одинаково с честным завершением.
+        _paused = final["status"] == "paused"
+        _tail = " · ⏸ на паузе, можно возобновить" if _paused else ""
+        summary = (f"📨 DM «{name}»: ✅ {sent} отправлено, ❌ {failed} ошибок, "
+                   f"📊 {total} всего{_tail}")
         return {
             "status": "done",
             "ok": sent,
             "failed": failed,
             "total": total,
+            "paused": _paused,
             "summary": summary,
         }
     return {"status": "done", "summary": f"📨 DM campaign #{campaign_id} completed"}
@@ -7076,9 +7083,28 @@ async def _exec_bulk_dm_adhoc(
     # без spintax expand возвращает текст как есть (no-op). Идентичные ЛС многим —
     # самая палевная сигнатура (PeerFlood/spam-репорт).
     from services.dm_engine import expand_spintax as _expand_spintax
+    # Исходы отправки различаем общим классификатором: флуд-вейт, флаг PeerFlood,
+    # мёртвая сессия и «получатель закрыл ЛС» требуют РАЗНОЙ реакции.
+    from services.dm_engine import classify_send_result as _classify_send_result
+
+    # PeerFlood — флаг на аккаунте, а не на получателе: короткой паузы мало,
+    # иначе следующая операция добьёт помеченный аккаунт (паритет с dm_engine).
+    _PEER_FLOOD_COOLDOWN_S = 48 * 3600
 
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
     usernames: list[str] = params.get("usernames") or []
+    # Дубли в списке = два одинаковых ЛС одному человеку с разных аккаунтов —
+    # самая заметная спам-сигнатура. Схлопываем, сохраняя порядок.
+    if usernames:
+        _seen_refs: set[str] = set()
+        _uniq: list[str] = []
+        for _u in usernames:
+            _key = str(_u).lstrip("@").strip().lower()
+            if not _key or _key in _seen_refs:
+                continue
+            _seen_refs.add(_key)
+            _uniq.append(_u)
+        usernames = _uniq
     text: str = params.get("text") or ""
     delay: float = float(params.get("delay") or 2.5)
 
@@ -7098,6 +7124,26 @@ async def _exec_bulk_dm_adhoc(
 
     if not account_ids or not usernames or (not text and media_bytes is None):
         return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст/медиа"}
+
+    # Реестр «не писать»: раньше применялся только в масс-инвайте, из-за чего
+    # человек, явно попросивший не писать, получал разовую рассылку. Fail-open —
+    # сбой реестра не срывает операцию.
+    _opt_out_skipped = 0
+    try:
+        from services import contact_opt_out as _coo
+        from services.dm_engine import filter_opted_out_refs as _filter_refs
+
+        _opted = await _coo.load_opted_out(pool, owner_id)
+        if _opted:
+            usernames, _opt_out_skipped = _filter_refs(usernames, _opted)
+            if _opt_out_skipped:
+                log.info("bulk_dm_adhoc op=%d: пропущено %d по реестру «не писать»",
+                         op_id, _opt_out_skipped)
+    except Exception:
+        log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: opt-out filter failed")
+    if not usernames:
+        return {"status": "done", "ok": 0, "fail": 0,
+                "summary": f"🚫 Все {_opt_out_skipped} получателей в реестре «не писать» — отправлять некому"}
 
     rows = await resource_selector.select_all_active(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
@@ -7137,7 +7183,22 @@ async def _exec_bulk_dm_adhoc(
 
         ok_count = 0
         err_count = 0
+        skip_count = 0     # получатель недостижим (приватность/блок/удалён) — не наша ошибка
         flood_wait_total = 0.0
+        acc_idx = 0
+
+        async def _log_step(step: int, target: str, status: str, message: str) -> None:
+            """Построчный аудит в «📋 Лог» операции.
+
+            Раньше разовая рассылка не писала НИ ОДНОЙ строки: пользователь
+            видел только «✅ N ❌ M» и не мог узнать, кому именно не дошло.
+            """
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, step, str(target)[:64], status, str(message)[:200],
+            )
 
         for i, username in enumerate(usernames):
             if await _is_cancelled(pool, op_id):
@@ -7150,13 +7211,18 @@ async def _exec_bulk_dm_adhoc(
 
             if not active_accounts:
                 err_count += 1
+                await _log_step(i + 1, username, "error", "не осталось рабочих аккаунтов")
                 await _safe_execute(
                         pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
                 continue
 
-            acc = active_accounts[i % len(active_accounts)]
+            # Явный вращающийся индекс вместо i % len: при выбывании аккаунта
+            # из ротации модуль по счётчику получателей перескакивал через
+            # оставшиеся аккаунты и грузил одни сильнее других.
+            acc = active_accounts[acc_idx % len(active_accounts)]
+            acc_idx += 1
             _msg = _expand_spintax(text)  # свой вариант текста этому получателю
 
             try:
@@ -7172,29 +7238,69 @@ async def _exec_bulk_dm_adhoc(
                         acc["session_str"], username, _msg, _acc=acc
                     )
 
-                if result.get("banned"):
-                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk_dm_adhoc")
+                kind = _classify_send_result(result)
+                _err_text = str(result.get("error") or "")
+
+                if kind == "sent":
+                    ok_count += 1
+                    await _log_step(i + 1, username, "ok", f"отправлено · акк {acc['id']}")
+                elif kind == "flood":
+                    # Флуд-вейт — ограничение КОНКРЕТНОГО аккаунта. Ставим cooldown
+                    # и выводим его из ротации, иначе следующий получатель уйдёт с
+                    # того же аккаунта и добьёт его.
+                    fw = int(result.get("flood_wait") or 0)
+                    flood_wait_total += fw
+                    err_count += 1
+                    await _safe_execute(
+                        pool,
+                        "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
+                        "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
+                        "WHERE id=$2",
+                        min(max(fw, 60), 3600), acc["id"],
+                    )
+                    if len(active_accounts) > 1:
+                        active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                    await _log_step(i + 1, username, "error", f"FloodWait {fw}с · акк {acc['id']}")
+                    log.info("bulk_dm_adhoc: flood_wait %ss acc=%s → выведен из ротации", fw, acc["id"])
+                elif kind == "peer_flood":
+                    # Аккаунт помечен Telegram за спам ВООБЩЕ. Продолжать им —
+                    # гарантированная потеря аккаунта: длинный кулдаун и из ротации.
+                    err_count += 1
+                    await _safe_execute(
+                        pool,
+                        "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
+                        "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
+                        "WHERE id=$2",
+                        _PEER_FLOOD_COOLDOWN_S, acc["id"],
+                    )
+                    active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                    await _log_step(i + 1, username, "error", f"PeerFlood · акк {acc['id']} выведен")
+                    log.warning("bulk_dm_adhoc: PeerFlood acc=%s — аккаунт выведен из рассылки", acc["id"])
+                elif kind == "auth":
+                    # Мёртвая сессия. Прежний код искал ключ 'banned', которого
+                    # send_dm никогда не возвращает, — то есть не ловил это вообще.
+                    await _db.deactivate_account(pool, acc["id"], "dead session in bulk_dm_adhoc")
                     await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc")
                     active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                     err_count += 1
-                    log.info("bulk_dm_adhoc: account %s banned, removed from pool", acc["id"])
-                elif result.get("flood_wait"):
-                    fw = result.get("flood_wait", 0)
-                    flood_wait_total += fw
-                    err_count += 1
-                    log.info("bulk_dm_adhoc: flood_wait %ss for @%s", fw, username)
-                elif result.get("ok"):
-                    ok_count += 1
+                    await _log_step(i + 1, username, "error", f"сессия мертва · акк {acc['id']}")
+                    log.info("bulk_dm_adhoc: dead session acc %s, removed from pool", acc["id"])
+                elif kind == "skip":
+                    # Получатель недостижим навсегда (приватность/чёрный список/
+                    # удалён). Аккаунт здоров — не трогаем его и не считаем это
+                    # нашей ошибкой, иначе метрика «ошибок» врёт про здоровье флота.
+                    skip_count += 1
+                    await _log_step(i + 1, username, "skip", _err_text or "получатель недоступен")
                 else:
                     err_count += 1
-                    log.warning(
-                        "bulk_dm_adhoc: failed @%s: %s", username, result.get("error", "unknown")
-                    )
+                    await _log_step(i + 1, username, "error", _err_text or "unknown")
+                    log.warning("bulk_dm_adhoc: failed @%s: %s", username, _err_text or "unknown")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log_exc_swallow(log, "bulk_dm_adhoc: send_dm @%s: %s", username, exc)
                 err_count += 1
+                await _log_step(i + 1, username, "error", str(exc))
 
             await _safe_execute(
                     pool,
@@ -7218,11 +7324,18 @@ async def _exec_bulk_dm_adhoc(
                 pass
 
         _quar_note = f" · 🛡 {_skipped_quar} аккаунтов пропущено (риск-пульс)" if _skipped_quar else ""
+        _oo_note = f" · 🚫 {_opt_out_skipped} в реестре «не писать»" if _opt_out_skipped else ""
+        # «Недоступен» ≠ «ошибка»: закрытые ЛС и удалённые аккаунты получателей
+        # смешивались с настоящими сбоями и создавали ложную картину проблем флота.
+        _skip_note = f" · 🔒 {skip_count} недоступны (закрытые ЛС/удалены)" if skip_count else ""
         return {
             "status": "done",
             "ok": ok_count,
             "fail": err_count,
-            "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей{_quar_note}",
+            "skipped": skip_count,
+            "opt_out_skipped": _opt_out_skipped,
+            "summary": (f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей"
+                        f"{_skip_note}{_quar_note}{_oo_note}"),
         }
     finally:
         await release_accounts(claimed_ids)

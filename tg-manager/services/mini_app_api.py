@@ -8636,17 +8636,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 """SELECT id, name, status, sent_count, fail_count, total_targets,
-                          text_template, target_type, created_at
+                          text_template, target_type, params, created_at
                    FROM dm_campaigns WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 50""",
                 uid,
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1", uid)
-            return _json_resp({"campaigns": [
-                {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
-                for r in rows
-            ], "total": int(total or 0)})
+            # Срок считаем на сервере тем же движком, что задаёт паузы между
+            # отправками: раньше на экране было только «0/5000 отправлено», и
+            # пользователь не знал, что это недели, а не часы.
+            from services.dm_engine import estimate_duration_seconds as _eta
+            out = []
+            for r in rows:
+                d = dict(r)
+                _p = d.get("params") or {}
+                if isinstance(_p, str):
+                    try:
+                        _p = _json.loads(_p)
+                    except Exception:
+                        _p = {}
+                d["params"] = _p if isinstance(_p, dict) else {}
+                d["pace"] = d["params"].get("pace") or "normal"
+                _remaining = max(
+                    0,
+                    int(d.get("total_targets") or 0)
+                    - int(d.get("sent_count") or 0)
+                    - int(d.get("fail_count") or 0),
+                )
+                d["remaining"] = _remaining
+                d["eta_seconds"] = _eta(d.get("target_type"), d["pace"], _remaining)
+                d["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
+                out.append(d)
+            return _json_resp({"campaigns": out, "total": int(total or 0)})
         except Exception as exc:
             log.exception("dm_campaigns_list uid=%d", uid)
             return _err(str(exc), 500)
@@ -8667,10 +8689,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Заполните название и текст", 400)
         # Полный список типов таргета, поддержанных dm_engine._get_targets.
         _ALLOWED_TARGETS = {
-            "all_bots", "bot_users", "cohort", "crm", "parsed_audience", "import_list",
+            "all_bots", "bot_users", "cohort", "crm", "segment",
+            "parsed_audience", "import_list",
         }
         if target_type not in _ALLOWED_TARGETS:
             return _err(f"target_type должен быть одним из: {', '.join(sorted(_ALLOWED_TARGETS))}", 400)
+        # Сегмент CRM как аудитория: проверяем владение ДО создания кампании —
+        # иначе кампания создастся и молча уйдёт в пустоту на этапе резолва.
+        _segment_filters = None
+        if target_type == "segment":
+            if not target_id:
+                return _err("Для сегмента выберите сохранённый сегмент", 400)
+            try:
+                _seg_id = int(target_id)
+            except (TypeError, ValueError):
+                return _err("Invalid target_id", 400)
+            try:
+                from services.contacts_hub import repository as _repo
+                _segment_filters = await _repo.get_segment_filters(pool, uid, _seg_id)
+            except Exception:
+                log.exception("dm campaign: segment lookup uid=%d seg=%s", uid, target_id)
+                return _err("Не удалось прочитать сегмент", 500)
+            if _segment_filters is None:
+                return _err("Сегмент не найден", 404)
         # IDOR-защита: при таргете на конкретного бота проверяем владение.
         if target_type in ("bot_users", "cohort") and target_id:
             try:
@@ -8723,6 +8764,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             elif target_type == "crm":
                 total_targets = await _safe_count(pool,
                     "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0", uid)
+            elif target_type == "segment" and _segment_filters is not None:
+                from services.contacts_hub import repository as _repo
+                total_targets = await _repo.count_segment(pool, uid, _segment_filters)
             elif target_type == "parsed_audience":
                 if target_id:
                     total_targets = await _safe_count(pool,
@@ -8798,7 +8842,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not row:
             return _err("Не найдено", 404)
         if row["status"] == "running":
-            return _err("Кампания уже выполняется", 409)
+            # Статус 'running' мог залипнуть: операция упала с исключением или
+            # контейнер перезапустился, а строка кампании осталась в работе.
+            # Тогда запуск отвечал 409 навсегда — кампанию было не спасти, только
+            # удалить. Считаем её идущей, ТОЛЬКО если под неё есть живая операция.
+            _alive = await _safe_count(
+                pool,
+                """SELECT COUNT(*) FROM operation_queue
+                   WHERE owner_id=$1 AND op_type='dm_campaign'
+                     AND status IN ('pending','running')
+                     AND (params->>'campaign_id') = $2""",
+                uid, str(campaign_id),
+            )
+            if _alive:
+                return _err("Кампания уже выполняется", 409)
+            log.warning(
+                "dm_campaign_launch: кампания %d висела в 'running' без операции — перезапускаем",
+                campaign_id,
+            )
         try:
             label = f"DM-кампания: {row['name']}"
             op_id = await _obus.submit(
@@ -8815,6 +8876,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception as exc:
             log.exception("dm_campaign_launch uid=%d cid=%d", uid, campaign_id)
+            return _err(str(exc), 500)
+
+    async def dm_campaign_pause(request: web.Request) -> web.Response:
+        """Поставить идущую кампанию на паузу.
+
+        Движок проверяет статус кампании перед каждым получателем, поэтому
+        смены статуса достаточно — цикл выйдет сам и кампанию можно будет
+        возобновить с места остановки. Раньше кнопка «Возобновить» была, а
+        поставить на паузу было нечем: остановить рассылку можно было только
+        отменой операции в другом экране.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            campaign_id = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            row = await pool.fetchrow(
+                "SELECT status FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+                campaign_id, uid,
+            )
+            if not row:
+                return _err("Не найдено", 404)
+            if row["status"] != "running":
+                return _err("Пауза возможна только для идущей кампании", 409)
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
+                campaign_id, uid,
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("dm_campaign_pause uid=%d cid=%d", uid, campaign_id)
             return _err(str(exc), 500)
 
     async def dm_campaign_delete(request: web.Request) -> web.Response:
@@ -14550,6 +14645,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/dm_campaigns", dm_campaigns_list)
     app.router.add_post("/api/miniapp/dm_campaigns", dm_campaign_create)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/launch", dm_campaign_launch)
+    app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/pause", dm_campaign_pause)
     app.router.add_delete("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_delete)
     # Account Warmup
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
