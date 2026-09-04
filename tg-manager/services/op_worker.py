@@ -1640,6 +1640,7 @@ def _build_dispatch() -> dict:
         "bulk_dm_adhoc": _exec_bulk_dm_adhoc,
         "run_broadcast": _exec_run_broadcast,
         "mass_invite": _exec_mass_invite,
+        "create_chatlist_folder": _exec_create_chatlist_folder,
         "self_promo_blast": _exec_self_promo_blast,
         # ── Накрутка ──────────────────────────────────────────────────────────
         "boost_views": _exec_boost_views,
@@ -9915,6 +9916,77 @@ async def _filter_unready_for_invite(pool, op_id: int, accounts: list) -> list:
                  "(spamblock/banned/…) — пропущены", op_id, len(accounts) - len(kept))
         return kept
     return accounts  # все небезопасны → fail-open (не обнуляем операцию)
+
+
+async def _exec_create_chatlist_folder(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Собрать общую папку из своих чатов и экспортировать chatlist-ссылку.
+
+    Инвайтинг «от обратного»: одна ссылка добавляет человеку сразу всю связку
+    каналов+чат. Ссылку экспортирует сессия аккаунта-владельца — поэтому это
+    операция, а не синхронный вызов из API (баноопасность/FloodWait/Premium-гейт
+    решаются здесь, в защищённом слое).
+    """
+    from services import account_manager, chatlist_folders as cf
+    from database import db as _db
+
+    folder_id = params.get("folder_id")
+    title = params.get("title") or "Подборка"
+    chat_ids = [int(c) for c in (params.get("chat_ids") or [])]
+    acc_id = params.get("acc_id")
+    if not chat_ids:
+        return {"status": "failed", "summary": "⚠️ В папке нет чатов"}
+
+    # Аккаунт-владелец сессии: либо указанный (загрузка одного по id), либо —
+    # через единую флуд-осознанную дверь (resource_selector), а НЕ сырым SELECT
+    # мимо неё: иначе можно взять аккаунт в кулдауне/на мёртвом прокси.
+    if acc_id:
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, first_name, phone, username, device_model, "
+            "system_version, app_version, lang_code, system_lang_code, cf_relay_url, "
+            "proxy_id FROM tg_accounts WHERE id=$1 AND owner_id=$2 "
+            "AND is_active=TRUE AND session_str IS NOT NULL", int(acc_id), owner_id)
+    else:
+        from services import resource_selector as _rs
+
+        _cands = await _rs.select_all_active(pool, owner_id, action_type="default")
+        acc = _cands[0] if _cands else None
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Нет активного аккаунта с сессией"}
+
+    claimed = await try_claim_accounts([int(acc["id"])])
+    if not claimed:
+        return {"status": "failed", "summary": "⚠️ Аккаунт занят другой операцией"}
+    try:
+        res = await account_manager.create_shared_folder_link(
+            acc["session_str"], cf.clean_title(title), chat_ids, _acc=dict(acc))
+    finally:
+        await release_accounts([int(acc["id"])])
+
+    if folder_id:
+        try:
+            await _db.set_chatlist_folder_result(pool, int(folder_id), owner_id, res)
+        except Exception:
+            log.warning("chatlist folder: не удалось записать итог folder=%s", folder_id)
+
+    if not res.get("ok"):
+        kind = res.get("error_kind")
+        if kind == "premium":
+            msg = ("⚠️ Для общих папок Telegram требует Premium на аккаунте, "
+                   "которым создаётся папка. Включите Premium или выберите другой аккаунт.")
+        elif kind == "peer":
+            msg = "⚠️ Аккаунт не админ ни в одном из выбранных чатов — папку не собрать."
+        elif kind == "flood":
+            msg = f"⚠️ Telegram просит подождать: {res.get('error')}"
+        elif kind == "auth":
+            msg = "⚠️ Сессия аккаунта недействительна — переимпортируйте его."
+        else:
+            msg = f"⚠️ Не удалось создать папку: {res.get('error')}"
+        return {"status": "failed", "summary": msg}
+
+    return {"status": "done", "invite_link": res.get("invite_link"),
+            "summary": f"📁 Папка готова — ссылка: {res.get('invite_link')}"}
 
 
 async def _exec_mass_invite(

@@ -377,6 +377,13 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📨",
     },
+    "create_chatlist_folder": {
+        "description": "Сборка общей папки и экспорт chatlist-ссылки",
+        "min_plan": "starter",
+        # Экспорт не идемпотентен (каждый прогон плодит ссылку) — без ретраев.
+        "max_retries": 0,
+        "icon": "📁",
+    },
     "bulk_set_profile": {
         "description": "Массовая установка профилей аккаунтов",
         "min_plan": "starter",

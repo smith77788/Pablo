@@ -162,6 +162,16 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_notified_at TIMESTAMPTZ",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_reason TEXT",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_at TIMESTAMPTZ",
+    # v199: общие папки как канал инвайтинга.
+    """CREATE TABLE IF NOT EXISTS chatlist_folders (
+        id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, acc_id BIGINT,
+        title TEXT NOT NULL, chat_ids BIGINT[] NOT NULL DEFAULT '{}',
+        chat_count INTEGER NOT NULL DEFAULT 0, filter_id INTEGER,
+        invite_link TEXT, invite_slug TEXT, status TEXT NOT NULL DEFAULT 'draft',
+        error TEXT, instance_id BIGINT, join_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    "CREATE INDEX IF NOT EXISTS idx_chatlist_folders_owner ON chatlist_folders(owner_id, created_at DESC)",
     # v198: здоровье управляемых ботов. Без этих колонок бот с отозванным
     # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
     # этом только серверный лог.
@@ -9508,6 +9518,87 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # в очередь «нужен ручной разбор»), а в интерфейсе не было ни экрана, ни
     # строчки — при том что подпись раздела обещала «восстановление».
 
+    # ── Общие папки (Shared Folders) как канал инвайтинга ──────────────────────
+    async def chatlist_folders_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT id, title, chat_count, status, invite_link, error,
+                      instance_id, join_count, created_at
+                 FROM chatlist_folders WHERE owner_id=$1
+                ORDER BY created_at DESC LIMIT 100""", uid)
+        out = []
+        for r in (rows or []):
+            d = dict(r)
+            d["created_at"] = d["created_at"].isoformat() if d.get("created_at") else None
+            out.append(d)
+        return _json_resp({"ok": True, "folders": out})
+
+    async def chatlist_folder_create(request: web.Request) -> web.Response:
+        """Собрать папку из своих каналов/чатов и поставить экспорт ссылки в очередь.
+
+        Пригодность набора проверяем СРАЗУ (пусто/слишком много/непригодные) —
+        отказ до операции; сам экспорт ссылки идёт операцией (сессия аккаунта,
+        баноопасность, Premium-гейт Telegram)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        from services import chatlist_folders as cf
+
+        # Разрешаем два источника набора: явные chat_ids ИЛИ узлы связки.
+        chat_ids = body.get("chat_ids") or []
+        assets = [{"chat_id": c} for c in chat_ids]
+        instance_id = body.get("instance_id")
+        ok, why, eligible = cf.validate_selection(assets)
+        if not ok:
+            return _err(why, 400)
+        # Все чаты должны быть СВОИми — сверяем с managed_channels владельца.
+        owned = await _safe_fetch(pool,
+            "SELECT channel_id FROM managed_channels WHERE owner_id=$1", uid)
+        owned_ids = {int(r["channel_id"]) for r in (owned or [])}
+        eligible = [a for a in eligible if int(a["chat_id"]) in owned_ids]
+        if not eligible:
+            return _err("В подборку попали только чужие или неизвестные чаты — "
+                        "выбирайте из своих каналов.", 400)
+        record = cf.build_folder_record(uid, body.get("title") or "Подборка",
+                                        eligible, instance_id)
+        acc_id = body.get("acc_id")
+        from database import db as _db
+
+        folder_id = await _db.save_chatlist_folder(pool, uid, record,
+                                                   acc_id=int(acc_id) if acc_id else None)
+        try:
+            op_id = await _obus.submit(pool, uid, "create_chatlist_folder", {
+                "folder_id": folder_id, "title": record["title"],
+                "chat_ids": record["chat_ids"], "acc_id": acc_id,
+            }, total_items=1, label=f"Общая папка «{record['title']}»")
+        except PermissionError as exc:
+            # Отказ по тарифу — не сбой: честный 403 с причиной, чтобы платная
+            # функция не выглядела сломанной.
+            return _err(str(exc) or "Требуется подписка", 403)
+        return _json_resp({"ok": True, "folder_id": folder_id, "op_id": op_id,
+                           "chat_count": record["chat_count"]})
+
+    async def chatlist_folder_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["folder_id"])
+        except (KeyError, ValueError):
+            return _err("bad folder_id", 400)
+        row = await pool.fetchrow(
+            "DELETE FROM chatlist_folders WHERE id=$1 AND owner_id=$2 RETURNING id",
+            fid, uid)
+        if not row:
+            return _err("Папка не найдена", 404)
+        return _json_resp({"ok": True})
+
     async def rehab_overview_ep(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -15443,6 +15534,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
+    app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
+    app.router.add_post("/api/miniapp/chatlist_folders", chatlist_folder_create)
+    app.router.add_delete("/api/miniapp/chatlist_folders/{folder_id}", chatlist_folder_delete)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)
     app.router.add_post("/api/miniapp/rehab/{acc_id}/{action}", rehab_action)
     app.router.add_get("/api/miniapp/warmup/{plan_id}/log", warmup_plan_log)

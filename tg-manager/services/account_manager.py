@@ -2318,6 +2318,132 @@ async def get_dialogs(
             log_exc_swallow(log, "Сбой в get_dialogs")
 
 
+def _pick_free_filter_id(used_ids) -> int:
+    """Свободный id папки в клиенте (2..255; 0/1 — All/Archive, зарезервированы).
+
+    Чистая функция — единственная часть создания папки, которую можно проверить
+    без Telegram. Возвращает наименьший свободный id; если все заняты — 0
+    (сигнал «места нет», исполнитель отдаёт понятную ошибку).
+    """
+    used = set()
+    for i in used_ids or []:
+        try:
+            used.add(int(i))
+        except (TypeError, ValueError):
+            continue
+    for candidate in range(2, 256):
+        if candidate not in used:
+            return candidate
+    return 0
+
+
+async def create_shared_folder_link(
+    session_string: str, title: str, chat_ids: list[int],
+    _acc: dict | None = None, existing_filter_id: int | None = None,
+) -> dict:
+    """Создать общую папку из указанных чатов и экспортировать chatlist-ссылку.
+
+    Возвращает {ok, invite_link, slug, filter_id, error, error_kind}. error_kind:
+    'premium' — нужна Telegram Premium на аккаунте (Telegram требует Premium для
+    ШАРИНГА папок), 'auth' — сессия мертва, 'flood' — FloodWait, 'peer' — чат
+    недоступен аккаунту, 'other' — прочее.
+
+    ВНИМАНИЕ: сетевые типы Telethon (DialogFilterChatlist, chatlists.*) зависят
+    от слоя API и здесь НЕ покрыты юнит-тестами — заглушка пула их не связывает.
+    Требует проверки на живом флоте (см. CLAUDE.md про e2e). Логика вокруг
+    (выбор filter_id, классификация ошибок) чистая и проверяется.
+    """
+    from telethon import functions, types
+    from telethon.errors import FloodWaitError
+
+    if not chat_ids:
+        return {"ok": False, "error": "пустой набор чатов", "error_kind": "other"}
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+        async def _work():
+            # 1) input-peer для каждого чата; недоступные — отсеиваем с причиной,
+            #    а не роняем весь экспорт.
+            peers = []
+            skipped = 0
+            for cid in chat_ids:
+                try:
+                    peers.append(await client.get_input_entity(int(cid)))
+                except Exception:
+                    skipped += 1
+            if not peers:
+                return {"ok": False, "error": "ни один чат недоступен аккаунту",
+                        "error_kind": "peer"}
+
+            # 2) свободный filter_id (или переиспользуем папку той же связки).
+            fid = int(existing_filter_id) if existing_filter_id else 0
+            if not fid:
+                try:
+                    existing = await client(functions.messages.GetDialogFiltersRequest())
+                    used = [getattr(f, "id", 0)
+                            for f in getattr(existing, "filters", existing) or []]
+                except Exception:
+                    used = []
+                fid = _pick_free_filter_id(used)
+            if not fid:
+                return {"ok": False,
+                        "error": "в аккаунте не осталось свободных папок",
+                        "error_kind": "other"}
+
+            # 3) создаём/обновляем папку как chatlist (шаринг-совместимую).
+            #    title в новых слоях — TextWithEntities, в старых — str; пробуем
+            #    богатый тип, при рассинхроне слоя падаем на строку.
+            try:
+                _title_obj = types.TextWithEntities(text=title, entities=[])
+            except Exception:
+                _title_obj = title
+            try:
+                await client(functions.messages.UpdateDialogFilterRequest(
+                    id=fid,
+                    filter=types.DialogFilterChatlist(
+                        id=fid, title=_title_obj,
+                        pinned_peers=[], include_peers=peers, emoticon=None)))
+            except TypeError:
+                # Старый слой: DialogFilterChatlist со строковым title.
+                await client(functions.messages.UpdateDialogFilterRequest(
+                    id=fid,
+                    filter=types.DialogFilterChatlist(
+                        id=fid, title=title,
+                        pinned_peers=[], include_peers=peers, emoticon=None)))
+
+            # 4) экспорт ссылки-приглашения к папке.
+            res = await client(functions.chatlists.ExportChatlistInviteRequest(
+                chatlist=types.InputChatlistDialogFilter(filter_id=fid),
+                title=title, peers=peers))
+            link = getattr(getattr(res, "invite", None), "url", "") or ""
+            slug = link.rstrip("/").split("/")[-1] if link else ""
+            return {"ok": bool(link), "invite_link": link, "slug": slug,
+                    "filter_id": fid, "skipped_peers": skipped,
+                    "error": None if link else "Telegram не вернул ссылку",
+                    "error_kind": None if link else "other"}
+
+        return await asyncio.wait_for(_work(), timeout=_OP_TIMEOUT)
+    except FloodWaitError as e:
+        return {"ok": False, "error": f"FloodWait {getattr(e,'seconds','?')}с",
+                "error_kind": "flood"}
+    except Exception as e:
+        low = str(e).lower()
+        if "premium" in low or "chatlists.chatlist_invites" in low or "user_premium" in low:
+            kind = "premium"
+        elif any(x in low for x in ("auth", "unauthorized", "key is not registered")):
+            kind = "auth"
+        else:
+            kind = "other"
+        return {"ok": False, "error": str(e)[:200], "error_kind": kind}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "create_shared_folder_link: disconnect")
+
+
 async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> dict:
     """Scan account for channels/groups where it's admin or creator.
 

@@ -1800,6 +1800,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Массовый инвайт</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <!-- Инвайт «от обратного»: одна ссылка добавляет человеку сразу всю
+           связку каналов+чат общей папкой Telegram. -->
+      <div class="mgmt-tile" onclick="openFolders()">
+        <div class="mgmt-tile-ico">📁</div>
+        <div class="mgmt-tile-lbl">Общие папки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openParser()">
         <div class="mgmt-tile-ico">🔭</div>
         <div class="mgmt-tile-lbl">Парсер</div>
@@ -4745,6 +4752,39 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="rehabStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-folders">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📁 Общие папки</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openFolderCompose()">+ Собрать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Упакуйте свои каналы и чат в одну папку Telegram и раздайте одну ссылку —
+      человек добавит сразу всю подборку. Вступление остаётся его выбором.
+      Для шаринга папок Telegram требует Premium на аккаунте-владельце.
+    </div>
+    <div class="lst" id="foldersList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-foldercompose">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📁 Новая папка</div>
+  </div>
+  <div class="sub-sb">
+    <div class="field"><label>Название папки (до 12 символов)</label>
+      <input type="text" id="fcTitle" maxlength="12" placeholder="напр. Крипта"></div>
+    <div class="field"><label>Свои каналы в подборку</label>
+      <div style="font-size:11px;opacity:.6;margin:-4px 0 6px">Отметьте каналы — по ссылке они добавятся человеку одним блоком.</div>
+      <div class="lst" id="fcChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+    <div class="field-err" id="fcErr"></div>
+    <button class="btn btn-p" id="fcBtn" style="width:100%" onclick="submitFolder()">📁 Создать и получить ссылку</button>
   </div>
 </div>
 
@@ -17065,6 +17105,74 @@ async function openWarmup() {
 // уведомления. Аккаунт со спам-блоком выглядел потерянным, хотя система его
 // вытягивала; а те, что уходили в «нужен ручной разбор», ждали человека,
 // который никогда не узнавал, что его ждут.
+// ── Общие папки (Shared Folders) как канал инвайтинга ───────────────────
+// Одна ссылка добавляет человеку сразу всю связку каналов+чат. Раздача
+// честная (наши рассылки/боты/посты), вступление — выбор пользователя.
+let FC_SEL = new Set();
+async function openFolders() {
+  push('s-folders');
+  txt('foldersList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/chatlist_folders');
+    const fs = d.folders||[];
+    if (!fs.length) { txt('foldersList', empty('📁','Пока нет папок','Соберите подборку своих каналов и раздайте одну ссылку')); return; }
+    txt('foldersList', fs.map(f=>{
+      const st = f.status;
+      const color = st==='ready'?'var(--green)':st==='failed'?'var(--red,#ef4444)':'var(--hint)';
+      const line = st==='ready' ? (f.invite_link||'ссылка готова')
+                 : st==='failed' ? (f.error||'ошибка') : 'создаётся…';
+      return `<div class="row" style="border-left:3px solid ${color}">
+        <div class="row-ico" style="background:var(--bg2)">📁</div>
+        <div class="row-body" ${st==='ready'?`onclick="copyText('${esc(f.invite_link||'')}')" style="cursor:pointer"`:''}>
+          <div class="row-name">${esc(f.title)} · ${f.chat_count} чат(ов)${f.join_count?' · добавили '+f.join_count:''}</div>
+          <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
+        </div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id})">🗑</button></div>
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('foldersList', empty('⚠️','Ошибка',e.message)); }
+}
+async function deleteFolder(id){
+  if(!await askConfirm('Удалить папку из списка? Сама папка в Telegram останется.')) return;
+  try{ await api('/api/miniapp/chatlist_folders/'+id,{method:'DELETE'}); toast('🗑 Удалено'); openFolders(); }
+  catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+async function openFolderCompose(){
+  push('s-foldercompose');
+  FC_SEL = new Set();
+  document.getElementById('fcTitle').value='';
+  document.getElementById('fcErr').textContent='';
+  txt('fcChannels','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    // Свои каналы берём из уже существующего списка каналов владельца.
+    const d = await api('/api/miniapp/channels');
+    const chans = (d.channels||[]).filter(c=>c.channel_id||c.chat_id);
+    if (!chans.length) { txt('fcChannels', empty('📢','Нет своих каналов','Сначала импортируйте свои каналы')); return; }
+    txt('fcChannels', chans.map(c=>{
+      const cid = c.channel_id||c.chat_id;
+      return `<label class="row" style="cursor:pointer">
+        <div class="row-body"><div class="row-name">${esc(c.title||('#'+cid))}</div>
+          ${c.username?`<div class="row-val">@${esc(c.username)}</div>`:''}</div>
+        <div class="row-right"><input type="checkbox" value="${cid}" onchange="fcToggle(${cid},this.checked)"></div>
+      </label>`;
+    }).join(''));
+  } catch(e){ txt('fcChannels', empty('⚠️','Ошибка',e.message)); }
+}
+function fcToggle(cid, on){ if(on) FC_SEL.add(cid); else FC_SEL.delete(cid); }
+async function submitFolder(){
+  const title=document.getElementById('fcTitle').value.trim();
+  const err=document.getElementById('fcErr'); err.textContent='';
+  const ids=[...FC_SEL];
+  if(!ids.length){ err.textContent='Отметьте хотя бы один канал'; return; }
+  const btn=document.getElementById('fcBtn'); btn.disabled=true; btn.textContent='Создаю…';
+  try{
+    const r=await api('/api/miniapp/chatlist_folders',{method:'POST',body:JSON.stringify({title, chat_ids:ids})});
+    toast(`📁 Папка из ${r.chat_count} чатов создаётся — ссылка появится в списке`);
+    if(r.op_id) pollOpResult(r.op_id, 'Общая папка');
+    back(); openFolders();
+  }catch(e){ err.textContent=e.message||'Ошибка'; }
+  finally{ btn.disabled=false; btn.textContent='📁 Создать и получить ссылку'; }
+}
 const REHAB_COLOR = {appeal:'var(--blue,#3b82f6)', warming:'var(--green)',
                      recheck:'var(--blue,#3b82f6)', freed:'var(--green)',
                      stuck:'var(--orange,#f59e0b)', gone:'var(--hint)',

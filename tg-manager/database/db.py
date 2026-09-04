@@ -689,6 +689,41 @@ async def fetch_bots(pool: asyncpg.Pool, query: str, *args: object) -> list[dict
     return _dec_bot_rows(rows)
 
 
+async def save_chatlist_folder(
+    pool: asyncpg.Pool, owner_id: int, record: dict, acc_id: int | None = None,
+) -> int:
+    """Сохранить черновик общей папки (до экспорта ссылки). Возвращает id."""
+    row = await pool.fetchrow(
+        """INSERT INTO chatlist_folders
+               (owner_id, acc_id, title, chat_ids, chat_count, instance_id, status)
+           VALUES ($1,$2,$3,$4,$5,$6,'draft')
+        RETURNING id""",
+        owner_id, acc_id, record["title"],
+        [int(c) for c in record["chat_ids"]], int(record["chat_count"]),
+        record.get("instance_id"))
+    return int(row["id"])
+
+
+async def set_chatlist_folder_result(
+    pool: asyncpg.Pool, folder_id: int, owner_id: int, result: dict,
+) -> None:
+    """Записать итог экспорта ссылки (owner-scoped)."""
+    if result.get("ok"):
+        await pool.execute(
+            """UPDATE chatlist_folders
+                  SET status='ready', invite_link=$3, invite_slug=$4,
+                      filter_id=$5, error=NULL, updated_at=now()
+                WHERE id=$1 AND owner_id=$2""",
+            folder_id, owner_id, result.get("invite_link"),
+            result.get("slug"), result.get("filter_id"))
+    else:
+        await pool.execute(
+            """UPDATE chatlist_folders
+                  SET status='failed', error=$3, updated_at=now()
+                WHERE id=$1 AND owner_id=$2""",
+            folder_id, owner_id, str(result.get("error") or "ошибка")[:300])
+
+
 async def replace_bot_token(
     pool: asyncpg.Pool,
     owner_id: int,
