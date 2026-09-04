@@ -335,32 +335,11 @@ def _proxy_display_host(raw: str) -> str:
         return raw.split("@")[-1]
 
 
-def is_safe_public_url(url: str) -> bool:
-    """SSRF-гард для загрузки картинок по URL (аватар бота).
-
-    Требует https, отсекает localhost и приватные диапазоны IP в hostname.
-    Best-effort (без резолва DNS): блокирует очевидные внутренние адреса.
-    Чистая функция — тестируема.
-    """
-    import re as _re
-    from urllib.parse import urlparse
-    if not url or not isinstance(url, str):
-        return False
-    try:
-        p = urlparse(url.strip())
-    except Exception:
-        return False
-    if p.scheme != "https" or not p.hostname:
-        return False
-    host = p.hostname.lower()
-    if host in ("localhost", "0.0.0.0") or host.endswith(".local") or host.endswith(".internal"):
-        return False
-    # Приватные / loopback / link-local диапазоны по literal-IP в hostname.
-    if _re.match(r"^127\.", host) or _re.match(r"^10\.", host) \
-       or _re.match(r"^192\.168\.", host) or _re.match(r"^169\.254\.", host) \
-       or _re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host) or host == "::1":
-        return False
-    return True
+# SSRF-гард — единственная реализация в services/security.py. Здесь была своя,
+# на регулярках, и она пропускала канонический IPv6 (`[::ffff:127.0.0.1]`, ULA,
+# link-local): два гарда с разной строгостью хуже одного, потому что усиливают
+# всегда не тот.
+from services.security import is_safe_public_url  # noqa: E402,F401
 
 
 _SCHEDULE_REPEAT_MIN = {"none": 0, "daily": 1440, "weekly": 10080}

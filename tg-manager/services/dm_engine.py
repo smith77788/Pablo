@@ -48,9 +48,18 @@ def _media_filename(url: str, content_type: str) -> str:
 
 async def _download_media(url: str) -> tuple[bytes, str]:
     """Скачать медиа кампании один раз. Возвращает (bytes, filename). Бросает при
-    неверной схеме/пустом/слишком большом файле/сетевой ошибке."""
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise ValueError("URL должен начинаться с http:// или https://")
+    неверной схеме/внутреннем адресе/пустом/слишком большом файле/сетевой ошибке.
+
+    SSRF-гард здесь ОБЯЗАТЕЛЕН: это реальный сетевой sink, отложенный от момента
+    сабмита — воркер тянет URL позже, уже без пользователя. Проверки не было
+    вовсе, а http:// пускался как есть, то есть http://169.254.169.254 (метаданные
+    облака) был достижим со стороны сервера. Резолвим DNS перед КАЖДЫМ
+    скачиванием: доверять проверке на сабмите нельзя, адрес мог смениться.
+    """
+    from services.security import resolve_url_is_public
+    if not await resolve_url_is_public(url):
+        raise ValueError(
+            "URL медиа должен быть публичным https (внутренние адреса запрещены)")
     import aiohttp
 
     async with aiohttp.ClientSession() as sess:

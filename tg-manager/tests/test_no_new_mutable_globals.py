@@ -104,6 +104,10 @@ def detect() -> set[str]:
 
 # Делить нечего: объекты привязаны к процессу/циклу событий по своей природе.
 PROCESS_LOCAL: dict[str, str] = {
+    "services/wb_chat/login.py:_PENDING": (
+        "незавершённый вход: держит ЖИВОЙ transport-объект (сокет), который "
+        "нельзя ни сериализовать в БД, ни использовать из другого процесса; "
+        "живёт секунды-минуты до ввода кода"),
     "services/account_manager.py:_pending": "клиент Telethon на время логина — объект процесса",
     "services/account_manager.py:_pending_device": "то же, профиль устройства входа",
     "services/account_manager.py:_pending_qr": "то же, QR-логин",
@@ -150,6 +154,9 @@ CACHE: dict[str, str] = {
     "services/broadcaster.py:_bot_tier_cache": "тариф бота с TTL",
     "services/contacts_hub/search_engine.py:_cache": "кэш результатов поиска",
     "services/fleet_governor.py:_CACHE": "множитель темпа с TTL",
+    "services/wb_chat/drivers/mock.py:SENT_OUTBOX": (
+        "исходящие mock-драйвера — существует только в тестах и локальной отладке, "
+        "в проде драйвер real"),
     "services/op_worker.py:_DISPATCH": (
         "таблица «op_type → исполнитель»; собирается один раз из кода модуля и "
         "дальше только читается — расходиться между процессами нечему"),

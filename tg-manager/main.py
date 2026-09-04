@@ -457,6 +457,11 @@ async def main() -> None:
     dp.include_router(ranking_handler.router)
     from bot.handlers import metrics_dashboard as _metrics_dashboard_handler
     dp.include_router(_metrics_dashboard_handler.router)
+    # Экономика флота: модуль лежал невлитым в отдельной ветке — код, тесты и
+    # хендлер были написаны, но роутер нигде не регистрировался, поэтому раздел
+    # просто не существовал для пользователя.
+    from bot.handlers import budget_radar as budget_radar_handler
+    dp.include_router(budget_radar_handler.router)
     dp.include_router(accounts_handler.router)
     dp.include_router(referral_handler.router)
     dp.include_router(channel_ops_handler.router)
@@ -525,6 +530,7 @@ async def main() -> None:
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
+    dp.include_router(budget_radar_handler.router)
     dp.error.register(_global_error_handler)
     install_error_monitoring(dp)
 
@@ -744,6 +750,7 @@ async def main() -> None:
             BotCommand(command="menu", description="🏠 Infragram OS"),
             BotCommand(command="about", description="✨ Что умеет Infragram"),
             BotCommand(command="pulse", description="💓 Пульс флота — кто на паузе и почему"),
+            BotCommand(command="budget", description="💸 Экономика флота — где утекает бюджет"),
             BotCommand(command="find", description="🔍 Найти функцию"),
             BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
             BotCommand(command="spin", description="🎲 Spintax — рандомизация текста"),

@@ -138,6 +138,91 @@ def validate_string(value: Any, max_len: int = 1000, required: bool = True) -> O
     return s[:max_len]
 
 
+# ── SSRF-гард ────────────────────────────────────────────────────────────────
+# Гард жил ДВАЖДЫ: синтаксическая проверка по регуляркам внутри mini_app_api и
+# усиленная версия в ветке аудита, которая так и не была влита. Работала первая —
+# и пропускала канонический IPv6: `https://[::ffff:127.0.0.1]/` (IPv4 в
+# IPv6-обёртке) и ULA/link-local `fc00::/fe80::` не совпадали ни с одной её
+# регуляркой. Проверка через ipaddress закрывает весь класс разом, а резолв DNS —
+# имена, указывающие внутрь, и нестандартные записи IPv4 (`https://2130706433/`,
+# `https://127.1/`, `https://0x7f000001/`).
+# Одна реализация на проект, в модуле безопасности.
+
+
+def is_internal_ip(ip_str: str) -> bool:
+    """True, если IP приватный/служебный (loopback, private, link-local,
+    reserved, multicast, unspecified). Неразбираемое — считаем небезопасным.
+
+    IPv4-mapped IPv6 (``::ffff:127.0.0.1``) разворачиваем в IPv4 перед проверкой.
+    """
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return bool(
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+def is_safe_public_url(url: str) -> bool:
+    """SSRF-гард (синтаксический слой): https + hostname не является внутренним
+    литерал-адресом. НЕ ловит имена, резолвящиеся внутрь, и нестандартные
+    кодировки IPv4 — для реального fetch используйте ``resolve_url_is_public``.
+    Чистая функция — тестируема.
+    """
+    from urllib.parse import urlparse
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        p = urlparse(url.strip())
+    except Exception:
+        return False
+    if p.scheme != "https" or not p.hostname:
+        return False
+    host = p.hostname.lower()
+    if host in ("localhost", "0.0.0.0") or host.endswith(".local") or host.endswith(".internal"):
+        return False
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True  # обычное имя — резолв проверит async-слой
+    return not is_internal_ip(host)
+
+
+async def resolve_url_is_public(url: str) -> bool:
+    """Авторитетный SSRF-гард: синтаксическая проверка + РЕЗОЛВ DNS каждого
+    адреса. Отвергает, если ХОТЯ БЫ ОДИН резолвнутый IP внутренний. Закрывает
+    нестандартные кодировки IPv4 (резолвятся в 127.0.0.1) и имена, указывающие
+    внутрь (metadata через DNS). Остаётся узкое окно DNS-rebinding до connect,
+    но http-схема (нужная большинству metadata-эндпоинтов) запрещена.
+    """
+    import socket
+    from urllib.parse import urlparse
+    if not is_safe_public_url(url):
+        return False
+    try:
+        host = urlparse(url.strip()).hostname
+    except Exception:
+        return False
+    if not host:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except Exception:
+        return False
+    addrs = {i[4][0] for i in infos}
+    if not addrs:
+        return False
+    return not any(is_internal_ip(a) for a in addrs)
+
+
 def validate_url(url: str, require_https: bool = True) -> bool:
     """Validate a URL is well-formed and optionally requires HTTPS."""
     if not url or not isinstance(url, str):
