@@ -478,6 +478,67 @@ async def search_messages(pool, owner_id: int, query: str, limit: int = 100) -> 
     return out
 
 
+# ── Медиа из архива ───────────────────────────────────────────────────────────
+
+# Bot API отдаёт файлы не больше 20 МБ — больше скачать физически нельзя.
+_MEDIA_DOWNLOAD_LIMIT = 20 * 1024 * 1024
+
+_MEDIA_MIME = {
+    "photo": ("image/jpeg", ".jpg"),
+    "video": ("video/mp4", ".mp4"),
+    "animation": ("video/mp4", ".mp4"),
+    "video_note": ("video/mp4", ".mp4"),
+    "voice": ("audio/ogg", ".ogg"),
+    "audio": ("audio/mpeg", ".mp3"),
+    "sticker": ("image/webp", ".webp"),
+    "document": ("application/octet-stream", ""),
+}
+
+
+async def fetch_media(pool, bot, owner_id: int, chat_id: int, msg_id: int) -> dict:
+    """Достать файл сообщения из архива.
+
+    Смысл хранилища — сохранить то, что собеседник потом удалил. Но media_file_id
+    писался в базу и НИКУДА не отдавался: в архиве была видна подпись «📷 Фото»,
+    а самого фото не существовало ни в одном экране. Для удалённых сообщений это
+    ломало главное обещание модуля.
+
+    Возвращает {ok, data, filename, mime} либо {ok: False, error}.
+    Скоуп владельца обязателен: chat_id приходит из URL.
+    """
+    row = await pool.fetchrow(
+        """SELECT media_file_id, media_type, media_name, media_size
+             FROM vault_messages
+            WHERE owner_id=$1 AND chat_id=$2 AND msg_id=$3""",
+        owner_id, chat_id, msg_id)
+    if not row:
+        return {"ok": False, "error": "Сообщение не найдено", "status": 404}
+    file_id = row["media_file_id"]
+    if not file_id:
+        return {"ok": False, "error": "В сообщении нет вложения", "status": 404}
+    size = int(row["media_size"] or 0)
+    if size > _MEDIA_DOWNLOAD_LIMIT:
+        return {"ok": False, "status": 413,
+                "error": f"Файл {size // 1024 // 1024} МБ — Telegram отдаёт ботам не больше 20 МБ"}
+
+    mime, ext = _MEDIA_MIME.get(row["media_type"] or "", ("application/octet-stream", ""))
+    name = row["media_name"] or f"vault_{chat_id}_{msg_id}{ext}"
+    try:
+        f = await bot.get_file(file_id)
+        buf = await bot.download_file(f.file_path)
+    except Exception as exc:
+        # Файл мог протухнуть на стороне Telegram (особенно у давно удалённых
+        # сообщений). Это не сбой сервера — объясняем причину, а не 500.
+        log.info("vault fetch_media owner=%s chat=%s msg=%s: %s",
+                 owner_id, chat_id, msg_id, exc)
+        return {"ok": False, "status": 410,
+                "error": "Telegram больше не отдаёт этот файл (мог быть удалён на его стороне)"}
+    data = buf.read() if hasattr(buf, "read") else bytes(buf or b"")
+    if not data:
+        return {"ok": False, "status": 410, "error": "Пустой файл"}
+    return {"ok": True, "data": data, "filename": name, "mime": mime}
+
+
 # ── Ответ из хранилища (от имени пользователя) ───────────────────────────────
 
 async def send_reply(pool, bot, owner_id: int, chat_id: int, text: str) -> dict:
@@ -549,6 +610,13 @@ def _ui_message(r) -> dict:
         "media_type": r["media_type"],
         "media_label": _MEDIA_LABEL.get(r["media_type"], "📎 Вложение") if r["media_type"] else "",
         "media_name": r["media_name"] if "media_name" in r.keys() else None,
+        "media_size": (int(r["media_size"]) if "media_size" in r.keys() and r["media_size"] else None),
+        # Есть ли что скачивать. Сам file_id наружу не отдаём: он одноразово
+        # обменивается на файл только через бота, и светить его в мини-аппе
+        # незачем — за файлом клиент ходит на наш эндпоинт по (chat_id, msg_id).
+        "has_media": bool(
+            ("media_file_id" in r.keys() and r["media_file_id"]) or r["media_type"]
+        ),
         "date": r["msg_date"].isoformat() if r["msg_date"] else None,
         "deleted": bool(r["is_deleted"]),
         "edited": bool(r["is_edited"]),

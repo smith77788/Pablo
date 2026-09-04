@@ -4751,6 +4751,62 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(f"Ошибка: {str(exc)[:140]}", 500)
         return _json_resp({"results": res, "total": len(res)})
 
+    async def vault_media(request: web.Request) -> web.Response:
+        """Отдать вложение из архива.
+
+        media_file_id писался в базу с самого начала и не отдавался наружу
+        ничем: в архиве была видна подпись «📷 Фото», а самого файла не
+        существовало ни в одном экране. Для сообщений, которые собеседник
+        УДАЛИЛ, это ломало главное обещание хранилища.
+
+        Файл проксируем через сервер: прямая ссылка Telegram содержит токен
+        бота, отдавать её в мини-апп нельзя.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            chat_id = int(request.match_info["chat_id"])
+            msg_id = int(request.match_info["msg_id"])
+        except (KeyError, ValueError):
+            return _err("bad request", 400)
+        token = _bot_token()
+        if not token:
+            return _err("Бот не настроен", 500)
+        from aiogram import Bot as _Bot
+        from services import vault_service as _v
+
+        _b = _Bot(token=token)
+        try:
+            res = await _v.fetch_media(pool, _b, uid, chat_id, msg_id)
+        except Exception as exc:
+            log.exception("vault_media uid=%s chat=%s msg=%s", uid, chat_id, msg_id)
+            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+        finally:
+            try:
+                await _b.session.close()
+            except Exception:
+                pass
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось получить файл",
+                        int(res.get("status") or 404))
+        name = str(res.get("filename") or "file")
+        # Имя файла задаёт собеседник — в заголовок оно уходить как есть не
+        # должно (перевод строки/кавычка ломают ответ). Кладём безопасный ASCII
+        # плюс RFC 5987 для юникодного имени.
+        import urllib.parse as _up
+        ascii_name = "".join(c for c in name if 32 <= ord(c) < 127 and c not in '"\\') or "file"
+        return web.Response(
+            body=res["data"],
+            headers={
+                "Content-Type": res.get("mime") or "application/octet-stream",
+                "Content-Disposition":
+                    f'inline; filename="{ascii_name}"; '
+                    f"filename*=UTF-8''{_up.quote(name)}",
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
     async def vault_reply(request: web.Request) -> web.Response:
         """Ответ собеседнику ОТ ИМЕНИ пользователя через бизнес-соединение."""
         uid = _get_uid(request)
@@ -15053,6 +15109,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vault/settings", vault_settings)
     app.router.add_post("/api/miniapp/vault/settings", vault_settings)
     app.router.add_post("/api/miniapp/vault/chat/{chat_id}/reply", vault_reply)
+    app.router.add_get("/api/miniapp/vault/media/{chat_id}/{msg_id}", vault_media)
     app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)
     app.router.add_post("/api/miniapp/account/{acc_id}/proxy", account_set_proxy)
     app.router.add_post("/api/miniapp/account/{acc_id}/note", account_set_note)
