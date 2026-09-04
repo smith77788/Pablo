@@ -162,6 +162,14 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_notified_at TIMESTAMPTZ",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_reason TEXT",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_at TIMESTAMPTZ",
+    # v198: здоровье управляемых ботов. Без этих колонок бот с отозванным
+    # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
+    # этом только серверный лог.
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_error TEXT",
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ",
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS fail_streak INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_ok_at TIMESTAMPTZ",
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS dead_notified_at TIMESTAMPTZ",
     # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
@@ -1173,8 +1181,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # 1) Личные боты (added_by = uid)
         # 2) Боты из экосистем пользователя (ecosystem_members)
         # 3) Боты из рабочих пространств пользователя (workspace_members)
-        rows = await _safe_fetch(pool,
-            """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
+        # Колонки здоровья добавляет inline-миграция на старте. Если она не
+        # прошла, список ботов не должен исчезнуть целиком: _safe_fetch вернул
+        # бы пустоту, неотличимую от «ботов нет». Поэтому — запасной запрос
+        # без них (см. ту же защиту в обзоре прогрева).
+        _BOT_HEALTH_COLS = "mb.last_error, mb.fail_streak, mb.last_ok_at,"
+        _BOTS_SQL = """SELECT DISTINCT mb.bot_id, mb.username, mb.first_name, mb.is_active,
+                      {health}
                       COUNT(DISTINCT bu.user_id) FILTER (WHERE bu.is_active=true) AS subscriber_count,
                       COUNT(DISTINCT bu.user_id) AS total_users
                FROM managed_bots mb
@@ -1192,8 +1205,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       JOIN workspace_members wm ON wm.workspace_id=w.id
                       WHERE wm.user_id=$1
                   )
-               GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active
-               ORDER BY subscriber_count DESC LIMIT $2""", uid, limit)
+               GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active{group}
+               ORDER BY subscriber_count DESC LIMIT $2"""
+        try:
+            rows = await pool.fetch(
+                _BOTS_SQL.format(health=_BOT_HEALTH_COLS,
+                                 group=",\n mb.last_error, mb.fail_streak, mb.last_ok_at"),
+                uid, limit)
+        except Exception:
+            log.warning("bots uid=%d: нет колонок здоровья, показываем список без них", uid)
+            rows = await _safe_fetch(
+                pool, _BOTS_SQL.format(health="", group=""), uid, limit)
+        # Честное состояние каждого бота. Раньше бот с отозванным токеном
+        # выглядел здесь ровно как рабочий: подписчики ему писали, ответа не
+        # было, и об этом знал только серверный лог.
+        try:
+            from services import bot_health as _bh
+
+            rows = [{**dict(r), "health": _bh.describe(dict(r))} for r in (rows or [])]
+        except Exception:
+            log.debug("bots: состояние ботов недоступно uid=%s", uid)
         total = await _safe_count(pool,
             """SELECT COUNT(DISTINCT bot_id) FROM managed_bots
                WHERE added_by=$1
@@ -1243,6 +1274,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT * FROM managed_bots WHERE bot_id=$1", bot_id)
         if not bot:
             return _err("Bot not found", 404)
+        # Токен клиенту не отдаём. `SELECT *` тянул и его: у ботов, добавленных
+        # до включения шифрования, он лежит в открытом виде (decrypt_token
+        # намеренно пропускает legacy-строки как есть), то есть ответ отдавал
+        # полный контроль над ботом всякому, кто видит эту выдачу — включая
+        # участника рабочего пространства, которому доступ к боту дан только
+        # на чтение. Заодно убираем метку уведомления — она внутренняя.
+        bot = {k: v for k, v in dict(bot).items()
+               if k not in ("token", "dead_notified_at")}
+        try:
+            from services import bot_health as _bh
+
+            bot["health"] = _bh.describe(bot)
+        except Exception:
+            log.debug("bot_detail: состояние бота недоступно bot=%s", bot_id)
         subs_active = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id)
         subs_total = await _safe_count(pool,
@@ -5912,8 +5957,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Этот бот уже добавлен другим пользователем", 409)
             already = (result is False)
             if already:
+                # Бот уже наш — значит человек, скорее всего, вставляет НОВЫЙ
+                # токен взамен отозванного. Раньше здесь просто отвечали «уже
+                # добавлен», токен не обновлялся, и бот продолжал молчать; а
+                # единственный обходной путь — удалить и добавить заново —
+                # стирал всю аудиторию (bot_users висит на ON DELETE CASCADE).
+                # bot_id тот же, поэтому подписчики, воронки и правила целы.
+                replaced = await _db.replace_bot_token(
+                    pool, uid, bot_id, token, username, first_name)
                 return _json_resp({
                     "ok": True, "already_exists": True,
+                    "token_replaced": bool(replaced),
                     "bot_id": bot_id, "username": username, "first_name": first_name,
                 })
             return _json_resp({

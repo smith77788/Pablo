@@ -689,6 +689,41 @@ async def fetch_bots(pool: asyncpg.Pool, query: str, *args: object) -> list[dict
     return _dec_bot_rows(rows)
 
 
+async def replace_bot_token(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    bot_id: int,
+    token: str,
+    username: str = "",
+    first_name: str = "",
+) -> bool:
+    """Заменить токен бота НА МЕСТЕ, сохранив всё остальное.
+
+    Разрыв: заменить токен было нельзя. `add_bot` при существующем bot_id
+    возвращает «уже добавлен» и токен НЕ обновляет, поэтому у бота с отозванным
+    токеном оставался единственный путь — удалить и добавить заново. А
+    `bot_users` висит на `managed_bots` с `ON DELETE CASCADE`: вместе с ботом
+    стиралась вся его аудитория. Продукт предлагал вылечить молчание бота ценой
+    базы подписчиков.
+
+    Здесь bot_id не меняется, поэтому подписчики, воронки, правила, расписания
+    и статистика остаются на месте. Возвращает True, если строка обновлена.
+    """
+    from services.token_vault import encrypt_token as _enc_tok
+
+    row = await pool.fetchrow(
+        """UPDATE managed_bots
+              SET token=$3,
+                  username=COALESCE(NULLIF($4,''), username),
+                  first_name=COALESCE(NULLIF($5,''), first_name),
+                  is_active=TRUE,
+                  fail_streak=0, last_error=NULL, dead_notified_at=NULL
+            WHERE bot_id=$1 AND added_by=$2
+        RETURNING bot_id""",
+        bot_id, owner_id, _enc_tok(token), username or "", first_name or "")
+    return row is not None
+
+
 async def add_bot(
     pool: asyncpg.Pool,
     token: str,
