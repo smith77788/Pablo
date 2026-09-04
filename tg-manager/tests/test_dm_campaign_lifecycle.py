@@ -127,3 +127,31 @@ def test_op_summary_distinguishes_paused_from_finished():
     assert "на паузе" in body, (
         "поставленная на паузу кампания не должна выглядеть завершённой в панели операций"
     )
+
+
+# ── Удаление во время рассылки ────────────────────────────────────────────────
+
+def test_deleted_campaign_stops_the_send_loop():
+    """Дефект намерения: прежняя проверка `if current and ...` не отличала
+    «строки нет» от «не на паузе». Удалив идущую кампанию, пользователь не
+    останавливал её — цикл продолжал слать ЛС РЕАЛЬНЫМ ЛЮДЯМ по удалённой
+    кампании, пока не падал на FK-вставке в журнал отправок.
+    """
+    src = (_ROOT / "services" / "dm_engine.py").read_text(encoding="utf-8")
+    start = src.index("async def run_campaign")
+    body = src[start:]
+    assert "if current is None:" in body, (
+        "исчезнувшая строка кампании обязана останавливать рассылку"
+    )
+    assert 'if current and current["status"] == "paused"' not in body, (
+        "старая проверка пропускала удаление кампании"
+    )
+
+
+def test_delete_warns_about_consequences():
+    assert "deleteDm(id, status)" in _UI.replace("async function deleteDm(id, status)",
+                                                 "deleteDm(id, status)")
+    assert "ИДУЩУЮ кампанию" in _UI, "удаление идущей кампании требует явного предупреждения"
+    assert "журнал отправок" in _UI, (
+        "удаление стирает журнал — значит и отчёт, и защиту от повторной отправки"
+    )

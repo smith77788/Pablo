@@ -1008,7 +1008,15 @@ async def run_campaign(
         current = await pool.fetchrow(
             "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id
         )
-        if current and current["status"] == "paused":
+        if current is None:
+            # Кампанию удалили прямо во время рассылки. Прежняя проверка
+            # (`if current and ...`) на отсутствие строки не реагировала: цикл
+            # шёл дальше и отправлял ЛС РЕАЛЬНЫМ ЛЮДЯМ по удалённой кампании,
+            # пока не падал на FK-вставке в журнал. Удаление — однозначное
+            # намерение остановить, останавливаемся немедленно.
+            log.info("dm_engine: campaign %d удалена во время рассылки — стоп", campaign_id)
+            return
+        if current["status"] == "paused":
             log.info("dm_engine: campaign %d paused", campaign_id)
             return
 
