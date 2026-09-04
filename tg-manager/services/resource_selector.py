@@ -243,7 +243,7 @@ async def select_all_active(
                    a.device_model, a.system_version, a.app_version,
                    a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url,
                    a.tags, a.pool, a.labels, a.warnings, a.project,
-                   a.trust_score, a.cooldown_until,
+                   a.trust_score, a.cooldown_until, a.is_premium,
                    COALESCE(a.acc_status, 'active') AS acc_status,
                    p.proxy_url, p.geo_country,
                    p.is_alive AS proxy_alive,
@@ -251,7 +251,11 @@ async def select_all_active(
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
             WHERE {where}
-            ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
+            -- is_premium — ВТОРОЙ ключ, после trust_score (не вместо него):
+            -- платные аккаунты статистически реже боты и имеют выше лимиты, но
+            -- это неподтверждённый платформой сигнал, а не измеренный факт как
+            -- trust_score. NULLS LAST — «не проверяли» не хуже «не premium».
+            ORDER BY a.trust_score DESC NULLS LAST, a.is_premium DESC NULLS LAST, a.added_at""",
         *params,
     )
 

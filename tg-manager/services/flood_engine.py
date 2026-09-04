@@ -918,6 +918,7 @@ async def get_best_account(
                    a.device_model, a.system_version, a.app_version,
                    a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url,
                    a.trust_score, a.cooldown_until, a.tags, a.pool, a.last_used,
+                   a.is_premium,
                    p.proxy_url, p.geo_country,
                    r.ban_probability AS physics_ban_probability
             FROM tg_accounts a
@@ -952,6 +953,15 @@ async def get_best_account(
         combined = account_rank_score(row["id"], row["trust_score"])
         combined += float(row["physics_ban_probability"] or 0.0) * 1.5
         combined += _recency_penalty(row.get("last_used"), now_ts)
+        # Мягкий бонус Premium-аккаунту: платные подписчики статистически
+        # реже боты, и лимиты у них ощутимо выше — но это неподтверждённый
+        # платформой сигнал, а не измеренный факт (в отличие от trust_score/
+        # ban_probability, посчитанных по реальным исходам). Величина вдвое
+        # меньше максимума _recency_penalty (0.08) — тем же принципом: сдвигает
+        # выбор только среди почти равных, не жертвуя безопасностью ради
+        # непроверенного преимущества. is_premium NULL (не проверяли) → 0.
+        if row.get("is_premium"):
+            combined -= 0.04
         if combined < best_score:
             best_score = combined
             best = dict(row)
