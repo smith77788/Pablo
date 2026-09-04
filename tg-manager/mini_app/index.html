@@ -12114,9 +12114,17 @@ function startCampaignFromParse(runId) {
   toast('📨 Аудитория: '+(r.source||'парсер')+' · '+num(r.total_saved||0)+' — введите текст');
 }
 
+// id правимой кампании (null — создаём новую). Аудиторию в режиме правки не
+// меняем: часть получателей может быть уже обработана, и смена аудитории на
+// полпути превратила бы журнал отправок в кашу — это отдельная кампания.
+let CMP_EDIT_ID = null;
+
 function openCmpModal() {
   buildCmpPresets();
+  CMP_EDIT_ID = null;
   CMP_PARSE_RUN = null;
+  // Режим правки блокирует выбор аудитории — при создании новой возвращаем.
+  { const _tt=document.getElementById('cmpTargetType'); if(_tt) _tt.disabled=false; }
   // Размеры сегментов живые — перечитываем при каждом открытии, иначе
   // пользователь целится по устаревшему числу контактов.
   CMP_SEGMENTS = null;
@@ -12229,7 +12237,7 @@ async function saveCmp() {
   errEl.style.display='none';
   if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
-  if (needBot && !target_id) { errEl.textContent='Выберите бота'; errEl.style.display='block'; return; }
+  if (!CMP_EDIT_ID && needBot && !target_id) { errEl.textContent='Выберите бота'; errEl.style.display='block'; return; }
   const payload = {name, text, target_type, target_id, pace, cohort_type};
   if (target_type==='segment') {
     const segId = document.getElementById('cmpSegment')?.value;
@@ -12250,6 +12258,26 @@ async function saveCmp() {
   if (media) payload.media_url = media;
   const btn = document.getElementById('cmpBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
+  if (CMP_EDIT_ID) {
+    try {
+      await api('/api/miniapp/dm_campaign/'+CMP_EDIT_ID, {method:'PATCH', body: JSON.stringify({
+        name, text, pace,
+        per_account_daily: perAccRaw ? parseInt(perAccRaw) : null,
+        quiet_hours: !!document.getElementById('cmpQuiet')?.checked,
+        media_url: document.getElementById('cmpMedia')?.value.trim() || '',
+      })});
+      closeCmpModal();
+      tg.HapticFeedback?.notificationOccurred('success');
+      toast('💾 Изменения сохранены');
+      openDmCampaigns();
+    } catch(e) {
+      errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+      tg.HapticFeedback?.notificationOccurred('error');
+    } finally {
+      btn.disabled=false; btn.textContent='💾 Сохранить изменения';
+    }
+    return;
+  }
   try {
     const d = await api('/api/miniapp/dm_campaigns', {
       method:'POST',
@@ -16296,6 +16324,7 @@ async function openDmCampaigns() {
           ${c.status==='paused'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Возобновить (продолжит с места остановки)" onclick="launchDm(${c.id},'paused')">▶ Возобновить</button>`:''}
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↻ Повторить</button>`:''}
+          ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick='editDm(${JSON.stringify(c)})'>✏️</button>`:''}
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id})">🗑</button>
         </div>
       </div>`;
@@ -16361,6 +16390,32 @@ async function openDmReport(id) {
     txt('dmrBody', h);
   } catch(e) {
     txt('dmrBody', errHtml(e.message,'openDmReport('+id+')'));
+  }
+}
+
+// Правка неидущей кампании: раньше опечатка в тексте означала удалить её и
+// собрать заново — заново выбрать аудиторию, темп, лимит на аккаунт, медиа.
+function editDm(c) {
+  openCmpModal();                      // сброс полей и CMP_EDIT_ID=null
+  CMP_EDIT_ID = c.id;
+  document.getElementById('cmpName').value = c.name || '';
+  document.getElementById('cmpText').value = c.text_template || '';
+  document.getElementById('cmpLen').textContent = (c.text_template||'').length;
+  const p = c.params || {};
+  const pc = document.getElementById('cmpPace'); if (pc) pc.value = p.pace || 'normal';
+  const pa = document.getElementById('cmpPerAcc'); if (pa) pa.value = p.per_account_daily || '';
+  const md = document.getElementById('cmpMedia'); if (md) md.value = p.media_url || '';
+  const q = document.getElementById('cmpQuiet'); if (q) q.checked = p.quiet_hours !== false;
+  // Аудиторию не трогаем: показываем как есть и блокируем выбор.
+  const tt = document.getElementById('cmpTargetType');
+  if (tt) { tt.value = c.target_type || 'all_bots'; tt.disabled = true; }
+  updateCmpTargetBot();
+  document.getElementById('cmpBtn').textContent = '💾 Сохранить изменения';
+  const sent = c.sent_count || 0;
+  if (sent) {
+    const e = document.getElementById('cmpErr');
+    e.textContent = `Уже отправлено ${sent} — им ушёл прежний текст. Новый получат только оставшиеся.`;
+    e.style.display = 'block';
   }
 }
 

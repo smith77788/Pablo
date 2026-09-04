@@ -8911,6 +8911,122 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("dm_campaign_launch uid=%d cid=%d", uid, campaign_id)
             return _err(str(exc), 500)
 
+    async def dm_campaign_update(request: web.Request) -> web.Response:
+        """Отредактировать неидущую кампанию: название, текст и настройки темпа.
+
+        Эндпоинта правки не было вовсе: опечатка в тексте означала удалить
+        кампанию и собрать заново — заново выбрать аудиторию, темп, лимит на
+        аккаунт, медиа. Аудиторию здесь СОЗНАТЕЛЬНО не меняем: часть получателей
+        уже может быть обработана, и смена аудитории на полпути превратила бы
+        журнал отправок в кашу — это отдельная кампания.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            campaign_id = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("bad campaign_id", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT status, params FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            campaign_id, uid,
+        )
+        if not row:
+            return _err("Не найдено", 404)
+        if row["status"] == "running":
+            return _err("Нельзя править идущую кампанию — сначала поставьте на паузу", 409)
+
+        sets: list[str] = []
+        args: list = []
+
+        if body.get("name") is not None:
+            name = (body.get("name") or "").strip()
+            if not name:
+                return _err("Название не может быть пустым", 400)
+            args.append(name[:100])
+            sets.append(f"name=${len(args)}")
+
+        if body.get("text") is not None:
+            text = validate_string(body.get("text"), max_len=4096)
+            if not text:
+                return _err("Текст не может быть пустым", 400)
+            if check_sql_suspicious(text):
+                return _err("Недопустимые символы в тексте", 400)
+            args.append(text)
+            sets.append(f"text_template=${len(args)}")
+
+        # Настройки живут в params — читаем текущие и правим точечно, чтобы не
+        # затереть то, чего нет в запросе (медиа, список получателей, когорту).
+        _p = row["params"] or {}
+        if isinstance(_p, str):
+            try:
+                _p = _json.loads(_p)
+            except Exception:
+                _p = {}
+        if not isinstance(_p, dict):
+            _p = {}
+        _params_touched = False
+
+        if body.get("pace") is not None:
+            pace = (body.get("pace") or "normal").strip()
+            if pace not in ("slow", "normal", "fast", "auto"):
+                return _err("Неизвестный темп", 400)
+            _p["pace"] = pace
+            _params_touched = True
+
+        if "per_account_daily" in body:
+            raw = body.get("per_account_daily")
+            if raw in (None, "", 0):
+                _p.pop("per_account_daily", None)
+            else:
+                try:
+                    _p["per_account_daily"] = max(1, min(200, int(raw)))
+                except (TypeError, ValueError):
+                    return _err("per_account_daily должен быть числом", 400)
+            _params_touched = True
+
+        if "quiet_hours" in body:
+            if body.get("quiet_hours") is False:
+                _p["quiet_hours"] = False
+            else:
+                _p.pop("quiet_hours", None)  # умолчание живёт в движке
+            _params_touched = True
+
+        if "media_url" in body:
+            media_url = (body.get("media_url") or "").strip()
+            if media_url:
+                if not is_safe_public_url(media_url):
+                    return _err("Нужен публичный https URL медиа", 400)
+                _p["media_url"] = media_url
+            else:
+                _p.pop("media_url", None)
+            _params_touched = True
+
+        if _params_touched:
+            args.append(_json.dumps(_p))
+            sets.append(f"params=${len(args)}::jsonb")
+
+        if not sets:
+            return _err("Нечего изменять", 400)
+
+        args.extend([campaign_id, uid])
+        try:
+            await pool.execute(
+                f"UPDATE dm_campaigns SET {', '.join(sets)} "
+                f"WHERE id=${len(args) - 1} AND owner_id=${len(args)}",
+                *args,
+            )
+        except Exception as exc:
+            log.exception("dm_campaign_update uid=%d cid=%d", uid, campaign_id)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True})
+
     async def dm_campaign_report(request: web.Request) -> web.Response:
         """Отчёт по кампании: исходы, разбивка по аккаунтам, последние записи.
 
@@ -14792,6 +14908,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/launch", dm_campaign_launch)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/pause", dm_campaign_pause)
     app.router.add_get("/api/miniapp/dm_campaign/{campaign_id}/report", dm_campaign_report)
+    app.router.add_patch("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_update)
     app.router.add_delete("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_delete)
     # Account Warmup
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
