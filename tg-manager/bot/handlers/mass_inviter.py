@@ -790,11 +790,18 @@ async def _inv_offer_pace(message: Message, data: dict) -> None:
     kb = InlineKeyboardBuilder()
     # Темп = пауза между батчами. Инвайт — самая баноопасная операция, поэтому
     # выбор скорости обязателен (медленный безопаснее для аккаунтов).
+    # «Авто» ведёт flood_engine.auto_strategy: темп по состоянию ВСЕГО флота за
+    # сегодня, с пересмотром на каждом прогоне. Ручные slow/normal/fast — три
+    # числа, выбранные вслепую: оператор не знает, сколько флудов флот словил за
+    # последний час. Режим существовал в движке и в мини-аппе, а в боте — главной
+    # поверхности продукта — его просто не было на клавиатуре.
+    kb.button(text="🤖 Авто (по состоянию флота)",
+              callback_data=InviterCb(action="setpace", item="auto"))
     kb.button(text="🐢 Медленно (безопасно)", callback_data=InviterCb(action="setpace", item="slow"))
     kb.button(text="🚶 Обычно", callback_data=InviterCb(action="setpace", item="normal"))
     kb.button(text="🐇 Быстро (риск)", callback_data=InviterCb(action="setpace", item="fast"))
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
-    kb.adjust(1, 2, 1)
+    kb.adjust(1, 1, 2, 1)
     await message.answer(
         "👥 <b>Инвайтер — выбор темпа</b>\n\n"
         f"🎯 Группа: <code>{html.escape(group)}</code>\n"
@@ -802,7 +809,9 @@ async def _inv_offer_pace(message: Message, data: dict) -> None:
         f"🔑 Аккаунтов: <b>{use}</b>\n"
         f"📊 ~{per_acc} пользователей на аккаунт\n\n"
         "⚠️ <i>Инвайт — самая баноопасная операция. «Медленно» "
-        "снижает риск ограничений аккаунтов.</i>",
+        "снижает риск ограничений аккаунтов.</i>\n"
+        "🤖 <i>«Авто» подбирает темп сам — по флудам и объёму всего флота за "
+        "сегодня — и объясняет решение в итоге операции.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -847,7 +856,8 @@ async def _inv_offer_volume(message: Message, data: dict) -> None:
 async def cb_inviter_pace(
     callback: CallbackQuery, callback_data: InviterCb, state: FSMContext
 ) -> None:
-    pace = callback_data.item if callback_data.item in ("slow", "normal", "fast") else "normal"
+    pace = (callback_data.item
+            if callback_data.item in ("auto", "slow", "normal", "fast") else "normal")
     await state.update_data(inv_pace=pace)
     data = await state.get_data()
     try:
@@ -991,7 +1001,11 @@ async def cb_inviter_confirm(
         # стоп на мёртвом чате и серии выходов/жалоб).
         "safe_mode": bool(data.get("inv_safe")),
     }
-    _pace_ru = {"slow": "🐢 медленно", "normal": "🚶 обычно", "fast": "🐇 быстро"}[pace]
+    # .get, а не [pace]: значение приходит из состояния FSM, которое переживает
+    # рестарты и обновления, и незнакомая строка роняла бы хендлер KeyError'ом
+    # уже ПОСЛЕ того, как пользователь всё настроил.
+    _pace_ru = {"auto": "🤖 авто (по флоту)", "slow": "🐢 медленно",
+                "normal": "🚶 обычно", "fast": "🐇 быстро"}.get(pace, pace)
     _method_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
     if params["safe_mode"]:
         _method_ru = "🛡 безопасный + " + _method_ru
