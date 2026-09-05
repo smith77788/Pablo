@@ -631,6 +631,24 @@ async def main() -> None:
     except Exception:
         log.warning("failed to load payment wallets from DB", exc_info=True)
 
+    # TON_API_KEY / TON_RATE — те же настройки из той же админ-панели
+    # («⚙️ Настройка оплаты»), но живут только в os.environ этого процесса:
+    # msg_payment_setting_value() пишет их через os.environ[key]=value, а не
+    # через _PAY_OVERRIDES (в отличие от кошельков), поэтому и восстанавливать
+    # их нужно тем же способом — иначе после каждого рестарта курс/ключ молча
+    # откатывались на дефолт из env/.env (TON_RATE по умолчанию 3.0),
+    # и платежи считались по устаревшему курсу без единого предупреждения.
+    try:
+        for _env_name, _skey in (
+            ("TON_API_KEY", "pay_ton_api_key"),
+            ("TON_RATE", "pay_ton_rate"),
+        ):
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val:
+                os.environ[_env_name] = _val
+    except Exception:
+        log.warning("failed to load TON_API_KEY/TON_RATE from DB", exc_info=True)
+
     # Self-heal критичных столбцов ДО обслуживания запросов. Запись session_fp/
     # proxy_fp ломается, если столбца ещё нет (лаг применения schema_v143/v146 при
     # деплое) → «нельзя добавить аккаунт/прокси», а без прокси не работает ничего.
