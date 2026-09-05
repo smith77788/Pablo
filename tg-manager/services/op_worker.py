@@ -565,7 +565,7 @@ async def _claim_single_account(
         return None, {"status": "failed",
                       "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
     if not await try_claim_account(int(acc["id"])):
-        return None, {"status": "failed",
+        return None, {"status": "requeue",
                       "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     return dict(acc), None
 
@@ -3920,7 +3920,7 @@ async def _exec_global_presence_channel(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts_rows) - len(claimed_ids)
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
@@ -4571,7 +4571,7 @@ async def _exec_gp_bulk_apply(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts_rows) - len(claimed_ids)
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
@@ -4908,7 +4908,7 @@ async def _exec_global_presence_bot(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts_rows) - len(claimed_ids)
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
@@ -5212,7 +5212,7 @@ async def _exec_bulk_create_channels_multi(
     # занятый аккаунт всё равно шёл в работу (вторая сессия → AUTH_KEY_DUPLICATED).
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
@@ -5369,7 +5369,7 @@ async def _exec_bulk_create_channels(
     # Отказной захват: создание каналов идёт живой сессией аккаунта. Без захвата
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -5633,7 +5633,7 @@ async def _exec_bot_factory_multi(
     # Отказной захват вместо безусловной пометки: занятую сессию в работу не берём.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
@@ -5792,7 +5792,7 @@ async def _exec_bot_factory(
     # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
     # мог параллельно вести другую операцию → две сессии на одном auth-key.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -6846,7 +6846,7 @@ async def _exec_bulk_edit_channels(
     # другую операцию → две сессии на одном auth-key → AUTH_KEY_DUPLICATED.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -6933,7 +6933,7 @@ async def _exec_group_import_all(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -7022,7 +7022,7 @@ async def _exec_group_announce(
 
     # Отказной захват: объявление рассылается живой сессией этого аккаунта.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -7199,7 +7199,7 @@ async def _exec_bulk_dm_adhoc(
     # которые тут же отбросим. Каждый работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
@@ -7412,7 +7412,7 @@ async def _exec_pin_last_post(
     # Без захвата он мог параллельно вести другую операцию (две сессии на
     # одном auth-key → AUTH_KEY_DUPLICATED).
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -7499,7 +7499,7 @@ async def _exec_bulk_post_to_channel(
     # которые тут же отбросим. Каждый работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -7658,7 +7658,7 @@ async def _exec_bulk_update_profile(
     # Отказной захват: каждый аккаунт работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -7811,7 +7811,7 @@ async def _exec_bulk_chan_exec(
     # их в total — соврать в прогрессе и в итоге.
     claimed_ids = await try_claim_accounts([int(a) for a in acc_map])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _claimed_set = set(claimed_ids)
     _pairs_before = len(channel_acc_pairs)
@@ -7975,7 +7975,7 @@ async def _exec_bulk_post_chans(
 
     # Отказной захват: постинг идёт живой сессией этого аккаунта.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -8099,7 +8099,7 @@ async def _exec_channel_import_all(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -8471,7 +8471,7 @@ async def _exec_scan_owned_resources(
     # Отказной захват: каждый аккаунт работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -8642,7 +8642,7 @@ async def _exec_reclassify_channels(
 
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
@@ -8839,7 +8839,7 @@ async def _exec_deploy_network(
     # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
     # мог параллельно вести другую операцию → две сессии на одном auth-key.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -9102,7 +9102,7 @@ async def _exec_community_set_staff(
     # Без захвата он мог параллельно вести другую операцию (две сессии на
     # одном auth-key → AUTH_KEY_DUPLICATED).
     if not await try_claim_account(int(owner_acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(owner_acc["id"])
 
@@ -9236,7 +9236,7 @@ async def _exec_promote_all_admins(
     # Без захвата он мог параллельно вести другую операцию (две сессии на
     # одном auth-key → AUTH_KEY_DUPLICATED).
     if not await try_claim_account(int(owner_acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(owner_acc["id"])
 
@@ -9710,7 +9710,7 @@ async def _exec_boost_subscribers(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -9799,7 +9799,7 @@ async def _exec_boost_bot_starts(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -10036,7 +10036,7 @@ async def _exec_create_chatlist_folder(
 
     claimed = await try_claim_accounts([int(acc["id"])])
     if not claimed:
-        return {"status": "failed", "summary": "⚠️ Аккаунт занят другой операцией"}
+        return {"status": "requeue", "summary": "⚠️ Аккаунт занят другой операцией"}
     try:
         res = await account_manager.create_shared_folder_link(
             acc["session_str"], cf.clean_title(title), chat_ids, _acc=dict(acc))
@@ -10419,13 +10419,14 @@ async def _exec_mass_invite(
         log_exc_swallow(log, f"mass_invite op={op_id}: claim accounts failed")
 
     if not accounts:
+        # requeue, а не done/failed: раньше отправляло владельца перезапускать
+        # операцию вручную — теперь живая очередь (см. _requeue_op_no_accounts)
+        # сама стартует прогон, когда флот освободится, до 20 минут.
         return {
-            "status": "done", "ok": 0, "failed": 0,
-            "left": len(user_refs) + len(phones),
+            "status": "requeue",
             "summary": ("⏸ Все подходящие аккаунты сейчас заняты другими операциями "
-                        "(прогрев/страйк/другой инвайт). Дождитесь их завершения и "
-                        "повторите — параллельно одну сессию использовать нельзя "
-                        "(риск AUTH_KEY_DUPLICATED)."),
+                        "(прогрев/страйк/другой инвайт) — операция в очереди, стартует "
+                        "автоматически, когда флот освободится."),
         }
 
     # ── «Мать-Дочка»: подменяем group дочерней, пока она жива ──────────────────
@@ -11823,7 +11824,7 @@ async def _exec_niche_growth_post(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
