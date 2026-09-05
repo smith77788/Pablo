@@ -607,7 +607,7 @@ def plan_waves(accounts: list[dict], num_waves: int = 3) -> list[list[dict]]:
     return waves
 
 
-# ── Core: parallel_strike v2 (staggered) ────────────────────────────────────────
+# ── Core: staggered_strike (эшелонированная атака волнами) ──────────────────────
 
 
 async def _one_account_strike(
@@ -2380,69 +2380,6 @@ def _strike_effectiveness_verdict(r: "StrikeResult") -> list[str]:
 
 
 # ── Backward-compatible API (для channel_ops.py) ────────────────────────────────
-
-
-async def parallel_strike(
-    accounts: list[dict],
-    peer_username: str,
-    intel: dict,
-    reason: str,
-    preset: str | None,
-) -> list[dict]:
-    """
-    Обратно-совместимый вызов — запускает report_peer_deep параллельно.
-    Использует v2 engine если доступен.
-    """
-    from services import account_manager
-
-    label = preset or reason
-    texts = assign_texts(label, len(accounts))
-    sem = asyncio.Semaphore(_CONCURRENCY)
-
-    async def _one(acc: dict, text: str) -> dict:
-        async with sem:
-            try:
-                return await account_manager.report_peer_deep_v2(
-                    acc["session_str"],
-                    peer_username,
-                    reason,
-                    message=text,
-                    msg_messages=assign_texts(label, 10),
-                    max_msg_reports=50,
-                    block_after=True,
-                    multi_reason=True,
-                    join_first=True,
-                    negative_react=True,
-                    report_admins=True,
-                    report_linked_bots=True,
-                    forward_to_bot=True,
-                    report_photo=True,
-                    report_pinned=True,
-                    report_linked_group=True,
-                    wave_num=0,
-                    _acc=acc,
-                )
-            except Exception as e:
-                log.warning("parallel_strike acc %s: %s", acc.get("id"), e)
-                return {"peer_reported": False, "error": str(e)[:100]}
-
-    results = _safe_gather_results(
-        await asyncio.gather(
-            *[_one(acc, txt) for acc, txt in zip(accounts, texts)],
-            return_exceptions=True,
-        )
-    )
-    return list(results)
-
-
-async def strike_network_nodes(
-    accounts: list[dict],
-    intel: dict,
-    reason: str,
-    preset: str | None,
-) -> dict[str, int]:
-    """Обратно-совместимый вызов — использует v2 (параллельная атака узлов)."""
-    return await strike_network_nodes_v2(accounts, intel, reason, preset)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
