@@ -1194,7 +1194,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🔄 Только мои (убрать чужие)</button>
+      <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
+      <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
     </div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -19233,6 +19234,18 @@ async function reclassifyChannels() {
     const r = await api('/api/miniapp/channels/reclassify', {method:'POST', body:JSON.stringify({prune:true})});
     toast(`🔄 Проверка инфраструктуры запущена · ${r.accounts} акк. · операция #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Переопределение инфраструктуры', ()=>openChannels());
+  } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
+}
+
+// Подтянуть карточки каналов из Telegram: имя, ссылку, число участников, роль.
+// Та же операция reclassify_channels, но prune:false — НИЧЕГО не удаляет. Нужна,
+// когда канал переименовали/сменили ссылку не через Infragram: сам по себе список
+// обновляется фоновым обходом раз в несколько часов.
+async function refreshChannelsMeta() {
+  try {
+    const r = await api('/api/miniapp/channels/reclassify', {method:'POST', body:JSON.stringify({prune:false})});
+    toast(`🔄 Обновление запущено · ${r.accounts} акк. · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Обновление списка каналов', ()=>openChannels());
   } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
 }
 

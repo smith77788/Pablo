@@ -8635,6 +8635,13 @@ async def _exec_reclassify_channels(
 
         # channel_id → ранг роли по всем аккаунтам: 0=участник, 1=админ, 2=создатель
         rank_map: dict[int, int] = {}
+        # channel_id → свежие данные карточки из того же обхода диалогов.
+        # Раньше get_dialogs отдавал title/username/members/access_hash, а бралась
+        # ОДНА роль — остальное выбрасывалось. Из-за этого список показывал имя и
+        # ссылку на момент импорта: переименовал канал в самом Telegram — Infragram
+        # об этом не узнавал, — а «участников» стояло 0 у всех, потому что колонку
+        # managed_channels.members_count не заполнял никто.
+        meta_map: dict[int, dict] = {}
         errors = 0
 
         for idx, acc in enumerate(accounts):
@@ -8649,6 +8656,26 @@ async def _exec_reclassify_channels(
                     cid = int(cid)
                     rank = 2 if d.get("is_creator") else (1 if d.get("is_admin") else 0)
                     rank_map[cid] = max(rank_map.get(cid, 0), rank)
+                    _m = meta_map.setdefault(cid, {})
+                    # Пустое значение НЕ затирает уже известное: один аккаунт может
+                    # видеть карточку беднее другого. Отдельный случай — username:
+                    # его могли снять, и это тоже правда, поэтому пустой username
+                    # принимается от аккаунта с ролью не ниже уже учтённой.
+                    if d.get("title"):
+                        _m["title"] = d["title"]
+                    if d.get("type"):
+                        _m["type"] = d["type"]
+                    if d.get("access_hash"):
+                        _m["access_hash"] = int(d["access_hash"])
+                    # participants_count в списке диалогов — поле необязательное:
+                    # Telegram присылает его не всегда. Ноль означает «не сказали»,
+                    # а не «никого нет», поэтому нулём известное число не портим.
+                    _mem = int(d.get("members") or 0)
+                    if _mem > 0:
+                        _m["members"] = max(_mem, int(_m.get("members") or 0))
+                    if rank >= int(_m.get("_rank", -1)):
+                        _m["_rank"] = rank
+                        _m["username"] = d.get("username") or ""
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -8665,6 +8692,38 @@ async def _exec_reclassify_channels(
         owned_ids = [c for c, r in rank_map.items() if r >= 1]
         creator_ids = [c for c, r in rank_map.items() if r >= 2]
         foreign_ids = [c for c, r in rank_map.items() if r == 0]
+
+        # Карточка канала приводится к тому, что сейчас в Telegram: имя, ссылка,
+        # число участников, тип, access_hash. Данные уже добыты обходом выше —
+        # ни одного дополнительного запроса к Telegram здесь не делается.
+        refreshed = 0
+        if meta_map:
+            _rows = [
+                (
+                    owner_id, cid,
+                    m.get("title") or None,
+                    m.get("username"),                       # '' = ссылку сняли
+                    int(m["members"]) if m.get("members") else None,
+                    m.get("type") or None,
+                    int(m["access_hash"]) if m.get("access_hash") else None,
+                )
+                for cid, m in meta_map.items()
+            ]
+            try:
+                await pool.executemany(
+                    "UPDATE managed_channels SET "
+                    "  title         = COALESCE($3, title), "
+                    "  username      = COALESCE($4, username), "
+                    "  members_count = COALESCE($5, members_count), "
+                    "  type          = COALESCE($6, type), "
+                    "  access_hash   = COALESCE($7, access_hash) "
+                    "WHERE owner_id=$1 AND channel_id=$2",
+                    _rows,
+                )
+                refreshed = len(_rows)
+            except Exception as _mexc:
+                # Обновление карточек — не причина заваливать переопределение ролей.
+                log.warning("_exec_reclassify_channels: карточки не обновлены: %s", _mexc)
 
         # Проставляем роль по подтверждённым каналам.
         if owned_ids:
@@ -8701,17 +8760,20 @@ async def _exec_reclassify_channels(
 
         kept = len(owned_ids)
         err_note = f"\n⚠️ Сессий с ошибкой: {errors}" if errors else ""
+        upd_note = f"\n🔄 Обновлено карточек: {refreshed}" if refreshed else ""
         if prune:
             summary = (f"✅ Инфраструктура переопределена\n"
                        f"👑 Моих каналов/групп: {kept}\n"
-                       f"🚫 Убрано чужих (только участник): {removed}{err_note}")
+                       f"🚫 Убрано чужих (только участник): {removed}{upd_note}{err_note}")
         else:
-            summary = (f"✅ Роли обновлены\n"
-                       f"👑 Моих: {kept} · 🚫 Чужих помечено: {len(foreign_ids)}{err_note}")
+            summary = (f"✅ Список обновлён\n"
+                       f"👑 Моих: {kept} · 🚫 Чужих помечено: {len(foreign_ids)}"
+                       f"{upd_note}{err_note}")
         return {
             "status": "done",
             "owned": kept,
             "foreign_removed": removed,
+            "refreshed": refreshed,
             "summary": summary,
         }
     finally:

@@ -206,6 +206,28 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
             old_username = (ch["username"] or "").strip()
             old_about = (ch["about"] or "").strip()
 
+            # Карточка приводится к текущему состоянию Telegram НА КАЖДОМ удачном
+            # опросе, а не только когда сработал дрейф. Раньше запись жила внутри
+            # `if changes:` и требовала, чтобы старое значение было непустым:
+            # канал, переименованный не через Infragram, оставался в списке под
+            # прежним именем, снятая ссылка висела вечно, а members_count не писал
+            # никто вообще — отсюда «0 участников» у всех каналов.
+            #
+            # Ноль участников от Telegram означает «не сказали», а не «никого нет»,
+            # поэтому известное число нулём не затирается. Пустой username, наоборот,
+            # затирает: ссылку могли снять, и это правда.
+            await pool.execute(
+                "UPDATE managed_channels SET "
+                "  title         = COALESCE($2, title), "
+                "  username      = $3, "
+                "  members_count = COALESCE($4, members_count) "
+                "WHERE id=$1",
+                ch["id"],
+                new_title or None,
+                new_username,
+                int(info.get("members_count") or 0) or None,
+            )
+
             changes: dict = {}
             if old_title and new_title and new_title != old_title:
                 changes["title"] = {"old": old_title, "new": new_title}
@@ -254,14 +276,10 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                         ensure_ascii=False,
                     ),
                 )
-                # Update stored values
+                # title/username уже записаны выше — здесь остаётся описание.
                 await pool.execute(
-                    "UPDATE managed_channels "
-                    "SET title=$2, username=$3, about=$4 WHERE id=$1",
-                    ch["id"],
-                    new_title or old_title,
-                    new_username or old_username,
-                    new_about,
+                    "UPDATE managed_channels SET about=$2 WHERE id=$1",
+                    ch["id"], new_about,
                 )
                 # Notify owner
                 ch_name = old_title or new_title or f"#{ch['channel_id']}"
