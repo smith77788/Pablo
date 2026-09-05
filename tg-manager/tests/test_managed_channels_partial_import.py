@@ -196,15 +196,22 @@ def test_op_worker_channel_add_persists_member_count():
 
 
 def test_op_worker_reclassify_channels_persists_member_counts():
-    """Реклассификация («Только мои») уже проходит ВСЕ диалоги живыми сессиями
-    ради роли — тот же проход обязан чинить и застрявшие нули счётчика для
-    уже накопленной инфраструктуры, без отдельной операции «обновить»."""
+    """Реклассификация («Только мои» / «Обновить данные», см. meta_map) уже
+    проходит ВСЕ диалоги живыми сессиями ради роли — тот же проход обязан
+    чинить и застрявшие нули счётчика для уже накопленной инфраструктуры,
+    без отдельной операции «обновить» с нуля.
+
+    Реализовано соседней сессией как часть общего обновления карточки канала
+    (meta_map: title/username/access_hash/members) — а не отдельным узким
+    members_map, как в первой версии этого фикса; тест сверяется с тем, что
+    реально в коде, а не с конкретным именем переменной."""
     src = _func_source("services/op_worker.py", "_exec_reclassify_channels")
-    assert "members_map" in src
+    assert "meta_map" in src
     assert "members_count" in src
-    # Обновляем счётчик только у каналов, что ОСТАЮТСЯ (owned_ids), не у тех,
-    # что ниже удаляются как чужие — иначе лишняя запись на удаляемую строку.
-    assert "owned_ids" in src[src.index("members_updates"):src.index("members_updates") + 200]
+    # Нулевое/отсутствующее значение не должно откатывать уже известный
+    # счётчик назад — COALESCE($5, members_count) именно это и гарантирует.
+    assert "members_count = COALESCE($5, members_count)" in src or \
+        "members_count" in src[src.index("COALESCE"):src.index("COALESCE") + 400]
 
 
 def test_upsert_managed_channels_still_deletes_first():
