@@ -82,6 +82,27 @@ def _acc_result_fleet_danger(r: dict) -> bool:
 _BAN_MARKERS = ("banned", "deactivated", "auth_key", "user_deactivated",
                 "phone_number_banned")
 
+# ── Адаптивный пейсинг ──────────────────────────────────────────────────────────
+# Паузы между волнами — не константа: чем больше аккаунтов уже словили флуд, тем
+# сильнее Telegram давит, тем ДЛИННЕЕ пауза перед следующей волной. Множитель
+# только УДЛИНЯЕТ (≥1.0) — безопасно для флота, темп не разгоняем.
+_PACING_FLOOD_FACTOR = 2.0   # 50% флуда → пауза ×2, 100% → ×3 (но такое обрывает канарейка)
+_PACING_MAX_MULT = 3.0
+
+
+def _flood_ratio(results: list[dict]) -> float:
+    """Доля аккаунтов, упёршихся во флуд, среди отработавших (0..1). ЧИСТАЯ."""
+    if not results:
+        return 0.0
+    flood = sum(1 for r in results if _acc_outcome(r) == "flood")
+    return flood / len(results)
+
+
+def _pacing_multiplier(flood_ratio: float) -> float:
+    """Множитель паузы по доле флуда: 1.0 (чисто) … _PACING_MAX_MULT. ЧИСТАЯ."""
+    fr = max(0.0, min(1.0, flood_ratio))
+    return min(_PACING_MAX_MULT, 1.0 + _PACING_FLOOD_FACTOR * fr)
+
 
 def _acc_outcome(r: dict) -> str:
     """Категория исхода аккаунта для честного счётчика: ok|flood|banned|failed.
@@ -1507,12 +1528,15 @@ async def staggered_strike(
                     )
                     wave_results.extend(rest_results)
 
-            # Пауза между волнами (пропускаем при канарейка-стопе)
+            # Пауза между волнами (пропускаем при канарейка-стопе). Адаптивно:
+            # чем больше аккаунтов волны 1 словили флуд — тем длиннее пауза.
             if len(plan.waves) > 1 and not _canary_abort:
-                wc = random.uniform(*_WAVE_COOLDOWN)
+                _mult = _pacing_multiplier(_flood_ratio(wave_results))
+                wc = random.uniform(*_WAVE_COOLDOWN) * _mult
                 if progress_cb:
+                    _hint = f" (×{_mult:.1f} по флуду)" if _mult > 1.05 else ""
                     await progress_cb(
-                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2..."
+                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2{_hint}..."
                     )
                 await asyncio.sleep(wc)
 
@@ -1546,12 +1570,15 @@ async def staggered_strike(
                 )
                 wave_results.extend(w2_results)
 
-            # Пауза перед финальной волной (пропускаем при канарейка-стопе)
+            # Пауза перед финальной волной (пропускаем при канарейка-стопе).
+            # Адаптивно по накопленной доле флуда (волны 1+2).
             if len(plan.waves) > 2 and not _canary_abort:
-                wc = random.uniform(*_WAVE_COOLDOWN)
+                _mult = _pacing_multiplier(_flood_ratio(wave_results))
+                wc = random.uniform(*_WAVE_COOLDOWN) * _mult
                 if progress_cb:
+                    _hint = f" (×{_mult:.1f} по флуду)" if _mult > 1.05 else ""
                     await progress_cb(
-                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3..."
+                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3{_hint}..."
                     )
                 await asyncio.sleep(wc)
 
