@@ -16618,7 +16618,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(f"Не удалось импортировать: {str(exc)[:140]}", 500)
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
-    app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
 
     # ── Добавление аккаунта: интерактивные способы входа (как в боте) ──────────
     # Раньше в мини-аппе был ТОЛЬКО импорт строки сессии. Добавляем вход по номеру
@@ -18542,6 +18541,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", uch_contact_message)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/media", uch_contact_media)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
+    # Регистрация обязана идти ПОСЛЕ определения хендлера: setup_routes —
+    # обычная функция, и ссылка на ещё не созданную локальную функцию даёт
+    # UnboundLocalError. Раньше эта строка стояла на 600 строк выше — сервер
+    # не собирался вообще, мини-апп отвечал «Application failed to respond».
+    app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
     app.router.add_post("/api/miniapp/uch/segment/preview", uch_segment_preview)
     app.router.add_post("/api/miniapp/uch/segment/message", uch_segment_message)
     app.router.add_get("/api/miniapp/ab/results", ab_results)
