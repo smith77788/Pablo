@@ -202,8 +202,6 @@ KNOWN_DIVERGENCE: dict[str, str] = {
     "services/chat_guard.py:_FLOOD": "антифлуд чата считается по процессу → порог мягче",
     "services/resource_selector.py:_account_usage": "равномерность ротации аккаунтов",
     "services/session_simulator.py:_adaptive_data": "адаптация поведения, копится заново",
-    "services/strike_engine.py:_ab_tests": "A/B-тесты не переживают рестарт",
-    "services/strike_engine.py:_preset_stats": "статистика пресетов не переживает рестарт",
     "services/ai_providers.py:_KEY_OVERRIDES": "ключ, заданный в рантайме, виден одному процессу",
     "services/managed_bot_webhooks.py:_secret_map":
         "секрет вебхука зарегистрирован в одном процессе (есть запасной путь)",
@@ -265,7 +263,7 @@ def test_no_duplicate_classification():
 
 def test_known_divergence_does_not_grow():
     """Принятый долг не должен расти: новое состояние с ценой — сразу в БД."""
-    assert len(KNOWN_DIVERGENCE) <= 22, (
+    assert len(KNOWN_DIVERGENCE) <= 16, (
         f"список принятых расхождений вырос до {len(KNOWN_DIVERGENCE)}. "
         "Это не место для новых записей — выносите состояние в БД. "
         "Уменьшили список? Опустите и порог, чтобы храповик не откатывался."
