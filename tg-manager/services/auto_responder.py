@@ -39,6 +39,26 @@ _DEAD_TOKEN_BASE_COOLDOWN = 60.0  # seconds
 _DEAD_TOKEN_MAX_COOLDOWN = 3600.0  # cap at 1h between retries
 
 
+def _is_dm_update(upd: dict) -> bool:
+    """True только если сообщение пришло из ЛИЧНОГО чата с ботом.
+
+    Весь пользовательский путь автоответчика держит chat_id как id пользователя:
+    учёт нового юзера, подписка на воронку, add_bot_user, авто-ответы, /start,
+    релей «входящих» оператору. В личке chat.id == user.id — верно. В ГРУППЕ
+    chat.id — это id группы, поэтому дочерний бот, попавший в чат (обычное дело
+    при инвайте Мать-Дочка), отвечал бы прямо в группу (спам, выгоняющий только
+    что приглашённых) и засорял бы базу подписчиков id-ами групп. Группового
+    поведения у этого пути нет вовсе — только лички.
+    """
+    msg = upd.get("message")
+    if not isinstance(msg, dict):
+        return False
+    # Отсутствие типа (Telegram его всегда шлёт) трактуем как личку, чтобы не
+    # отломить штатный путь при неожиданной форме апдейта.
+    ctype = (msg.get("chat") or {}).get("type") or "private"
+    return ctype == "private"
+
+
 def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str:
     """Render {{PLACEHOLDER}} tokens in text with user/bot context."""
     if not text or "{{" not in text:
@@ -356,6 +376,12 @@ async def _process_bot(
 
             msg = upd.get("message")
             if not msg:
+                continue
+            # Только личка: в группе chat_id — это id группы, и весь путь ниже
+            # (авто-ответы, /start, воронки, релей) отвечал бы В ГРУППУ и портил
+            # базу подписчиков. Дочерний бот при инвайте Мать-Дочка попадает в
+            # чат — без этой отсечки он спамит в него на каждое сообщение.
+            if not _is_dm_update(upd):
                 continue
             chat_id = msg.get("chat", {}).get("id")
             text = msg.get("text", "")
