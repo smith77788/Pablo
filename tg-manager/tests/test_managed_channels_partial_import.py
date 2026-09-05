@@ -42,7 +42,10 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import os
 import pathlib
+
+import pytest
 
 from database import db
 
@@ -133,6 +136,82 @@ class _FakePool:
 
 def _channels(*ids: int) -> list[dict]:
     return [{"id": i, "title": f"Ch{i}", "type": "channel"} for i in ids]
+
+
+# ── Регрессия: 0 участников у ВСЕХ импортированных каналов ──────────────────
+#
+# account_manager.get_dialogs() уже кладёт реальное число участников в каждый
+# диалог (entity.participants_count → ключ "members"), но add_managed_channels()
+# роняло его на пути в БД — колонка managed_channels.members_count никогда не
+# получала значение при импорте/реклассификации, поэтому у мини-аппа ВСЕ
+# каналы показывали «0 участников» независимо от реального размера.
+
+
+def test_add_managed_channels_persists_member_count():
+    pool = _FakePool()
+    ch = [{"id": 1, "title": "Ch1", "type": "channel", "members": 4321}]
+
+    async def _run():
+        await db.add_managed_channels(pool, owner_id=1, acc_id=10, channels=ch)
+
+    asyncio.run(_run())
+    inserts = [(q, args) for q, args in pool.log if "INSERT INTO managed_channels" in q]
+    assert len(inserts) == 1
+    q, args = inserts[0]
+    assert "members_count" in q
+    assert 4321 in args, "реальное число участников не попало в параметры INSERT"
+
+
+def test_add_managed_channels_missing_members_key_defaults_to_zero_not_crash():
+    """Часть точек вызова (например _exec_channel_add) передаёт словари без
+    ключа "members" вовсе — не должно падать с KeyError."""
+    pool = _FakePool()
+    ch = [{"id": 1, "title": "Ch1", "type": "channel"}]
+
+    async def _run():
+        await db.add_managed_channels(pool, owner_id=1, acc_id=10, channels=ch)
+
+    asyncio.run(_run())  # не должно бросить исключение
+
+
+def test_add_managed_channels_upsert_never_regresses_count_to_zero():
+    """SQL обязан беречь уже известный счётчик от нуля/временного сбоя —
+    иначе частичная страница диалогов откатывала бы счётчик назад."""
+    pool = _FakePool()
+
+    async def _run():
+        await db.add_managed_channels(
+            pool, owner_id=1, acc_id=10, channels=[{"id": 1, "title": "Ch1", "members": 0}])
+
+    asyncio.run(_run())
+    q = pool.log[0][0]
+    assert "CASE WHEN EXCLUDED.members_count > 0" in q
+    assert "managed_channels.members_count END" in q
+
+
+def test_op_worker_channel_add_persists_member_count():
+    src = _func_source("services/op_worker.py", "_exec_channel_add")
+    assert "members_count" in src
+    assert 'res.get("members")' in src
+
+
+def test_op_worker_reclassify_channels_persists_member_counts():
+    """Реклассификация («Только мои» / «Обновить данные», см. meta_map) уже
+    проходит ВСЕ диалоги живыми сессиями ради роли — тот же проход обязан
+    чинить и застрявшие нули счётчика для уже накопленной инфраструктуры,
+    без отдельной операции «обновить» с нуля.
+
+    Реализовано соседней сессией как часть общего обновления карточки канала
+    (meta_map: title/username/access_hash/members) — а не отдельным узким
+    members_map, как в первой версии этого фикса; тест сверяется с тем, что
+    реально в коде, а не с конкретным именем переменной."""
+    src = _func_source("services/op_worker.py", "_exec_reclassify_channels")
+    assert "meta_map" in src
+    assert "members_count" in src
+    # Нулевое/отсутствующее значение не должно откатывать уже известный
+    # счётчик назад — COALESCE($5, members_count) именно это и гарантирует.
+    assert "members_count = COALESCE($5, members_count)" in src or \
+        "members_count" in src[src.index("COALESCE"):src.index("COALESCE") + 400]
 
 
 def test_upsert_managed_channels_still_deletes_first():
@@ -257,3 +336,84 @@ def test_channel_ops_live_reload_still_uses_full_resync_intentionally():
     поменяют на частичные данные — тест не даст молча потерять инвариант."""
     src = _func_source("bot/handlers/channel_ops.py", "cb_manage_show_dialogs_live")
     assert "upsert_managed_channels(" in src
+
+
+# ── Реальный Postgres: CASE-логика UPSERT'а действительно так себя ведёт ────
+#
+# _FakePool выше только логирует SQL-текст, не исполняет его — CASE-выражение
+# внутри INSERT...ON CONFLICT нужно проверить на настоящем движке.
+#
+# ОДИН цикл на модуль: соединения asyncpg привязаны к тому циклу, в котором
+# созданы — отдельный asyncio.run() на фикстуру и на тело теста даёт
+# "attached to a different loop" при первом же реальном запросе из теста.
+
+DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
+
+_PG_LOOP: "asyncio.AbstractEventLoop | None" = None
+
+
+def _pg_run(coro):
+    global _PG_LOOP
+    if _PG_LOOP is None or _PG_LOOP.is_closed():
+        _PG_LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(_PG_LOOP)
+    return _PG_LOOP.run_until_complete(coro)
+
+
+@pytest.fixture
+def pg_pool():
+    if not DSN:
+        pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+    import asyncpg
+
+    async def _boot():
+        conn = await asyncpg.connect(DSN)
+        for f in ("schema_v19.sql", "schema_v91.sql"):
+            path = _TG_MANAGER_ROOT / f
+            for chunk in path.read_text(encoding="utf-8").split(";"):
+                body = "\n".join(
+                    ln for ln in chunk.split("\n") if not ln.strip().startswith("--")
+                ).strip()
+                if body:
+                    try:
+                        await conn.execute(body)
+                    except Exception:
+                        pass
+        await conn.execute("DELETE FROM managed_channels WHERE owner_id=990201")
+        return conn
+
+    try:
+        conn = _pg_run(_boot())
+    except Exception as exc:
+        pytest.skip(f"Postgres по INFRAGRAM_TEST_DSN недоступен: {str(exc)[:120]}")
+    yield conn
+    _pg_run(conn.execute("DELETE FROM managed_channels WHERE owner_id=990201"))
+    _pg_run(conn.close())
+
+
+def test_real_postgres_member_count_persists_and_never_regresses(pg_pool):
+    async def _run():
+        await db.add_managed_channels(
+            pg_pool, owner_id=990201, acc_id=1,
+            channels=[{"id": 555, "title": "Ch", "members": 777}])
+        row = await pg_pool.fetchrow(
+            "SELECT members_count FROM managed_channels WHERE owner_id=990201 AND channel_id=555")
+        assert row["members_count"] == 777
+
+        # Повторный (частичный/сбойный) проход с members=0 не должен откатить счётчик.
+        await db.add_managed_channels(
+            pg_pool, owner_id=990201, acc_id=1,
+            channels=[{"id": 555, "title": "Ch", "members": 0}])
+        row = await pg_pool.fetchrow(
+            "SELECT members_count FROM managed_channels WHERE owner_id=990201 AND channel_id=555")
+        assert row["members_count"] == 777, "нулевое значение откатило уже известный счётчик"
+
+        # А настоящий рост — обязан примениться.
+        await db.add_managed_channels(
+            pg_pool, owner_id=990201, acc_id=1,
+            channels=[{"id": 555, "title": "Ch", "members": 900}])
+        row = await pg_pool.fetchrow(
+            "SELECT members_count FROM managed_channels WHERE owner_id=990201 AND channel_id=555")
+        assert row["members_count"] == 900
+
+    _pg_run(_run())

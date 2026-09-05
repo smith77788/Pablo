@@ -3813,15 +3813,24 @@ async def add_managed_channels(
     """
     if not channels:
         return 0
+    # members_count: account_manager.get_dialogs() уже кладёт его в каждый
+    # диалог (entity.participants_count), но до сих пор терялся на пути в БД —
+    # отсюда «0 участников» у ВСЕХ импортированных каналов в мини-аппе.
+    # Не даём нулю/отсутствующему значению затирать уже известный счётчик
+    # (частичная страница диалогов/временный сбой Telegram не обязаны откатывать
+    # число назад).
     await pool.executemany(
-        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, is_admin, is_creator)
-           VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, is_admin, is_creator, members_count)
+           VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            ON CONFLICT (owner_id, channel_id) DO UPDATE
            SET title=EXCLUDED.title, username=EXCLUDED.username,
                acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
                type=EXCLUDED.type,
                is_admin=COALESCE(EXCLUDED.is_admin, managed_channels.is_admin),
-               is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator)""",
+               is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator),
+               members_count=CASE WHEN EXCLUDED.members_count > 0
+                                   THEN EXCLUDED.members_count
+                                   ELSE managed_channels.members_count END""",
         [
             (
                 owner_id,
@@ -3833,6 +3842,7 @@ async def add_managed_channels(
                 ch.get("type", "channel"),
                 ch.get("is_admin"),
                 ch.get("is_creator"),
+                int(ch.get("members") or 0),
             )
             for ch in channels
         ],

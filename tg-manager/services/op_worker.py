@@ -8174,15 +8174,18 @@ async def _exec_channel_add(
         # функция удаляет ВСЕ существующие каналы аккаунта перед вставкой
         # (рассчитана на полный ре-импорт, а не на добавление одного канала).
         await pool.execute(
-            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
-               VALUES($1, $2, $3, $4, $5, $6, $7)
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, members_count)
+               VALUES($1, $2, $3, $4, $5, $6, $7, $8)
                ON CONFLICT (owner_id, channel_id) DO UPDATE
                SET title=EXCLUDED.title, username=EXCLUDED.username,
                    acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-                   type=EXCLUDED.type""",
+                   type=EXCLUDED.type,
+                   members_count=CASE WHEN EXCLUDED.members_count > 0
+                                       THEN EXCLUDED.members_count
+                                       ELSE managed_channels.members_count END""",
             owner_id, int(acc["id"]), res["channel_id"], title,
             res.get("username") or "", res.get("access_hash") or 0,
-            res.get("type") or "channel",
+            res.get("type") or "channel", int(res.get("members") or 0),
         )
         return {
             "status": "done",

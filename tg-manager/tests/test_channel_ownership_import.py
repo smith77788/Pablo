@@ -105,7 +105,11 @@ def test_add_managed_channels_persists_role_flags():
     assert "is_admin" in q and "is_creator" in q, "INSERT обязан писать роль"
     # COALESCE защищает известную роль от затирания NULL при частичном довозе
     assert "COALESCE(EXCLUDED.is_admin" in q
-    assert True in row and row[-2:] == (True, True)
+    # is_admin, is_creator — предпоследние два параметра (последний —
+    # members_count, добавленный отдельным фиксом «0 участников у всех
+    # импортированных каналов»); позиция от конца, а не абсолютная, чтобы не
+    # переломаться от порядка появления новых полей.
+    assert True in row and row[-3:-1] == (True, True)
 
 
 def test_upsert_managed_channels_persists_role_flags():

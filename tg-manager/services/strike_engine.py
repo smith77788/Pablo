@@ -51,6 +51,52 @@ _FLOOD_CAP = 65.0  # кап exponential backoff
 # Увеличено до 60-120с для снижения риска coordinated attack detection
 _STAGGER_BASE = (60, 120)
 
+# ── Канарейка (гейт массовой операции) ──────────────────────────────────────────
+# Strike — самая баноопасная операция. Прежде чем бить всем флотом, пробуем 1-3
+# лучшими аккаунтами и смотрим исход. Если ВСЕ они словили флуд/бан и НИ ОДНА
+# жалоба не принята — это сигнал, что Telegram отвергает жалобы и/или банит;
+# продолжать всем флотом = сжечь его впустую. Тогда аккаунтные волны
+# останавливаем, а безаккаунтные векторы (abuse-формы, email) продолжаем — они не
+# жгут флот и это единственный вектор, реально удаляющий канал.
+_CANARY_SIZE = 3
+
+_FLEET_DANGER_MARKERS = (
+    "flood_wait", "flood", "peer_flood", "too many", "banned",
+    "deactivated", "auth_key", "user_deactivated", "phone_number_banned",
+)
+
+
+def _acc_result_success(r: dict) -> bool:
+    """Аккаунт реально что-то сделал (жалоба принята / вступил / пожаловался на сообщения)."""
+    return bool(r.get("peer_reported") or r.get("joined") or r.get("msgs_reported"))
+
+
+def _acc_result_fleet_danger(r: dict) -> bool:
+    """Исход, опасный для флота: peer-flood или ошибка флуда/бана/мёртвой сессии."""
+    if r.get("_peer_flood"):
+        return True
+    err = (r.get("error") or "").lower()
+    return any(m in err for m in _FLEET_DANGER_MARKERS)
+
+
+def canary_verdict(results: list[dict]) -> tuple[bool, str]:
+    """Решение канарейки по исходам первых аккаунтов: (останавливать?, причина).
+
+    Консервативно: стоп ТОЛЬКО когда участвовало ≥2 аккаунта, НИ ОДНА жалоба не
+    принята И КАЖДЫЙ аккаунт словил флуд/бан. Любой успех или неоднозначный сбой
+    (таймаут/сеть/приватность) — продолжаем: ложный стоп (операция не сработала)
+    хуже, чем лишняя волна. ЧИСТАЯ функция — тестируется без сети/БД.
+    """
+    n = len(results)
+    if n < 2:
+        return (False, "")
+    if any(_acc_result_success(r) for r in results):
+        return (False, "")
+    danger = sum(1 for r in results if _acc_result_fleet_danger(r))
+    if danger == n:
+        return (True, f"канарейка: {n}/{n} аккаунтов словили флуд/бан, 0 жалоб принято")
+    return (False, "")
+
 
 def _telegram_target_display(target: str) -> str:
     try:
@@ -477,6 +523,10 @@ class StrikeResult:
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
     phase_results: dict[str, Any] = field(default_factory=dict)
+    # Канарейка остановила аккаунтные волны (флот сбережён); безаккаунтные векторы
+    # (abuse-формы, email) при этом продолжают работать.
+    canary_aborted: bool = False
+    canary_reason: str = ""
 
 
 # ── Pre-flight ─────────────────────────────────────────────────────────────────
@@ -1377,32 +1427,60 @@ async def staggered_strike(
                     f"🎯 {_telegram_target_display(target)}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов",
                 )
 
-            # ═══ Волна 1: ReportPeer + ReportSpam + Join + Internal ═══
+            # ═══ Волна 1: канарейка (1-3 лучших) → проверка → остальные ═══
+            # Сначала бьём малой канарейкой и ждём исход. Если она показывает
+            # системный флуд/бан (все словили, 0 жалоб принято) — аккаунтные волны
+            # НЕ запускаем (флот сбережён); безаккаунтные векторы (abuse/email)
+            # ниже всё равно отработают.
+            _canary_abort = False
             wave_results: list[dict] = []
             if plan.waves:
-                texts_w1 = assign_texts(plan.preset or plan.reason, len(plan.waves[0]))
-                tasks = [
-                    _one_account_strike(
-                        acc,
-                        target,
-                        intel,
-                        plan.reason,
-                        plan.preset,
-                        texts_w1,
-                        i,
-                        0,
-                        sem,
-                        mode=plan.mode,
-                        pool=pool,
-                    )
-                    for i, acc in enumerate(plan.waves[0])
-                ]
-                wave_results = _safe_gather_results(
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                )
+                w0 = plan.waves[0]
+                texts_w1 = assign_texts(plan.preset or plan.reason, len(w0))
+                canary_accs = w0[:_CANARY_SIZE]
+                rest0 = w0[_CANARY_SIZE:]
 
-            # Пауза между волнами
-            if len(plan.waves) > 1:
+                def _mk_task(acc, idx):
+                    return _one_account_strike(
+                        acc, target, intel, plan.reason, plan.preset,
+                        texts_w1, idx, 0, sem, mode=plan.mode, pool=pool)
+
+                canary_results = _safe_gather_results(
+                    await asyncio.gather(
+                        *[_mk_task(acc, i) for i, acc in enumerate(canary_accs)],
+                        return_exceptions=True,
+                    )
+                )
+                wave_results = list(canary_results)
+                _canary_abort, _canary_reason = canary_verdict(canary_results)
+                if _canary_abort:
+                    result.canary_aborted = True
+                    result.canary_reason = _canary_reason
+                    result.errors.append(_canary_reason)
+                    if progress_cb:
+                        await progress_cb(
+                            "strike_canary_abort",
+                            f"🛑 Канарейка: {_canary_reason} — аккаунтные волны "
+                            f"остановлены, флот сбережён. Продолжаю безаккаунтными "
+                            f"векторами (abuse/email).",
+                        )
+                    log.warning(
+                        "staggered_strike: target=%s КАНАРЕЙКА-СТОП: %s "
+                        "(не запущено аккаунтов: rest0=%d + волны 2/3)",
+                        target, _canary_reason, len(rest0),
+                    )
+                elif rest0:
+                    rest_results = _safe_gather_results(
+                        await asyncio.gather(
+                            *[_mk_task(acc, i)
+                              for i, acc in enumerate(rest0, start=len(canary_accs))],
+                            return_exceptions=True,
+                        )
+                    )
+                    wave_results.extend(rest_results)
+
+            # Пауза между волнами (пропускаем при канарейка-стопе)
+            if len(plan.waves) > 1 and not _canary_abort:
                 wc = random.uniform(*_WAVE_COOLDOWN)
                 if progress_cb:
                     await progress_cb(
@@ -1411,7 +1489,8 @@ async def staggered_strike(
                 await asyncio.sleep(wc)
 
             # ═══ Волна 2: Поддержка — другие причины, админы, боты ═══
-            if len(plan.waves) > 1 and plan.waves[1] and not await _op_cancelled():
+            if (len(plan.waves) > 1 and plan.waves[1] and not _canary_abort
+                    and not await _op_cancelled()):
                 if progress_cb:
                     await progress_cb(
                         "strike_wave2",
@@ -1439,8 +1518,8 @@ async def staggered_strike(
                 )
                 wave_results.extend(w2_results)
 
-            # Пауза перед финальной волной
-            if len(plan.waves) > 2:
+            # Пауза перед финальной волной (пропускаем при канарейка-стопе)
+            if len(plan.waves) > 2 and not _canary_abort:
                 wc = random.uniform(*_WAVE_COOLDOWN)
                 if progress_cb:
                     await progress_cb(
@@ -1449,7 +1528,8 @@ async def staggered_strike(
                 await asyncio.sleep(wc)
 
             # ═══ Волна 3: Завершение — блокировка, финальные жалобы ═══
-            if len(plan.waves) > 2 and plan.waves[2] and not await _op_cancelled():
+            if (len(plan.waves) > 2 and plan.waves[2] and not _canary_abort
+                    and not await _op_cancelled()):
                 if progress_cb:
                     await progress_cb(
                         "strike_wave3",
@@ -1528,17 +1608,20 @@ async def staggered_strike(
                     "; ".join(result.errors[:2])[:120] if result.errors else "none",
                 )
 
-            # ═══ Фаза: Network nodes (параллельно) ═══
-            if progress_cb:
-                await progress_cb(
-                    "strike_network",
-                    f"🌐 {_telegram_target_display(target)}: Атака сетевых узлов...",
+            # ═══ Фаза: Network nodes (параллельно) — аккаунтный вектор ═══
+            # При канарейка-стопе пропускаем: узлы бьются тем же флотом, а он уже
+            # под флудом/баном — не жжём его дальше.
+            if not _canary_abort:
+                if progress_cb:
+                    await progress_cb(
+                        "strike_network",
+                        f"🌐 {_telegram_target_display(target)}: Атака сетевых узлов...",
+                    )
+                net = await strike_network_nodes_v2(
+                    plan.accounts, intel, plan.reason, plan.preset
                 )
-            net = await strike_network_nodes_v2(
-                plan.accounts, intel, plan.reason, plan.preset
-            )
-            result.network_nodes = net.get("nodes_attacked", 0)
-            result.network_reports = net.get("total_reports", 0)
+                result.network_nodes = net.get("nodes_attacked", 0)
+                result.network_reports = net.get("total_reports", 0)
 
             # ═══ Фаза: External escalation ═══
             if progress_cb:
@@ -1561,22 +1644,24 @@ async def staggered_strike(
                 result.abuse_form_ok,
             )
 
-            # ═══ Фаза: SpamBot + anti-scam боты ═══
-            # Используем лучший аккаунт (первый по trust_score после pre-flight сортировки)
-            spambot_result = await _escalate_to_spambot(
-                plan.accounts[0] if plan.accounts else None, target
-            )
-            result.spambot_escalation = (
-                spambot_result.get("status", "unknown")
-                if isinstance(spambot_result, dict)
-                else "skipped"
-            )
-            log.info(
-                "strike_engine: spambot_escalation target=%s status=%s bots=%s",
-                target,
-                result.spambot_escalation,
-                spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {},
-            )
+            # ═══ Фаза: SpamBot + anti-scam боты — аккаунтный вектор ═══
+            # При канарейка-стопе пропускаем (использует аккаунт флота).
+            if not _canary_abort:
+                # Лучший аккаунт (первый по trust_score после pre-flight сортировки)
+                spambot_result = await _escalate_to_spambot(
+                    plan.accounts[0] if plan.accounts else None, target
+                )
+                result.spambot_escalation = (
+                    spambot_result.get("status", "unknown")
+                    if isinstance(spambot_result, dict)
+                    else "skipped"
+                )
+                log.info(
+                    "strike_engine: spambot_escalation target=%s status=%s bots=%s",
+                    target,
+                    result.spambot_escalation,
+                    spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {},
+                )
 
             # ═══ Фаза: Email-эскалация ═══
             if pool and plan.owner_id:
@@ -2269,6 +2354,14 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             status = "🟡"  # частичный удар (только ReportPeer, без сообщений)
         else:
             status = "🔴"  # удар не прошёл (нет даже базовой жалобы)
+        if r.canary_aborted:
+            status = "🛑"  # канарейка остановила аккаунтные волны (флот сбережён)
+        if r.canary_aborted:
+            lines.append(
+                f"🛑 <code>{r.target}</code> — <b>канарейка остановила флот</b>\n"
+                f"  └ {r.canary_reason}. Аккаунтные волны не запущены (флот сбережён); "
+                f"безаккаунтные векторы (abuse-формы, email) отработали ниже.\n"
+            )
         lines.append(
             f"{status} <code>{r.target}</code>\n"
             f"  ├ Жалоб на канал: <b>{r.peer_reported}</b> "

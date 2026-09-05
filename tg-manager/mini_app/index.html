@@ -9709,6 +9709,8 @@ function buildChDetail(d) {
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1;min-width:88px">✏️ Изменить</button>
       <button class="btn btn-s" onclick="getChannelInviteLink(${c.channel_id})" style="flex:1;min-width:88px">🔗 Ссылка</button>
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1;min-width:88px">👑 Админы</button>
+      <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1;min-width:88px">👥 Инвайтинг</button>
+      <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1;min-width:88px">📊 Собрать аудиторию</button>
       <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1;min-width:88px">🗑 Убрать</button>
     </div>
 
@@ -15888,6 +15890,19 @@ const ADV_STYLE = {
 // Карточка аккаунта: почему движок даёт ему именно такой лимит и такую паузу.
 // Без неё «аккаунт пропущен» и «лимит 12» выглядели произволом системы.
 
+// Быстрое действие с экрана канала. Сам экран инвайтинга вынесен в
+// screens/invite.js; вызов идёт в момент клика, когда файл уже загружен.
+// Быстрое действие с экрана канала: тот же запуск, что и обычный «Массовый
+// инвайт», только группа уже подставлена — не нужно искать канал заново.
+async function openMassInviteForChannel(chId) {
+  const c = CUR_CHANNELS.find(x=>x.channel_id==chId);
+  const ref = c && c.username ? '@'+c.username : String(chId);
+  await openMassInvite();  // сбрасывает поля — заполняем ПОСЛЕ
+  const g = document.getElementById('massInviteGroup');
+  if (g) g.value = ref;
+  checkInviteRights();
+  toast('🎯 Канал подставлен — выберите источник аудитории и запустите');
+}
 
 
 
@@ -17615,6 +17630,13 @@ function openParserModal() {
   applyFormPrefs('parser', {type:'parserType', limit:'parserLimit', days:'parserDays'});
   parserTypeToggle();
   document.getElementById('parserMbg').classList.add('show');
+}
+// Быстрое действие с экрана канала: та же модалка парсера, только источник
+// уже подставлен этим каналом.
+function openParserForChannel(chId) {
+  const c = CUR_CHANNELS.find(x=>x.channel_id==chId);
+  openParserModal();
+  document.getElementById('parserSrc').value = c && c.username ? c.username : String(chId);
 }
 function parserTypeToggle() {
   // окно активности нужно и для «Активные», и для «Комментаторы»
