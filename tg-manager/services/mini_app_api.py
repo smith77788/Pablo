@@ -9555,22 +9555,57 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import chatlist_folders as cf
 
         # Разрешаем два источника набора: явные chat_ids ИЛИ узлы связки.
-        chat_ids = body.get("chat_ids") or []
-        assets = [{"chat_id": c} for c in chat_ids]
+        chat_ids = list(body.get("chat_ids") or [])
         instance_id = body.get("instance_id")
+        # Своя карта каналов: id строки И telegram channel_id → channel_id.
+        # Соглашение ref_id в узлах связки неоднозначно (id строки vs channel_id),
+        # поэтому резолвим против ОБОИХ и берём настоящий channel_id.
+        owned_rows = await _safe_fetch(pool,
+            "SELECT id, channel_id, title FROM managed_channels WHERE owner_id=$1", uid)
+        by_row_id, by_chan_id, owned_ids = {}, {}, set()
+        for r in (owned_rows or []):
+            cid = int(r["channel_id"])
+            owned_ids.add(cid)
+            by_chan_id[cid] = cid
+            by_row_id[int(r["id"])] = cid
+
+        # Сборка из связки: если явных чатов нет, а есть instance_id — тянем узлы
+        # (owner-scoped) и резолвим их ref_id в свои каналы. Так «развернул
+        # связку → раздал папку» становится одной цепочкой, а не двумя экранами.
+        auto_title = None
+        if not chat_ids and instance_id:
+            from services import network_builder as _nb
+
+            detail = await _nb.get_instance_detail(pool, uid, int(instance_id))
+            if not detail:
+                return _err("Связка не найдена", 404)
+            auto_title = (detail.get("instance") or {}).get("name")
+            for n in detail.get("nodes") or []:
+                if str(n.get("node_type") or "").lower() not in ("channel", "group", "supergroup", "chat"):
+                    continue
+                ref = n.get("ref_id")
+                try:
+                    ref = int(ref)
+                except (TypeError, ValueError):
+                    continue
+                cid = by_chan_id.get(ref) or by_row_id.get(ref)
+                if cid:
+                    chat_ids.append(cid)
+            if not chat_ids:
+                return _err("В связке нет ваших каналов, пригодных для папки.", 400)
+
+        assets = [{"chat_id": c} for c in chat_ids]
         ok, why, eligible = cf.validate_selection(assets)
         if not ok:
             return _err(why, 400)
         # Все чаты должны быть СВОИми — сверяем с managed_channels владельца.
-        owned = await _safe_fetch(pool,
-            "SELECT channel_id FROM managed_channels WHERE owner_id=$1", uid)
-        owned_ids = {int(r["channel_id"]) for r in (owned or [])}
         eligible = [a for a in eligible if int(a["chat_id"]) in owned_ids]
         if not eligible:
             return _err("В подборку попали только чужие или неизвестные чаты — "
                         "выбирайте из своих каналов.", 400)
-        record = cf.build_folder_record(uid, body.get("title") or "Подборка",
-                                        eligible, instance_id)
+        record = cf.build_folder_record(
+            uid, body.get("title") or auto_title or "Подборка",
+            eligible, instance_id)
         acc_id = body.get("acc_id")
         from database import db as _db
 

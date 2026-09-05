@@ -21322,6 +21322,7 @@ async function showNetDeployPlan() {
       h += `<button class="btn btn-p" style="width:100%;margin-top:8px" onclick="deployNet()">🚀 Развернуть связку</button>`;
       h += `<div class="hint" style="font-size:11px;color:var(--hint);padding:6px 2px">Создаст недостающие каналы/группы и назначит admin-связи под защитой темпа. Боты — вручную через @BotFather.</div>`;
     }
+    h += `<button class="btn btn-s" style="width:100%;margin-top:6px" onclick="folderFromNet()">📁 Собрать общую папку из каналов связки</button>`;
     txt('netDeployPlan', h);
   } catch(e) {
     txt('netDeployPlan', empty('⚠️','Ошибка',e.message||'Не удалось построить план'));
@@ -21335,6 +21336,19 @@ async function deployNet() {
     toast(`🚀 Запущено: +${r.create} объектов${r.op_id?` · операция #${r.op_id}`:''}`);
   } catch(e) {
     toast('⚠️ '+(e.message||'Ошибка'));
+  }
+}
+// «Развернул связку → раздал одной ссылкой»: собираем общую папку прямо из
+// каналов связки, без ручного отбора на отдельном экране.
+async function folderFromNet() {
+  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!await askConfirm('Собрать общую папку из каналов этой связки и получить одну ссылку-приглашение?')) return;
+  try {
+    const r = await api('/api/miniapp/chatlist_folders', {method:'POST', body:JSON.stringify({instance_id:_currentNetId})});
+    toast(`📁 Папка из ${r.chat_count} чатов создаётся — ссылка появится в «Общих папках»`);
+    if(r.op_id) pollOpResult(r.op_id, 'Общая папка');
+  } catch(e) {
+    toast('⚠️ '+(e.message||'Ошибка').substring(0,140));
   }
 }
 async function selectNetwork(netId) {
