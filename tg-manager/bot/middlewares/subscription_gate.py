@@ -148,6 +148,20 @@ class SubscriptionGateMiddleware(BaseMiddleware):
         if not bot:
             return await handler(event, data)
 
+        # Гейт подписки — концепт ЛИЧНОГО чата с ботом. В группах/супергруппах/
+        # каналах он не должен показываться ВООБЩЕ: там каждое сообщение любого
+        # неподписанного участника рождало новый пост гейта прямо в чат. При
+        # массовом инвайте (Мать-Дочка) это непрерывный спам приветствиями,
+        # который выгонял только что приглашённых людей (подтверждено скринами
+        # из прода). Кнопку «проверить» обрабатываем до этой отсечки — она
+        # редактирует своё сообщение и безопасна где угодно, но новые гейты в
+        # не-личных чатах не постим.
+        chat = None
+        if isinstance(event, Message):
+            chat = event.chat
+        elif isinstance(event, CallbackQuery) and event.message is not None:
+            chat = event.message.chat
+
         # Handle "check" button — always re-verify against Telegram API, invalidate cache
         if isinstance(event, CallbackQuery) and event.data == "gate:check":
             _cache_invalidate(user.id)
@@ -171,6 +185,11 @@ class SubscriptionGateMiddleware(BaseMiddleware):
                     f"Вы ещё не подписаны: {names}", show_alert=True
                 )
             return None
+
+        # Не личный чат — пропускаем без гейта. Именно здесь жил спам: гейт
+        # постился в группу на каждое сообщение неподписанного участника.
+        if chat is not None and getattr(chat, "type", None) != "private":
+            return await handler(event, data)
 
         # Fast path: serve from cache (avoids Telegram API call per request)
         cached = _cache_get(user.id)
