@@ -528,7 +528,11 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         rows = await pool.fetch(
             """SELECT id, target, reason, preset, accounts_used, peer_reported, msgs_reported,
                       COALESCE(msgs_fetched, 0) AS msgs_fetched,
-                      network_nodes, verified_down, duration_s, created_at
+                      network_nodes, verified_down, duration_s, created_at,
+                      COALESCE(accounts_ok, 0) AS accounts_ok,
+                      COALESCE(accounts_flood, 0) AS accounts_flood,
+                      COALESCE(accounts_banned, 0) AS accounts_banned,
+                      COALESCE(accounts_failed, 0) AS accounts_failed
                FROM strike_history
                WHERE owner_id=$1
                ORDER BY created_at DESC LIMIT 10""",
@@ -606,6 +610,13 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
                 f"   {r['reason']}{preset_label} · {r['accounts_used']} акк · "
                 f"{r['peer_reported']} жалоб · сообщ: {msgs_str} · {int(r['duration_s'] or 0)}с"
             )
+            # Честная разбивка по аккаунтам (если сохранена) — видно нагрузку на флот.
+            _ao, _afl = r["accounts_ok"] or 0, r["accounts_flood"] or 0
+            _abn, _afa = r["accounts_banned"] or 0, r["accounts_failed"] or 0
+            if _ao or _afl or _abn or _afa:
+                lines.append(
+                    f"   👥 ✅{_ao} · 🌊{_afl} флуд · ⛔{_abn} бан · ⚠️{_afa} сбой"
+                )
             # Collect distinct targets for re-run buttons (first occurrence wins)
             if r["target"] not in seen_targets and len(rerun_rows) < 5:
                 seen_targets.add(r["target"])

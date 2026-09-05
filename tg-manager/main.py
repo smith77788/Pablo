@@ -662,6 +662,13 @@ async def main() -> None:
         "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS is_backup BOOLEAN DEFAULT FALSE",
         # Mutual Contacts (взаимные) — колонка нужна до первого uch-запроса (schema_v152).
         "ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS is_mutual BOOLEAN DEFAULT FALSE",
+        # Честный per-account счётчик Strike в истории (schema_v201) — INSERT в
+        # strike_history перечисляет эти колонки; при лаге миграции запись истории
+        # падала бы. Аддитивно, DEFAULT 0.
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_ok INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_flood INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_banned INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_failed INT DEFAULT 0",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",
