@@ -85,7 +85,8 @@ def test_creates_an_invite_link_not_a_bare_id():
 
 
 def test_ui_and_api_expose_the_toggle():
-    ui = _read("mini_app/index.html")
+    from tests.miniapp_source import miniapp_source
+    ui = miniapp_source()
     api = _read("services/mini_app_api.py")
     assert 'id="invDaughterGroups"' in ui
     assert "body.use_daughter_groups" in ui

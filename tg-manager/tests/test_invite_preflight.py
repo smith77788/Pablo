@@ -86,7 +86,8 @@ def test_respects_quarantine():
 
 def test_ui_calls_preflight_and_has_panel():
     from pathlib import Path
-    html = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert 'id="massInvitePreflight"' in html, "нет панели предполётной проверки"
     assert "loadInvitePreflight(" in html and "invite/preflight" in html, (
         "UI должен запрашивать предполётную проверку перед запуском"

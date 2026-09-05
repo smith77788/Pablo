@@ -243,7 +243,8 @@ def test_card_exposes_factors():
 
 
 def test_ui_renders_advice_and_card():
-    html = ROOT.joinpath("mini_app", "index.html").read_text(encoding="utf-8")
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert 'id="invAdvice"' in html and "loadInviteAdvice" in html, "блок разбора"
     assert 'id="s-invacc"' in html and "openInviteAccount" in html, "экран карточки"
     assert "loadInviteAdvice();" in html, "разбор должен грузиться при открытии экрана"

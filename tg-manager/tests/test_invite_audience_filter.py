@@ -15,7 +15,7 @@ import re
 from services import mini_app_api, op_worker
 from services.audience_filters import parsed_audience_filters
 
-_HTML = os.path.join(os.path.dirname(__file__), "..", "mini_app", "index.html")
+# Мини-апп больше не один файл: экраны вынесены в mini_app/screens/*.js.
 
 
 def test_filter_sql_builder():
@@ -64,7 +64,8 @@ def test_exec_mass_invite_applies_filters():
 
 
 def test_ui_invite_filters_wired():
-    html = open(_HTML, encoding="utf-8").read()
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     for cid in ("invFltUsername", "invFltNotBot", "invFltPremium", "invFltActive"):
         assert f'id="{cid}"' in html, f"нет чекбокса фильтра {cid}"
     m = re.search(r"async function submitMassInvite\(\)\s*\{(.*?)\n\}", html, re.DOTALL)

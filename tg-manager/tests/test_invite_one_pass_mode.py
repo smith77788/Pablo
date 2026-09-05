@@ -19,7 +19,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
-HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Мини-апп больше не один файл: экраны вынесены в mini_app/screens/*.js.
+# Источник берём целиком, иначе вынос экрана роняет проверку, хотя
+# функциональность на месте.
+from tests.miniapp_source import miniapp_source
+
+HTML = miniapp_source()
 
 
 def _exec_body() -> str:

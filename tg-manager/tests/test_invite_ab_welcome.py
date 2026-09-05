@@ -27,7 +27,8 @@ def test_backend_accepts_welcome_variants():
 
 
 def test_frontend_welcome_ab_ui():
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert "miWelcomeAbOn" in html
     assert "function toggleWelcomeAb" in html
     assert "body.welcome_variants" in html

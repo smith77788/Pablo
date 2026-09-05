@@ -50,7 +50,8 @@ def test_executor_resolves_segment_via_engine():
 
 
 def test_frontend_segment_source_ui():
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert 'value="segment"' in html
     assert "massInviteSegmentField" in html
     assert "function loadInviteSegments" in html
@@ -59,7 +60,8 @@ def test_frontend_segment_source_ui():
 
 
 def test_frontend_parse_run_picker_unifies_sources():
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     # прошлые запуски парсера (конкуренты/поиск) выбираются в шаге источника
     assert "massInviteParseRunField" in html
     assert "function loadInviteParseRuns" in html

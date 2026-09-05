@@ -37,7 +37,8 @@ def test_backend_readiness_and_joinall_endpoints():
 
 
 def test_frontend_has_controls_and_sends_params():
-    html = _read("mini_app/index.html")
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     # селекторы способа и объёма
     assert 'id="massInviteMethod"' in html
     assert 'id="massInviteVolMode"' in html
@@ -51,7 +52,8 @@ def test_frontend_has_controls_and_sends_params():
 
 
 def test_frontend_has_readiness_and_joinall():
-    html = _read("mini_app/index.html")
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert "function loadFleetReadiness" in html
     assert "function joinAllToGroup" in html
     assert "/api/miniapp/invite/fleet_readiness" in html
@@ -73,7 +75,8 @@ def test_backend_file_upload_and_dedup():
 
 
 def test_frontend_file_upload_and_dedup():
-    html = _read("mini_app/index.html")
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert 'id="massInviteFile"' in html
     assert "function uploadInviteFile" in html
     assert "/api/miniapp/invite/parse_file" in html

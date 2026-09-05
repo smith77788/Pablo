@@ -25,8 +25,9 @@ def _api_src() -> str:
 
 
 def _index_html() -> str:
-    p = Path(__file__).resolve().parent.parent / "mini_app" / "index.html"
-    return p.read_text(encoding="utf-8")
+    """Мини-апп целиком: экраны вынесены в mini_app/screens/*.js."""
+    from tests.miniapp_source import miniapp_source
+    return miniapp_source()
 
 
 def test_week_query_is_dense_7_days():

@@ -47,6 +47,7 @@ def test_endpoint_and_ui_wired():
     assert '"/api/miniapp/invite/retention"' in api
     assert "invite_retention.summarize" in api
     assert "kind='left'" in api
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert "function loadInviteRetention" in html
     assert "/api/miniapp/invite/retention" in html

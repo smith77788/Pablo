@@ -18,7 +18,8 @@ def _src() -> str:
 
 
 def _index() -> str:
-    return (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
+    from tests.miniapp_source import miniapp_source
+    return miniapp_source()
 
 
 def test_channel_admin_status_returns_channel_id():

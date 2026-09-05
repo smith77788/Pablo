@@ -24,8 +24,13 @@ from __future__ import annotations
 import pathlib
 import re
 
-HTML = (pathlib.Path(__file__).resolve().parents[1]
-        / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Экран инвайтинга вынесен в mini_app/screens/invite.js. Тест разбирает ТЕЛО
+# функции, поэтому берём именно тот файл, где она объявлена, а не склейку:
+# в склейке границы файлов условны. Разметка при этом осталась в index.html.
+from tests.miniapp_source import miniapp_html, source_of
+
+HTML = source_of("openMassInvite")
+MARKUP = miniapp_html()
 
 
 def _function_body(name: str) -> str:
@@ -71,7 +76,7 @@ def _children_of(container_id: str) -> set[str]:
                 self.stack.pop()
 
     t = T()
-    t.feed(HTML)
+    t.feed(MARKUP)
     return t.inside
 
 

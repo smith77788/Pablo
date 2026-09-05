@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _index() -> str:
-    return (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+    from tests.miniapp_source import miniapp_source
+    return miniapp_source()
 
 
 def _read(rel: str) -> str:

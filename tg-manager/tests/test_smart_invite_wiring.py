@@ -28,7 +28,8 @@ def test_miniapp_passes_safe_mode():
     m = m[:m.index("\n    async def ", 1)]
     assert 'body.get("safe_mode")' in m, "мини-апп не читает safe_mode"
     assert '"safe_mode"' in m
-    html = _read("mini_app/index.html")
+    from tests.miniapp_source import miniapp_source
+    html = miniapp_source()
     assert "invSafeMode" in html, "нет чекбокса безопасного режима во фронте"
     assert "body.safe_mode = true" in html, "чекбокс не уходит в запрос"
 

@@ -12,7 +12,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-HTML = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Мини-апп больше не один файл: экраны вынесены в mini_app/screens/*.js.
+# Источник берём целиком, иначе вынос экрана роняет проверку, хотя
+# функциональность на месте.
+from tests.miniapp_source import miniapp_source
+
+HTML = miniapp_source()
 
 
 def test_submit_mass_invite_confirms_before_launch():
