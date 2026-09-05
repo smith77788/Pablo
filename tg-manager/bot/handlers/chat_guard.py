@@ -236,12 +236,47 @@ async def on_my_status(event: ChatMemberUpdated, bot: Bot, pool: asyncpg.Pool) -
 #  2. Мгновенная чистка системных сообщений + приветствие новичков
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def _lazy_activate_if_admin(bot: Bot, pool: asyncpg.Pool, chat) -> dict | None:
+    """Активировать охрану чата, если бот УЖЕ админ, но строки нет.
+
+    Активация висела только на событии my_chat_member в момент повышения бота.
+    При массовом инвайте (Мать-Дочка) бота промоутят программно userbot-ом,
+    либо событие теряется при рестарте — строка guard_chats не создаётся, и
+    чистка системных сообщений молча не работает, хотя бот админ с правами.
+    Это ровно то, что показали скрины из прода: «покинул(а) группу» висят.
+
+    Здесь самолечение: пришло служебное сообщение, бот в чате админ с правом
+    удаления — ставим чат под охрану на месте (owner=0 — авто-активация,
+    настройки «из коробки», управляема командой /guard в самом чате).
+    """
+    try:
+        me_id = bot.id
+        member = await bot.get_chat_member(chat.id, me_id)
+    except Exception:
+        return None
+    if getattr(member, "status", "") != "administrator":
+        return None
+    if not bool(getattr(member, "can_delete_messages", False)):
+        return None
+    try:
+        return await cg.register_chat(
+            pool, 0, chat.id, title=chat.title or "", username=chat.username or "")
+    except Exception:
+        log_exc_swallow(log, "guard: lazy activate")
+        return None
+
+
 @router.message(F.chat.type.in_(_GROUP), F.content_type.in_(cg.ALL_SERVICE_TYPES))
 async def on_service_message(message: Message, bot: Bot, pool: asyncpg.Pool) -> None:
     """Системное сообщение в группе — удалить по настройкам + обработать новичков."""
     guard = await cg.is_guarded(pool, message.chat.id)
     if not guard:
-        return
+        # Строки нет, но бот мог быть повышён в обход события my_chat_member
+        # (программный промоут при инвайте / пропущенный при рестарте апдейт).
+        # Пробуем активировать по факту прав, иначе — выходим.
+        guard = await _lazy_activate_if_admin(bot, pool, message.chat)
+        if not guard:
+            return
     settings = guard["settings"]
     ct = message.content_type
     if ct in cg.JOIN_TYPES:
