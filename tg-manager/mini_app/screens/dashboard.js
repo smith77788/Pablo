@@ -39,6 +39,7 @@ function _udEnsureScreen() {
 }
 
 const _UD_TABS = [
+  { key: 'attention', label: '⚠️ Требует внимания' },
   { key: 'infra',     label: '📊 Инфраструктура' },
   { key: 'analytics', label: '📈 Аналитика' },
   { key: 'more',      label: '🗂 Все разделы' },
@@ -60,7 +61,7 @@ function _udRenderTabs() {
 async function openUnifiedDashboard() {
   _udEnsureScreen();
   push('s-uni-dash');
-  _udTabCur = 'infra';
+  _udTabCur = 'attention';
   _udRenderTabs();
   await _udLoad();
 }
@@ -89,7 +90,10 @@ async function _udLoad() {
   if (_udTabCur === 'more') { body.innerHTML = _udRenderMore(); return; }
   _udLoading();
   try {
-    if (_udTabCur === 'infra') {
+    if (_udTabCur === 'attention') {
+      const d = await api('/api/miniapp/dashboard/attention');
+      body.innerHTML = _udRenderAttention(d);
+    } else if (_udTabCur === 'infra') {
       const d = await api('/api/miniapp/dashboard/visual');
       // переиспользуем рендер командного центра (cmdcenter.js)
       body.innerHTML = (typeof _ccRender === 'function')
@@ -102,6 +106,82 @@ async function _udLoad() {
   } catch (e) {
     _udError((e && e.message) || 'Ошибка');
   }
+}
+
+// ── Вкладка «Требует внимания» ──────────────────────────────────────────────
+// Витрина с кнопками: показывает то, что система уже знает о своём состоянии, и
+// чинит это УЖЕ СУЩЕСТВУЮЩИМИ операциями. Своих массовых действий здесь нет —
+// каждая кнопка идёт в обычный эндпоинт со своими проверками (тариф,
+// предохранитель, скоуп владельца).
+
+// Переходы на экраны — по явному списку, а не по имени функции из ответа
+// сервера: иначе переименование экрана превращает кнопку в мёртвую, а бэкенд
+// начинает знать про устройство фронта.
+const _UD_SCREENS = {
+  health:   () => (typeof openHealth === 'function') && openHealth(),
+  bots:     () => { push('s-bots'); if (typeof loadBots === 'function') loadBots(); },
+  channels: () => (typeof openChannels === 'function') && openChannels(),
+};
+
+const _UD_SEV = {
+  high:   { color: 'var(--red,#ef4444)',    ico: '🔴' },
+  medium: { color: 'var(--orange,#f59e0b)', ico: '🟠' },
+  info:   { color: 'var(--hint)',           ico: '🔵' },
+};
+
+let _UD_ITEMS = [];
+
+async function _udAct(idx) {
+  const it = _UD_ITEMS[idx];
+  if (!it || !it.action) return;
+  const a = it.action;
+  if (a.screen) { const go = _UD_SCREENS[a.screen]; if (go) go(); return; }
+  if (!a.endpoint) return;
+  const btn = document.getElementById('udBtn' + idx);
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const opts = { method: a.method || 'POST' };
+    if (a.body) opts.body = JSON.stringify(a.body);
+    const r = await api(a.endpoint, opts);
+    toast('✅ ' + (r && r.summary ? String(r.summary).slice(0, 80)
+                                  : (r && r.op_id ? 'Операция #' + r.op_id : 'Готово')));
+    if (a.reload) _udLoad();
+  } catch (e) {
+    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
+    if (btn) { btn.disabled = false; btn.textContent = a.label; }
+  }
+}
+
+function _udRenderAttention(d) {
+  d = d || {};
+  _UD_ITEMS = d.items || [];
+  if (!_UD_ITEMS.length) {
+    return '<div style="text-align:center;padding:44px 20px">' +
+      '<div style="font-size:40px">✅</div>' +
+      '<div style="font-weight:700;margin-top:10px">Всё в порядке</div>' +
+      '<div style="color:var(--hint);font-size:13px;margin-top:6px">' +
+      'Упавших операций, мёртвых прокси и молчащих ботов нет.</div></div>';
+  }
+  const head = '<div style="font-size:13px;color:var(--hint);margin-bottom:10px">' +
+    (d.high ? `Срочного: <b style="color:var(--red,#ef4444)">${d.high}</b> из ${d.total}`
+            : `Пунктов: ${d.total} — срочного нет`) + '</div>';
+
+  return head + _UD_ITEMS.map((it, i) => {
+    const sev = _UD_SEV[it.severity] || _UD_SEV.info;
+    const a = it.action;
+    const btn = a
+      ? `<button id="udBtn${i}" class="btn btn-s" onclick="_udAct(${i})" ` +
+        'style="margin-top:10px;width:100%;font-size:13px;padding:9px 6px">' +
+        `${esc(a.label || 'Действие')}</button>`
+      : '';
+    return '<div style="background:var(--card,var(--bg-input));border-radius:14px;' +
+      `padding:13px;margin-bottom:10px;border-left:3px solid ${sev.color}">` +
+      '<div style="display:flex;align-items:flex-start;gap:8px">' +
+      `<span style="font-size:14px">${sev.ico}</span>` +
+      `<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">${esc(it.title)}</div>` +
+      `<div style="color:var(--hint);font-size:12px;margin-top:4px;line-height:1.45">${esc(it.detail || '')}</div>` +
+      '</div></div>' + btn + '</div>';
+  }).join('');
 }
 
 // ── Вкладка «Аналитика» ─────────────────────────────────────────────────────
@@ -175,7 +255,37 @@ function _udRenderAnalytics(d) {
         '</div>').join('')
     : '<div style="color:var(--hint);font-size:12px">Нет событий</div>');
 
-  return chips + charts + topCard + actCard;
+  // Пульс здоровья, SEO и гео сервер отдаёт в этом же ответе с самого начала,
+  // но экран их не рисовал — данные приходили и выбрасывались.
+  const h = d.account_health || {};
+  const hTotal = (h.healthy || 0) + (h.at_risk || 0) + (h.quarantine || 0);
+  const pulseCard = hTotal ? card('❤️ Пульс аккаунтов',
+    '<div style="display:flex;gap:8px">' +
+    _udChip('✅', _udNum(h.healthy), 'Здоровы', 'var(--green,#2dd4bf)') +
+    _udChip('⚠️', _udNum(h.at_risk), 'Под риском', 'var(--orange,#f59e0b)') +
+    _udChip('⛔', _udNum(h.quarantine), 'Карантин', 'var(--red,#ef4444)') +
+    '</div>') : '';
+
+  const seo = d.seo || {};
+  const geo = d.geo || {};
+  const extra = [];
+  if (seo.tracked_keywords || seo.pending_suggestions) {
+    extra.push(card('🔍 SEO',
+      '<div style="display:flex;gap:8px">' +
+      _udChip('🔑', _udNum(seo.tracked_keywords), 'Ключей', 'var(--blue,#38bdf8)') +
+      _udChip('💡', _udNum(seo.pending_suggestions), 'Подсказок', 'var(--purple,#a78bfa)') +
+      '</div>'));
+  }
+  if (geo.plans) {
+    extra.push(card('🌍 География',
+      '<div style="display:flex;gap:8px">' +
+      _udChip('🗺', _udNum(geo.plans), 'Планов', 'var(--fg)') +
+      _udChip('▶️', _udNum(geo.running), 'В работе', 'var(--orange,#f59e0b)') +
+      _udChip('✅', _udNum(geo.done), 'Готово', 'var(--green,#2dd4bf)') +
+      '</div>'));
+  }
+
+  return chips + pulseCard + charts + topCard + extra.join('') + actCard;
 }
 
 // ── Вкладка «Все разделы» — запуск детальных экранов ────────────────────────

@@ -16108,6 +16108,187 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return {"plans": 0, "done": 0, "running": 0}
 
+    async def dashboard_attention(request: web.Request) -> web.Response:
+        """«Что требует внимания» — единственный экран, который отвечает на вопрос
+        оператора «что сейчас не так и что с этим сделать».
+
+        Система копит подробную картину своего состояния — упавшие операции,
+        мёртвые прокси, карантин аккаунтов, молчащие боты, аккаунты без прокси, —
+        но до сих пор всё это лежало по разным экранам или не показывалось вовсе.
+        Здесь оно сведено в один список, отсортированный по важности.
+
+        Каждая карточка несёт ДЕЙСТВИЕ, и все действия — уже существующие
+        эндпоинты со своими проверками (тариф, предохранитель, скоуп владельца).
+        Новых массовых операций тут не заводится: дашборд обязан оставаться
+        витриной с кнопками, а не вторым движком.
+
+        Каждый блок обёрнут отдельно: упавшая выборка гасит свою карточку, а не
+        весь экран — оператор в аварии не должен получить пустую страницу.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+
+        items: list[dict] = []
+
+        def add(kind, sev, title, detail, count, action=None):
+            it = {"kind": kind, "severity": sev, "title": title,
+                  "detail": detail, "count": int(count)}
+            if action:
+                it["action"] = action
+            items.append(it)
+
+        # ── Операции, которые упали ────────────────────────────────────────
+        try:
+            rows = await _safe_fetch(pool,
+                "SELECT id, op_type, label, last_error, finished_at "
+                "FROM operation_queue WHERE owner_id=$1 AND status='failed' "
+                "  AND COALESCE(finished_at, created_at) > NOW() - INTERVAL '7 days' "
+                "ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 5", uid)
+            if rows:
+                n = int(await _safe_fetchval(pool,
+                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
+                    "AND status='failed' AND COALESCE(finished_at, created_at) "
+                    "> NOW() - INTERVAL '7 days'", uid) or len(rows))
+                first = rows[0]
+                add("ops_failed", "high",
+                    f"Операций упало за неделю: {n}",
+                    (first["label"] or first["op_type"] or "операция")
+                    + (f" — {str(first['last_error'])[:90]}" if first["last_error"] else ""),
+                    n,
+                    {"label": "↻ Повторить последнюю",
+                     "endpoint": f"/api/miniapp/operation/{int(first['id'])}/retry",
+                     "method": "POST", "reload": True})
+        except Exception:
+            log.warning("attention: ops_failed", exc_info=True)
+
+        # ── Операции, застрявшие в работе ──────────────────────────────────
+        try:
+            n = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
+                "AND status='running' AND started_at < NOW() - INTERVAL '2 hours'",
+                uid) or 0)
+            if n:
+                add("ops_stuck", "high",
+                    f"Операций висит дольше двух часов: {n}",
+                    "Обычно это оборванная сессия или недоступный Telegram. "
+                    "Пауза остановит очередь, не теряя прогресс.",
+                    n,
+                    {"label": "⏸ Поставить очередь на паузу",
+                     "endpoint": "/api/miniapp/operations/pause",
+                     "method": "POST", "reload": True})
+        except Exception:
+            log.warning("attention: ops_stuck", exc_info=True)
+
+        # ── Мёртвые прокси ─────────────────────────────────────────────────
+        try:
+            row = await _safe_fetchrow(pool,
+                "SELECT COUNT(*) AS dead, "
+                "  (SELECT COUNT(*) FROM tg_accounts a JOIN user_proxies p ON p.id=a.proxy_id "
+                "   WHERE a.owner_id=$1 AND a.is_active AND p.is_alive=FALSE) AS stranded "
+                "FROM user_proxies WHERE owner_id=$1 AND is_alive=FALSE", uid)
+            dead = int(row["dead"]) if row else 0
+            stranded = int(row["stranded"]) if row else 0
+            if dead:
+                add("proxy_dead", "high" if stranded else "medium",
+                    f"Мёртвых прокси: {dead}",
+                    (f"На них сидит аккаунтов: {stranded}. Пока прокси мёртв, "
+                     "аккаунт не работает и выглядит сломанным."
+                     if stranded else "Аккаунтов на них нет — можно просто убрать."),
+                    dead,
+                    {"label": "🚚 Переселить аккаунты" if stranded else "🧹 Убрать мёртвые",
+                     "endpoint": "/api/miniapp/proxy/evacuate" if stranded
+                                 else "/api/miniapp/proxy/cleanup_dead",
+                     "method": "POST", "reload": True})
+        except Exception:
+            log.warning("attention: proxy_dead", exc_info=True)
+
+        # ── Активные аккаунты вообще без прокси ────────────────────────────
+        try:
+            n = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                "AND proxy_id IS NULL", uid) or 0)
+            if n:
+                add("acc_no_proxy", "medium",
+                    f"Аккаунтов без прокси: {n}",
+                    "Они выходят с общего адреса сервера. Для флота это самый "
+                    "заметный признак связки аккаунтов между собой.",
+                    n,
+                    {"label": "🔀 Раздать прокси",
+                     "endpoint": "/api/miniapp/proxy/rotate",
+                     "method": "POST", "reload": True})
+        except Exception:
+            log.warning("attention: acc_no_proxy", exc_info=True)
+
+        # ── Карантин по единому пульсу здоровья ────────────────────────────
+        try:
+            summ = await _account_health_summary(uid)
+            q = int(summ.get("quarantine") or 0)
+            risk = int(summ.get("at_risk") or 0)
+            if q or risk:
+                add("acc_health", "high" if q else "medium",
+                    f"В карантине: {q} · под риском: {risk}",
+                    "Пульс сводит ограничения, флуд и доверие в один сигнал. "
+                    "Операции такие аккаунты пропускают.",
+                    q + risk,
+                    {"label": "❤️ Открыть здоровье", "screen": "health"})
+        except Exception:
+            log.warning("attention: acc_health", exc_info=True)
+
+        # ── Молчащие боты (schema_v198) ────────────────────────────────────
+        try:
+            n = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 "
+                "AND COALESCE(fail_streak,0) > 0", uid) or 0)
+            if n:
+                add("bots_silent", "high",
+                    f"Ботов не отвечают: {n}",
+                    "Подписчики пишут, бот молчит. Чаще всего отозван токен — "
+                    "его можно заменить, не теряя аудиторию.",
+                    n,
+                    {"label": "🤖 Открыть ботов", "screen": "bots"})
+        except Exception:
+            log.warning("attention: bots_silent", exc_info=True)
+
+        # ── Аккаунты на восстановлении ─────────────────────────────────────
+        try:
+            n = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM account_rehab_state WHERE owner_id=$1 "
+                "AND phase IN ('appeal','warming','recheck')", uid) or 0)
+            if n:
+                add("acc_rehab", "info",
+                    f"Восстанавливается аккаунтов: {n}",
+                    "Апелляция, прогрев и перепроверка идут сами. "
+                    "Вмешательство не нужно — это статус, а не поломка.",
+                    n)
+        except Exception:
+            log.warning("attention: acc_rehab", exc_info=True)
+
+        # ── Каналы без числа участников ────────────────────────────────────
+        try:
+            n = int(await _safe_fetchval(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 "
+                "AND COALESCE(members_count,0) = 0", uid) or 0)
+            if n:
+                add("ch_stale", "info",
+                    f"Каналов без данных: {n}",
+                    "Имя, ссылка и число участников подтягиваются из Telegram. "
+                    "Если канал меняли не через Infragram — обновите список.",
+                    n,
+                    {"label": "🔄 Обновить каналы",
+                     "endpoint": "/api/miniapp/channels/reclassify",
+                     "method": "POST", "body": {"prune": False}, "reload": True})
+        except Exception:
+            log.warning("attention: ch_stale", exc_info=True)
+
+        _order = {"high": 0, "medium": 1, "info": 2}
+        items.sort(key=lambda i: (_order.get(i["severity"], 3), -i["count"]))
+        return _json_resp({
+            "items": items,
+            "high": sum(1 for i in items if i["severity"] == "high"),
+            "total": len(items),
+        })
+
     async def _account_health_summary(uid: int) -> dict:
         """Сводка риск-пульса для дашборда (fail-soft: ошибка → нули)."""
         try:
@@ -16549,6 +16730,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
     app.router.add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)
+    # Регистрация ПОСЛЕ определения обработчика: setup_routes — обычная функция,
+    # ссылка на ещё не созданную локальную функцию роняет сборку всего сервера
+    # (так 2026-09-04 лёг мини-апп целиком).
+    app.router.add_get("/api/miniapp/dashboard/attention", dashboard_attention)
     app.router.add_get("/api/miniapp/next_actions", next_actions)
     app.router.add_post("/api/miniapp/next_actions/apply", next_actions_apply)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
