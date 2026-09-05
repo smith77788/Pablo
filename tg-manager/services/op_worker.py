@@ -604,10 +604,24 @@ async def _on_account_banned(pool, owner_id: int, acc_id: int, where: str) -> No
         pass
 
 
+# Решение владельца: приглашённым НЕ слать приветствие в личку. Свежеприглашённый
+# незнакомец, которому в ЛС падает автосообщение, — это и триггер антиспама
+# Telegram, и повод уйти из чата (людей и так заваливает уведомлениями при
+# инвайте). Выключатель хранит машинерию (A/B, дедуп, retention-маркер) на случай
+# осознанного включения в будущем, но по умолчанию ЛС-приветствие не уходит.
+_INVITE_WELCOME_DM_ENABLED = False
+
+
 async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
     """Шов «Инвайт → Welcome»: после успешного инвайта разослать приветствие тем,
     кто РЕАЛЬНО добавлен (operation_log.status='ok'). Только методы, где ok = член
-    группы (direct/admin) — при 'link' само приглашение и есть DM. Fail-open."""
+    группы (direct/admin) — при 'link' само приглашение и есть DM. Fail-open.
+
+    По решению владельца ЛС-приветствие приглашённым отключено (см.
+    _INVITE_WELCOME_DM_ENABLED): даже с заполненным полем welcome ничего не
+    уходит, чтобы не спамить и не выгонять только что вступивших."""
+    if not _INVITE_WELCOME_DM_ENABLED:
+        return
     w = params.get("welcome")
     if not isinstance(w, dict):
         return

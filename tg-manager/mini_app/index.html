@@ -4531,9 +4531,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field">
         <label>✉️ Welcome вступившим (необязательно)</label>
         <textarea id="massInviteWelcome" rows="2" placeholder="Автосообщение тем, кто реально вступил (для «Обычный»/«Через админку»). Пусто — не слать." style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
-        <div style="font-size:12px;color:var(--hint);margin-top:4px">
-          Инвайт → вступление → приветствие одной транзакцией. Уйдёт только
-          реально добавленным, с защитой темпа (губернатор). Не для метода «ссылка».
+        <div style="font-size:12px;color:var(--orange,#f59e0b);margin-top:4px">
+          ⏸ Отправка приветствия приглашённым в ЛС сейчас отключена: свежих
+          участников это спамит и выгоняет из чата. Поле сохранено на будущее —
+          но сообщение не уходит.
         </div>
         <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block;margin-top:6px"><input type="checkbox" id="miWelcomeAbOn" onchange="toggleWelcomeAb(this)" style="vertical-align:middle"> 🧪 A/B приветствие: делить вступивших по вариантам</label>
         <div id="miWelcomeAbBox" style="display:none;margin-top:6px">

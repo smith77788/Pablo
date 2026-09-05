@@ -29,7 +29,20 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-def test_chain_welcome_enqueues_for_joiners(monkeypatch):
+def test_welcome_dm_to_joiners_is_disabled(monkeypatch):
+    """Решение владельца: приглашённым НЕ слать приветствие в личку.
+
+    Раньше здесь проверялось, что _chain_welcome ставит bulk_dm_adhoc на
+    вступивших. Владелец отменил ЛС-приветствие приглашённым (спамит и выгоняет
+    только что вступивших). Теперь тест — страж этого решения: даже с
+    заполненным welcome ничего не отправляется. Если кто-то снова включит
+    рассылку (_INVITE_WELCOME_DM_ENABLED), тест покраснеет и заставит
+    согласовать это, а не вернёт спам молча.
+
+    Машинерию (A/B, дедуп, retention-маркер) намеренно НЕ удаляем — она под
+    выключателем; её структуру стерегут отдельные строковые тесты."""
+    assert op_worker._INVITE_WELCOME_DM_ENABLED is False, (
+        "ЛС-приветствие приглашённым должно быть выключено по решению владельца")
     subs = []
     async def fake_submit(pool, owner, op_type, params, **kw):
         subs.append((op_type, params))
@@ -37,15 +50,11 @@ def test_chain_welcome_enqueues_for_joiners(monkeypatch):
     import services.operation_bus as ob
     monkeypatch.setattr(ob, "submit", fake_submit)
 
-    pool = _FakePool(["@a", "@b", "123", "promote"])   # promote — мета, отфильтровать
+    pool = _FakePool(["@a", "@b", "123", "promote"])
     _run(op_worker._chain_welcome(pool, 1, 55,
         {"invite_method": "direct", "account_ids": [1, 2],
          "welcome": {"text": "Привет!", "delay": 30}}))
-    assert len(subs) == 1
-    op_type, params = subs[0]
-    assert op_type == "bulk_dm_adhoc"
-    assert params["usernames"] == ["@a", "@b", "123"]   # без 'promote'
-    assert params["text"] == "Привет!" and params["account_ids"] == [1, 2]
+    assert subs == [], "приглашённым не должно уходить ЛС-приветствие"
 
 
 def test_no_welcome_no_action(monkeypatch):
