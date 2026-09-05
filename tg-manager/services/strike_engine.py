@@ -79,6 +79,49 @@ def _acc_result_fleet_danger(r: dict) -> bool:
     return any(m in err for m in _FLEET_DANGER_MARKERS)
 
 
+_BAN_MARKERS = ("banned", "deactivated", "auth_key", "user_deactivated",
+                "phone_number_banned")
+
+# ── Адаптивный пейсинг ──────────────────────────────────────────────────────────
+# Паузы между волнами — не константа: чем больше аккаунтов уже словили флуд, тем
+# сильнее Telegram давит, тем ДЛИННЕЕ пауза перед следующей волной. Множитель
+# только УДЛИНЯЕТ (≥1.0) — безопасно для флота, темп не разгоняем.
+_PACING_FLOOD_FACTOR = 2.0   # 50% флуда → пауза ×2, 100% → ×3 (но такое обрывает канарейка)
+_PACING_MAX_MULT = 3.0
+
+
+def _flood_ratio(results: list[dict]) -> float:
+    """Доля аккаунтов, упёршихся во флуд, среди отработавших (0..1). ЧИСТАЯ."""
+    if not results:
+        return 0.0
+    flood = sum(1 for r in results if _acc_outcome(r) == "flood")
+    return flood / len(results)
+
+
+def _pacing_multiplier(flood_ratio: float) -> float:
+    """Множитель паузы по доле флуда: 1.0 (чисто) … _PACING_MAX_MULT. ЧИСТАЯ."""
+    fr = max(0.0, min(1.0, flood_ratio))
+    return min(_PACING_MAX_MULT, 1.0 + _PACING_FLOOD_FACTOR * fr)
+
+
+def _acc_outcome(r: dict) -> str:
+    """Категория исхода аккаунта для честного счётчика: ok|flood|banned|failed.
+
+    ЧИСТАЯ функция. ok — жалоба/вступление реально прошли; flood — peer-flood или
+    FLOOD_WAIT (аккаунт жив, но темп упёрся); banned — сессия мертва/забанена;
+    failed — прочий сбой (сеть, приватность, «канал не найден»)."""
+    if not r:
+        return "failed"
+    if _acc_result_success(r):
+        return "ok"
+    err = (r.get("error") or "").lower()
+    if r.get("_peer_flood") or "flood" in err or "too many" in err:
+        return "flood"
+    if any(m in err for m in _BAN_MARKERS):
+        return "banned"
+    return "failed"
+
+
 def canary_verdict(results: list[dict]) -> tuple[bool, str]:
     """Решение канарейки по исходам первых аккаунтов: (останавливать?, причина).
 
@@ -527,6 +570,12 @@ class StrikeResult:
     # (abuse-формы, email) при этом продолжают работать.
     canary_aborted: bool = False
     canary_reason: str = ""
+    # Честный per-account счётчик исходов (сколько аккаунтов: приняли жалобу / упёрлись
+    # во флуд / забанены / прочий сбой). Сумма ≈ числу реально отработавших аккаунтов.
+    accounts_ok: int = 0
+    accounts_flood: int = 0
+    accounts_banned: int = 0
+    accounts_failed: int = 0
 
 
 # ── Pre-flight ─────────────────────────────────────────────────────────────────
@@ -1479,12 +1528,15 @@ async def staggered_strike(
                     )
                     wave_results.extend(rest_results)
 
-            # Пауза между волнами (пропускаем при канарейка-стопе)
+            # Пауза между волнами (пропускаем при канарейка-стопе). Адаптивно:
+            # чем больше аккаунтов волны 1 словили флуд — тем длиннее пауза.
             if len(plan.waves) > 1 and not _canary_abort:
-                wc = random.uniform(*_WAVE_COOLDOWN)
+                _mult = _pacing_multiplier(_flood_ratio(wave_results))
+                wc = random.uniform(*_WAVE_COOLDOWN) * _mult
                 if progress_cb:
+                    _hint = f" (×{_mult:.1f} по флуду)" if _mult > 1.05 else ""
                     await progress_cb(
-                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2..."
+                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2{_hint}..."
                     )
                 await asyncio.sleep(wc)
 
@@ -1518,12 +1570,15 @@ async def staggered_strike(
                 )
                 wave_results.extend(w2_results)
 
-            # Пауза перед финальной волной (пропускаем при канарейка-стопе)
+            # Пауза перед финальной волной (пропускаем при канарейка-стопе).
+            # Адаптивно по накопленной доле флуда (волны 1+2).
             if len(plan.waves) > 2 and not _canary_abort:
-                wc = random.uniform(*_WAVE_COOLDOWN)
+                _mult = _pacing_multiplier(_flood_ratio(wave_results))
+                wc = random.uniform(*_WAVE_COOLDOWN) * _mult
                 if progress_cb:
+                    _hint = f" (×{_mult:.1f} по флуду)" if _mult > 1.05 else ""
                     await progress_cb(
-                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3..."
+                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3{_hint}..."
                     )
                 await asyncio.sleep(wc)
 
@@ -1574,6 +1629,10 @@ async def staggered_strike(
             result.bots_reported += agg.get("bots", 0)
             result.forwarded += agg.get("fwd", 0)
             result.blocked += agg.get("blocked", 0)
+            result.accounts_ok += agg.get("acc_ok", 0)
+            result.accounts_flood += agg.get("acc_flood", 0)
+            result.accounts_banned += agg.get("acc_banned", 0)
+            result.accounts_failed += agg.get("acc_failed", 0)
             result.errors = [r.get("error") for r in wave_results if r.get("error")]
             for wave_result in wave_results:
                 result.errors.extend(wave_result.get("errors", [])[:3])
@@ -2208,10 +2267,16 @@ def aggregate_results(results: list[dict]) -> dict:
         "fwd": 0,
         "blocked": 0,
         "failed": 0,
+        # Честный per-account счётчик исходов (принято/флуд/бан/прочий сбой).
+        "acc_ok": 0,
+        "acc_flood": 0,
+        "acc_banned": 0,
+        "acc_failed": 0,
     }
     for r in results:
         if not r:
             s["failed"] += 1
+            s["acc_failed"] += 1
             continue
         if r.get("peer_reported"):
             s["peer"] += 1
@@ -2232,6 +2297,7 @@ def aggregate_results(results: list[dict]) -> dict:
         s["bots"] += r.get("bots_reported", 0)
         s["fwd"] += r.get("forwarded", 0)
         s["blocked"] += 1 if r.get("blocked") else 0
+        s["acc_" + _acc_outcome(r)] += 1
     return s
 
 
@@ -2393,6 +2459,16 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"  └ Длительность: <b>{r.duration_s:.0f}с</b> · "
             f"Аккаунтов: <b>{r.unique_accounts}</b>"
         )
+        # Честный per-account счётчик: видно, сколько аккаунтов реально приняли
+        # жалобу, а сколько упёрлись во флуд/бан — без приукрашивания.
+        if (r.accounts_ok or r.accounts_flood or r.accounts_banned or r.accounts_failed):
+            lines.append(
+                "  👥 Аккаунты: "
+                f"✅ <b>{r.accounts_ok}</b> принято · "
+                f"🌊 <b>{r.accounts_flood}</b> флуд · "
+                f"⛔ <b>{r.accounts_banned}</b> бан · "
+                f"⚠️ <b>{r.accounts_failed}</b> прочий сбой"
+            )
         recon = r.phase_results.get("recon", {})
         lines.append(
             "  🧭 Разведка: "
