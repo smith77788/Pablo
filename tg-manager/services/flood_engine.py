@@ -407,13 +407,13 @@ async def account_risk_factors(pool, account_id: int) -> dict:
         mult *= 0.85
         notes.append("нет username")
 
-    try:
-        warm = int(row.get("warmup_level") or 0)
-        if warm <= 0:
-            mult *= 0.7
-            notes.append("аккаунт не прогрет")
-    except (TypeError, ValueError):
-        pass
+    # warmup_level — строка ("light"/"medium"/"deep"), не число: int() тут
+    # раньше падал на любом непустом значении и молча гасился except'ом —
+    # штраф «не прогрет» никогда не срабатывал ни для одного реально
+    # прогретого аккаунта (см. schema_v201 про отдельный readiness_level).
+    if not str(row.get("warmup_level") or "").strip():
+        mult *= 0.7
+        notes.append("аккаунт не прогрет")
 
     # Premium/аватар — только если профиль ДЕЙСТВИТЕЛЬНО снимали. Без отметки
     # времени False неотличим от «не спрашивали», и аккаунт получил бы штраф за

@@ -54,8 +54,11 @@ class _Pool:
 
 
 def _acc(**over):
+    # warmup_level — строка ("light"/"medium"/"deep" от account_warmer.py) или
+    # NULL, НЕ число: в проде это всегда TEXT (schema_v64.sql), int() на нём
+    # падал бы ValueError — см. schema_v201/фикс invite_advisor.py.
     base = {"id": 1, "label": "+79990000001", "first_name": "Иван",
-            "username": "ivan", "has_photo": True, "warmup_level": 3}
+            "username": "ivan", "has_photo": True, "warmup_level": "medium"}
     base.update(over)
     return base
 
@@ -130,8 +133,18 @@ def test_unchecked_avatar_is_not_flagged():
 
 
 def test_cold_accounts_are_flagged():
-    res = _advise(_Pool(week=[_stat()], accounts=[_acc(warmup_level=0)]))
+    res = _advise(_Pool(week=[_stat()], accounts=[_acc(warmup_level=None)]))
     assert "прогрет" in _titles(res)
+
+
+def test_warmed_account_string_level_does_not_crash_or_flag_as_cold():
+    """Регресс: warmup_level — TEXT ("light"/"medium"/"deep"), а не число.
+    int(r["warmup_level"]) падал ValueError на любом реальном (непустом)
+    значении — Invite Advisor отвечал 500 всем, кто хоть раз прогревал
+    аккаунт (см. schema_v201)."""
+    for level in ("light", "medium", "deep"):
+        res = _advise(_Pool(week=[_stat()], accounts=[_acc(warmup_level=level)]))
+        assert "прогрет" not in _titles(res), f"{level!r} не должен считаться холодным"
 
 
 # ── хватит ли флота ──────────────────────────────────────────────────────────

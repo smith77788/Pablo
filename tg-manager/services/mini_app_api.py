@@ -180,8 +180,12 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS fail_streak INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_ok_at TIMESTAMPTZ",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS dead_notified_at TIMESTAMPTZ",
-    # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
-    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
+    # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS.
+    # TEXT, not FLOAT: schema_v64.sql (the actual authoritative migration,
+    # applied first in any real deploy) declares it TEXT DEFAULT NULL — this
+    # mirror had drifted from it and would have created the wrong column type
+    # on any environment where this ran before schema_v64.sql.
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level TEXT DEFAULT NULL",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
     # crm_deals: fix stage CHECK constraint (schema had 'new/contacted/qualified',
     # API and JS use 'lead/contact/proposal/negotiation')

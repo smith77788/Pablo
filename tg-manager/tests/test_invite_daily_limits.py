@@ -171,8 +171,11 @@ class _FactorPool:
 
 def _mature(**over):
     import datetime as d
+    # warmup_level — строка ("light"/"medium"/"deep" от account_warmer.py) или
+    # NULL, НЕ число: в проде это всегда TEXT (schema_v64.sql). NULL = аккаунт
+    # ни разу не прогревался.
     base = {
-        "first_name": "Иван", "username": "ivan", "warmup_level": 3, "tg_user_id": 1,
+        "first_name": "Иван", "username": "ivan", "warmup_level": "medium", "tg_user_id": 1,
         "reg_date": d.datetime.now(d.timezone.utc) - d.timedelta(days=500),
     }
     base.update(over)
@@ -201,7 +204,17 @@ def test_empty_profile_gets_smaller_limit():
 
 
 def test_unwarmed_account_gets_smaller_limit():
-    assert _limit_for(_mature(warmup_level=0))["limit"] < _limit_for(_mature())["limit"]
+    assert _limit_for(_mature(warmup_level=None))["limit"] < _limit_for(_mature())["limit"]
+
+
+def test_warmup_level_string_values_do_not_crash():
+    """Регресс: warmup_level — TEXT ("light"/"medium"/"deep"), не число.
+    int(warmup_level) падал бы ValueError на любом реальном значении — тут
+    завёрнуто в try/except, поэтому не 500, но штраф «не прогрет» тихо никогда
+    не срабатывал ни для одного реально прогретого аккаунта (см. schema_v201)."""
+    for level in ("light", "medium", "deep"):
+        r = _limit_for(_mature(warmup_level=level))
+        assert r["limit"] > 0  # не упало
 
 
 def test_factors_are_explained_to_human():
@@ -214,7 +227,7 @@ def test_missing_reg_date_does_not_penalise():
     """Нет оценки возраста — не выдумываем: аккаунт не наказывается за пробел
     в наших данных."""
     no_reg = _limit_for(_mature(reg_date=None))["limit"]
-    assert no_reg >= _limit_for(_mature(warmup_level=0))["limit"]
+    assert no_reg >= _limit_for(_mature(warmup_level=None))["limit"]
 
 
 def test_unchecked_profile_is_not_penalised():
