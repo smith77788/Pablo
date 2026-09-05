@@ -107,7 +107,7 @@ def test_archive_incoming_and_outgoing_encrypted(pool):
     _run(v.archive_message(pool, _msg(50, 1, 50, "привет секрет"), OWNER, CONN))
     _run(v.archive_message(pool, _msg(50, 2, OWNER, "ответ владельца"), OWNER, CONN))
 
-    msgs = _run(v.list_messages(pool, OWNER, 50))
+    msgs = _run(v.list_messages(pool, OWNER, 50))["messages"]
     assert [m["direction"] for m in msgs] == ["in", "out"]
     assert msgs[0]["text"] == "привет секрет" and msgs[1]["text"] == "ответ владельца"
 
@@ -136,7 +136,7 @@ def test_media_metadata_stored(pool):
     photo = _msg(50, 20, 50, None, photo=[N(file_id="big", file_unique_id="u", file_size=999,
                                             mime_type=None, file_name=None)])
     _run(v.archive_message(pool, photo, OWNER, CONN))
-    m = _run(v.list_messages(pool, OWNER, 50))[0]
+    m = _run(v.list_messages(pool, OWNER, 50))["messages"][0]
     assert m["media_type"] == "photo" and m["media_label"] == "📷 Фото"
 
 
@@ -148,7 +148,7 @@ def test_edit_keeps_history(pool):
     _run(v.upsert_connection(pool, CONN, OWNER, 777, True, True, {}))
     _run(v.archive_message(pool, _msg(50, 30, 50, "было"), OWNER, CONN))
     _run(v.record_edit(pool, _msg(50, 30, 50, "стало"), OWNER))
-    m = _run(v.list_messages(pool, OWNER, 50))[0]
+    m = _run(v.list_messages(pool, OWNER, 50))["messages"][0]
     assert m["text"] == "стало" and m["edited"] is True
     # прошлая версия сохранена (зашифрованной) в edit_history
     hist = _run(pool.fetchval(
@@ -167,7 +167,7 @@ def test_delete_marks_but_keeps_content(pool):
     _run(v.archive_message(pool, _msg(50, 41, 50, "и меня"), OWNER, CONN))
     n = _run(v.mark_deleted(pool, OWNER, 50, [40, 41]))
     assert n == 2
-    msgs = {m["msg_id"]: m for m in _run(v.list_messages(pool, OWNER, 50))}
+    msgs = {m["msg_id"]: m for m in _run(v.list_messages(pool, OWNER, 50))["messages"]}
     assert msgs[40]["deleted"] is True and msgs[40]["text"] == "не потеряй меня", \
         "контент удалённого сообщения обязан сохраниться"
 
@@ -182,7 +182,7 @@ def test_list_chats_and_search(pool):
     _run(v.archive_message(pool, _msg(60, 1, 60, "апельсин"), OWNER, CONN))
     chats = _run(v.list_chats(pool, OWNER))
     assert {c["chat_id"] for c in chats} == {50, 60}
-    found = _run(v.search_messages(pool, OWNER, "яблок"))
+    found = _run(v.search_messages(pool, OWNER, "яблок"))["results"]
     assert len(found) == 1 and found[0]["chat_id"] == 50
 
 
@@ -193,8 +193,8 @@ def test_owner_scope_isolation(pool):
     _run(v.archive_message(pool, _msg(50, 1, 50, "только мои"), OWNER, CONN))
     # другой владелец не видит чужой архив
     assert _run(v.list_chats(pool, OWNER2)) == []
-    assert _run(v.list_messages(pool, OWNER2, 50)) == []
-    assert _run(v.search_messages(pool, OWNER2, "мои")) == []
+    assert _run(v.list_messages(pool, OWNER2, 50))["messages"] == []
+    assert _run(v.search_messages(pool, OWNER2, "мои"))["results"] == []
 
 
 # ── «ловец»: было→стало, что удалил собеседник, лента, фильтры, экспорт ───────
@@ -247,9 +247,9 @@ def test_list_messages_filters(pool):
          photo=[N(file_id="p", file_unique_id="u", file_size=1, mime_type=None, file_name=None)]), OWNER, CONN))
     _run(v.archive_message(pool, _msg(50, 3, OWNER, "моё"), OWNER, CONN))
     _run(v.mark_deleted(pool, OWNER, 50, [1]))
-    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"media_only": True}))) == 1
-    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"deleted_only": True}))) == 1
-    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"direction": "out"}))) == 1
+    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"media_only": True}))["messages"]) == 1
+    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"deleted_only": True}))["messages"]) == 1
+    assert len(_run(v.list_messages(pool, OWNER, 50, filters={"direction": "out"}))["messages"]) == 1
 
 
 def test_export_data_decrypted_grouped(pool):

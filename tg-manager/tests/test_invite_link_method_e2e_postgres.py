@@ -71,7 +71,12 @@ def env():
         state["exported"] += 1
         return "https://t.me/+SECRET"
 
-    async def fake_link_batch(session, acc, link, refs, msg=None):
+    # Сигнатура повторяет живую invite_via_link_batch (session, acc, link, refs,
+    # message_text, pace_mult) и терпима к добавлению параметров: иначе
+    # каждый новый аргумент движка молча ломает весь этот файл, а увидеть
+    # это можно только с живым Postgres. Так и случилось с pace_mult.
+    async def fake_link_batch(session, acc, link, refs, msg=None,
+                              pace_mult=1.0, *args, **kwargs):
         state["link_calls"].append((int(acc["id"]), link, list(refs)))
         return {"ok": len(refs), "failed": 0, "peer_flood": False,
                 "flood_wait": 0, "errors": [], "privacy_failed": [], "no_rights": False}

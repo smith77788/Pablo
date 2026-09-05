@@ -69,7 +69,11 @@ def env():
     async def fast(x):
         return await _sleep(0)
 
-    async def fake_batch(session, acc, group, refs):
+    # Сигнатура повторяет живую invite_batch (session, acc, group, refs,
+    # pace_mult, bulk) и терпима к добавлению параметров — см. комментарий
+    # в test_invite_link_method_e2e_postgres.py.
+    async def fake_batch(session, acc, group, refs, pace_mult=1.0,
+                         bulk=None, *args, **kwargs):
         aid = int(acc["id"])
         state["invite_calls"].append((aid, list(refs)))
         # no_connect: имитируем полный отказ подключения флота (сессия/сеть) —

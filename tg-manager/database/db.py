@@ -26,6 +26,29 @@ from database.pool_config import get_pool_config, log_pool_config
 log = logging.getLogger(__name__)
 
 
+def migration_version_key(path: str) -> int:
+    """Номер миграции для сортировки — цифры сразу после `_v`, а не все цифры имени.
+
+    Раньше склеивались ВСЕ цифры имени, и schema_v190_geo_country_iso2.sql
+    превращался в 1902 — уезжал в конец очереди, после v200. Той миграции
+    повезло: это идемпотентный бэкфилл данных, порядок ей безразличен. Но
+    следующая же с цифрой в описании (v201_ipv6…, v205_2fa…) встала бы не на
+    своё место, и если она заводит таблицу, на которую опирается более поздняя,
+    — та упадёт при старте.
+
+    Журнал schema_migrations ключуется по ИМЕНИ ФАЙЛА, поэтому смена порядка
+    ничего не переприменяет: всё уже применённое так и останется пропущенным.
+    """
+    name = os.path.basename(path)
+    if name == "schema.sql":
+        return 0
+    m = re.match(r"schema_v(\d+)", name)
+    if m:
+        return int(m.group(1))
+    digits = "".join(filter(str.isdigit, name))
+    return int(digits) if digits else 0
+
+
 def parse_baseline_manifest(text: str) -> set[str]:
     """Разобрать манифест baseline: имена файлов схемы, которые снимок содержит.
 
@@ -254,12 +277,7 @@ async def create_pool() -> asyncpg.Pool:
         )
 
         # Sort by version number, deduplicate by basename
-        def _version_key(p: str) -> int:
-            name = os.path.basename(p)
-            if name == "schema.sql":
-                return 0
-            digits = "".join(filter(str.isdigit, name))
-            return int(digits) if digits else 0
+        _version_key = migration_version_key
 
         all_paths.sort(key=_version_key)
         seen: set[str] = set()
