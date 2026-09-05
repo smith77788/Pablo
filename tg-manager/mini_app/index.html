@@ -16038,7 +16038,14 @@ async function openMassInvite() {
   INV_IMPORT_OK = 0;
   INV_FILE_REFS = null; INV_FILE_PHONES = null;
   massInviteSrcToggle();
-  document.getElementById('massInviteAccsLoad').textContent = 'Загрузка аккаунтов…';
+  // Заглушка «Загрузка…» лежит ВНУТРИ massInviteAccsWrap, и ниже по функции
+  // wrap.innerHTML затирает её насовсем. Поэтому при втором открытии экрана
+  // getElementById возвращал null, присваивание падало — а падало оно ДО
+  // await, то есть аккаунты-инвайтеры и история дальше не грузились вообще.
+  // Пересоздаём заглушку целиком: состояние одинаково на каждом открытии.
+  const accsWrapEl = document.getElementById('massInviteAccsWrap');
+  if (accsWrapEl) accsWrapEl.innerHTML =
+    '<div style="font-size:12px;color:var(--hint)" id="massInviteAccsLoad">Загрузка аккаунтов…</div>';
   const [opsD, accsD] = await Promise.allSettled([
     api('/api/miniapp/operations'),
     api('/api/miniapp/accounts'),
