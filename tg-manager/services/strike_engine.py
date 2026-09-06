@@ -4539,16 +4539,10 @@ async def mass_report(
                 f"🎯 [{t_idx + 1}/{len(targets)}] {_telegram_target_display(target)}...",
             )
 
-        # Recon для каждой цели (быстрый, одним аккаунтом)
-        intel: dict = {}
-        try:
-            from services import account_manager as _am
-
-            intel = await _am.get_channel_intel(
-                viable_accounts[0]["session_str"], target.lstrip("@")
-            )
-        except Exception:
-            log_exc_swallow(log, f"mass_report: intel failed target={target}")
+        # Пре-рекон здесь не нужен: report_peer_deep_v2 сам делает GetFullChannel/
+        # GetHistory на каждом аккаунте. Раньше тут был вызов несуществующего
+        # _am.get_channel_intel (мгновенный AttributeError → intel={}), а результат
+        # всё равно нигде не использовался — мёртвый код, убран.
 
         # Параллельная атака по волнам
         wave_results: list[dict] = []
