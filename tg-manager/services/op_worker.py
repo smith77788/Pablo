@@ -6234,9 +6234,10 @@ async def _exec_strike(
                        pinned_reported, admins_reported, network_nodes, network_reports,
                        blocked, verified_down, duration_s, abuse_form_ok,
                        spambot_escalation,
-                       accounts_ok, accounts_flood, accounts_banned, accounts_failed)
+                       accounts_ok, accounts_flood, accounts_banned, accounts_failed,
+                       infra_domains, infra_apwg_sent, infra_registrar_sent)
                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-                          $18,$19,$20,$21)""",
+                          $18,$19,$20,$21,$22,$23,$24)""",
                 owner_id,
                 r.target,
                 reason,
@@ -6258,6 +6259,9 @@ async def _exec_strike(
                 getattr(r, "accounts_flood", 0),
                 getattr(r, "accounts_banned", 0),
                 getattr(r, "accounts_failed", 0),
+                len(getattr(r, "infra_domains", []) or []),
+                getattr(r, "infra_apwg_sent", 0),
+                getattr(r, "infra_registrar_sent", 0),
             )
         except Exception as _he:
             log.warning(

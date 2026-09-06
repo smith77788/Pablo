@@ -532,7 +532,10 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
                       COALESCE(accounts_ok, 0) AS accounts_ok,
                       COALESCE(accounts_flood, 0) AS accounts_flood,
                       COALESCE(accounts_banned, 0) AS accounts_banned,
-                      COALESCE(accounts_failed, 0) AS accounts_failed
+                      COALESCE(accounts_failed, 0) AS accounts_failed,
+                      COALESCE(infra_domains, 0) AS infra_domains,
+                      COALESCE(infra_apwg_sent, 0) AS infra_apwg_sent,
+                      COALESCE(infra_registrar_sent, 0) AS infra_registrar_sent
                FROM strike_history
                WHERE owner_id=$1
                ORDER BY created_at DESC LIMIT 10""",
@@ -616,6 +619,13 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             if _ao or _afl or _abn or _afa:
                 lines.append(
                     f"   👥 ✅{_ao} · 🌊{_afl} флуд · ⛔{_abn} бан · ⚠️{_afa} сбой"
+                )
+            # Внешняя инфраструктура: домены цели, снятые через APWG/регистратора.
+            _idm = r["infra_domains"] or 0
+            _iap, _irg = r["infra_apwg_sent"] or 0, r["infra_registrar_sent"] or 0
+            if _idm or _iap or _irg:
+                lines.append(
+                    f"   🕸 доменов {_idm} · APWG {_iap} · регистратору {_irg}"
                 )
             # Collect distinct targets for re-run buttons (first occurrence wins)
             if r["target"] not in seen_targets and len(rerun_rows) < 5:

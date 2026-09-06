@@ -669,6 +669,11 @@ async def main() -> None:
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_flood INT DEFAULT 0",
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_banned INT DEFAULT 0",
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_failed INT DEFAULT 0",
+        # Внешняя инфраструктура цели (домены/APWG/регистратор) — история их пишет,
+        # без колонок запись падала бы при лаге миграции. Аддитивно, DEFAULT 0.
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_domains INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_apwg_sent INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_registrar_sent INT DEFAULT 0",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",
