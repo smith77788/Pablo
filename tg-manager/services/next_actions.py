@@ -97,6 +97,15 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
         "bots": _fv(
             pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid
         ),
+        # Найденные на флоте, но ещё не подключённые боты. Без этого «0 ботов»
+        # при живом флоте вело только в парсер, хотя боты могли уже существовать
+        # на самих аккаунтах и их достаточно подключить.
+        "bots_discovered_pending": _fv(
+            pool,
+            "SELECT COUNT(*) FROM discovered_bots "
+            "WHERE owner_id=$1 AND linked_bot_id IS NULL",
+            uid,
+        ),
         "subscribers": _fv(
             pool,
             "SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu "
@@ -391,6 +400,41 @@ def build_suggestions(state: dict) -> list[dict]:
                 "cta": "Открыть экосистемы",
                 "nav": None,
                 "fn": "openEcosystems",
+            }
+        )
+
+    # 9b. Найдены боты на флоте, но не подключены — самый короткий путь к
+    # рабочим ботам: они уже существуют, осталось забрать токены у BotFather.
+    _disc = state.get("bots_discovered_pending", 0)
+    if _disc > 0:
+        s.append(
+            {
+                "id": "connect_discovered_bots",
+                "priority": 82,
+                "icon": "🔌",
+                "title": f"Подключите {_disc} найденных ботов",
+                "reason": "Эти боты уже есть на ваших аккаунтах — Infragram заберёт "
+                "их токены у @BotFather, и ими можно будет управлять.",
+                "cta": "Подключить",
+                "nav": None,
+                "fn": "connectDiscoveredBots",
+            }
+        )
+
+    # 9c. Флот есть, ботов нет и скан ещё не находил — боты могли быть созданы
+    # с этих же аккаунтов, а прежняя подсказка вела в парсер мимо этого пути.
+    if acc > 0 and state.get("bots", 0) == 0 and _disc == 0:
+        s.append(
+            {
+                "id": "scan_fleet_bots",
+                "priority": 70,
+                "icon": "🔍",
+                "title": "Проверьте флот на ботов",
+                "reason": f"У вас {acc} аккаунтов и ни одного подключённого бота. "
+                "Боты, созданные с этих аккаунтов, находятся сканом через @BotFather.",
+                "cta": "Найти на флоте",
+                "nav": None,
+                "fn": "scanFleetBots",
             }
         )
 

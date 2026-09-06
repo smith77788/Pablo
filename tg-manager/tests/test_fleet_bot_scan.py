@@ -191,6 +191,61 @@ def test_ui_offers_bulk_connect():
     assert "Подключить найденных" in _UI
 
 
+# ── Подсказки следующего шага и экран найденных ────────────────────────────
+# Новый путь (скан → найденные → подключить) существовал, но продукт про него
+# нигде не подсказывал: при «0 ботов» подсказка вела в парсер, мимо того, что
+# боты могут уже быть на самих аккаунтах. А «Найденные» были текстом без
+# единого действия — подключить конкретного бота было нельзя.
+
+def _suggest(state):
+    from services import next_actions as NA
+
+    base = {"acc_active": 5, "bots": 0, "bots_discovered_pending": 0,
+            "subscribers": 0, "parsed_recent": 0, "dm_running": 0,
+            "funnels": 0, "auto_rules": 0, "channels": 0}
+    base.update(state)
+    return {s["id"] for s in NA.build_suggestions(base)}
+
+
+def test_suggests_scanning_the_fleet_when_there_are_no_bots():
+    assert "scan_fleet_bots" in _suggest({"bots": 0, "bots_discovered_pending": 0})
+
+
+def test_suggests_connecting_when_bots_were_found():
+    ids = _suggest({"bots": 0, "bots_discovered_pending": 7})
+    assert "connect_discovered_bots" in ids
+    # Пока есть что подключать, повторно предлагать скан незачем.
+    assert "scan_fleet_bots" not in ids
+
+
+def test_no_scan_suggestion_when_bots_already_connected():
+    assert "scan_fleet_bots" not in _suggest({"bots": 3})
+
+
+def test_connect_suggestion_names_the_number():
+    from services import next_actions as NA
+
+    st = {"acc_active": 5, "bots": 0, "bots_discovered_pending": 7,
+          "subscribers": 0, "parsed_recent": 0, "dm_running": 0,
+          "funnels": 0, "auto_rules": 0, "channels": 0}
+    sug = next(s for s in NA.build_suggestions(st)
+               if s["id"] == "connect_discovered_bots")
+    assert "7" in sug["title"]
+    assert sug["fn"] == "connectDiscoveredBots"
+
+
+def test_state_counts_unconnected_discovered_bots():
+    src = (_ROOT / "services" / "next_actions.py").read_text(encoding="utf-8")
+    assert "bots_discovered_pending" in src
+    assert "linked_bot_id IS NULL" in src
+
+
+def test_found_bots_is_a_screen_with_actions_not_a_popup():
+    assert 'id="s-foundbots"' in _UI
+    assert "connectOneBot" in _UI, "должно быть подключение конкретного бота"
+    assert "openBotByUsername" in _UI, "у подключённого — вход в меню управления"
+
+
 def test_schema_file_exists():
     assert (_ROOT / "schema_v200_discovered_bots.sql").exists()
     assert "CREATE TABLE IF NOT EXISTS discovered_bots" in _API

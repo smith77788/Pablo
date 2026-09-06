@@ -4805,6 +4805,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<div class="screen" id="s-foundbots">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🤖 Найденные боты</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="connectDiscoveredBots()">🔌 Подключить всех</button></div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Боты, найденные на ваших аккаунтах через @BotFather. Подключение забирает
+      токен у BotFather от лица аккаунта-владельца — после этого ботом можно управлять.
+    </div>
+    <div id="foundBotsStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
+    <div class="lst" id="foundBotsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <div class="screen" id="s-warmuplog">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
@@ -7851,17 +7867,56 @@ async function connectDiscoveredBots() {
     if (r.op_id) pollOpResult(r.op_id, 'Подключение найденных ботов', loadBots);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
 }
+// Полноценный экран, а не всплывающее окно: из списка найденных надо уметь
+// ДЕЙСТВОВАТЬ — подключить конкретного бота или открыть управление уже
+// подключённым. Раньше это был текст без единого действия.
 async function showDiscoveredBots() {
+  push('s-foundbots');
+  txt('foundBotsStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('foundBotsList','');
   try {
     const d = await api('/api/miniapp/bots/discovered');
     const bots = d.bots||[];
-    if (!bots.length) { toast('Найденных ботов пока нет — запустите скан флота'); return; }
-    const lines = bots.slice(0,40).map(b =>
-      `${b.connected?'✅':'○'} @${esc(b.username)}${b.account?' · '+esc(b.account):''}`).join('\n');
-    const pending = d.total - d.connected;
-    await showInfo(`Найдено ботов: ${d.total} (подключено ${d.connected})\n\n`
-                   + lines.substring(0, 2600)
-                   + (pending ? `\n\nНе подключено: ${pending}. Кнопка «🔌 Подключить найденных» заберёт их токены у @BotFather.` : ''));
+    const pending = (d.total||0) - (d.connected||0);
+    txt('foundBotsStats', `
+      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Найдено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.connected||0}</div><div class="kpi-lbl">Подключено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:${pending?'var(--orange,#f59e0b)':'var(--hint)'}">${pending}</div><div class="kpi-lbl">Осталось</div></div>`);
+    if (!bots.length) {
+      txt('foundBotsList', empty('🤖','Найденных ботов пока нет','Запустите скан флота — Infragram спросит @BotFather на каждом аккаунте',{label:'🔍 Найти на флоте',fn:'scanFleetBots()'}));
+      return;
+    }
+    txt('foundBotsList', bots.map(b=>`
+      <div class="row" style="border-left:3px solid ${b.connected?'var(--green)':'var(--orange,#f59e0b)'}">
+        <div class="row-ico" style="background:var(--bg2)">${b.connected?'✅':'🤖'}</div>
+        <div class="row-body">
+          <div class="row-name">@${esc(b.username)}</div>
+          <div class="row-val">${b.connected?'подключён — доступно управление':'не подключён'}${b.account?' · '+esc(b.account):''}</div>
+        </div>
+        <div class="row-right">
+          ${b.connected
+            ? `<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openBotByUsername('${esc(b.username)}')">⚙️ Управление</button>`
+            : `<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="connectOneBot('${esc(b.username)}')">🔌 Подключить</button>`}
+        </div>
+      </div>`).join(''));
+  } catch(e) { txt('foundBotsList', empty('⚠️','Ошибка',e.message)); }
+}
+// Подключить одного конкретного бота из найденных.
+async function connectOneBot(uname) {
+  try {
+    const r = await api('/api/miniapp/bots/connect_discovered',
+                        {method:'POST', body:JSON.stringify({usernames:[uname]})});
+    toast('🔌 Подключаю @'+uname + (r.op_id ? ' · #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Подключение @'+uname, showDiscoveredBots);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
+}
+// Открыть меню управления уже подключённым ботом по его username.
+async function openBotByUsername(uname) {
+  try {
+    if (!BOTS || !BOTS.length) { const d = await api('/api/miniapp/bots'); BOTS = d.bots||[]; }
+    const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === String(uname).toLowerCase());
+    if (!b) { toast('Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
+    openBot(b.bot_id);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 
