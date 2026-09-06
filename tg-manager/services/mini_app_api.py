@@ -12725,16 +12725,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         # is_backup может ещё не примениться (лаг миграции) — тогда селект с колонкой
         # упадёт; фолбэк без неё, чтобы список прокси НИКОГДА не ломался.
+        # acc_count — сколько аккаунтов сидит на прокси. Без него мёртвый прокси
+        # с двенадцатью аккаунтами и мёртвый запасной без единого выглядели в
+        # списке одинаково, и было непонятно, какой чинить первым. Тем же числом
+        # объясняется отказ удаления (409 «прокси назначен N аккаунтам») ДО тапа.
         try:
             rows = await pool.fetch(
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check,
-                          created_at, COALESCE(is_backup, FALSE) AS is_backup
+                          created_at, COALESCE(is_backup, FALSE) AS is_backup,
+                          -- latency_avg_ms пишет сторож прокси; экран «Пул»
+                          -- читал его как latency_ms и потому ВСЕГДА показывал
+                          -- «Нет данных о задержке» и среднее «—».
+                          latency_avg_ms AS latency_ms,
+                          (SELECT COUNT(*) FROM tg_accounts a
+                            WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id) AS acc_count
                    FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
         except Exception:
             rows = await _safe_fetch(pool,
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
                    FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
-            rows = [dict(r, is_backup=False) for r in rows]
+            rows = [dict(r, is_backup=False, acc_count=0, latency_ms=None) for r in rows]
         # proxy_url хранится зашифрованным — расшифровываем для отображения (passthrough legacy)
         from services.token_vault import decrypt_token
 

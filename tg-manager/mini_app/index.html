@@ -11586,16 +11586,25 @@ async function loadProxies() {
       const checkedAt = p.last_check?' · '+ago(p.last_check):'';
       const backupBadge = p.is_backup?' 🛟':'';
       const backupIco = p.is_backup?'🛟':'⚪';
+      // Сколько аккаунтов на прокси — это и срочность («мёртвый с 12 аккаунтами»
+      // против «мёртвого запасного без единого»), и причина будущего отказа
+      // удаления: назначенный прокси не удаляется, пока назначение не снято.
+      const accN = Number(p.acc_count||0);
+      const accNote = accN ? ` · 👤 ${accN}` : '';
+      const stranded = (p.is_alive===false && accN)
+        ? `<div class="li-sub" style="color:var(--red)">🚨 ${accN} аккаунтов простаивают — переселите на живой прокси</div>`
+        : '';
       return `<div class="li">
         <div class="ava ava-blue">🌐</div>
         <div class="li-body">
           <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}${backupBadge}</div>
-          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}</div>
+          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}${accNote}</div>
+          ${stranded}
         </div>
         <div class="li-right">
           <span title="Резервный прокси" style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
           <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
-          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
+          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -11907,7 +11916,18 @@ async function submitAccImport() {
   } finally { btn.disabled=false; btn.textContent='➕ Импортировать'; }
 }
 
-async function deleteProxy(id) {
+// accN — сколько аккаунтов на этом прокси. Сервер такое удаление всё равно не
+// пропустит (409: аккаунты ушли бы напрямую и рискуют AUTH_KEY_DUPLICATED), но
+// объяснить это лучше ДО тапа, а не отказом после.
+async function deleteProxy(id, accN) {
+  accN = Number(accN||0);
+  if (accN) {
+    await showInfo(`Прокси назначен ${accN} аккаунт(ам) — удалить его нельзя.\n\n`
+      + `Сначала снимите назначение («Снять прокси» в карточке аккаунта) или переселите `
+      + `аккаунты на живой прокси, иначе они уйдут напрямую с общего IP.`);
+    return;
+  }
+  if (!await askConfirm('Удалить прокси? Действие необратимо.')) return;
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
     toast('Удалено'); loadProxies();
@@ -12204,7 +12224,7 @@ function renderProxyPoolList(items) {
     const host = (p.proxy_url||'').split('@').pop();
     const lat = p.latency_ms ? p.latency_ms+'мс' : '';
     const backup = p.is_backup?' 🛟':'';
-    const accounts = p.account_count ? ' · 📱'+p.account_count : '';
+    const accounts = p.acc_count ? ' · 📱'+p.acc_count : '';
     return `<div class="li">
       <div class="ava ava-blue">🌐</div>
       <div class="li-body">
@@ -12214,7 +12234,7 @@ function renderProxyPoolList(items) {
       <div class="li-right">
         <span style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})" title="Резервный">${p.is_backup?'🛟':'⚪'}</span>
         <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
-        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
+        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
       </div>
     </div>`;
   }).join('');
