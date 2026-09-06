@@ -1382,6 +1382,21 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
         log_exc_swallow(log, f"op_worker alerts query error: {e}")
         return
 
+    # Активно исполняющиеся в этом процессе running-операции НЕ застряли: они живут
+    # в _active_op_ids — тот же критерий, по которому _watchdog_stale их НЕ сбрасывает.
+    # Без этой отсечки здоровый долгий mass_invite (пейсинг часами, чтобы не ловить
+    # баны) метился «застрял», и админу уходил ложный алерт с чужим owner_id и
+    # угрозой «running зависло → будет авто-сброшено» — хотя сброса не будет
+    # (операция активна). Тот же класс, что уже закрытый ложняк по отложенным
+    # pending: сообщаем только о реально брошенных running (сирота после падения
+    # воркера), которые вотчдог и правда сбросит.
+    async with _active_lock:
+        active_now: frozenset[int] = frozenset(_active_op_ids)
+    rows = [
+        r for r in rows
+        if not (r["status"] == "running" and int(r["id"]) in active_now)
+    ]
+
     fresh = [r for r in rows if int(r["id"]) not in _alerted_stuck_ops]
     if not fresh:
         # подчистим множество от уже завершённых, чтобы не росло бесконечно
