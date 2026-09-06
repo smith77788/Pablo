@@ -10,10 +10,21 @@
 
 ## Флот (аккаунты + прокси)
 
-### 1. Прямая выборка аккаунтов в обход единой двери — крупный рефактор
-**Где:** `services/op_worker.py`, около восьми мест вида
-`SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active ...`
-(строки ~641, 10195, 12013, 12200, 12261, 12339 и рядом).
+### 1. Прямая выборка аккаунтов в обход единой двери — ЧАСТЬ СДЕЛАНА
+**Мигрировано:** четыре боевых исполнителя — `_exec_ad_intel_scan`,
+`_exec_phone_check`, `_exec_gift_scan`, `_exec_report_peer` — переведены на
+`resource_selector` (тест `tests/test_op_worker_single_door_scans.py`, падает
+без фикса). Порог доверия сознательно НЕ поднят: внутри `select_all_active`
+стоит `COALESCE(a.trust_score, 0)`, и любой положительный порог выкинул бы
+аккаунты с ещё не измеренным доверием.
+
+**Остаётся:** места, выбирающие только `id` для НЕ-боевых нужд (диагностика,
+показ) — их ратчет `test_account_selection_single_door` держит как LEAVE. Перед
+миграцией каждого убедиться, что там нужен не полный флот: у дашбордов и
+предполёта смысл именно в показе cooling-аккаунтов, и «починка» сломала бы их.
+
+**Где было:** `services/op_worker.py`, места вида
+`SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active ...`.
 
 **В чём вред.** `services/resource_selector.py` объявлен единой дверью выбора
 («All systems should use this module»), и именно на нём висят: фильтр мёртвых

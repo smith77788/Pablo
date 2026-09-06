@@ -12502,13 +12502,20 @@ async def _exec_ad_intel_scan(
     if not channel:
         return {"status": "failed", "summary": "⚠️ channel не указан"}
 
-    # Pick any active account for scanning
+    # Одна дверь: сырой `ORDER BY last_used` брал аккаунт, не спрашивая ни о
+    # кулдауне, ни о статусе, ни о живости прокси — скан уходил забаненным или
+    # обесточенным аккаунтом и падал. select_account_rotated идёт через
+    # select_all_active (статусы, кулдаун, мёртвый прокси) и при этом сохраняет
+    # смысл прежней сортировки — размазать нагрузку, а не долбить один аккаунт.
     try:
-        acc_row = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
-            owner_id,
-        )
-        account_id = int(acc_row["id"]) if acc_row else 0
+        from services import resource_selector as _rsel
+        # action_type оставлен "default" СОЗНАТЕЛЬНО: у порога доверия внутри
+        # стоит COALESCE(trust_score, 0), поэтому любой положительный порог
+        # выкинул бы аккаунты с ещё не измеренным доверием (NULL) — на свежем
+        # флоте операция стала бы «нет аккаунтов». Миграция добавляет только
+        # защиту, а не новый способ отказать.
+        acc = await _rsel.select_account_rotated(pool, owner_id, action_type="default")
+        account_id = int(acc["id"]) if acc else 0
     except Exception as e:
         log.warning('resolve account_id failed: %s', e)
         account_id = 0
@@ -12688,13 +12695,14 @@ async def _exec_phone_check(
     if not phones:
         return {"status": "failed", "summary": "⚠️ Список номеров пуст"}
 
-    # Pick any active account
+    # Одна дверь. ImportContacts — одна из самых баноопасных операций Telegram,
+    # а прежний сырой выбор брал аккаунт в кулдауне после флуда, в спамблоке или
+    # на мёртвом прокси: проверка либо падала, либо загоняла аккаунт глубже.
+    # action_type="default" — см. пояснение про COALESCE(trust_score, 0) в
+    # _exec_ad_scan: порог доверия здесь выкинул бы аккаунты с NULL-доверием.
     try:
-        acc_row = await pool.fetchrow(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
-            owner_id,
-        )
+        from services import resource_selector as _rsel
+        acc_row = await _rsel.select_account_rotated(pool, owner_id, action_type="default")
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
 
@@ -12751,11 +12759,13 @@ async def _exec_gift_scan(
     """
     from services import gift_inventory as _gi
 
+    # Одна дверь: скан подарков поднимает сессию КАЖДОГО аккаунта, поэтому
+    # забаненные и сидящие на мёртвом прокси давали гарантированную ошибку на
+    # каждом — и портили счётчик исхода. action_type="default" — порог доверия
+    # выкинул бы аккаунты с NULL-доверием (см. _exec_ad_intel_scan).
     try:
-        accounts = await pool.fetch(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY id",
-            owner_id,
-        )
+        from services import resource_selector as _rsel
+        accounts = await _rsel.select_all_active(pool, owner_id, action_type="default")
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунтов: {exc}"}
 
@@ -12828,12 +12838,14 @@ async def _exec_report_peer(
         log.warning('account count query failed: %s', e)
         acc_count = 5
 
+    # Одна дверь: репорт — действие, за которое аккаунт получает ограничения,
+    # поэтому вести в него аккаунт в кулдауне или в спамблоке особенно дорого.
+    # Срез до acc_count делаем ПОСЛЕ фильтров, иначе лимит выбирался бы из
+    # непригодных. action_type="default" — см. пояснение в _exec_ad_intel_scan.
     try:
-        accounts = await pool.fetch(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT $2",
-            owner_id, acc_count,
-        )
+        from services import resource_selector as _rsel
+        accounts = (await _rsel.select_all_active(
+            pool, owner_id, action_type="default"))[:acc_count]
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунтов: {exc}"}
 
