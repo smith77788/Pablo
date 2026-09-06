@@ -4511,11 +4511,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <select id="massInviteMethod" class="sel" onchange="massInviteMethodToggle()">
           <option value="direct" selected>➕ Обычный (нужны права приглашать)</option>
           <option value="admin">👑 Через админку (обход приватности)</option>
-          <option value="link">🔗 Рассылка ссылки в ЛС</option>
+          <option value="link">🔗 Рассылка ссылки в ЛС ⚠️ риск для флота</option>
         </select>
         <div style="font-size:12px;color:var(--hint);margin-top:4px">
           «Через админку»: цель делается админом (попадает в чат) и тут же лишается
-          прав → остаётся участником. «Ссылка в ЛС»: человек вступает сам.
+          прав → остаётся участником.
+        </div>
+        <!-- Метод оставлен, но это не нейтральный выбор: рассылка ссылок в ЛС
+             незнакомцам собирает жалобы и выкашивает аккаунты. Предупреждаем
+             прямо у выбора, а не после потери флота. -->
+        <div style="font-size:12px;color:var(--orange,#f59e0b);margin-top:4px">
+          ⚠️ «Ссылка в ЛС»: человек вступает сам, но рассылка незнакомцам собирает
+          жалобы и убивает аккаунты. Приватность этим не обходится — лучше
+          исключить такие цели из базы.
         </div>
       </div>
       <div class="field" id="massInviteLinkMsgField" style="display:none">
