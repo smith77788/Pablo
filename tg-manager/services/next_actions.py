@@ -149,6 +149,61 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
             "AND parsed_at > NOW() - INTERVAL '7 days'",
             uid,
         ),
+        # ── Общие папки (chatlist_folders) ────────────────────────────────
+        "folders_total": _fv(
+            pool, "SELECT COUNT(*) FROM chatlist_folders WHERE owner_id=$1", uid
+        ),
+        # Папка без ссылки — мёртвый артефакт: экспорт сессией не удался или
+        # завис в draft. Окно в 10 минут отсекает те, что создаются прямо сейчас.
+        "folders_no_link": _fv(
+            pool,
+            "SELECT COUNT(*) FROM chatlist_folders WHERE owner_id=$1 "
+            "AND invite_link IS NULL AND created_at < NOW() - INTERVAL '10 minutes'",
+            uid,
+        ),
+        # ── Связки (network_builder) ──────────────────────────────────────
+        "nets_total": _fv(
+            pool, "SELECT COUNT(*) FROM network_instances WHERE owner_id=$1", uid
+        ),
+        "nets_empty": _fv(
+            pool,
+            "SELECT COUNT(*) FROM network_instances i WHERE i.owner_id=$1 "
+            "AND NOT EXISTS (SELECT 1 FROM network_nodes n WHERE n.instance_id=i.id)",
+            uid,
+        ),
+        # Узлы в 'pending' = связка нарисована, но не развёрнута: каналы/чаты
+        # ещё не созданы и админки не назначены.
+        "net_nodes_pending": _fv(
+            pool,
+            "SELECT COUNT(*) FROM network_nodes n "
+            "JOIN network_instances i ON i.id=n.instance_id "
+            "WHERE i.owner_id=$1 AND COALESCE(n.status,'pending')='pending'",
+            uid,
+        ),
+        # ── Хранилище (Vault) ─────────────────────────────────────────────
+        "vault_conn": _fv(
+            pool,
+            "SELECT COUNT(*) FROM business_connections WHERE owner_id=$1 "
+            "AND is_enabled=true",
+            uid,
+        ),
+        "vault_conn_off": _fv(
+            pool,
+            "SELECT COUNT(*) FROM business_connections WHERE owner_id=$1 "
+            "AND is_enabled=false",
+            uid,
+        ),
+        "vault_rules": _fv(
+            pool,
+            "SELECT COUNT(*) FROM vault_intent_rules WHERE owner_id=$1 AND is_active=true",
+            uid,
+        ),
+        "vault_intents_7d": _fv(
+            pool,
+            "SELECT COUNT(*) FROM vault_intent_hits WHERE owner_id=$1 "
+            "AND created_at > NOW() - INTERVAL '7 days'",
+            uid,
+        ),
         "recent_ops": _fr(
             pool,
             "SELECT op_type, status FROM operation_queue WHERE owner_id=$1 "
@@ -500,6 +555,153 @@ def build_suggestions(state: dict) -> list[dict]:
                 "cta": "Создать рассылку",
                 "nav": None,
                 "fn": "openBotBroadcast",
+            }
+        )
+
+    # ── Папки, связки и Хранилище ─────────────────────────────────────────
+    # Эти три модуля жили в копайлоте немыми: пользователь не узнавал ни о
+    # сломанном артефакте (папка без ссылки), ни о неразвёрнутой связке, ни о
+    # том, что архив перестал пополняться. Подсказки только по РЕАЛЬНЫМ
+    # состояниям — «подключите Хранилище» всем подряд не показываем: это
+    # требует Telegram Business и превращается в вечный баннер.
+
+    # 14. Папка без ссылки — экспорт не удался или завис. Артефакт есть, толку
+    #     нет: раздавать нечего.
+    if state.get("folders_no_link", 0) > 0:
+        n = state["folders_no_link"]
+        s.append(
+            {
+                "id": "fix_folder_link",
+                "priority": 66,
+                "icon": "📂",
+                "title": f"{n} папок без ссылки",
+                "reason": "Папка собрана, но chatlist-ссылку выгрузить не удалось — "
+                "раздавать нечего. Повторите экспорт другим аккаунтом.",
+                "cta": "Открыть папки",
+                "nav": None,
+                "fn": "openFolders",
+            }
+        )
+
+    # 15. Связка нарисована, но не развёрнута: узлы ждут создания каналов и
+    #     назначения админок. Без этого связка — просто схема.
+    if state.get("net_nodes_pending", 0) > 0:
+        n = state["net_nodes_pending"]
+        s.append(
+            {
+                "id": "deploy_network",
+                "priority": 64,
+                "icon": "🧩",
+                "title": f"Разверните связку: {n} узлов ждут",
+                "reason": "Узлы связки в состоянии «ожидает» — каналы и чаты ещё не "
+                "созданы, админки не назначены. Разверните, чтобы схема заработала.",
+                "cta": "Открыть связки",
+                "nav": None,
+                "fn": "openNetworkBuilder",
+            }
+        )
+
+    # 16. Есть каналы, но ни одной общей папки — самый короткий путь раздать
+    #     сразу всю связку одной ссылкой вместо N приглашений.
+    if state.get("channels", 0) >= 2 and state.get("folders_total", 0) == 0:
+        s.append(
+            {
+                "id": "create_shared_folder",
+                "priority": 50,
+                "icon": "🗂",
+                "title": f"Соберите {state['channels']} каналов в общую папку",
+                "reason": "Одна ссылка на папку добавляет человеку сразу всю связку "
+                "каналов и чатов — вместо отдельного приглашения в каждый.",
+                "cta": "Открыть папки",
+                "nav": None,
+                "fn": "openFolders",
+            }
+        )
+
+    # 17. Связка создана, но пуста — узлы не добавлены.
+    if state.get("nets_empty", 0) > 0:
+        s.append(
+            {
+                "id": "fill_empty_network",
+                "priority": 46,
+                "icon": "🧩",
+                "title": "Связка пуста — добавьте узлы",
+                "reason": "Связка заведена, но в ней нет ни каналов, ни чатов, ни "
+                "ботов. Добавьте узлы и рёбра, иначе разворачивать нечего.",
+                "cta": "Открыть связки",
+                "nav": None,
+                "fn": "openNetworkBuilder",
+            }
+        )
+
+    # 18. Есть и каналы, и боты, но они не связаны между собой.
+    if (
+        state.get("channels", 0) >= 1
+        and state.get("bots", 0) >= 1
+        and state.get("nets_total", 0) == 0
+    ):
+        s.append(
+            {
+                "id": "build_first_network",
+                "priority": 44,
+                "icon": "🕸",
+                "title": "Свяжите бота с каналом",
+                "reason": "Бот и канал работают порознь. Связка делает бота "
+                "администратором канала и настраивает кросспостинг между ними.",
+                "cta": "Открыть связки",
+                "nav": None,
+                "fn": "openNetworkBuilder",
+            }
+        )
+
+    # 19. Хранилище отключено — архив молча перестал пополняться. Тихая потеря
+    #     данных: переписка удаляется у собеседника и не остаётся нигде.
+    if state.get("vault_conn_off", 0) > 0 and state.get("vault_conn", 0) == 0:
+        s.append(
+            {
+                "id": "vault_reconnect",
+                "priority": 74,
+                "icon": "🗄",
+                "title": "Хранилище отключено",
+                "reason": "Подключение бизнес-аккаунта выключено — архив не "
+                "пополняется, удалённые сообщения больше не сохраняются.",
+                "cta": "Открыть Хранилище",
+                "nav": None,
+                "fn": "openVault",
+            }
+        )
+
+    # 20. Сенсор поймал намерения — это горячие контакты, а не строчки журнала.
+    if state.get("vault_intents_7d", 0) > 0:
+        n = state["vault_intents_7d"]
+        s.append(
+            {
+                "id": "review_intent_hits",
+                "priority": 80,
+                "icon": "🔥",
+                "title": f"{n} сигналов о намерении за неделю",
+                "reason": "Сенсор поймал в переписке фразы-намерения — это готовые к "
+                "разговору контакты. Проверьте журнал, пока сигнал свежий.",
+                "cta": "Открыть сенсор",
+                "nav": None,
+                "fn": "openIntentSensor",
+            }
+        )
+
+    # 21. Хранилище работает, но правил нет — архив копится, сигналы никто не
+    #     ловит: модуль наполовину выключен.
+    if state.get("vault_conn", 0) > 0 and state.get("vault_rules", 0) == 0:
+        s.append(
+            {
+                "id": "setup_intent_rules",
+                "priority": 56,
+                "icon": "🎣",
+                "title": "Включите сенсор намерений",
+                "reason": "Хранилище пишет переписку, но правил нет — «сколько стоит» "
+                "и «готов купить» проходят мимо. Правило само двигает контакт по CRM.",
+                "cta": "Настроить правила",
+                "nav": None,
+                "fn": "openIntentSensor",
             }
         )
 

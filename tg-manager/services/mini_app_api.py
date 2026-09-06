@@ -2037,6 +2037,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception as _e:  # fail-soft: пульс не должен ронять список
                 log.debug("accounts health merge owner=%s: %s", uid, _e)
 
+        # Одно действие-лечение на строку. Считается ПОСЛЕ мержа пульса —
+        # карантин/риск видны только оттуда. Список важнее подсказки: любая
+        # ошибка здесь молча оставляет строки без кнопок.
+        try:
+            from services import account_fix as _afix
+            _afix.annotate(rows)
+        except Exception as _e:  # pragma: no cover
+            log.debug("accounts fix annotate owner=%s: %s", uid, _e)
+
         # Серверная агрегация KPI (глобальные счётчики, не срез). Админ — по всей
         # платформе, обычный пользователь — по своим аккаунтам.
         if admin:

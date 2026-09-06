@@ -562,6 +562,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .acc-trust{height:2px;border-radius:1px;background:var(--sep);margin-top:4px;overflow:hidden;width:70px}
 .acc-trust-fill{height:100%;border-radius:1px}
 .acc-right{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+/* Лечение прямо в строке: список называл проблему, но чинить её заставлял
+   идти в карточку и разворачивать «Действия». */
+.acc-fix{margin-top:5px;padding:4px 9px;font-size:11px;font-weight:600;border:none;border-radius:7px;cursor:pointer;background:var(--bg-orange-16,rgba(245,158,11,.16));color:var(--orange)}
+.acc-fix.danger{background:var(--bg-red-16,rgba(239,68,68,.16));color:var(--red)}
+.acc-fix:active{opacity:.65}
 
 /* ─── Dashboard KPI scroll ──────────────────────────────── */
 .kpi-scroll{display:flex;gap:6px;padding:8px 16px 4px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
@@ -8977,6 +8982,22 @@ function updateAccKpi(list, stats) {
   if (pb) { pb.style.display = dead>0 ? 'block' : 'none'; el('purgeDeadN', dead); }
 }
 
+// Кнопка-лечение в строке аккаунта. Что именно чинить, решает сервер
+// (services/account_fix.py) — здесь только рендер. Функцию проверяем на
+// существование: подсказка не должна превращаться в мёртвый тап, если экран
+// вырезали или переименовали.
+function _fixBtn(f) {
+  if (!f || !f.fn || typeof window[f.fn] !== 'function') return '';
+  const args = (f.args || []).map(v => {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'number') return String(v);
+    return `'${String(v).replace(/[^\w@.-]/g, '')}'`;   // строки — только безопасные символы
+  }).join(',');
+  const cls = f.tone === 'danger' ? 'acc-fix danger' : 'acc-fix';
+  return `<button class="${cls}" title="${esc(f.reason || '')}" `
+    + `onclick="event.stopPropagation();${f.fn}(${args})">${esc(f.label || 'Исправить')}</button>`;
+}
+
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
@@ -9026,6 +9047,7 @@ function renderAccounts(list) {
         <div class="acc-phone">${esc(phone)}</div>
         ${proxyNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
+        ${ACC_SEL_MODE ? '' : _fixBtn(a.fix)}
       </div>
       ${right}
     </div>`;
