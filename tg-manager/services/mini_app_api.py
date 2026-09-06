@@ -15351,11 +15351,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            # tg_channels не имеет колонки is_active (есть только id/owner_id/title/
-            # username/...) — раньше SELECT is_active валил эндпоинт 500. Каналы
-            # считаем активными по факту наличия.
+            # Каналы берём из managed_channels — это таблица, куда реально пишутся
+            # каналы пользователя (8 путей записи). Прежний источник tg_channels
+            # НИКЕМ не заполняется (нет ни одного INSERT/UPDATE в коде и сидов в
+            # миграциях) → узлы-каналы в топологии всегда были пусты. DISTINCT ON
+            # (channel_id): один канал может вестись несколькими аккаунтами (строка
+            # на acc_id) — иначе в графе дубли-узлы. Активность по факту наличия.
             channels = await pool.fetch(
-                "SELECT id, username, title FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
+                "SELECT DISTINCT ON (channel_id) channel_id AS id, username, title "
+                "FROM managed_channels WHERE owner_id=$1 ORDER BY channel_id LIMIT 50",
+                uid,
             )
             # managed_bots скоупится по added_by, НЕ owner_id (такой колонки нет) —
             # прежний owner_id=$1 валил эндпоинт 500.
