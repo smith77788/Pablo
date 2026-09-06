@@ -1,5 +1,5 @@
-"""Храповик: никаких вызовов внутренних функций/классов с keyword-аргументом,
-которого нет в их сигнатуре.
+"""Храповик: никаких вызовов внутренних функций/классов с аргументом вне сигнатуры
+— ни keyword-арга, которого нет в параметрах, ни лишних позиционных.
 
 Класс бага: operation_bus.submit(scheduled_for=...) — submit не принимал такой
 kwarg → TypeError в рантайме, убивший ВСЕ отложенные операции продукта. Синтаксис
@@ -58,17 +58,23 @@ def _imp(modname):
 
 
 def _params(obj):
+    """(имена kw-параметров, есть **kwargs, макс_позиционных|None, есть *args)."""
     try:
         sig = inspect.signature(obj)
     except (ValueError, TypeError):
         return None
-    names, var_kw = set(), False
+    names, var_kw, max_pos, var_pos = set(), False, 0, False
     for p in sig.parameters.values():
         if p.kind == inspect.Parameter.VAR_KEYWORD:
             var_kw = True
-        elif p.kind != inspect.Parameter.VAR_POSITIONAL:
+        elif p.kind == inspect.Parameter.VAR_POSITIONAL:
+            var_pos = True
+        else:
             names.add(p.name)
-    return names, var_kw
+            if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                          inspect.Parameter.POSITIONAL_OR_KEYWORD):
+                max_pos += 1
+    return names, var_kw, max_pos, var_pos
 
 
 def _scan(path):
@@ -112,7 +118,9 @@ def _scan(path):
         if not isinstance(n, ast.Call):
             continue
         kwargs = [k.arg for k in n.keywords if k.arg is not None]
-        if not kwargs:
+        has_dstar = any(k.arg is None for k in n.keywords)  # **d — не знаем имён
+        has_star = any(isinstance(a, ast.Starred) for a in n.args)  # *a — не считаем
+        if not kwargs and (has_star or not n.args):
             continue
         obj = label = None
         f = n.func
@@ -142,16 +150,21 @@ def _scan(path):
         pr = _params(obj)
         if pr is None:
             continue
-        names, var_kw = pr
-        if var_kw:
-            continue
-        for kw in kwargs:
-            if kw not in names:
-                out.append((os.path.relpath(path, ROOT), n.lineno, label, kw))
+        names, var_kw, max_pos, var_pos = pr
+        rel = os.path.relpath(path, ROOT)
+        # (1) keyword-арг не из сигнатуры (нет **kwargs)
+        if not var_kw and not has_dstar:
+            for kw in kwargs:
+                if kw not in names:
+                    out.append((rel, n.lineno, label, f"неизвестный kwarg '{kw}'"))
+        # (2) слишком много позиционных (нет *args, нет распаковки *a)
+        if not var_pos and not has_star and len(n.args) > max_pos:
+            out.append((rel, n.lineno, label,
+                        f"{len(n.args)} позиц. аргументов, принимает {max_pos}"))
     return out
 
 
-def test_no_bad_kwargs_to_internal_callables():
+def test_no_bad_arguments_to_internal_callables():
     findings = []
     for base in ("services", "bot"):
         for dp, _d, files in os.walk(os.path.join(ROOT, base)):
@@ -165,8 +178,8 @@ def test_no_bad_kwargs_to_internal_callables():
             findings += _scan(os.path.join(ROOT, fn))
 
     assert not findings, (
-        "keyword-аргумент, которого нет в сигнатуре внутренней функции/класса "
+        "вызов внутренней функции/класса с аргументом вне сигнатуры "
         "(TypeError в рантайме, как submit(scheduled_for=...)):\n"
-        + "\n".join(f"  {p}:{ln} → {label}(... {kw}=...)"
-                    for p, ln, label, kw in findings)
+        + "\n".join(f"  {p}:{ln} → {label}: {detail}"
+                    for p, ln, label, detail in findings)
     )
