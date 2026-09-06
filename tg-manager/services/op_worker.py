@@ -8299,6 +8299,15 @@ async def _exec_check_accounts_health(
         # либо переданы чужие id. Не путаем с ошибкой запроса (см. выше).
         return {"status": "failed", "reason": "Нет аккаунтов для проверки"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     n = len(accounts)
     # done_items=0 при старте: операция может быть перезапущена (retry_count через
     # _maybe_requeue или подхват воркером) с тем же op_id — без сброса счётчик
@@ -9586,6 +9595,15 @@ async def _exec_boost_views(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -9653,6 +9671,15 @@ async def _exec_boost_reactions(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -9718,6 +9745,15 @@ async def _exec_boost_stories(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -11674,6 +11710,15 @@ async def _exec_bulk_set_profile(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -11757,6 +11802,15 @@ async def _exec_mass_report(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
     accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -11836,6 +11890,15 @@ async def _exec_content_clone(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД клонированием —
     # действие с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий
@@ -11930,6 +11993,15 @@ async def _exec_ai_comment(
         pool, owner_id, action_type="comment", respect_cooldown=True)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
     # Риск-пульс: коммент в канал с флагнутого аккаунта = быстрый бан (fail-open).
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     accounts = accounts[:acc_count]
@@ -11991,6 +12063,15 @@ async def _exec_compliance_scan(
         pool, owner_id, action_type="parse", respect_cooldown=True)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
     accounts = accounts[:acc_count]
 
     resources = resources[:100]  # потолок против гигантских прогонов
@@ -12523,6 +12604,14 @@ async def _exec_ad_intel_scan(
     if not account_id:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для сканирования"}
 
+    # Захват под живую сессию. Сессию поднимает не этот код, а
+    # ad_intelligence.scan_channel_ads — по account_id, внутри себя. Косвенность
+    # ничего не меняет: две сессии на одном auth-key дают AUTH_KEY_DUPLICATED.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    if not await _claim_available_accounts(op_id, [{"id": account_id}], owner_id):
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+
     try:
         result = await _ai.scan_channel_ads(pool, channel, account_id, owner_id)
         if result.get("status") == "error":
@@ -12699,7 +12788,7 @@ async def _exec_phone_check(
     # а прежний сырой выбор брал аккаунт в кулдауне после флуда, в спамблоке или
     # на мёртвом прокси: проверка либо падала, либо загоняла аккаунт глубже.
     # action_type="default" — см. пояснение про COALESCE(trust_score, 0) в
-    # _exec_ad_scan: порог доверия здесь выкинул бы аккаунты с NULL-доверием.
+    # _exec_ad_intel_scan: порог доверия выкинул бы аккаунты с NULL-доверием.
     try:
         from services import resource_selector as _rsel
         acc_row = await _rsel.select_account_rotated(pool, owner_id, action_type="default")
@@ -12708,6 +12797,16 @@ async def _exec_phone_check(
 
     if not acc_row:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для проверки"}
+
+    # Захват под живую сессию: без него операция подключала бы аккаунт,
+    # который в этот момент ведёт другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    _claimed = await _claim_available_accounts(op_id, [acc_row], owner_id)
+    if not _claimed:
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    acc_row = _claimed[0]
 
     acc = dict(acc_row)
     total = len(phones)
@@ -12771,6 +12870,16 @@ async def _exec_gift_scan(
 
     if not accounts:
         return {"status": "done", "summary": "📦 Нет активных аккаунтов для сканирования"}
+
+    # Захват под живые сессии. Сессию каждого аккаунта поднимает
+    # GiftInventoryService.scan_account_gifts по account_id — косвенно, но это
+    # такая же живая сессия: без захвата аккаунт мог одновременно вести другую
+    # операцию или прогрев (AUTH_KEY_DUPLICATED).
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     total_accounts = len(accounts)
     await _safe_execute(
@@ -12851,6 +12960,15 @@ async def _exec_report_peer(
 
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для репортинга"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Риск-пульс: репорт с флагнутого аккаунта = быстрый бан этого аккаунта (fail-open).
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
