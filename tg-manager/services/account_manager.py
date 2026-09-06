@@ -6841,6 +6841,7 @@ async def strike_map_target(
         "latest_msg_ids": [],
         "mentioned_usernames": [],
         "bot_usernames": [],
+        "external_domains": [],
         "error": None,
     }
 
@@ -6931,6 +6932,14 @@ async def strike_map_target(
             for u in _chan_re.findall(scan_text)
             if u not in intel["mentioned_usernames"]
         ][:5]
+        # Внешние (не-Telegram) домены из описания/постов — цель для вектора
+        # снятия инфраструктуры (APWG/Safe Browsing/хостинг). Извлечение —
+        # единый чистый помощник strike_engine, чтобы логика не расходилась.
+        try:
+            from services import strike_engine as _se
+            intel["external_domains"] = _se._extract_external_domains([scan_text])[:20]
+        except Exception:
+            log_exc_swallow(log, "strike_map_target: external_domains extract failed")
 
     except Exception as e:
         intel["error"] = str(e)[:200]
