@@ -140,6 +140,72 @@ def test_report_scam_infrastructure_no_smtp_returns_kit(monkeypatch):
     assert "kit" in res["skip_reason"] or "ящик" in res["skip_reason"]
 
 
+# ── Вектор: жалоба регистратору через RDAP ──────────────────────────────────────
+def test_parse_rdap_abuse_email_nested():
+    rdap = {"entities": [{
+        "roles": ["registrar"],
+        "entities": [{
+            "roles": ["abuse"],
+            "vcardArray": ["vcard", [
+                ["version", {}, "text", "4.0"],
+                ["fn", {}, "text", "Abuse Dept"],
+                ["email", {}, "text", "ABUSE@Registrar.com"],
+            ]],
+        }],
+    }]}
+    assert se._parse_rdap_abuse_email(rdap) == "abuse@registrar.com"
+
+
+def test_parse_rdap_abuse_email_absent():
+    assert se._parse_rdap_abuse_email({}) is None
+    assert se._parse_rdap_abuse_email({"entities": [{"roles": ["registrar"]}]}) is None
+    assert se._parse_rdap_abuse_email("junk") is None
+
+
+def test_rdap_registrar_abuse_fail_open_on_none():
+    async def fetch_none(url):
+        return None
+    assert _run(se._rdap_registrar_abuse("evil.com", _fetch=fetch_none)) is None
+
+    async def fetch_boom(url):
+        raise RuntimeError("network down")
+    assert _run(se._rdap_registrar_abuse("evil.com", _fetch=fetch_boom)) is None
+
+
+def test_registrar_body_has_domain_and_target():
+    body = se._build_registrar_abuse_body("evil.com", "@badchan", "2026-01-01T00:00:00Z")
+    assert "evil.com" in body and "t.me/badchan" in body
+    assert "ICANN" in body or "Acceptable Use" in body
+
+
+def test_report_domain_registrar_sends_per_resolved_domain(monkeypatch):
+    sent: list = []
+    _patch_email(monkeypatch, sent)
+
+    async def fake_fetch(url):
+        # RDAP-контакт есть только для одного домена — второй пропускаем (fail-open)
+        if "evil-pay.com" in url:
+            return {"entities": [{"roles": ["abuse"], "vcardArray": [
+                "vcard", [["email", {}, "text", "abuse@reg.com"]]]}]}
+        return None
+
+    res = _run(se.report_domain_registrar(
+        _FakePool(), 42, "@badchan", ["evil-pay.com", "no-rdap.co"],
+        "fraud", None, _fetch=fake_fetch))
+    assert res["registrar_sent"] == 1
+    assert len(sent) == 1 and sent[0]["to"] == "abuse@reg.com"
+    contacts = {c["domain"]: c for c in res["contacts"]}
+    assert contacts["evil-pay.com"]["ok"] is True
+    assert contacts["no-rdap.co"]["abuse_email"] is None
+
+
+def test_report_domain_registrar_non_infra_and_no_pool_skip():
+    r1 = _run(se.report_domain_registrar(_FakePool(), 42, "@x", ["e.com"], "csam", None))
+    assert r1["registrar_sent"] == 0 and "infra" in r1["skip_reason"]
+    r2 = _run(se.report_domain_registrar(None, 0, "@x", ["e.com"], "fraud", None))
+    assert r2["registrar_sent"] == 0
+
+
 # ── Интеграция в staggered_strike ───────────────────────────────────────────────
 def _accs(n):
     return [{"id": i, "session_str": "s" * 20, "trust_score": 1.0}
@@ -182,6 +248,11 @@ def _install_mocks(monkeypatch, per_account_result, recon_domains=None):
         calls["recon"] += 1
         return {"external_domains": list(recon_domains or [])}
 
+    async def fake_rdap(domain, _fetch=None):
+        calls["rdap"] = calls.get("rdap", 0) + 1
+        return f"abuse@registrar-of-{domain}"
+
+    monkeypatch.setattr(se, "_rdap_registrar_abuse", fake_rdap)
     monkeypatch.setattr(se, "_one_account_strike", fake_strike)
     monkeypatch.setattr(se, "strike_network_nodes_v2", fake_network)
     monkeypatch.setattr(se, "_escalate_to_spambot", fake_spambot)
@@ -209,6 +280,9 @@ def test_staggered_runs_infra_from_intel_domains(monkeypatch):
     assert r.infra_apwg_sent == 2
     assert calls["recon"] == 0            # домены были — карта цели не нужна
     assert any(m["to"] == "reportphishing@apwg.org" for m in sent)
+    # второй удар: жалоба регистратору каждого домена (abuse из RDAP)
+    assert r.infra_registrar_sent == 2
+    assert any(m["to"].startswith("abuse@registrar-of-") for m in sent)
 
 
 def test_staggered_recons_domains_when_intel_empty(monkeypatch):
@@ -240,6 +314,7 @@ def test_staggered_canary_abort_keeps_infra_no_recon(monkeypatch):
     assert r.canary_aborted is True
     assert calls["recon"] == 0            # флот в опасности — карту цели не жжём
     assert r.infra_apwg_sent == 1         # но домен из intel добит по APWG
+    assert r.infra_registrar_sent == 1    # и жалоба регистратору (флот не жжёт)
 
 
 def test_staggered_non_infra_skips_infra(monkeypatch):
@@ -259,10 +334,11 @@ def test_staggered_non_infra_skips_infra(monkeypatch):
 # ── Проводка/источники ──────────────────────────────────────────────────────────
 def test_summary_surfaces_infra_line():
     r = se.StrikeResult(target="@x", infra_domains=["evil-pay.com", "scam.co"],
-                        infra_apwg_sent=2)
+                        infra_apwg_sent=2, infra_registrar_sent=1)
     out = se.format_strike_summary([r])
     assert "Внешняя инфраструктура" in out
     assert "APWG отправлено" in out
+    assert "регистратору" in out
 
 
 def test_recon_extracts_external_domains_wired():
@@ -276,4 +352,5 @@ def test_recon_extracts_external_domains_wired():
 def test_staggered_calls_infra_orchestrator():
     src = inspect.getsource(se.staggered_strike)
     assert "report_scam_infrastructure" in src
+    assert "report_domain_registrar" in src
     assert "_is_infra_category" in src

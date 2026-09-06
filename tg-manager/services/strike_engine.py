@@ -357,6 +357,179 @@ async def report_scam_infrastructure(
     return result
 
 
+# ── Вектор: жалоба регистратору/хостеру домена через RDAP ───────────────────────
+# APWG/Safe Browsing добавляют сайт в блок-листы браузеров (предупреждают жертву).
+# Этот вектор бьёт по САМОМУ существованию площадки: RDAP — машиночитаемый протокол
+# реестра доменов — отдаёт abuse-контакт регистратора, а регистраторы ОБЯЗАНЫ по
+# своей AUP снимать домены за подтверждённый фрод/фишинг. Снятый домен = мёртвая
+# ссылка во всех постах скам-канала. В отличие от kit-каналов это РЕАЛЬНО
+# автоматизируется: один RDAP-запрос → письмо на abuse@ регистратора.
+
+
+def _parse_rdap_abuse_email(data: dict) -> str | None:
+    """Извлекает abuse-email из RDAP-ответа по домену. ЧИСТАЯ функция.
+
+    Ищет вложенную entity с ролью 'abuse' и достаёт email из её vCard. RDAP
+    кладёт контакт регистратора глубоко: entities[registrar].entities[abuse].
+    """
+    if not isinstance(data, dict):
+        return None
+
+    def _email_from_vcard(ent: dict) -> str | None:
+        v = ent.get("vcardArray")
+        if not (isinstance(v, list) and len(v) == 2 and isinstance(v[1], list)):
+            return None
+        for item in v[1]:
+            if (isinstance(item, list) and len(item) >= 4
+                    and str(item[0]).lower() == "email"):
+                val = item[3]
+                if isinstance(val, str) and "@" in val:
+                    return val.strip().lower()
+        return None
+
+    def _walk(entities) -> str | None:
+        for ent in entities or []:
+            if not isinstance(ent, dict):
+                continue
+            roles = [str(r).lower() for r in (ent.get("roles") or [])]
+            if "abuse" in roles:
+                em = _email_from_vcard(ent)
+                if em:
+                    return em
+            sub = _walk(ent.get("entities"))
+            if sub:
+                return sub
+        return None
+
+    return _walk(data.get("entities"))
+
+
+async def _rdap_registrar_abuse(domain: str, _fetch=None) -> str | None:
+    """abuse-email регистратора домена через публичный RDAP (rdap.org). Fail-open."""
+    async def _default_fetch(url: str):
+        import aiohttp
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10),
+                headers={"Accept": "application/rdap+json"},
+            ) as r:
+                if r.status != 200:
+                    return None
+                return await r.json(content_type=None)
+
+    fetch = _fetch or _default_fetch
+    try:
+        data = await fetch(f"https://rdap.org/domain/{domain}")
+    except Exception:
+        log_exc_swallow(log, f"rdap: fetch failed domain={domain}")
+        return None
+    return _parse_rdap_abuse_email(data if isinstance(data, dict) else {})
+
+
+def _build_registrar_abuse_body(domain: str, target: str, report_time: str) -> str:
+    """Тело жалобы регистратору/хостеру домена. ЧИСТАЯ функция."""
+    clean = str(target or "").lstrip("@")
+    return (
+        "DOMAIN ABUSE COMPLAINT\n"
+        "=================================================================\n\n"
+        "The domain below is used to host content for an active fraud/phishing\n"
+        "campaign that is distributed to victims via a public Telegram channel.\n\n"
+        f"  Abusive domain     : {domain}  (http://{domain}/ , https://{domain}/)\n"
+        f"  Distribution vector: Telegram channel https://t.me/{clean} (@{clean})\n"
+        f"  Reported at        : {report_time} UTC\n\n"
+        "The site solicits payments / credentials / personal data under false\n"
+        "pretenses, in violation of your Acceptable Use Policy and the ICANN\n"
+        "Registrar Accreditation Agreement (§3.18 — duty to act on abuse reports).\n"
+        "We request suspension of the domain and preservation of registration data\n"
+        "for law enforcement.\n\n"
+        "This is a good-faith report of illegal activity.\n"
+    )
+
+
+async def report_domain_registrar(
+    pool,
+    owner_id: int,
+    target: str,
+    domains: list[str],
+    reason: str,
+    preset: str | None,
+    _fetch=None,
+) -> dict:
+    """Автожалоба регистратору каждого внешнего домена (abuse-контакт из RDAP).
+
+    Для каждого домена: RDAP → abuse-email → письмо-жалоба с первого SMTP-ящика.
+    Fail-open: нет RDAP-контакта/pool/ящиков — домен пропускается, не падаем.
+
+    Возвращает {domains, registrar_sent, contacts: [{domain, abuse_email, ok}]}.
+    """
+    from datetime import datetime, timezone
+
+    result: dict = {
+        "domains": list(domains or []),
+        "registrar_sent": 0,
+        "contacts": [],
+    }
+    if not _is_infra_category(reason, preset):
+        result["skip_reason"] = "не infra-категория"
+        return result
+    if not domains:
+        result["skip_reason"] = "внешних доменов не найдено"
+        return result
+    if not pool or not owner_id:
+        result["skip_reason"] = "no pool/owner"
+        return result
+
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type,
+                      oauth_provider, oauth_refresh_token, oauth_access_token,
+                      oauth_expires_at
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        from services.token_vault import decrypt_token as _dt
+        db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
+    except Exception as e:
+        result["skip_reason"] = f"email accounts fetch: {str(e)[:60]}"
+        return result
+
+    if not db_emails:
+        result["skip_reason"] = "нет SMTP-ящиков"
+        return result
+
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ea = db_emails[0]
+    smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
+    for d in domains:
+        abuse = await _rdap_registrar_abuse(d, _fetch=_fetch)
+        if not abuse:
+            result["contacts"].append(
+                {"domain": d, "abuse_email": None, "ok": False}
+            )
+            log.info("strike_engine: RDAP no abuse contact for %s", d)
+            continue
+        body = _build_registrar_abuse_body(d, target, report_time)
+        subject = f"Abuse report: fraud/phishing content on {d}"
+        ok, err = await _send_email(
+            ea["smtp_host"], ea["smtp_port"], ea["email"], smtp_secret,
+            ea["email"], abuse, subject, body, auth_type=auth_type,
+        )
+        result["contacts"].append(
+            {"domain": d, "abuse_email": abuse, "ok": ok, "err": err}
+        )
+        if ok:
+            result["registrar_sent"] += 1
+            log.info("strike_engine: registrar abuse sent %s → %s", d, abuse)
+        else:
+            log.warning("strike_engine: registrar abuse failed %s → %s: %s",
+                        d, abuse, err)
+    return result
+
+
 def _telegram_target_display(target: str) -> str:
     try:
         from services.account_manager import format_telegram_join_ref_display
@@ -798,6 +971,11 @@ class StrikeResult:
     infra_domains: list[str] = field(default_factory=list)
     infra_apwg_sent: int = 0
     infra_escalation: dict = field(default_factory=dict)
+    # Жалоба регистратору/хостеру домена через RDAP: сколько писем реально ушло на
+    # abuse-контакт (регистратор снимает домен за фрод — убивает саму площадку) +
+    # найденные контакты по доменам.
+    infra_registrar_sent: int = 0
+    infra_registrar_contacts: list[dict] = field(default_factory=list)
 
 
 # ── Pre-flight ─────────────────────────────────────────────────────────────────
@@ -2014,6 +2192,25 @@ async def staggered_strike(
                         log_exc_swallow(
                             log, f"staggered_strike: infra escalation failed target={target}"
                         )
+                    # Второй удар по инфраструктуре: жалоба регистратору каждого
+                    # домена (abuse-контакт из RDAP) — снятие домена убивает саму
+                    # площадку, а не только предупреждает браузеры. Письмо флот не
+                    # расходует, поэтому идёт и при канарейка-стопе.
+                    try:
+                        reg_res = await report_domain_registrar(
+                            pool, plan.owner_id, target, _domains,
+                            plan.reason, plan.preset,
+                        )
+                        result.infra_registrar_sent = reg_res.get("registrar_sent", 0)
+                        result.infra_registrar_contacts = reg_res.get("contacts", [])
+                        log.info(
+                            "strike_engine: registrar target=%s domains=%d sent=%d",
+                            target, len(_domains), result.infra_registrar_sent,
+                        )
+                    except Exception:
+                        log_exc_swallow(
+                            log, f"staggered_strike: registrar escalation failed target={target}"
+                        )
 
             # ═══ Фаза 7: Верификация — реально ли цель ушла в даун ═══
             # Раньше verify_target_takedown была написана, но НИГДЕ не вызывалась:
@@ -2747,10 +2944,11 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             lines.append(
                 "  🕸 Внешняя инфраструктура: "
                 f"доменов <b>{len(r.infra_domains)}</b> · "
-                f"APWG отправлено <b>{r.infra_apwg_sent}</b> "
+                f"APWG отправлено <b>{r.infra_apwg_sent}</b> · "
+                f"регистратору <b>{r.infra_registrar_sent}</b> "
                 f"(<code>{_dsample}</code>) — "
-                "снятие через Safe Browsing/хостинг ломает воронку скама "
-                "независимо от Telegram"
+                "APWG флагает сайт в браузерах, жалоба регистратору снимает сам "
+                "домен: воронка скама ломается независимо от Telegram"
             )
         recon = r.phase_results.get("recon", {})
         lines.append(
