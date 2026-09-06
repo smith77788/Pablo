@@ -2599,11 +2599,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # провалы писали reason в result, не в error_msg).
             "COALESCE(error_msg, result->>'reason') AS error_msg, "
             "created_at, finished_at, scheduled_for, "
-            "COALESCE(result->>'summary', result->>'reason') AS summary "
+            "COALESCE(result->>'summary', result->>'reason') AS summary, "
+            "result AS _result "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)
         d = dict(row)
+        # Быстрые действия по ИТОГУ: раньше сводка советовала словами
+        # («назначьте прокси», «проверьте права», «повторите позже»), а кнопки
+        # рядом не было — совет уходил в пустоту.
+        _res_raw = d.pop("_result", None)
+        try:
+            import json as _json_qa
+            from services import op_quick_actions as _qa
+
+            _res = (_res_raw if isinstance(_res_raw, dict)
+                    else _json_qa.loads(_res_raw or "{}"))
+            d["quick_actions"] = _qa.suggest(
+                d.get("op_type"), d.get("status"), _res, op_id=op_id)
+        except Exception:
+            log.debug("operation_status: быстрые действия недоступны op=%s", op_id)
+            d["quick_actions"] = []
         # ISO для фронта (детали операции: Создано/Завершено/Запланировано)
         for _k in ("created_at", "finished_at", "scheduled_for"):
             if d.get(_k) is not None and hasattr(d[_k], "isoformat"):

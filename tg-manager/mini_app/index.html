@@ -6692,6 +6692,21 @@ const _OP_NEXT = {
   reg_check:     {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
   bot_factory:   {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
 };
+// Быстрые действия по ИТОГУ операции (считает сервер из структурного result).
+// Раньше сводка советовала словами — «назначьте прокси», «проверьте права»,
+// «повторите позже», — а кнопки рядом не было, и совет уходил в пустоту.
+// Мёртвых кнопок не рисуем: если функции нет в сборке, действие пропускаем.
+function _qaButtons(op, limit) {
+  const acts = (op && op.quick_actions) || [];
+  if (!acts.length) return '';
+  return acts.slice(0, limit || 2).map(a => {
+    if (typeof window[a.fn] !== 'function') return '';
+    const call = (a.arg === undefined || a.arg === null)
+      ? `${a.fn}()`
+      : `${a.fn}(${typeof a.arg === 'number' ? a.arg : `'${String(a.arg).replace(/'/g, "\\'")}'`})`;
+    return `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" title="${esc(a.reason||'')}" onclick="event.stopPropagation();hideOpDone();${call}">${esc(a.label)}</button>`;
+  }).join('');
+}
 function _opNextBtn(op) {
   const n = _OP_NEXT[op && op.op_type];
   if (!n || typeof window[n.fn] !== 'function') return '';
@@ -6714,7 +6729,7 @@ function showOpComplete(op) {
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      ${ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`}
+      ${_qaButtons(op) || (ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`)}
       <span style="font-size:12px;color:var(--accent)">Открыть детали →</span>
     </div>`;
   el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
@@ -10370,6 +10385,21 @@ async function openOpDetail(opId) {
     }
     if (o.status==='failed') {
       html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
+    }
+    // Быстрые действия по итогу — с объяснением, ПОЧЕМУ это предложено.
+    // На экране деталей места хватает, поэтому показываем все, а не первые две.
+    const _qa = (o.quick_actions||[]).filter(a => typeof window[a.fn] === 'function');
+    if (_qa.length) {
+      html += `<div class="sec" style="margin-top:12px">⚡ Что сделать дальше</div>
+        <div class="lst" style="margin:0 16px">` + _qa.map(a=>{
+          const call = (a.arg===undefined||a.arg===null)
+            ? `${a.fn}()`
+            : `${a.fn}(${typeof a.arg==='number'?a.arg:`'${String(a.arg).replace(/'/g,"\\'")}'`})`;
+          return `<div class="row" style="cursor:pointer" onclick="${call};back()">
+            <div class="row-body"><div class="row-name">${esc(a.label)}</div>
+            <div class="row-val" style="white-space:normal">${esc(a.reason||'')}</div></div>
+            <div class="row-right"><span class="chev">›</span></div></div>`;
+        }).join('') + `</div>`;
     }
     // Влияние на аккаунты: кто словил FloodWait за эту операцию — замыкает петлю
     // «операция → её след на аккаунтах» (раньше приходилось смотреть каждый акк).

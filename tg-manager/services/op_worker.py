@@ -11628,10 +11628,14 @@ async def _exec_mass_invite(
     )
     # Шов «Инвайт → Welcome»: приветствие реально добавленным (если настроено).
     await _chain_welcome(pool, owner_id, op_id, params)
+    # no_proxy / no_rights_retired отдаём СТРУКТУРНО, а не только текстом сводки:
+    # по ним строятся быстрые действия («назначить прокси», «проверить права»).
+    # Раньше отчёт советовал это словами, а кнопки не было — совет уходил в пустоту.
     return {"status": "done", "ok": total_ok, "failed": total_fail,
             "left": _left, "next_op_id": _next_op,
             "worked_accounts": _engaged_n, "noconnect": _idle_other,
             "all_failed_connect": _all_failed_connect,
+            "no_proxy": _no_proxy_n, "no_rights_retired": _no_rights_retired,
             "flood_storm": flood_storm, "summary": summary}
 
 
