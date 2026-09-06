@@ -10578,7 +10578,14 @@ async def _exec_mass_invite(
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
     _acc_uid: dict = {}          # id аккаунта → tg_user_id (для промоута; наполняется ниже)
-    _no_rights_on_demand: set = set()  # кому уже выдавали права по ходу (анти-цикл)
+    # Сколько раз пробовали выдать права каждому инвайтеру по ходу прогона.
+    # Было множеством («уже пробовали») — одна осечка по сети/флуду промоутера
+    # стоила аккаунта на весь прогон (в отчёте: «N аккаунтов без прав выведены
+    # из круга»). Считаем попытки, потолок — против зацикливания.
+    from services.invite_recovery import (
+        promote_retry_allowed as _irec_promote_retry_allowed,
+    )
+    _no_rights_on_demand: dict = {}
     _auto_promote = params.get("auto_promote", True)
     _promote_trick = params.get("promote_trick", True)
     # Метод «ссылка в ЛС» вообще не требует прав админа — человек вступает сам.
@@ -10956,8 +10963,9 @@ async def _exec_mass_invite(
             # была и не помогла — выводим из круга (анти-цикл), не роняя прогон.
             if res.get("no_rights"):
                 _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
-                if _promoter is not None and acc_id not in _no_rights_on_demand:
-                    _no_rights_on_demand.add(acc_id)
+                if _promoter is not None and _irec_promote_retry_allowed(
+                        _no_rights_on_demand.get(acc_id, 0)):
+                    _no_rights_on_demand[acc_id] = _no_rights_on_demand.get(acc_id, 0) + 1
                     try:
                         from services import account_manager as _am
                         _u = _acc_uid.get(acc_id)
@@ -11253,8 +11261,18 @@ async def _exec_mass_invite(
 
     _next_op = None
     _chain = int(params.get("invite_chain") or 0)
-    if (_left and not group_broken and not flood_storm
-            and not _all_failed_connect and _chain < _MAX_INVITE_CHAIN):
+    # Перегрев флота больше НЕ отменяет продолжение: раньше остаток целей
+    # исчезал вместе с операцией, хотя отчёт сам советовал «дайте отдохнуть и
+    # повторите позже». PeerFlood/FloodWait лечатся отдыхом, и продолжение
+    # уезжает на следующий запуск — так цель достигается без сжигания флота.
+    from services import invite_recovery as _irec
+
+    _cont_ok, _cont_why = _irec.should_schedule_continuation(
+        left=_left, group_broken=group_broken,
+        all_failed_connect=_all_failed_connect,
+        chain=_chain, max_chain=_MAX_INVITE_CHAIN, flood_storm=flood_storm,
+        ok_count=total_ok)
+    if _cont_ok:
         if not await _is_cancelled(pool, op_id):
             _next_op = await _schedule_invite_continuation(
                 pool, owner_id, params, list(q_users), list(q_phones), _chain + 1)
@@ -11343,8 +11361,11 @@ async def _exec_mass_invite(
            ) if (total_ok == 0 and not group_broken and not flood_storm
                  and _fail_reasons.get("privacy", 0) + _fail_reasons.get("not_mutual", 0)
                      >= max(1, int(total_fail * 0.5))) else "")
+        # Про повтор больше НЕ советуем словами: остаток планируется сам (строка
+        # «🔁 Осталось …» ниже). Раньше здесь висел совет «повторите позже», а
+        # продолжение при перегреве не создавалось вовсе — цель просто терялась.
         + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
-           "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
+           "чтобы не потерять аккаунты. Это временный лимит Telegram: он снимается отдыхом."
            if flood_storm else "")
         + (f"\n🚫 {_no_rights_retired} аккаунтов без прав админа выведены из круга — их "
            "цели переданы аккаунтам с правами (если инвайтит только создатель, проверьте, "

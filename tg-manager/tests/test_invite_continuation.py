@@ -77,29 +77,47 @@ def test_continuation_is_not_re_gated_by_plan():
 
 
 def test_chain_is_bounded():
-    from services import op_worker
+    from services import invite_recovery, op_worker
     assert op_worker._MAX_INVITE_CHAIN >= 2, "одного продолжения мало для больших аудиторий"
     assert op_worker._MAX_INVITE_CHAIN <= 60, "забытая операция не должна жить месяцами"
     body = _exec_body()
-    assert "_chain < _MAX_INVITE_CHAIN" in body, "цепочка обязана иметь предел"
+    # Решение переехало в чистую функцию — предел передаётся ей явно.
+    assert "max_chain=_MAX_INVITE_CHAIN" in body, "цепочка обязана иметь предел"
+    assert invite_recovery.should_schedule_continuation(
+        left=10, group_broken=False, all_failed_connect=False,
+        chain=5, max_chain=5)[0] is False, "предел цепочки обязан срабатывать"
     assert '"invite_chain"' in _fn("_schedule_invite_continuation"), (
         "счётчик должен передаваться дальше, иначе предел не сработает"
     )
 
 
 def test_no_continuation_when_the_problem_is_not_limits():
-    body = _exec_body()
-    # Условие продолжения обёрнуто в скобки и занимает несколько строк —
-    # проверяем блок вокруг предела цепочки, а не одну конкретную строку.
-    i = body.index("_chain < _MAX_INVITE_CHAIN")
-    cond = body[i - 220:i + 60]
-    assert "not group_broken" in cond, "закрытая группа: повтор бессмыслен"
-    assert "not flood_storm" in cond, "перегретый флот: повтор навредит"
+    """Границы сохранены, но правило про перегрев стало ТОЧНЕЕ.
+
+    Раньше любой перегрев отменял продолжение — и остаток целей исчезал вместе с
+    операцией (живой прогон: 203/380, остаток 177 потерян). Теперь различаем:
+    перегрев ПОСЛЕ успехов = флот упёрся в потолок, лечится отдыхом, остаток
+    уезжает на следующий запуск; перегрев БЕЗ единого успеха = флагнутый чат или
+    аудитория, повтор жжёт аккаунты — продолжения нет.
+    """
+    from services import invite_recovery as ir
+
+    def _c(**kw):
+        base = dict(left=100, group_broken=False, all_failed_connect=False,
+                    chain=0, max_chain=5)
+        base.update(kw)
+        return ir.should_schedule_continuation(**base)
+
+    assert _c(group_broken=True)[0] is False, "закрытая группа: повтор бессмыслен"
+    assert _c(flood_storm=True, ok_count=0)[0] is False, (
+        "перегрев без единого успеха: повтор навредит")
+    assert _c(flood_storm=True, ok_count=203)[0] is True, (
+        "перегрев после успехов — временный лимит, цель нельзя бросать")
 
 
 def test_no_continuation_after_cancel():
     body = _exec_body()
-    seg = body[body.index("_chain < _MAX_INVITE_CHAIN"):][:400]
+    seg = body[body.index("should_schedule_continuation"):][:500]
     assert "_is_cancelled" in seg, (
         "отменённая операция не имеет права воскресать продолжением"
     )
