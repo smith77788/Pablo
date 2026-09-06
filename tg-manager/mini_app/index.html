@@ -805,6 +805,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div style="display:flex;gap:8px;padding:0 0 10px">
       <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+      <!-- Инвентаризация флота: боты, созданные с аккаунтов, скану ресурсов
+           не видны (бот — не канал), и раньше их нельзя было найти вовсе. -->
+      <button class="btn btn-s" onclick="scanFleetBots()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Найти на флоте</button>
+      <button class="btn btn-s" onclick="showDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">📋 Найденные</button>
     </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -7818,10 +7822,36 @@ async function loadBots() {
   }
 }
 
+// Скан флота на ботов: спрашивает @BotFather от лица каждого аккаунта.
+// Токены при этом не добываются — это отдельный диалог на каждого бота;
+// задача скана быстро показать, ЧТО есть и на каком аккаунте.
+async function scanFleetBots() {
+  if (!await askConfirm('Спросить @BotFather на каждом аккаунте флота, какие боты им принадлежат?\nЭто займёт время: обращения к BotFather разносятся, чтобы не ловить лимиты.')) return;
+  try {
+    const r = await api('/api/miniapp/bots/scan_fleet', {method:'POST', body:'{}'});
+    toast('🔍 Скан запущен' + (r.op_id ? ' · операция #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Скан флота на ботов');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+async function showDiscoveredBots() {
+  try {
+    const d = await api('/api/miniapp/bots/discovered');
+    const bots = d.bots||[];
+    if (!bots.length) { toast('Найденных ботов пока нет — запустите скан флота'); return; }
+    const lines = bots.slice(0,40).map(b =>
+      `${b.connected?'✅':'○'} @${esc(b.username)}${b.account?' · '+esc(b.account):''}`).join('\n');
+    await showInfo(`Найдено ботов: ${d.total} (подключено ${d.connected})\n\n`
+                   + lines.substring(0, 3000));
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+
 function renderBots() {
   const wrap = document.getElementById('botList');
   if (!wrap) return;
-  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Подключите бота по токену от @BotFather',{label:'➕ Добавить бота',fn:'openBotAddModal()'}); return; }
+  // Пустой список ≠ «ботов нет»: боты могли быть созданы с аккаунтов флота, а
+  // скан ресурсов их никогда не находил (бот — не канал). Даём найти их, а не
+  // только вставлять токены руками по одному.
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет подключённых ботов','Боты, созданные с ваших аккаунтов, можно найти сканом флота — или подключить по токену от @BotFather',{label:'🔍 Найти ботов на флоте',fn:'scanFleetBots()'}); return; }
   wrap.className = 'bot-cards';
   wrap.innerHTML = BOTS.map(b=>{
     // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй

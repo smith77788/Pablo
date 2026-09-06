@@ -1637,6 +1637,7 @@ def _build_dispatch() -> dict:
         "bulk_update_profile": _exec_bulk_update_profile,
         "check_accounts_health": _exec_check_accounts_health,
         "scan_owned_resources": _exec_scan_owned_resources,
+        "scan_owned_bots": _exec_scan_owned_bots,
         "account_warmup": _exec_account_warmup,
         "auto_register": _exec_auto_register,
         "leave_all_chats": _exec_leave_all_chats,
@@ -8437,6 +8438,108 @@ async def _exec_check_accounts_health(
         "spamblock_perm": spamblock_perm,
         "summary": summary,
     }
+
+
+async def _exec_scan_owned_bots(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Найти ботов, которыми владеют аккаунты флота (@BotFather /mybots).
+
+    Разрыв: скан ресурсов находил каналы и чаты, но ботов — никогда (бот не
+    Channel и в обходе диалогов не виден). На живом флоте это «164 канала/чата,
+    32 аккаунта и 0 ботов», а подключить бота можно было только вручную по
+    токену. Здесь — быстрая инвентаризация: что есть и на каком аккаунте.
+    Токены не добываются: это отдельный диалог с BotFather на каждого бота.
+    """
+    from services import account_manager
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    _COLS = """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+                      a.device_model, a.system_version, a.app_version,
+                      a.lang_code, a.system_lang_code, a.cf_relay_url,
+                      a.proxy_id, p.proxy_url, p.geo_country
+                 FROM tg_accounts a
+                 LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE"""
+    if account_ids:
+        rows = await _safe_fetch(pool, _COLS + " WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+                                 owner_id, account_ids)
+    else:
+        rows = await _safe_fetch(pool, _COLS + " WHERE a.owner_id=$1 AND a.is_active=TRUE",
+                                 owner_id)
+    accounts = [dict(r) for r in (rows or []) if r["session_str"]]
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет аккаунтов с сессией для скана"}
+
+    claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed:
+        return {"status": "failed",
+                "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed)]
+
+    found_total = 0
+    new_total = 0
+    dead = 0
+    lines: list[str] = []
+    try:
+        await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+                            len(accounts), op_id)
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                break
+            label = acc.get("first_name") or acc.get("phone") or f"ID {acc['id']}"
+            try:
+                res = await asyncio.wait_for(
+                    account_manager.scan_owned_bots(acc["session_str"], _acc=acc),
+                    timeout=90)
+            except Exception as e:
+                res = {"bots": [], "error": str(e)[:120]}
+            if res.get("error"):
+                dead += 1
+                lines.append(f"⚠️ {label}: {res['error']}")
+            bots = res.get("bots") or []
+            found_total += len(bots)
+            for uname in bots:
+                try:
+                    row = await pool.fetchrow(
+                        """INSERT INTO discovered_bots(owner_id, acc_id, username)
+                           VALUES($1,$2,$3)
+                           ON CONFLICT (owner_id, username) DO UPDATE
+                             SET last_seen=now(), acc_id=EXCLUDED.acc_id
+                           RETURNING (xmax = 0) AS inserted""",
+                        owner_id, int(acc["id"]), uname)
+                    if row and row["inserted"]:
+                        new_total += 1
+                except Exception:
+                    log.warning("scan_owned_bots: не удалось записать @%s", uname)
+            if bots:
+                lines.append(f"✅ {label}: {len(bots)} — " + ", ".join("@" + b for b in bots[:8]))
+            await _safe_execute(pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                                idx + 1, op_id)
+            # BotFather не любит частых обращений подряд — разносим аккаунты.
+            await asyncio.sleep(random.uniform(3.0, 7.0))
+    finally:
+        await release_accounts([int(a["id"]) for a in accounts])
+
+    # Отмечаем уже подключённых: найденный ≠ подключённый, и человек должен
+    # видеть, что из найденного уже под управлением.
+    try:
+        await pool.execute(
+            """UPDATE discovered_bots d SET linked_bot_id = mb.bot_id
+                 FROM managed_bots mb
+                WHERE d.owner_id=$1 AND mb.added_by=$1
+                  AND lower(mb.username) = lower(d.username)""", owner_id)
+    except Exception:
+        log.debug("scan_owned_bots: связывание с managed_bots пропущено")
+
+    summary = (f"🤖 Скан ботов: найдено {found_total} на {len(accounts)} аккаунтах"
+               + (f", новых {new_total}" if new_total else "")
+               + (f"; {dead} аккаунтов не ответили" if dead else ""))
+    if lines:
+        summary += "\n" + "\n".join(lines[:20])
+    if not found_total:
+        summary += ("\nБотов не найдено. Если боты есть — они могли быть созданы "
+                    "не с этих аккаунтов: скан спрашивает @BotFather от лица каждого.")
+    return {"status": "done", "found": found_total, "new": new_total, "summary": summary}
 
 
 async def _exec_scan_owned_resources(

@@ -7065,6 +7065,103 @@ async def update_account_username(
 
 _BOTFATHER_USERNAME = "BotFather"
 
+
+def parse_mybots_usernames(button_labels) -> list[str]:
+    """Достать @username ботов из кнопок ответа BotFather на /mybots.
+
+    Разрыв: скан флота находил каналы и чаты (обход диалогов ищет Channel), но
+    БОТОВ не находил никогда — бот, созданный аккаунтом, это не Channel и в
+    диалогах как «свой ресурс» не виден. Итог на живом флоте: 164 канала/чата,
+    32 аккаунта и 0 ботов, хотя боты есть. Единственный достоверный источник
+    списка своих ботов — сам @BotFather.
+
+    Чистая функция: на вход подписи кнопок клавиатуры, на выход — нормализованные
+    username'ы. Навигационные кнопки («Back», «Cancel», пагинация) отсеиваются
+    правилом Telegram: username бота обязан оканчиваться на «bot».
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in (button_labels or []):
+        s = str(raw or "").strip()
+        if not s.startswith("@"):
+            continue
+        # BotFather иногда пишет «@name — описание»: берём первый токен.
+        s = s.split()[0].strip()
+        uname = s.lstrip("@")
+        if len(uname) < 5 or not uname.lower().endswith("bot"):
+            continue
+        if not all(c.isalnum() or c == "_" for c in uname):
+            continue
+        key = uname.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(uname)
+    return out
+
+
+async def scan_owned_bots(session_string: str, _acc: dict | None = None) -> dict:
+    """Список ботов, которыми владеет ЭТОТ аккаунт (через @BotFather /mybots).
+
+    Возвращает {'bots': [username, ...], 'error': str|None}. Токены здесь НЕ
+    добываются: их выдача — отдельный многошаговый диалог с BotFather на каждого
+    бота, и гонять его по всему флоту разом значит без нужды долбить BotFather.
+    Задача этого скана — быстро узнать, ЧТО и НА КАКОМ аккаунте есть.
+
+    Сетевая часть на живом Telegram не покрыта юнит-тестами (заглушка типы не
+    связывает) — разбор ответа вынесен в parse_mybots_usernames и проверяется.
+    """
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        bf = await client.get_entity(_BOTFATHER_USERNAME)
+        bf_id = bf.id
+
+        baseline = 0
+        try:
+            msgs = await client.get_messages(bf, limit=1)
+            if msgs and msgs[0].sender_id == bf_id:
+                baseline = msgs[0].id
+        except Exception:
+            log_exc_swallow(log, "scan_owned_bots: baseline")
+
+        await asyncio.sleep(random.uniform(1.0, 2.5))
+        await client.send_message(bf, "/mybots")
+
+        labels: list[str] = []
+        deadline = asyncio.get_event_loop().time() + 45.0
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(2.5)
+            try:
+                msgs = await client.get_messages(bf, limit=3)
+            except Exception:
+                continue
+            fresh = [m for m in (msgs or [])
+                     if m.id > baseline and m.sender_id == bf_id]
+            if not fresh:
+                continue
+            for m in fresh:
+                markup = getattr(m, "reply_markup", None)
+                for row in (getattr(markup, "rows", None) or []):
+                    for btn in (getattr(row, "buttons", None) or []):
+                        t = getattr(btn, "text", None)
+                        if t:
+                            labels.append(t)
+            if labels:
+                break
+        return {"bots": parse_mybots_usernames(labels), "error": None}
+    except Exception as e:
+        err = str(e)
+        low = err.lower()
+        if any(x in low for x in ("auth", "unauthorized", "key is not registered")):
+            return {"bots": [], "error": "сессия недействительна"}
+        return {"bots": [], "error": err[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "scan_owned_bots: disconnect")
+
 # Phrases BotFather uses at each step of /newbot (English + Russian variants)
 _BF_STEP_NAME = (
     "name",

@@ -162,6 +162,16 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_notified_at TIMESTAMPTZ",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_reason TEXT",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_at TIMESTAMPTZ",
+    # v200: боты, найденные на аккаунтах флота (скан через @BotFather).
+    # Найденный ≠ подключённый: у найденного есть username и аккаунт-владелец,
+    # но нет токена, поэтому в managed_bots (token UNIQUE NOT NULL) он не лежит.
+    """CREATE TABLE IF NOT EXISTS discovered_bots (
+        id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, acc_id BIGINT,
+        username TEXT NOT NULL, linked_bot_id BIGINT,
+        first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (owner_id, username))""",
+    "CREATE INDEX IF NOT EXISTS idx_discovered_bots_owner ON discovered_bots(owner_id, last_seen DESC)",
     # v199: общие папки как канал инвайтинга.
     """CREATE TABLE IF NOT EXISTS chatlist_folders (
         id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, acc_id BIGINT,
@@ -9527,6 +9537,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # строчки — при том что подпись раздела обещала «восстановление».
 
     # ── Общие папки (Shared Folders) как канал инвайтинга ──────────────────────
+    async def bots_scan_fleet(request: web.Request) -> web.Response:
+        """Запустить скан флота на ботов (@BotFather /mybots по каждому аккаунту).
+
+        Разрыв: скан ресурсов находил каналы и чаты, но ботов — никогда, и
+        подключить бота можно было только вручную по токену. На живом флоте это
+        «164 канала/чата, 32 аккаунта и 0 ботов»."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        acc_ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "scan_owned_bots", {"account_ids": acc_ids},
+                total_items=len(acc_ids) or 1, label="Скан флота на ботов")
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        return _json_resp({"ok": True, "op_id": op_id})
+
+    async def bots_discovered_list(request: web.Request) -> web.Response:
+        """Найденные на флоте боты: что есть, на каком аккаунте, подключён ли."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT d.username, d.acc_id, d.linked_bot_id, d.last_seen,
+                      a.first_name, a.phone
+                 FROM discovered_bots d
+                 LEFT JOIN tg_accounts a ON a.id = d.acc_id
+                WHERE d.owner_id=$1
+                ORDER BY (d.linked_bot_id IS NULL) DESC, d.username
+                LIMIT 500""", uid)
+        out = []
+        for r in (rows or []):
+            d = dict(r)
+            d["last_seen"] = d["last_seen"].isoformat() if d.get("last_seen") else None
+            d["connected"] = d.get("linked_bot_id") is not None
+            d["account"] = d.get("first_name") or d.get("phone") or (
+                f"#{d['acc_id']}" if d.get("acc_id") else "")
+            out.append(d)
+        return _json_resp({"ok": True, "bots": out,
+                           "total": len(out),
+                           "connected": sum(1 for x in out if x["connected"])})
+
     async def chatlist_folders_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -15577,6 +15634,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
+    app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
+    app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
     app.router.add_post("/api/miniapp/chatlist_folders", chatlist_folder_create)
     app.router.add_delete("/api/miniapp/chatlist_folders/{folder_id}", chatlist_folder_delete)
