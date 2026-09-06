@@ -1638,6 +1638,7 @@ def _build_dispatch() -> dict:
         "check_accounts_health": _exec_check_accounts_health,
         "scan_owned_resources": _exec_scan_owned_resources,
         "scan_owned_bots": _exec_scan_owned_bots,
+        "connect_discovered_bots": _exec_connect_discovered_bots,
         "account_warmup": _exec_account_warmup,
         "auto_register": _exec_auto_register,
         "leave_all_chats": _exec_leave_all_chats,
@@ -8438,6 +8439,137 @@ async def _exec_check_accounts_health(
         "spamblock_perm": spamblock_perm,
         "summary": summary,
     }
+
+
+async def _exec_connect_discovered_bots(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Подключить найденных на флоте ботов пакетом: токен от BotFather → база.
+
+    Без этого скан был тупиком: найденного бота видно, а подключить нечем —
+    токена у него нет. Токен выдаёт сам BotFather по кнопке «API Token», и
+    забираем мы его сессией того аккаунта, которому бот принадлежит.
+
+    Токены нигде не логируются; в базу уходят через db.add_bot (шифрование
+    token_vault). Уважаем лимит тарифа на число ботов.
+    """
+    from services import account_manager, bot_api
+    from database import db as _db
+    from bot.utils.subscription import get_bot_limit, get_effective_bot_count
+
+    only = [str(u).lstrip("@").lower() for u in (params.get("usernames") or [])]
+    try:
+        cap = max(1, min(50, int(params.get("limit") or 20)))
+    except (TypeError, ValueError):
+        cap = 20
+
+    rows = await _safe_fetch(pool,
+        """SELECT d.username, d.acc_id FROM discovered_bots d
+            WHERE d.owner_id=$1 AND d.linked_bot_id IS NULL AND d.acc_id IS NOT NULL
+            ORDER BY d.username""", owner_id)
+    pending = [dict(r) for r in (rows or [])]
+    if only:
+        pending = [p for p in pending if str(p["username"]).lower() in set(only)]
+    if not pending:
+        return {"status": "done", "connected": 0,
+                "summary": "🤖 Нечего подключать: все найденные боты уже подключены "
+                           "или список пуст — запустите скан флота."}
+
+    # Тарифный потолок: не пытаемся подключать больше, чем разрешено планом.
+    try:
+        _lim = await get_bot_limit(pool, owner_id)
+        _have = await get_effective_bot_count(pool, owner_id)
+        room = max(0, int(_lim) - int(_have))
+    except Exception:
+        room = cap
+    if room <= 0:
+        return {"status": "failed",
+                "summary": "⚠️ Достигнут лимит ботов по тарифу — подключение невозможно"}
+    pending = pending[:min(cap, room)]
+
+    # Группируем по аккаунту-владельцу: один диалог с BotFather на аккаунт.
+    by_acc: dict = {}
+    for p in pending:
+        by_acc.setdefault(int(p["acc_id"]), []).append(p["username"])
+
+    acc_rows = await _safe_fetch(pool,
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+                  a.device_model, a.system_version, a.app_version, a.lang_code,
+                  a.system_lang_code, a.cf_relay_url, a.proxy_id,
+                  p.proxy_url, p.geo_country
+             FROM tg_accounts a
+             LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+            WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])""",
+        owner_id, list(by_acc.keys()))
+    accounts = {int(r["id"]): dict(r) for r in (acc_rows or []) if r["session_str"]}
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет живых сессий аккаунтов-владельцев"}
+
+    claimed = await try_claim_accounts(list(accounts.keys()))
+    if not claimed:
+        return {"status": "failed", "summary": "⚠️ Аккаунты заняты другой операцией"}
+
+    connected = 0
+    failed: list[str] = []
+    try:
+        await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+                            len(pending), op_id)
+        import aiohttp as _aio
+
+        done_n = 0
+        async with _aio.ClientSession() as _http:
+            for acc_id in list(claimed):
+                acc = accounts.get(int(acc_id))
+                if not acc:
+                    continue
+                names = by_acc.get(int(acc_id)) or []
+                if await _is_cancelled(pool, op_id):
+                    break
+                try:
+                    res = await asyncio.wait_for(
+                        account_manager.fetch_bot_tokens_via_botfather(
+                            acc["session_str"], names, _acc=acc, limit=len(names)),
+                        timeout=60 + 25 * len(names))
+                except Exception as e:
+                    failed.append(f"аккаунт #{acc_id}: {str(e)[:70]}")
+                    continue
+                for uname, token in (res.get("tokens") or {}).items():
+                    done_n += 1
+                    try:
+                        info = await bot_api.get_me(_http, token)
+                        if not info or not info.get("id"):
+                            failed.append(f"@{uname}: токен не принят Telegram")
+                            continue
+                        added = await _db.add_bot(
+                            pool, token=token, bot_id=int(info["id"]),
+                            username=info.get("username", "") or uname,
+                            first_name=info.get("first_name", "") or "",
+                            added_by=owner_id)
+                        if added == "taken":
+                            failed.append(f"@{uname}: бот уже подключён другим владельцем")
+                            continue
+                        connected += 1
+                        await _safe_execute(
+                            pool,
+                            "UPDATE discovered_bots SET linked_bot_id=$3 "
+                            "WHERE owner_id=$1 AND lower(username)=lower($2)",
+                            owner_id, uname, int(info["id"]))
+                    except Exception:
+                        # Токен в текст ошибки не попадает намеренно.
+                        failed.append(f"@{uname}: не удалось подключить")
+                for uname, why in (res.get("errors") or {}).items():
+                    if uname != "_":
+                        failed.append(f"@{uname}: {why}")
+                await _safe_execute(pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                                    done_n, op_id)
+                await asyncio.sleep(random.uniform(3.0, 6.0))
+    finally:
+        await release_accounts(list(claimed))
+
+    summary = f"🤖 Подключено ботов: {connected} из {len(pending)}"
+    if failed:
+        summary += "\nНе удалось:\n" + "\n".join(f"• {x}" for x in failed[:15])
+    return {"status": "done", "connected": connected, "summary": summary}
 
 
 async def _exec_scan_owned_bots(

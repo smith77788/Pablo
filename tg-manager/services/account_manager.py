@@ -7100,6 +7100,113 @@ def parse_mybots_usernames(button_labels) -> list[str]:
     return out
 
 
+def parse_botfather_token(text: str) -> str | None:
+    """Достать токен бота из ответа BotFather на кнопку «API Token».
+
+    BotFather пишет «Here is the token for @name: <token>» (или по-русски).
+    Формат токена жёсткий — по нему и находим, не полагаясь на текст вокруг,
+    который Telegram меняет и локализует.
+    """
+    import re as _re
+
+    m = _re.search(r"\b(\d{6,}:[A-Za-z0-9_-]{30,})\b", str(text or ""))
+    return m.group(1) if m else None
+
+
+# Подписи кнопки «показать токен» у BotFather (англ. и рус. локали).
+_BF_TOKEN_BTN = ("api token", "back to bot", "токен")
+
+
+async def fetch_bot_tokens_via_botfather(
+    session_string: str, usernames: list, _acc: dict | None = None,
+    limit: int = 20,
+) -> dict:
+    """Получить токены указанных ботов через диалог с @BotFather.
+
+    Возвращает {'tokens': {username: token}, 'errors': {username: причина}}.
+
+    Зачем: без токена найденный бот подключить нечем, и список найденных был бы
+    тупиком — посмотреть можно, сделать нельзя. Токен выдаёт сам BotFather по
+    кнопке «API Token» в /mybots.
+
+    Диалог платный по времени и лимитам, поэтому: потолок на прогон, паузы между
+    ботами, и мы НИКОГДА не логируем сам токен.
+
+    Сетевая часть на живом Telegram юнит-тестами не покрыта (заглушка типы не
+    связывает) — разбор ответа вынесен в parse_botfather_token и проверяется.
+    """
+    tokens: dict = {}
+    errors: dict = {}
+    wanted = [str(u).lstrip("@") for u in (usernames or []) if str(u or "").strip()][:max(1, int(limit))]
+    if not wanted:
+        return {"tokens": {}, "errors": {}}
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        bf = await client.get_entity(_BOTFATHER_USERNAME)
+
+        async def _latest():
+            msgs = await client.get_messages(bf, limit=1)
+            return msgs[0] if msgs else None
+
+        for uname in wanted:
+            try:
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+                await client.send_message(bf, "/mybots")
+                await asyncio.sleep(3.0)
+                msg = await _latest()
+                if msg is None:
+                    errors[uname] = "BotFather не ответил"
+                    continue
+                # 1) выбрать бота в списке
+                try:
+                    await msg.click(text=f"@{uname}")
+                except Exception:
+                    errors[uname] = "бот не найден в списке BotFather"
+                    continue
+                await asyncio.sleep(2.5)
+                msg = await _latest()
+                # 2) нажать «API Token»
+                clicked = False
+                for row in (getattr(getattr(msg, "reply_markup", None), "rows", None) or []):
+                    for btn in (getattr(row, "buttons", None) or []):
+                        label = str(getattr(btn, "text", "") or "").strip().lower()
+                        if "api token" in label or label == "токен":
+                            try:
+                                await msg.click(text=getattr(btn, "text"))
+                                clicked = True
+                            except Exception:
+                                pass
+                            break
+                    if clicked:
+                        break
+                if not clicked:
+                    errors[uname] = "кнопка «API Token» не найдена"
+                    continue
+                await asyncio.sleep(2.5)
+                msg = await _latest()
+                tok = parse_botfather_token(getattr(msg, "text", "") or "")
+                if tok:
+                    tokens[uname] = tok            # НЕ логируем
+                else:
+                    errors[uname] = "BotFather не показал токен"
+            except Exception as e:
+                errors[uname] = str(e)[:120]
+        return {"tokens": tokens, "errors": errors}
+    except Exception as e:
+        low = str(e).lower()
+        why = ("сессия недействительна"
+               if any(x in low for x in ("auth", "unauthorized", "key is not registered"))
+               else str(e)[:160])
+        return {"tokens": tokens, "errors": {**errors, "_": why}}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "fetch_bot_tokens_via_botfather: disconnect")
+
+
 async def scan_owned_bots(session_string: str, _acc: dict | None = None) -> dict:
     """Список ботов, которыми владеет ЭТОТ аккаунт (через @BotFather /mybots).
 

@@ -328,6 +328,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🤖",
     },
+    "connect_discovered_bots": {
+        "description": "Подключение найденных на флоте ботов (токены от @BotFather)",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔌",
+    },
     "reclassify_channels": {
         "description": "Переопределение моей инфраструктуры (убрать чужие каналы)",
         "min_plan": "starter",

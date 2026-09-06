@@ -9633,6 +9633,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         return _json_resp({"ok": True, "op_id": op_id})
 
+    async def bots_connect_discovered(request: web.Request) -> web.Response:
+        """Подключить найденных ботов пакетом (токены забирает у @BotFather).
+
+        Без этого скан был тупиком: найденного бота видно, а подключить нечем —
+        токена у него нет. Пустой usernames = подключить всех неподключённых.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        names = [str(u).lstrip("@") for u in (body.get("usernames") or []) if str(u or "").strip()]
+        try:
+            limit = max(1, min(50, int(body.get("limit") or 20)))
+        except (TypeError, ValueError):
+            limit = 20
+        pending = await _safe_count(pool,
+            "SELECT COUNT(*) FROM discovered_bots "
+            "WHERE owner_id=$1 AND linked_bot_id IS NULL AND acc_id IS NOT NULL", uid)
+        if not pending:
+            return _err("Нечего подключать: найденных неподключённых ботов нет — "
+                        "запустите скан флота", 409)
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "connect_discovered_bots",
+                {"usernames": names, "limit": limit},
+                total_items=len(names) or min(int(pending), limit),
+                label="Подключение найденных ботов")
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        return _json_resp({"ok": True, "op_id": op_id,
+                           "pending": int(pending)})
+
     async def bots_discovered_list(request: web.Request) -> web.Response:
         """Найденные на флоте боты: что есть, на каком аккаунте, подключён ли."""
         uid = _get_uid(request)
@@ -15711,6 +15746,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/operations/retry_failed", operations_retry_failed)
     app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
+    app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
     app.router.add_post("/api/miniapp/chatlist_folders", chatlist_folder_create)
     app.router.add_delete("/api/miniapp/chatlist_folders/{folder_id}", chatlist_folder_delete)

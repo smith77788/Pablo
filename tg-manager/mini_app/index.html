@@ -809,6 +809,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
            не видны (бот — не канал), и раньше их нельзя было найти вовсе. -->
       <button class="btn btn-s" onclick="scanFleetBots()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Найти на флоте</button>
       <button class="btn btn-s" onclick="showDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">📋 Найденные</button>
+      <button class="btn btn-p" onclick="connectDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">🔌 Подключить найденных</button>
     </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -7839,6 +7840,17 @@ async function scanFleetBots() {
     if (r.op_id) pollOpResult(r.op_id, 'Скан флота на ботов');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
+// Подключение найденных пакетом: скан даёт username, а подключить бота можно
+// только по токену — его отдаёт сам @BotFather по кнопке «API Token».
+// Без этого список найденных был бы тупиком: видно, но сделать нельзя.
+async function connectDiscoveredBots() {
+  if (!await askConfirm('Подключить найденных ботов?\nInfragram спросит их токены у @BotFather от лица аккаунтов-владельцев. Это займёт время: обращения разносятся, чтобы не ловить лимиты.')) return;
+  try {
+    const r = await api('/api/miniapp/bots/connect_discovered', {method:'POST', body:'{}'});
+    toast('🔌 Подключение запущено' + (r.op_id ? ' · операция #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Подключение найденных ботов', loadBots);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
+}
 async function showDiscoveredBots() {
   try {
     const d = await api('/api/miniapp/bots/discovered');
@@ -7846,8 +7858,10 @@ async function showDiscoveredBots() {
     if (!bots.length) { toast('Найденных ботов пока нет — запустите скан флота'); return; }
     const lines = bots.slice(0,40).map(b =>
       `${b.connected?'✅':'○'} @${esc(b.username)}${b.account?' · '+esc(b.account):''}`).join('\n');
+    const pending = d.total - d.connected;
     await showInfo(`Найдено ботов: ${d.total} (подключено ${d.connected})\n\n`
-                   + lines.substring(0, 3000));
+                   + lines.substring(0, 2600)
+                   + (pending ? `\n\nНе подключено: ${pending}. Кнопка «🔌 Подключить найденных» заберёт их токены у @BotFather.` : ''));
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 

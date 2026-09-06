@@ -121,6 +121,76 @@ def test_ui_offers_the_scan_instead_of_only_manual_token():
     assert "Нет подключённых ботов" in _UI
 
 
+# ── Подключение найденных: скан без этого — тупик ──────────────────────────
+# Найденный бот виден, но подключить его нечем: токена у него нет. Токен
+# отдаёт сам @BotFather по кнопке «API Token».
+
+def test_token_is_parsed_from_botfather_reply():
+    from services.account_manager import parse_botfather_token as T
+
+    assert T("Here is the token for @shop_bot:\n123456789:AAH-abcdefghijklmnopqrstuvwxyz012345") \
+        == "123456789:AAH-abcdefghijklmnopqrstuvwxyz012345"
+
+
+def test_token_parser_ignores_text_without_a_token():
+    from services.account_manager import parse_botfather_token as T
+
+    assert T("Choose a bot from the list below:") is None
+    assert T("") is None
+    assert T(None) is None
+
+
+def test_token_parser_does_not_accept_short_garbage():
+    from services.account_manager import parse_botfather_token as T
+
+    assert T("12:short") is None
+
+
+def test_connect_operation_is_registered():
+    assert '"connect_discovered_bots"' in _BUS
+    assert '"connect_discovered_bots": _exec_connect_discovered_bots' in _OPW
+
+
+def test_connect_respects_plan_limit_and_claims_accounts():
+    src = _func_src(_OPW, "_exec_connect_discovered_bots")
+    assert "get_bot_limit" in src and "get_effective_bot_count" in src, (
+        "нельзя подключать больше, чем разрешено тарифом")
+    assert "try_claim_accounts" in src and "release_accounts" in src
+    assert "finally" in src
+
+
+def test_connect_only_touches_not_yet_connected():
+    src = _func_src(_OPW, "_exec_connect_discovered_bots")
+    assert "linked_bot_id IS NULL" in src
+    # После подключения отметка проставляется — повтор не берёт того же дважды.
+    assert "SET linked_bot_id=$3" in src
+
+
+def test_connect_never_logs_the_token():
+    """Токен — секрет: он не должен попадать ни в лог, ни в текст ошибки."""
+    src = _func_src(_OPW, "_exec_connect_discovered_bots")
+    assert "log.info(token" not in src and "log.warning(token" not in src
+    assert "не удалось подключить" in src, (
+        "текст ошибки должен быть без токена")
+    fetch = _func_src(
+        (_ROOT / "services" / "account_manager.py").read_text(encoding="utf-8"),
+        "fetch_bot_tokens_via_botfather")
+    assert "НЕ логируем" in fetch
+
+
+def test_connect_endpoint_wired_and_gated():
+    src = _func_src(_API, "bots_connect_discovered")
+    assert "connect_discovered_bots" in src and "_obus.submit" in src
+    assert "403" in src
+    assert "owner_id=$1" in src
+    assert 'app.router.add_post("/api/miniapp/bots/connect_discovered"' in _API
+
+
+def test_ui_offers_bulk_connect():
+    assert "connectDiscoveredBots" in _UI
+    assert "Подключить найденных" in _UI
+
+
 def test_schema_file_exists():
     assert (_ROOT / "schema_v200_discovered_bots.sql").exists()
     assert "CREATE TABLE IF NOT EXISTS discovered_bots" in _API
