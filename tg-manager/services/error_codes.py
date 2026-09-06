@@ -1,10 +1,11 @@
 """Error codes for debugging and user-facing error messages.
 
 Usage:
-    from services.error_codes import ErrorCode, get_error_message, get_user_message
+    from services.error_codes import from_exception, get_error_message, get_user_message
 
-    # Get error code for an exception
-    error_code = ErrorCode.from_exception(exc)
+    # Get error code for an exception (from_exception — module function, NOT a method
+    # on the ErrorCode enum; ErrorCode.from_exception(...) → AttributeError)
+    error_code = from_exception(exc)
 
     # Get user-friendly message (in Russian)
     user_msg = get_user_message(error_code)

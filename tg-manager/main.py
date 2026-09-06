@@ -17,7 +17,7 @@ from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
-from services.error_codes import ErrorCode, get_user_message
+from services.error_codes import ErrorCode, from_exception, get_user_message
 from services.error_reporting import report_error, get_user_error_message
 from services.error_monitor import install_error_monitoring
 from bot.middlewares.user_activity import UserActivityLogMiddleware
@@ -207,8 +207,11 @@ async def _global_error_handler(event: ErrorEvent) -> None:
     if "query is too old" in exc_str or "query_id_invalid" in exc_str or "query id is invalid" in exc_str:
         return
 
-    # Get error code and user message
-    error_code = ErrorCode.from_exception(exc)
+    # Get error code and user message.
+    # from_exception — модуль-функция services.error_codes, НЕ метод Enum ErrorCode.
+    # Раньше вызывалась как атрибут Enum → AttributeError на второй строке
+    # глобального обработчика: юзер не получал ⚠️-ответа, report_error не звался.
+    error_code = from_exception(exc)
     user_msg = get_user_message(error_code)
     
     # Get user ID for context
