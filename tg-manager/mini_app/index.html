@@ -7256,7 +7256,7 @@ async function loadOrganismPulse() {
             </div>
             <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px">✕</span>
           </div>
-          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick='runPulseAction(${JSON.stringify(s.action)})'>▶ ${esc(pulseActionLabel(s.action))}</button>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
       }).join('');
       html += '</div>';
@@ -7308,7 +7308,7 @@ async function openDigest() {
         return `<div style="border-left:3px solid ${sv.c};background:var(--bg2);border-radius:0 10px 10px 0;padding:9px 12px">
           <div style="font-size:13.5px;font-weight:600">${sv.e} ${esc(s.title)}</div>
           <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
-          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick='runPulseAction(${JSON.stringify(s.action)})'>▶ ${esc(pulseActionLabel(s.action))}</button>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
       }).join('');
       h += '</div>';
@@ -7463,6 +7463,20 @@ function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
     campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата', seo:'Оптимизировать SEO', retention:'Настроить welcome', health:'Открыть здоровье'})[a&&a.kind] || 'Открыть';
+}
+// Действие подсказки Пульса — ОБЪЕКТ {kind, param}, и param бывает строкой.
+// Класть его в атрибут через JSON.stringify нельзя: свои кавычки JSON и
+// неэкранированный апостроф рвут разметку. Держим действия в карте, в атрибут
+// уходит только ключ (экранированный esc, как у соседней кнопки «✕»).
+const _PULSE_ACTIONS = {};
+function _pulseKeep(s) {
+  const key = String((s && s.id) || ('a' + Object.keys(_PULSE_ACTIONS).length));
+  _PULSE_ACTIONS[key] = s && s.action;
+  return key;
+}
+function runPulseActionById(key) {
+  const a = _PULSE_ACTIONS[key];
+  if (a) runPulseAction(a);
 }
 function runPulseAction(a) {
   const k = a && a.kind;
@@ -7671,12 +7685,22 @@ function renderFrequent() {
     .slice(0, 8);
   if (items.length < 3) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
   wrap.style.display = 'block';
-  list.innerHTML = items.map(x => `
-    <div class="freq-chip" onclick='replayAction(${JSON.stringify(x.onclick)})'>
+  // Сохранённая строка вызова почти всегда содержит СВОИ апострофы
+  // (`openAccountChat(5,'123')`), а атрибут обёрнут в апострофы — разметка
+  // рвалась, и чип не работал. В атрибут кладём индекс, строку берём из кэша.
+  _FREQ_ITEMS = items;
+  list.innerHTML = items.map((x, i) => `
+    <div class="freq-chip" onclick="replayFrequent(${i})">
       <div class="freq-chip-ico">${x.icon || '⚡'}</div>
       <div class="freq-chip-lbl">${esc(x.label)}</div>
     </div>`).join('');
   try { modernizeIcons(list); } catch(_) {}
+}
+// Отрисованные чипы: обработчик получает индекс, строку вызова берём отсюда.
+let _FREQ_ITEMS = [];
+function replayFrequent(i) {
+  const x = _FREQ_ITEMS[i];
+  if (x && x.onclick) replayAction(x.onclick);
 }
 function clearFrequent() {
   try { localStorage.removeItem(_FREQ_KEY); } catch(_) {}
@@ -15870,6 +15894,9 @@ async function deleteAiMem(id) {
 const NODE_TYPE = {proxies:'🌐 Прокси',accounts:'👥 Аккаунты',tasks:'📋 Задачи',alerts:'🔔 Алерты'};
 // ── Ноды-комьюнити (mini-Discord) ────────────────────────
 let _CUR_CNODE = null;
+// Кэш списка сообществ: строка передаёт в обработчик только id, а название и
+// chat_id берутся отсюда — данные в атрибуте onclick рвали разметку.
+let CUR_CNODES = [];
 async function openCommunity() {
   push('s-community');
   txt('communityList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -15878,7 +15905,13 @@ async function openCommunity() {
     const nodes = d.nodes||[];
     const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} сообществ`:'';
     if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы')); return; }
-    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id}, ${JSON.stringify(esc(n.title||('Нода #'+n.id)))}, ${n.tg_chat_id})">
+    // Название и chat_id НЕ подставляем в атрибут: JSON.stringify добавляет
+    // свои двойные кавычки, а атрибут тоже в двойных — строка обрывалась на
+    // первой же, и список не открывался ВСЕГДА, а не только на странном
+    // названии. Передаём id, остальное функция берёт из кэша (тот же приём,
+    // что уже применён в рассылках и воронках).
+    CUR_CNODES = nodes;
+    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id})">
       <div class="row-ico" style="background:var(--bg-purple-16)">🏛</div>
       <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id}</div></div>
       <span class="chev">›</span>
@@ -15904,7 +15937,12 @@ async function submitCommunityCreate() {
   } catch(e){ er.textContent=e.message||'Ошибка'; }
 }
 let _CUR_CNODE_CHAT = null;
+// Название и chat_id берём из кэша списка, а не из атрибута onclick — см.
+// комментарий у рендера списка сообществ.
 async function openCommunityNode(id, title, chatId) {
+  const _n = (CUR_CNODES || []).find(x => String(x.id) === String(id)) || {};
+  if (title === undefined) title = _n.title;
+  if (chatId === undefined) chatId = _n.tg_chat_id;
   _CUR_CNODE = id; _CUR_CNODE_CHAT = chatId;
   push('s-communitynode');
   txt('cnodeTitle','🏛 '+(title||'Сообщество'));
@@ -17717,6 +17755,10 @@ async function strikeLaunch() {
 
 function closeTakedownKit() { document.getElementById('mo-takedown').classList.remove('show'); }
 
+// Тексты жалоб набора: кнопка копирования передаёт индекс, а не сам текст.
+let _TAKEDOWN_TEXTS = [];
+function copyComplaintText(i) { copyText(_TAKEDOWN_TEXTS[i] || ''); }
+
 async function openTakedownKit() {
   if (!_STRIKE_TARGET) { toast('Сначала укажите цель'); return; }
   document.getElementById('mo-takedown').classList.add('show');
@@ -17726,6 +17768,11 @@ async function openTakedownKit() {
     const q = 'target='+encodeURIComponent(_STRIKE_TARGET)
             + '&reason='+encodeURIComponent((_STRIKE_CAT&&_STRIKE_CAT.key)||'other');
     const kit = await api('/api/miniapp/strike/takedown_kit?'+q);
+    // Текст жалобы в кэш, в атрибут — только индекс: JSON.stringify не
+    // экранирует апостроф, а атрибут обёрнут в апострофы, поэтому любой
+    // «don't» или «О'Брайен» в шаблоне рвал разметку и кнопка умирала.
+    _TAKEDOWN_TEXTS = (kit.channels||[]).map(
+      c => (c.subject?('Subject: '+c.subject+'\n\n'):'') + (c.body||''));
     box.innerHTML = (kit.channels||[]).map((c,i)=>{
       const link = c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(c.url)}</a>` : '<span style="color:var(--hint)">через приложение (см. инструкцию)</span>';
       const full = (c.subject?('Subject: '+c.subject+'\n\n'):'') + (c.body||'');
@@ -17734,7 +17781,7 @@ async function openTakedownKit() {
         <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:6px">${esc(c.how)}</div>
         <div style="font-size:12px;margin-bottom:6px">🔗 ${link}</div>
         <textarea readonly style="width:100%;min-height:96px;font-size:11px;background:var(--bg);color:var(--fg);border:1px solid var(--line,#333);border-radius:8px;padding:8px">${esc(full)}</textarea>
-        <button class="btn" style="width:100%;margin-top:6px;background:var(--bg)" onclick='copyText(${JSON.stringify(full)})'>📄 Скопировать текст</button>
+        <button class="btn" style="width:100%;margin-top:6px;background:var(--bg)" onclick="copyComplaintText(${i})">📄 Скопировать текст</button>
       </div>`;
     }).join('') || '<div style="color:var(--hint)">Нет доступных каналов</div>';
   } catch(e) {
