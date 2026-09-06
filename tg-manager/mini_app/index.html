@@ -17296,14 +17296,20 @@ async function openAdIntel() {
     txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
     const chs = d.top_channels||[];
     if (!chs.length) { txt('adIntelChannels', empty('📡','Нет данных','Добавьте канал для анализа')); }
+    // Имена полей — РОВНО те, что отдаёт /api/miniapp/ad_intel. Раньше здесь
+    // читались channel_username/placements_count/avg_er и advertiser_name/
+    // total_placements/avg_spend — ни одного такого ключа в ответе нет, поэтому
+    // строка вечно показывала «@undefined · 0 размещений · ER 0.0%». Совпадала
+    // одна quality_score из пяти. Заодно показываем то, что бэкенд слал, а UI
+    // выбрасывал: заголовок, подписчиков, оценку цены, давность размещения.
     else txt('adIntelChannels', chs.map(c=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
         <div class="row-body">
-          <div class="row-name">@${esc(c.channel_username||c.channel_id)}</div>
-          <div class="row-val">${c.placements_count||0} размещений · ER ${(c.avg_er||0).toFixed(1)}%</div>
+          <div class="row-name">${esc(c.title || (c.username ? '@'+c.username : 'Канал'))}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1)}%${c.ad_price_est?' · ~'+num(c.ad_price_est):''}</div>
         </div>
-        <div class="row-right" style="color:var(--orange);font-size:13px">${(c.quality_score||0).toFixed(0)}⭐</div>
+        <div class="row-right" style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</div>
       </div>
     `).join(''));
     const advs = d.top_advertisers||[];
@@ -17312,10 +17318,10 @@ async function openAdIntel() {
       <div class="row">
         <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
         <div class="row-body">
-          <div class="row-name">${esc(a.advertiser_name||a.advertiser_id)}</div>
-          <div class="row-val">${a.total_placements||0} размещений</div>
+          <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
+          <div class="row-val">${num(a.placements||0)} размещений</div>
         </div>
-        <div class="row-right" style="color:var(--hint);font-size:13px">${a.avg_spend?'$'+Number(a.avg_spend).toFixed(0):''}</div>
+        <div class="row-right" style="color:var(--hint);font-size:13px">${a.last_seen?ago(a.last_seen):''}</div>
       </div>
     `).join(''));
   } catch(e) {
