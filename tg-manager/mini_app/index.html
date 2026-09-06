@@ -6535,7 +6535,16 @@ const FETCH_TIMEOUT_MS = 30000;
     // (vault/health/invite/seo/…), не только Хранилище.
     // Формат «kind» либо «kind:параметр» — последнее нужно, чтобы уведомление
     // об удалённом сообщении вело сразу в НУЖНЫЙ чат, а не просто в раздел.
-    const _raw = (tg.initDataUnsafe?.start_param || (location.hash || '').replace('#','')).trim();
+    // web_app-кнопка кладёт наш #kind в тот же location.hash, куда Telegram
+    // ДОПИСЫВАЕТ свои tgWebApp*-параметры (tgWebAppData/Version/Platform/…).
+    // Раньше брали весь hash целиком → _screen получался мусором вида
+    // «operation&tgWebAppData=…», не совпадал ни с одним kind, и «Открыть» вело
+    // просто в приложение, а не в раздел. Берём наш сегмент, отсекая tg-параметры.
+    let _raw = (tg.initDataUnsafe?.start_param || '').trim();
+    if (!_raw) {
+      _raw = ((location.hash || '').replace(/^#/, '').split('&')
+                .find(p => p && !p.startsWith('tgWebApp')) || '').trim();
+    }
     const _ci = _raw.indexOf(':');
     const _screen = _ci > 0 ? _raw.slice(0, _ci) : _raw;
     const _param = _ci > 0 ? _raw.slice(_ci + 1) : null;
@@ -7490,7 +7499,7 @@ function runPulseAction(a) {
   if (k==='governor' || k==='invite') return openMassInvite();
   if (k==='campaign') return openCampaignPlanner();
   if (k==='intents') return openIntentSensor();
-  if (k==='operation') return openMassOps();
+  if (k==='operation') return openMassOps(a.param);
   if (k==='purge_dead') { goTab('accounts'); setTimeout(()=>filterAcc('dead', document.querySelector('[data-filter="dead"]')), 200); return; }
   if (k==='segment_hot') return openContactsHot();
   if (k==='chatwarmup') return openChatWarmup();
@@ -19103,7 +19112,7 @@ async function loadFleetWarnings() {
   } catch(_) { /* предупреждения не критичны */ }
 }
 
-async function openMassOps() {
+async function openMassOps(focusId) {
   push('s-massops');
   txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
   loadFleetWarnings();
@@ -19134,9 +19143,9 @@ async function openMassOps() {
       const opName = MASS_OP_LABELS[r.op_type]||esc(r.op_type);
       const progress = r.total_items?`${r.done_items||0}/${r.total_items}`:'—';
       return `
-        <div class="row">
+        <div class="row" id="massop-${r.id}">
           <div class="row-body">
-            <div class="row-name">${opName}</div>
+            <div class="row-name">#${r.id} ${opName}</div>
             <div class="row-val"><span class="badge ${cls}">${lbl}</span> · Прогресс: ${progress}</div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)} ${r.finished_at?'→ '+ago(r.finished_at):''}</div>
           </div>
@@ -19145,6 +19154,15 @@ async function openMassOps() {
     }).join(''));
     const running = rows.filter(r=>r.status==='running').length;
     document.getElementById('m-massops-val').textContent = running?`${running} активных`:rows.length+' операций';
+    // Deep-link «Открыть» из уведомления об операции: подсветить и прокрутить к ней.
+    if (focusId) { try {
+      const _el = document.getElementById('massop-' + focusId);
+      if (_el) {
+        _el.scrollIntoView({behavior:'smooth', block:'center'});
+        _el.style.outline = '2px solid #3390ec';
+        setTimeout(() => { try { _el.style.outline = ''; } catch(_){} }, 2500);
+      }
+    } catch(_){} }
   } catch(e) { txt('massopsList', empty('⚠️','Ошибка',e.message)); }
 }
 

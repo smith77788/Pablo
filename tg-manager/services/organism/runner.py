@@ -80,8 +80,13 @@ def _open_button(action: dict | None):
         url = _valid_mini_app_url(MINI_APP_URL)
         if not url:
             return None
+        # Формат #kind[:param] — мини-апп ведёт в раздел и (для operation) сразу к
+        # нужной операции. op_id прежде отбрасывался → «Открыть» вело в приложение,
+        # а не к операции.
+        _param = (action or {}).get("op_id")
+        frag = f"{kind}:{_param}" if _param not in (None, "") else kind
         return ("👉 Открыть и ответить" if kind == "vault" else "👉 Открыть",
-                WebAppInfo(url=f"{url}#{kind}"))
+                WebAppInfo(url=f"{url}#{frag}"))
     except Exception:
         return None
 
