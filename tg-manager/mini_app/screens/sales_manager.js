@@ -80,8 +80,9 @@ const SP_FORM = [
   { k: 'temperature', label: 'Температура (0–2)', type: 'text', ph: '0.7' },
 ];
 
-let _spBots = [];        // боты пользователя (для привязки)
-let _spCurrent = null;   // редактируемая персона
+let _spBots = [];         // боты пользователя (для привязки)
+let _spCurrent = null;    // редактируемая персона
+let _spPreselectBot = null; // бот для предвыбора при создании (вход из карточки бота)
 
 function _spScreen(id, title, refreshFn) {
   let el = document.getElementById(id);
@@ -104,7 +105,9 @@ function _spScreen(id, title, refreshFn) {
 }
 
 // ── Список персон ──────────────────────────────────────────────────────────────
-async function openSalesManager() {
+// botId (необязательно): вход из карточки бота — сразу открыть/создать менеджера
+// именно для этого бота.
+async function openSalesManager(botId) {
   _spScreen('s-sales', '🧑‍💼 Менеджеры продаж', 'openSalesManager()');
   push('s-sales');
   const body = document.getElementById('s-sales-body');
@@ -116,6 +119,14 @@ async function openSalesManager() {
     ]);
     _spBots = bots.bots || [];
     const list = pers.personas || [];
+    // Вход из карточки бота: если у бота уже есть менеджер — открыть его, иначе
+    // создать нового с предвыбранным ботом.
+    if (botId) {
+      const existing = list.find(p => String(p.bot_id) === String(botId));
+      if (existing) { openPersonaEditor(existing.id); return; }
+      _spPreselectBot = String(botId);
+      openPersonaEditor(0); return;
+    }
     let h = '<div style="padding:0 4px 10px;font-size:12px;color:var(--hint)">' +
       'Живой ИИ-менеджер для бота: консультирует, называет цены из вашего прайса, ' +
       'принимает заказы, переводит на оператора и делится каналами.</div>' +
@@ -159,6 +170,12 @@ async function openPersonaEditor(id) {
     _spCurrent._products = products;
     body.innerHTML = _spRenderForm(persona, products);
     _spFillForm(persona);
+    // предвыбор бота при создании из карточки бота
+    if (!persona.id && _spPreselectBot) {
+      const bs = document.getElementById('f_bot_id');
+      if (bs) bs.value = _spPreselectBot;
+      _spPreselectBot = null;
+    }
   } catch (e) {
     body.innerHTML = '<div style="color:var(--red);padding:20px">' + esc(e.message) + '</div>';
   }
