@@ -16041,6 +16041,208 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/mp/service/{sid}/toggle", mp_service_toggle)
     app.router.add_get("/api/miniapp/mp/admin/providers", mp_admin_providers)
     app.router.add_post("/api/miniapp/mp/admin/provider/{pid}/status", mp_admin_status)
+
+    # ── Sales Persona (сущность бота — живой менеджер по продажам) ────────────
+    from services import bot_sales_persona as _bsp
+
+    async def _sp_owned(uid, pid):
+        p = await _bsp.get_persona(pool, pid)
+        return p if (p and int(p["owner_id"]) == int(uid)) else None
+
+    async def sp_list(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        return _json_resp({"personas": await _bsp.list_personas(pool, uid)})
+
+    async def sp_create(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            d = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            name = d.pop("name", "")
+            p = await _bsp.create_persona(pool, uid, name, **d)
+            return _json_resp({"ok": True, "persona": p})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_create uid=%s", uid)
+            return _err(str(e), 500)
+
+    async def sp_detail(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        p = await _sp_owned(uid, pid)
+        if not p:
+            return _err("Not found", 404)
+        return _json_resp({"persona": p,
+                           "products": await _bsp.list_products(pool, pid)})
+
+    async def sp_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            return _json_resp({"ok": True,
+                               "persona": await _bsp.update_persona(pool, pid, uid, **d)})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_update uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_persona(pool, pid, uid)})
+
+    async def sp_assign(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+            bot_id = int(d["bot_id"])
+        except Exception:
+            return _err("bad request", 400)
+        # бот должен принадлежать пользователю (added_by)
+        own = await pool.fetchval(
+            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not own:
+            return _err("бот не найден или не ваш", 403)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        r = await _bsp.assign_to_bot(pool, pid, uid, bot_id)
+        return _json_resp({"ok": bool(r), "persona": r})
+
+    async def sp_unassign(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.unassign_from_bot(pool, pid, uid)})
+
+    async def sp_product_add(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
+                           else _mp.to_cents(d.get("price", "0")))
+            prod = await _bsp.add_product(
+                pool, pid, uid, d.get("name", ""), description=d.get("description", ""),
+                sku=d.get("sku", ""), price_cents=price_cents,
+                currency=d.get("currency", "USD"), in_stock=bool(d.get("in_stock", True)),
+                attributes=d.get("attributes") or {})
+            return _json_resp({"ok": True, "product": prod})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_product_add uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_product_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            prid = int(request.match_info["prid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        try:
+            if d.get("price") is not None and d.get("price_cents") is None:
+                d["price_cents"] = _mp.to_cents(d.pop("price"))
+            r = await _bsp.update_product(pool, prid, uid, **d)
+            if not r:
+                return _err("Not found", 404)
+            return _json_resp({"ok": True, "product": r})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_product_update uid=%s prid=%s", uid, prid)
+            return _err(str(e), 500)
+
+    async def sp_product_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            prid = int(request.match_info["prid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_product(pool, prid, uid)})
+
+    async def sp_orders(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        q = request.query
+        try:
+            bid = int(q["bot_id"]) if q.get("bot_id") else None
+        except ValueError:
+            bid = None
+        return _json_resp({"orders": await _bsp.list_orders(
+            pool, uid, bot_id=bid, status=q.get("status") or None)})
+
+    async def sp_order_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            oid = int(request.match_info["oid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        r = await _bsp.update_order(pool, oid, uid, **d)
+        if not r:
+            return _err("Not found", 404)
+        return _json_resp({"ok": True, "order": r})
+
+    app.router.add_get("/api/miniapp/sales/personas", sp_list)
+    app.router.add_post("/api/miniapp/sales/persona", sp_create)
+    app.router.add_get("/api/miniapp/sales/persona/{pid}", sp_detail)
+    app.router.add_patch("/api/miniapp/sales/persona/{pid}", sp_update)
+    app.router.add_delete("/api/miniapp/sales/persona/{pid}", sp_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/assign", sp_assign)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/unassign", sp_unassign)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/product", sp_product_add)
+    app.router.add_patch("/api/miniapp/sales/product/{prid}", sp_product_update)
+    app.router.add_delete("/api/miniapp/sales/product/{prid}", sp_product_delete)
+    app.router.add_get("/api/miniapp/sales/orders", sp_orders)
+    app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter

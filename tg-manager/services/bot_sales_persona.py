@@ -1,0 +1,614 @@
+"""Сущность бота — живой менеджер по продажам.
+
+Владелец назначает боту персону с богатой настройкой (манера, тон, знание товаров
+и цен, small-talk, табу, оператор, каналы, приём заказов). Бот в личке ведёт себя
+как реальный человек: консультирует, называет РЕАЛЬНЫЕ цены (без галлюцинаций),
+принимает заказы, переводит на живого оператора, даёт ссылки на каналы, помнит
+предпочтения клиента.
+
+Kernel поверх существующих паттернов: ai_providers (генерация, OpenAI-совместимо),
+relay_sessions (оператор), managed_bots (боты). Деньги — центы (BIGINT).
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+
+log = logging.getLogger(__name__)
+
+TONES = ("friendly", "professional", "casual", "warm", "energetic")
+EMOJI_LEVELS = ("none", "low", "medium", "high")
+MSG_LENGTHS = ("short", "medium", "long")
+FORMALITY = ("ty", "vy", "auto")
+_MAX_HISTORY = 12          # ходов диалога в контексте
+_PHONE_RE = re.compile(r"(?:\+?\d[\d\-\s()]{7,}\d)")
+
+# Дефолтные фразы-триггеры перевода на оператора (в дополнение к настроенным).
+_DEFAULT_HANDOFF = (
+    "оператор", "живой человек", "менеджер-человек", "с человеком", "жалоб",
+    "верните деньги", "возврат", "юрист", "директор", "поговорить с человеком",
+    "real person", "human", "operator", "refund",
+)
+_ORDER_INTENT = (
+    "заказать", "оформить заказ", "оформите", "хочу заказать", "беру", "куплю",
+    "хочу купить", "закажу", "оформи", "добавь в заказ", "order", "buy", "checkout",
+)
+
+
+# ── Чистые помощники ──────────────────────────────────────────────────────────
+def format_price(cents: int, currency: str = "USD") -> str:
+    cents = int(cents or 0)
+    return f"{cents // 100}.{cents % 100:02d} {currency}"
+
+
+def _clamp(v, lo, hi):
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return lo
+
+
+def detect_actions(text: str, persona: dict) -> dict:
+    """Эвристики намерений клиента (safety-net к модели). ЧИСТАЯ.
+
+    Возвращает {handoff: bool, order_intent: bool, phone: str|None}.
+    Перевод на оператора обязан срабатывать надёжно — не только по воле модели.
+    """
+    t = (text or "").lower()
+    triggers = [w.strip().lower() for w in
+                (persona.get("handoff_triggers") or "").replace("\n", ",").split(",")
+                if w.strip()]
+    handoff = any(w in t for w in triggers) or any(w in t for w in _DEFAULT_HANDOFF)
+    order_intent = any(w in t for w in _ORDER_INTENT)
+    m = _PHONE_RE.search(text or "")
+    phone = m.group(0).strip() if m else None
+    return {"handoff": handoff, "order_intent": order_intent, "phone": phone}
+
+
+def _emoji_guidance(level: str) -> str:
+    return {
+        "none": "Не используй эмодзи вообще.",
+        "low": "Эмодзи — очень редко, максимум один на несколько сообщений.",
+        "medium": "Эмодзи — умеренно, 0–1 на сообщение, к месту.",
+        "high": "Эмодзи — живо и часто, но без перебора.",
+    }.get(level, "Эмодзи — умеренно.")
+
+
+def _length_guidance(length: str) -> str:
+    return {
+        "short": "Отвечай коротко — 1–2 предложения, по делу.",
+        "medium": "Отвечай в 2–4 предложения, живо, но не длинно.",
+        "long": "Можешь отвечать развёрнуто, но без воды.",
+    }.get(length, "Отвечай в 2–4 предложения.")
+
+
+def _formality_guidance(f: str) -> str:
+    return {
+        "ty": "Обращайся к клиенту на «ты».",
+        "vy": "Обращайся к клиенту на «вы».",
+        "auto": "Подстройся под клиента: как он к тебе — так и ты к нему.",
+    }.get(f, "Подстройся под стиль клиента.")
+
+
+def build_system_prompt(persona: dict, products: list[dict],
+                        dialog: dict | None = None) -> str:
+    """Собирает системный промпт из ВСЕХ настроек персоны. ЧИСТАЯ функция —
+    ядро поведения; тестируется без сети."""
+    p = persona
+    L: list[str] = []
+    name = p.get("name") or "Менеджер"
+    role = p.get("role_title") or "менеджер по продажам"
+    company = p.get("company_name") or ""
+    L.append(f"Ты — {name}, {role}" + (f" компании «{company}»" if company else "") + ".")
+    L.append("Ты РЕАЛЬНЫЙ живой человек, а не бот. Никогда не говори, что ты ИИ, "
+             "бот или программа. Веди себя естественно, с эмоциями и своей манерой.")
+    if p.get("age"):
+        L.append(f"Возраст: примерно {p['age']} лет.")
+    if p.get("personality"):
+        L.append(f"Характер и манера: {p['personality'].strip()}")
+    L.append(f"Тон общения: {p.get('tone') or 'friendly'}.")
+    L.append(_formality_guidance(p.get("formality") or "auto"))
+    L.append(_emoji_guidance(p.get("emoji_level") or "medium"))
+    L.append(_length_guidance(p.get("msg_length") or "medium"))
+    hl = _clamp(p.get("humor_level", 1), 0, 3)
+    L.append(["Без шуток, серьёзно.", "Лёгкая доброжелательность, без шуток.",
+              "Уместный юмор время от времени.",
+              "Живой юмор, дружеская лёгкость."][hl])
+    if p.get("mirror_language", True):
+        L.append("Отвечай на том языке, на котором пишет клиент.")
+    elif p.get("language"):
+        L.append(f"Общайся на языке: {p['language']}.")
+
+    if company and p.get("company_about"):
+        L.append(f"О компании: {p['company_about'].strip()}")
+    if p.get("product_knowledge"):
+        L.append(f"Что мы продаём (общее знание): {p['product_knowledge'].strip()}")
+
+    # Каталог с РЕАЛЬНЫМИ ценами — запрет выдумывать цены/товары.
+    active = [pr for pr in (products or []) if pr.get("is_active", True)]
+    if active:
+        L.append("Актуальный прайс (называй ТОЛЬКО эти цены, ничего не выдумывай):")
+        for pr in active[:60]:
+            price = (format_price(pr["price_cents"], pr.get("currency") or "USD")
+                     if p.get("disclose_prices", True) else "цену уточните у оператора")
+            stock = "" if pr.get("in_stock", True) else " (нет в наличии)"
+            desc = f" — {pr['description'].strip()}" if pr.get("description") else ""
+            L.append(f"• {pr['name']}: {price}{stock}{desc}")
+    if not active and p.get("disclose_prices", True):
+        L.append("Точного прайса в системе нет — если не знаешь цену, честно скажи, "
+                 "что уточнишь, и предложи перевести на оператора. НЕ выдумывай цены.")
+    if p.get("pricing_policy"):
+        L.append(f"Политика цен/скидок: {p['pricing_policy'].strip()}")
+
+    # Поведение
+    caps = []
+    if p.get("can_consult", True):
+        caps.append("подробно консультируй по товарам и помогай выбрать")
+    if p.get("can_discuss_prefs", True):
+        caps.append("узнавай предпочтения клиента (бюджет, вкусы, задачи) и подбирай под них")
+    if p.get("proactive_offers", True):
+        caps.append("уместно предлагай подходящие товары, но без навязчивости")
+    if p.get("can_smalltalk", True):
+        topics = p.get("smalltalk_topics") or "погода, настроение, общие дружеские темы"
+        caps.append(f"поддерживай дружескую беседу на отвлечённые темы ({topics}), "
+                    "мягко возвращая разговор к тому, чем можешь помочь")
+    if caps:
+        L.append("Твои задачи: " + "; ".join(caps) + ".")
+    if p.get("taboo_topics"):
+        L.append(f"НИКОГДА не обсуждай и не касайся тем: {p['taboo_topics'].strip()}.")
+
+    # Заказы
+    if p.get("can_take_orders", True):
+        try:
+            fields = p.get("order_fields")
+            if isinstance(fields, str):
+                fields = json.loads(fields or "[]")
+        except Exception:
+            fields = []
+        fields = fields or ["Имя", "Телефон", "Адрес доставки"]
+        L.append("Если клиент хочет заказать — помоги оформить заказ: уточни товар и "
+                 "количество, затем вежливо собери данные (" + ", ".join(fields) + "). "
+                 "Как только получил контакт (телефон) — подтверди заказ.")
+
+    # Каналы
+    try:
+        channels = p.get("channels")
+        if isinstance(channels, str):
+            channels = json.loads(channels or "[]")
+    except Exception:
+        channels = []
+    if channels:
+        chlist = "; ".join(f"{c.get('title') or c.get('url')} — {c.get('url')}"
+                           for c in channels if c.get("url"))
+        L.append("Когда уместно, делись нашими каналами: " + chlist + ".")
+
+    # Оператор
+    if p.get("operator_username") or p.get("operator_chat_id"):
+        L.append("Если вопрос вне твоей компетенции, клиент просит живого человека, "
+                 "жалуется или речь о возврате/спорной ситуации — скажи, что "
+                 "подключаешь специалиста, и не выдумывай ответ.")
+
+    # Гардрейлы честности
+    L.append("Правила честности: не обещай того, чего не знаешь; не выдумывай "
+             "характеристики, сроки и цены; если не уверен — честно скажи, что "
+             "уточнишь. Не проси и не сообщай пароли/коды/платёжные данные в чате.")
+    if p.get("guardrails"):
+        L.append(p["guardrails"].strip())
+
+    # Память о клиенте
+    if dialog:
+        if dialog.get("summary"):
+            L.append(f"Что уже известно о клиенте и разговоре: {dialog['summary']}")
+        prefs = dialog.get("prefs")
+        if isinstance(prefs, str):
+            try:
+                prefs = json.loads(prefs)
+            except Exception:
+                prefs = {}
+        if prefs:
+            L.append("Предпочтения клиента: "
+                     + ", ".join(f"{k}: {v}" for k, v in prefs.items()))
+    return "\n".join(L)
+
+
+def _history_messages(dialog: dict | None) -> list[dict]:
+    if not dialog:
+        return []
+    h = dialog.get("history")
+    if isinstance(h, str):
+        try:
+            h = json.loads(h)
+        except Exception:
+            h = []
+    out = []
+    for turn in (h or [])[-_MAX_HISTORY:]:
+        role = turn.get("role")
+        content = turn.get("content")
+        if role in ("user", "assistant") and content:
+            out.append({"role": role, "content": content})
+    return out
+
+
+# ── Генерация ответа ──────────────────────────────────────────────────────────
+async def generate_reply(persona: dict, products: list[dict], dialog: dict | None,
+                         user_text: str) -> str:
+    """Ответ персоны через настроенный AI-провайдер (OpenAI-совместимо)."""
+    from services import ai_providers
+    providers = ai_providers.configured_providers()
+    if not providers:
+        return (persona.get("fallback")
+                or "Дайте секунду, уточню и вернусь с ответом 🙌")
+    # выбор провайдера: по имени из персоны, иначе первый настроенный
+    prov = next((x for x in providers
+                 if persona.get("ai_provider")
+                 and x.name.lower() == persona["ai_provider"].lower()), providers[0])
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        return persona.get("fallback") or "Секунду, уточню 🙌"
+    system_prompt = build_system_prompt(persona, products, dialog)
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(_history_messages(dialog))
+    messages.append({"role": "user", "content": user_text or ""})
+    model = (persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini"))
+    try:
+        client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=25.0)
+        resp = await client.chat.completions.create(
+            model=model, messages=messages,
+            max_tokens=_clamp(persona.get("max_tokens", 400), 64, 1200),
+            temperature=float(persona.get("temperature") or 0.7),
+        )
+        txt = (resp.choices[0].message.content or "").strip()
+        return txt or (persona.get("fallback") or "Секунду, уточню 🙌")
+    except Exception as e:
+        log.warning("bot_sales_persona generate error: %s", e)
+        return persona.get("fallback") or "Дайте секунду, уточню и вернусь 🙌"
+
+
+# ── CRUD: персоны ─────────────────────────────────────────────────────────────
+_PERSONA_TEXT = {
+    "name", "role_title", "gender", "avatar_emoji", "personality", "tone",
+    "formality", "emoji_level", "msg_length", "language", "company_name",
+    "company_about", "product_knowledge", "pricing_policy", "currency",
+    "smalltalk_topics", "taboo_topics", "operator_username", "handoff_triggers",
+    "handoff_message", "greeting", "fallback", "guardrails", "ai_provider", "model",
+}
+_PERSONA_BOOL = {
+    "mirror_language", "disclose_prices", "can_take_orders", "can_consult",
+    "can_smalltalk", "can_discuss_prefs", "proactive_offers", "is_active",
+}
+_PERSONA_INT = {"age", "humor_level", "max_tokens", "operator_chat_id"}
+_PERSONA_JSON = {"channels", "order_fields"}
+
+
+async def create_persona(pool, owner_id: int, name: str, **fields) -> dict:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("имя персоны обязательно")
+    row = await pool.fetchrow(
+        "INSERT INTO bot_sales_personas(owner_id, name) VALUES($1,$2) RETURNING *",
+        owner_id, name)
+    d = dict(row)
+    if fields:
+        upd = await update_persona(pool, d["id"], owner_id, **fields)
+        if upd:
+            return upd
+    return d
+
+
+async def get_persona(pool, persona_id: int) -> dict | None:
+    r = await pool.fetchrow("SELECT * FROM bot_sales_personas WHERE id=$1", persona_id)
+    return dict(r) if r else None
+
+
+async def get_persona_for_bot(pool, bot_id: int) -> dict | None:
+    r = await pool.fetchrow(
+        "SELECT * FROM bot_sales_personas WHERE bot_id=$1 AND is_active=TRUE LIMIT 1",
+        bot_id)
+    return dict(r) if r else None
+
+
+async def list_personas(pool, owner_id: int) -> list[dict]:
+    rows = await pool.fetch(
+        "SELECT * FROM bot_sales_personas WHERE owner_id=$1 ORDER BY created_at DESC",
+        owner_id)
+    return [dict(r) for r in rows]
+
+
+async def update_persona(pool, persona_id: int, owner_id: int, **fields) -> dict | None:
+    sets, args = [], []
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k in _PERSONA_TEXT:
+            args.append(str(v).strip()); sets.append(f"{k}=${len(args)}")
+        elif k in _PERSONA_BOOL:
+            args.append(bool(v)); sets.append(f"{k}=${len(args)}")
+        elif k in _PERSONA_INT:
+            args.append(int(v)); sets.append(f"{k}=${len(args)}")
+        elif k == "temperature":
+            args.append(round(float(v), 2)); sets.append(f"temperature=${len(args)}")
+        elif k in _PERSONA_JSON:
+            args.append(json.dumps(v)); sets.append(f"{k}=${len(args)}::jsonb")
+    if not sets:
+        return await get_persona(pool, persona_id)
+    args.extend([persona_id, owner_id])
+    r = await pool.fetchrow(
+        f"UPDATE bot_sales_personas SET {', '.join(sets)}, updated_at=now() "
+        f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    return dict(r) if r else None
+
+
+async def assign_to_bot(pool, persona_id: int, owner_id: int, bot_id: int) -> dict | None:
+    """Назначает персону боту. Снимает прочих активных персон с этого бота
+    (инвариант «один активный менеджер на бота»)."""
+    async with pool.acquire() as con:
+        async with con.transaction():
+            await con.execute(
+                "UPDATE bot_sales_personas SET bot_id=NULL, updated_at=now() "
+                "WHERE bot_id=$1 AND id<>$2", bot_id, persona_id)
+            r = await con.fetchrow(
+                "UPDATE bot_sales_personas SET bot_id=$3, is_active=TRUE, updated_at=now() "
+                "WHERE id=$1 AND owner_id=$2 RETURNING *", persona_id, owner_id, bot_id)
+    return dict(r) if r else None
+
+
+async def unassign_from_bot(pool, persona_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "UPDATE bot_sales_personas SET bot_id=NULL, updated_at=now() "
+        "WHERE id=$1 AND owner_id=$2", persona_id, owner_id)
+    return res.endswith("1")
+
+
+async def delete_persona(pool, persona_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM bot_sales_personas WHERE id=$1 AND owner_id=$2",
+        persona_id, owner_id)
+    return res.endswith("1")
+
+
+# ── CRUD: товары ──────────────────────────────────────────────────────────────
+async def add_product(pool, persona_id: int, owner_id: int, name: str, *,
+                      description: str = "", sku: str = "", price_cents: int = 0,
+                      currency: str = "USD", in_stock: bool = True,
+                      attributes: dict | None = None) -> dict:
+    if not (name or "").strip():
+        raise ValueError("название товара обязательно")
+    if int(price_cents) < 0:
+        raise ValueError("цена не может быть отрицательной")
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_products(persona_id, owner_id, name, description, sku,
+               price_cents, currency, in_stock, attributes)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING *""",
+        persona_id, owner_id, name.strip(), description.strip(), sku.strip(),
+        int(price_cents), (currency or "USD").upper()[:8], bool(in_stock),
+        json.dumps(attributes or {}))
+    return dict(r)
+
+
+async def list_products(pool, persona_id: int, *, active_only: bool = False) -> list[dict]:
+    cond = "AND is_active=TRUE" if active_only else ""
+    rows = await pool.fetch(
+        f"SELECT * FROM bot_sales_products WHERE persona_id=$1 {cond} ORDER BY id",
+        persona_id)
+    return [dict(r) for r in rows]
+
+
+async def update_product(pool, product_id: int, owner_id: int, **fields) -> dict | None:
+    text_f = {"name", "description", "sku", "currency"}
+    sets, args = [], []
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k in text_f:
+            args.append(str(v).strip()); sets.append(f"{k}=${len(args)}")
+        elif k == "price_cents":
+            if int(v) < 0:
+                raise ValueError("цена не может быть отрицательной")
+            args.append(int(v)); sets.append(f"price_cents=${len(args)}")
+        elif k in ("in_stock", "is_active"):
+            args.append(bool(v)); sets.append(f"{k}=${len(args)}")
+        elif k == "attributes":
+            args.append(json.dumps(v or {})); sets.append(f"attributes=${len(args)}::jsonb")
+    if not sets:
+        return None
+    args.extend([product_id, owner_id])
+    r = await pool.fetchrow(
+        f"UPDATE bot_sales_products SET {', '.join(sets)}, updated_at=now() "
+        f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    return dict(r) if r else None
+
+
+async def delete_product(pool, product_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM bot_sales_products WHERE id=$1 AND owner_id=$2",
+        product_id, owner_id)
+    return res.endswith("1")
+
+
+# ── Диалоги (память по клиенту) ───────────────────────────────────────────────
+async def get_or_create_dialog(pool, bot_id: int, customer_chat_id: int,
+                               owner_id: int, persona_id: int | None) -> dict:
+    r = await pool.fetchrow(
+        "SELECT * FROM bot_sales_dialogs WHERE bot_id=$1 AND customer_chat_id=$2",
+        bot_id, customer_chat_id)
+    if r:
+        return dict(r)
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_dialogs(bot_id, customer_chat_id, owner_id, persona_id)
+           VALUES($1,$2,$3,$4)
+           ON CONFLICT (bot_id, customer_chat_id) DO UPDATE SET last_at=now()
+           RETURNING *""",
+        bot_id, customer_chat_id, owner_id, persona_id)
+    return dict(r)
+
+
+async def append_turn(pool, dialog_id: int, user_text: str, assistant_text: str,
+                      *, prefs: dict | None = None, stage: str | None = None,
+                      handed_off: bool | None = None) -> None:
+    # держим последние 2*_MAX_HISTORY реплик в history
+    row = await pool.fetchrow(
+        "SELECT history, prefs FROM bot_sales_dialogs WHERE id=$1", dialog_id)
+    hist = []
+    if row and row["history"]:
+        hist = row["history"] if isinstance(row["history"], list) else json.loads(row["history"])
+    hist.append({"role": "user", "content": user_text})
+    hist.append({"role": "assistant", "content": assistant_text})
+    hist = hist[-2 * _MAX_HISTORY:]
+    cur_prefs = {}
+    if row and row["prefs"]:
+        cur_prefs = row["prefs"] if isinstance(row["prefs"], dict) else json.loads(row["prefs"])
+    if prefs:
+        cur_prefs.update(prefs)
+    sets = ["history=$2::jsonb", "prefs=$3::jsonb", "msg_count=msg_count+1",
+            "last_at=now()"]
+    args = [dialog_id, json.dumps(hist), json.dumps(cur_prefs)]
+    if stage:
+        args.append(stage); sets.append(f"stage=${len(args)}")
+    if handed_off is not None:
+        args.append(bool(handed_off)); sets.append(f"handed_off=${len(args)}")
+    await pool.execute(
+        f"UPDATE bot_sales_dialogs SET {', '.join(sets)} WHERE id=$1", *args)
+
+
+# ── Заказы ────────────────────────────────────────────────────────────────────
+async def create_order(pool, owner_id: int, bot_id: int, persona_id: int | None,
+                       customer_chat_id: int, *, customer_username: str = "",
+                       customer_name: str = "", items: list | None = None,
+                       total_cents: int = 0, currency: str = "USD",
+                       contact: dict | None = None, note: str = "") -> dict:
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_orders(owner_id, bot_id, persona_id, customer_chat_id,
+               customer_username, customer_name, items, total_cents, currency, contact, note)
+           VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb,$11) RETURNING *""",
+        owner_id, bot_id, persona_id, customer_chat_id, customer_username,
+        customer_name, json.dumps(items or []), int(total_cents),
+        (currency or "USD").upper()[:8], json.dumps(contact or {}), note)
+    return dict(r)
+
+
+async def open_order_for_dialog(pool, owner_id: int, bot_id: int,
+                                persona_id: int | None, customer_chat_id: int,
+                                **kw) -> dict:
+    """Возвращает открытый (new/confirmed) заказ клиента или создаёт черновик."""
+    r = await pool.fetchrow(
+        """SELECT * FROM bot_sales_orders
+           WHERE bot_id=$1 AND customer_chat_id=$2 AND status IN ('new','confirmed')
+           ORDER BY created_at DESC LIMIT 1""", bot_id, customer_chat_id)
+    if r:
+        return dict(r)
+    return await create_order(pool, owner_id, bot_id, persona_id, customer_chat_id, **kw)
+
+
+async def update_order(pool, order_id: int, owner_id: int, **fields) -> dict | None:
+    sets, args = [], []
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k in ("status", "note", "customer_name", "customer_username", "currency"):
+            args.append(str(v)); sets.append(f"{k}=${len(args)}")
+        elif k == "total_cents":
+            args.append(int(v)); sets.append(f"total_cents=${len(args)}")
+        elif k in ("items", "contact"):
+            args.append(json.dumps(v)); sets.append(f"{k}=${len(args)}::jsonb")
+    if not sets:
+        return None
+    args.extend([order_id, owner_id])
+    r = await pool.fetchrow(
+        f"UPDATE bot_sales_orders SET {', '.join(sets)}, updated_at=now() "
+        f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    return dict(r) if r else None
+
+
+async def list_orders(pool, owner_id: int, *, bot_id: int | None = None,
+                      status: str | None = None, limit: int = 100) -> list[dict]:
+    conds, args = ["owner_id=$1"], [owner_id]
+    if bot_id is not None:
+        args.append(bot_id); conds.append(f"bot_id=${len(args)}")
+    if status:
+        args.append(status); conds.append(f"status=${len(args)}")
+    args.append(max(1, min(500, limit)))
+    rows = await pool.fetch(
+        f"SELECT * FROM bot_sales_orders WHERE {' AND '.join(conds)} "
+        f"ORDER BY created_at DESC LIMIT ${len(args)}", *args)
+    return [dict(r) for r in rows]
+
+
+# ── Высокоуровневый вход: обработка сообщения клиента ─────────────────────────
+async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
+                          text: str, *, username: str = "", name: str = "") -> dict | None:
+    """Полный ход: клиент написал боту → ответ менеджера + побочные действия.
+
+    Возвращает None, если у бота нет активной персоны (тогда работает обычный
+    авто-ответ). Иначе {reply, handoff, operator, order_id, channels}.
+    Все ветки безопасны (fail-open): при сбое отдаём fallback, не роняем поллер.
+    """
+    persona = await get_persona_for_bot(pool, bot_id)
+    if not persona or not persona.get("is_active"):
+        return None
+    text = (text or "").strip()
+    pid = persona["id"]
+    dialog = await get_or_create_dialog(pool, bot_id, chat_id, owner_id, pid)
+    actions = detect_actions(text, persona)
+
+    # 1) Перевод на живого оператора — приоритетно и надёжно (не на волю модели).
+    has_operator = bool(persona.get("operator_username") or persona.get("operator_chat_id"))
+    if actions["handoff"] and has_operator and not dialog.get("handed_off"):
+        reply = persona.get("handoff_message") or "Секунду, подключаю специалиста 🙌"
+        try:
+            await append_turn(pool, dialog["id"], text, reply,
+                              stage="handoff", handed_off=True)
+        except Exception:
+            log.warning("bsp handle_incoming: append_turn(handoff) failed")
+        return {
+            "reply": reply, "handoff": True,
+            "operator": {"username": persona.get("operator_username"),
+                         "chat_id": persona.get("operator_chat_id")},
+            "order_id": None, "persona_id": pid,
+        }
+
+    products = await list_products(pool, pid, active_only=True)
+
+    # 2) Приём заказа: намерение → черновик; телефон → подтверждение.
+    order_id = None
+    order_note = ""
+    if persona.get("can_take_orders", True) and (actions["order_intent"] or actions["phone"]):
+        try:
+            order = await open_order_for_dialog(
+                pool, owner_id, bot_id, pid, chat_id,
+                customer_username=username, customer_name=name)
+            order_id = order["id"]
+            if actions["phone"]:
+                contact = order.get("contact") or {}
+                if isinstance(contact, str):
+                    contact = json.loads(contact or "{}")
+                contact["phone"] = actions["phone"]
+                await update_order(pool, order_id, owner_id,
+                                   contact=contact, status="confirmed")
+                order_note = persona.get("order_confirm_message") or "Заказ принят ✅"
+        except Exception:
+            log.warning("bsp handle_incoming: order flow failed", exc_info=False)
+
+    # 3) Живой ответ модели.
+    reply = await generate_reply(persona, products, dialog, text)
+    if order_note and order_note not in reply:
+        reply = f"{reply}\n\n{order_note}"
+
+    stage = ("order" if order_id else
+             dialog.get("stage") if dialog.get("stage") not in (None, "greeting")
+             else "consult")
+    try:
+        await append_turn(pool, dialog["id"], text, reply, stage=stage)
+    except Exception:
+        log.warning("bsp handle_incoming: append_turn failed")
+
+    # каналы — отдаём метаданными (auto_responder может добавить кнопки)
+    channels = persona.get("channels")
+    if isinstance(channels, str):
+        try:
+            channels = json.loads(channels or "[]")
+        except Exception:
+            channels = []
+    return {"reply": reply, "handoff": False, "operator": None,
+            "order_id": order_id, "channels": channels or [], "persona_id": pid}

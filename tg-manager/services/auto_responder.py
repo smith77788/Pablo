@@ -264,6 +264,29 @@ async def notify_broken_bots(pool: asyncpg.Pool, bot) -> int:
     return sent
 
 
+async def _notify_operator(http, token, operator: dict, chat_id: int,
+                           from_user: dict, text: str) -> None:
+    """Уведомить живого оператора о переводе диалога (через того же бота).
+
+    Бот может написать только в чат, который с ним взаимодействовал, поэтому
+    доставка работает по operator_chat_id. Если задан только @username —
+    доставить нечем (бот не может инициировать чат по username); клиент при этом
+    уже получил сообщение «подключаю специалиста», а перевод помечен в диалоге и
+    в auto_reply_log, так что оператор/владелец увидит его в аналитике.
+    """
+    op_chat = (operator or {}).get("chat_id")
+    if not op_chat:
+        return
+    uname = from_user.get("username")
+    who = f"@{uname}" if uname else (from_user.get("first_name") or f"id{chat_id}")
+    note = (f"🆘 Клиент {who} (chat_id={chat_id}) просит живого оператора.\n"
+            f"Последнее сообщение: {text[:300]}")
+    try:
+        await bot_api.send_message(http, token, int(op_chat), note)
+    except Exception:
+        log_exc_swallow(log, "auto_responder: notify operator failed")
+
+
 async def _process_bot(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
@@ -583,6 +606,53 @@ async def _process_bot(
                         ack = brand_injection.add_promo(ack, html=True, context="broadcast")
                     await bot_api.send_message(http, token, chat_id, ack)
                 continue
+
+            # ── Сущность-менеджер: назначенная боту sales-персона ведёт диалог ──
+            # Персона = живой продавец: приоритетнее шаблонных правил. Не для /start
+            # (там welcome/воронка) и не в relay-режиме (выше уже continue). Fail-open:
+            # любой сбой → падаем в обычные правила, поллер не роняем.
+            if not is_start:
+                _res = None
+                try:
+                    from services import bot_sales_persona as _bsp
+                    _owner = (bot_row or {}).get("added_by")
+                    if _owner:
+                        _res = await _bsp.handle_incoming(
+                            pool, bot_id, int(_owner), chat_id, text,
+                            username=(from_user.get("username") or ""),
+                            name=(from_user.get("first_name") or ""))
+                except Exception:
+                    log_exc_swallow(log, f"auto_responder: sales persona bot={bot_id}")
+                    _res = None
+                if _res is not None:      # у бота есть активная персона → она ответила
+                    _reply = _res.get("reply") or ""
+                    if _is_free and _reply:
+                        _reply = brand_injection.add_promo(
+                            _reply, html=False, context="broadcast")
+                    _rkb = None
+                    _rows = [[{"text": (c.get("title") or "Канал"), "url": c["url"]}]
+                             for c in (_res.get("channels") or []) if c.get("url")][:4]
+                    if _rows:
+                        _rkb = {"inline_keyboard": _rows}
+                    if _reply:
+                        try:
+                            await bot_api.send_message(
+                                http, token, chat_id, _reply, reply_markup=_rkb)
+                        except Exception:
+                            log_exc_swallow(log, f"auto_responder: persona send bot={bot_id}")
+                    if _res.get("handoff") and _res.get("operator"):
+                        await _notify_operator(http, token, _res["operator"],
+                                               chat_id, from_user, text)
+                    try:
+                        await pool.execute(
+                            "INSERT INTO auto_reply_log(bot_id, chat_id, rule_type, "
+                            "trigger_type, keyword) VALUES($1,$2,'auto_reply',"
+                            "'sales_persona',$3)",
+                            bot_id, chat_id,
+                            "handoff" if _res.get("handoff") else "reply")
+                    except Exception:
+                        log.debug("auto_reply_log persona insert failed bot=%d", bot_id)
+                    continue      # персона обработала сообщение — правила пропускаем
 
             # Auto-replies (правила отсортированы по priority DESC; первое
             # совпавшее И попадающее в рабочее окно — выигрывает)
