@@ -3148,6 +3148,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Возобновить все paused">▶️ Старт</button>
       <button class="btn btn-r" style="flex:1;font-size:12px;padding:8px 4px" onclick="clearDoneOps()" title="Удалить завершённые">🗑 Очистить</button>
     </div>
+    <div style="padding:0 0 6px">
+      <!-- Разбирать очередь по одной операции — не работа. Перезапускает всё
+           недоведённое: провалившиеся, отменённые и закрывшиеся «done» без
+           достижения цели. -->
+      <button class="btn btn-s" style="width:100%;font-size:12px;padding:8px 4px" onclick="retryAllFailed()" title="Повторить все недоведённые операции">↺ Перезапустить недоведённые</button>
+    </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -10249,7 +10255,7 @@ async function loadOps() {
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
             ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="event.stopPropagation();cancelOp(${o.id})">Отмена</span>`:''}
-            ${(o.status==='failed'||(o.op_type==='mass_publish'&&(o.err_cnt||0)>0&&o.status!=='running'&&o.status!=='pending'))?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
+            ${opCanRetry(o)?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
@@ -10345,6 +10351,29 @@ async function pollOpResult(opId, label, onDone){
     if(d.status==='cancelled'){ toast('⏹ '+(label||'Отменено')); return; }
   }
   toast('⏳ '+(label||'Операция')+' ещё выполняется — см. Очередь операций');
+}
+
+// «Упавшая» для человека — это не статус в базе, а недоведённая работа.
+// Инвайт закрывался `done` на 203 целях из 380, и повторить его было нечем:
+// кнопка показывалась только для failed. Зеркалит services/operation_retry.py.
+function opCanRetry(o) {
+  const st = String(o.status||'').toLowerCase();
+  if (['pending','running','paused','scheduled'].includes(st)) return false;
+  if (st === 'failed' || st === 'cancelled') return true;
+  if (st === 'done') {
+    const done = +(o.done_items||0), total = +(o.total_items||0);
+    if (total > 0 && done < total) return true;      // цель не добрана
+    return (+(o.err_cnt||0)) > 0;                    // завершилась с ошибками
+  }
+  return true;   // неизвестный статус — не запираем работу
+}
+async function retryAllFailed() {
+  if (!await askConfirm('Перезапустить все недоведённые операции за последнюю неделю?\nПовтор уважает дедуп: уже обработанные цели заново не берутся.')) return;
+  try {
+    const d = await api('/api/miniapp/operations/retry_failed', {method:'POST'});
+    toast(d.retried ? ('↺ ' + (d.note||('Перезапущено: '+d.retried))) : (d.note||'Нечего перезапускать'));
+    loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 
 async function retryOp(id) {

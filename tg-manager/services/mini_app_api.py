@@ -2753,7 +2753,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid op_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT op_type, params, label, status, total_items "
+                "SELECT op_type, params, label, status, total_items, done_items, "
+                "(SELECT COUNT(*) FROM operation_log ol "
+                " WHERE ol.op_id=operation_queue.id AND ol.status='error') AS err_cnt "
                 "FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
@@ -2787,9 +2789,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     label=f"Повтор неудавшихся ({len(failed_ids)})")
                 return _json_resp({"ok": True, "new_id": new_id, "channels": len(failed_ids)})
 
-            # Прочие операции — повтор целиком, только для проваленных.
-            if row["status"] != "failed":
-                return _err("Not found or not failed", 404)
+            # Прочие операции — повтор целиком. «Упавшая» для человека это не
+            # статус в базе, а НЕДОВЕДЁННАЯ работа: инвайт останавливался на
+            # 203 целях из 380 со статусом `done`, и повторить его было нечем.
+            from services import operation_retry as _oretry
+
+            _can, _why = _oretry.can_retry(
+                row["status"], row["done_items"], row["total_items"], row["err_cnt"])
+            if not _can:
+                return _err(f"Повтор невозможен: {_why}", 409)
             try:
                 _retry_params = (row["params"] if isinstance(row["params"], dict)
                                  else _json.loads(row["params"] or "{}"))
@@ -9537,6 +9545,72 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # строчки — при том что подпись раздела обещала «восстановление».
 
     # ── Общие папки (Shared Folders) как канал инвайтинга ──────────────────────
+    async def operations_retry_failed(request: web.Request) -> web.Response:
+        """Перезапустить все недоведённые операции разом.
+
+        Раньше повтор был только поштучным и только для `failed`. Операция,
+        закрывшаяся `done` без достижения цели (инвайт: 203 из 380), не
+        перезапускалась вообще, а разбирать очередь по одной руками — не работа.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import operation_retry as _oretry
+
+        rows = await _safe_fetch(pool,
+            """SELECT oq.id, oq.op_type, oq.label, oq.status,
+                      oq.done_items, oq.total_items,
+                      (SELECT COUNT(*) FROM operation_log ol
+                        WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt
+                 FROM operation_queue oq
+                WHERE oq.owner_id=$1
+                  AND oq.status IN ('failed','cancelled','done')
+                  AND oq.created_at > now() - INTERVAL '7 days'
+                ORDER BY oq.created_at DESC
+                LIMIT 100""", uid)
+        candidates = _oretry.pick_retryable([dict(r) for r in (rows or [])])
+        if not candidates:
+            return _json_resp({"ok": True, "retried": 0,
+                               "note": "Недоведённых операций за неделю нет"})
+        import json as _json2
+
+        retried, skipped = [], []
+        for c in candidates[:25]:   # потолок: не заваливаем очередь одним нажатием
+            src = await _safe_fetchrow(pool,
+                "SELECT op_type, params, label, total_items FROM operation_queue "
+                "WHERE id=$1 AND owner_id=$2", int(c["id"]), uid)
+            if not src:
+                continue
+            try:
+                prm = (src["params"] if isinstance(src["params"], dict)
+                       else _json2.loads(src["params"] or "{}"))
+            except (TypeError, ValueError):
+                prm = {}
+            try:
+                new_id = await _obus.submit(
+                    pool, uid, src["op_type"], prm,
+                    total_items=src["total_items"] or 0,
+                    label=f"Повтор: {src['label'] or src['op_type']}",
+                    dedup_window_sec=0)
+                retried.append({"from": int(c["id"]), "new_id": new_id,
+                                "reason": c["reason"]})
+            except PermissionError as exc:
+                skipped.append({"id": int(c["id"]), "why": str(exc)[:80]})
+            except ValueError:
+                skipped.append({"id": int(c["id"]),
+                                "why": f"тип «{src['op_type']}» больше не поддерживается"})
+        # Если по тарифу отказано ВО ВСЁМ — это отказ, а не «успех с пропусками»:
+        # честный 403 с причиной, иначе платное ограничение выглядело бы как
+        # молчаливое ничегонеделание. Частичный успех остаётся успехом.
+        if not retried and skipped:
+            return _err("Повтор отклонён тарифом: " + (skipped[0]["why"] or "требуется подписка"), 403)
+        return _json_resp({
+            "ok": True, "retried": len(retried), "skipped": len(skipped),
+            "candidates": len(candidates), "items": retried[:25],
+            "note": (f"Перезапущено {len(retried)}"
+                     + (f", пропущено {len(skipped)}" if skipped else "")),
+        })
+
     async def bots_scan_fleet(request: web.Request) -> web.Response:
         """Запустить скан флота на ботов (@BotFather /mybots по каждому аккаунту).
 
@@ -15634,6 +15708,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
+    app.router.add_post("/api/miniapp/operations/retry_failed", operations_retry_failed)
     app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
