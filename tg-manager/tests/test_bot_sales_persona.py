@@ -174,6 +174,70 @@ def test_match_order_items_with_declension_and_qty():
     assert bsp.match_order_items("просто привет", prods) == ([], 0)
 
 
+def test_match_order_items_respects_min_qty():
+    # Товар с доставкой «от 2»: клиент просит 1 → количество подтягивается до 2,
+    # никогда не оформляем/не считаем ниже минимума.
+    prods = [{"name": "Кофе", "price_cents": 1000, "min_qty": 2, "unit": "г"}]
+    items, total = bsp.match_order_items("хочу 1 кофе", prods)
+    by = {i["name"]: i["qty"] for i in items}
+    assert by.get("Кофе") == 2            # 1 → округлили вверх до min_qty
+    assert total == 1000 * 2
+    # Больше минимума — не трогаем.
+    items2, _ = bsp.match_order_items("давай 5 кофе", prods)
+    assert {i["name"]: i["qty"] for i in items2}.get("Кофе") == 5
+
+
+def test_detect_actions_rejects_implausible_phone():
+    p = {}
+    # «947293» — 6 цифр, не настоящий номер → не считаем телефоном.
+    assert bsp.detect_actions("мой номер 947293", p)["phone"] is None
+    # 9 цифр: подходит под regex-шаблон, но телефоном НЕ является (fail-without-fix:
+    # без проверки длины бот подтверждал бы заказ по такому «номеру»).
+    assert bsp.detect_actions("номер 123456789", p)["phone"] is None
+    # Слишком длинная цифровая мусорка (24 цифры) — тоже не телефон.
+    assert bsp.detect_actions("код 123456789012345678901234", p)["phone"] is None
+    # Настоящий полный номер — засчитываем.
+    assert bsp.detect_actions("звоните +7 900 123-45-67", p)["phone"]
+    assert bsp.detect_actions("89001234567", p)["phone"]
+
+
+def test_build_prompt_min_qty_and_order_rules():
+    persona = {"name": "Анна", "can_take_orders": True,
+               "order_rules": "доставка от 2 г по каждой позиции"}
+    products = [{"name": "Кофе", "price_cents": 1000, "currency": "USD",
+                 "in_stock": True, "is_active": True, "min_qty": 2, "unit": "г"}]
+    sp = bsp.build_system_prompt(persona, products)
+    assert "минимальный заказ: 2 г" in sp.lower()   # минимум показан в прайсе
+    assert "не предлагай" in sp.lower() or "не оформляй" in sp.lower()
+    assert "доставка от 2 г по каждой позиции" in sp   # правила заказа в промпте
+
+
+def test_build_prompt_forbids_inventing_name_and_meta():
+    # Без имени: строгий запрет выдумывать имя (в прошлом бот придумал «Алексей»).
+    sp = bsp.build_system_prompt({"name": "Анна"}, [])
+    assert "НЕИЗВЕСТНО" in sp
+    assert "выдумыв" in sp.lower()
+    # Запрет утечки служебных пометок/рассуждений клиенту.
+    assert "инструкц" in sp.lower()
+    # С известным именем — используем его.
+    sp2 = bsp.build_system_prompt({"name": "Анна"}, [],
+                                  {"customer_name": "Пётр"})
+    assert "Пётр" in sp2
+
+
+def test_build_prompt_payment_modes():
+    base = {"name": "Анна", "can_take_orders": True}
+    # Оплата через оператора.
+    sp_op = bsp.build_system_prompt({**base, "payment_via_operator": True}, [])
+    assert "оплат" in sp_op.lower() and "оператор" in sp_op.lower()
+    # Реквизиты.
+    sp_pd = bsp.build_system_prompt({**base, "payment_details": "карта 0000 1111"}, [])
+    assert "карта 0000 1111" in sp_pd
+    # Ничего не задано — всё равно есть инструкция про следующий шаг оплаты.
+    sp_none = bsp.build_system_prompt(base, [])
+    assert "оплат" in sp_none.lower()
+
+
 def test_merge_items():
     m, t = bsp._merge_items([{"name": "A", "qty": 1, "price_cents": 100}],
                             [{"name": "A", "qty": 3, "price_cents": 100},

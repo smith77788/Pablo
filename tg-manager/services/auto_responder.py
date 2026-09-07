@@ -287,6 +287,24 @@ async def _notify_operator(http, token, operator: dict, chat_id: int,
         log_exc_swallow(log, "auto_responder: notify operator failed")
 
 
+async def _notify_operator_order(http, token, operator: dict, chat_id: int,
+                                 from_user: dict, summary: str) -> None:
+    """Уведомить оператора о новом подтверждённом заказе (диалог остаётся у бота).
+
+    Раньше заказ «повисал»: оператор не знал о нём. Доставка — по operator_chat_id
+    (бот не может писать по @username без взаимодействия)."""
+    op_chat = (operator or {}).get("chat_id")
+    if not op_chat:
+        return
+    uname = from_user.get("username")
+    who = f"@{uname}" if uname else (from_user.get("first_name") or f"id{chat_id}")
+    note = (f"🛒 Новый заказ от {who} (chat_id={chat_id}).\n{summary or ''}").strip()
+    try:
+        await bot_api.send_message(http, token, int(op_chat), note)
+    except Exception:
+        log_exc_swallow(log, "auto_responder: notify operator (order) failed")
+
+
 async def _deliver_sales_reply(http, token, chat_id, text, reply_markup=None) -> bool:
     """Ответ менеджера «по-человечески»: печатает… → пауза под длину → короткие
     сообщения (1–2). Кнопки-каналы — на последнем. Возвращает True, если ушло."""
@@ -670,6 +688,10 @@ async def _process_bot(
                     if _res.get("handoff") and _res.get("operator"):
                         await _notify_operator(http, token, _res["operator"],
                                                chat_id, from_user, text)
+                    if _res.get("order_confirmed") and _res.get("order_operator"):
+                        await _notify_operator_order(
+                            http, token, _res["order_operator"],
+                            chat_id, from_user, _res.get("order_summary") or "")
                     try:
                         await pool.execute(
                             "INSERT INTO auto_reply_log(bot_id, chat_id, rule_type, "

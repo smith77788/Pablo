@@ -57,7 +57,12 @@ const SP_FORM = [
   { sec: '📦 Заказы' },
   { k: 'order_fields', label: 'Какие данные собирать (через запятую)', type: 'list',
     ph: 'Имя, Телефон, Адрес доставки' },
+  { k: 'order_rules', label: 'Правила заказа и доставки', type: 'textarea',
+    ph: 'Доставка от 2 единиц по каждой позиции. Самовывоз без ограничений. Минимальная сумма заказа — 1000.' },
   { k: 'order_confirm_message', label: 'Сообщение при подтверждении заказа', type: 'textarea' },
+  { k: 'payment_details', label: 'Реквизиты / инструкция по оплате', type: 'textarea',
+    ph: 'Оплата на карту 0000 0000 0000 0000 (Тинькофф), после перевода пришлите чек.' },
+  { k: 'payment_via_operator', label: 'Оплату принимает живой оператор (перевести на него)', type: 'bool' },
 
   { sec: '🆘 Оператор и каналы' },
   { k: 'operator_username', label: 'Username оператора', type: 'text', ph: '@operator' },
@@ -215,10 +220,17 @@ function _spRenderForm(persona, products) {
   h += '<div class="sec">🏷 Прайс (реальные цены — менеджер не выдумывает)</div>';
   h += '<div id="spProducts">' + _spRenderProducts(products) + '</div>';
   if (persona.id) {
-    h += '<div style="display:flex;gap:8px;margin:6px 0 12px">' +
+    h += '<div style="display:flex;gap:8px;margin:6px 0 4px">' +
       '<input type="text" id="np_name" placeholder="Товар" class="inp" style="flex:2">' +
       '<input type="number" id="np_price" placeholder="Цена" class="inp" style="flex:1">' +
       '<button class="btn btn-s" onclick="spAddProduct()">➕</button></div>';
+    h += '<div style="display:flex;gap:8px;margin:0 0 4px">' +
+      '<input type="number" id="np_min_qty" placeholder="Мин. заказ" class="inp" style="flex:1" min="1" value="1">' +
+      '<input type="text" id="np_unit" placeholder="Ед. (шт, г, кг)" class="inp" style="flex:1" value="шт">' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--hint);padding:0 2px 12px">' +
+      'Мин. заказ — сколько минимум можно заказать (напр. доставка от 2 г). ' +
+      'Менеджер не предложит и не оформит меньше.</div>';
   } else {
     h += '<div style="font-size:12px;color:var(--hint);padding:0 2px 10px">' +
       'Сохраните менеджера — затем можно добавить товары.</div>';
@@ -258,9 +270,11 @@ function _spRenderProducts(products) {
   }
   return products.map(pr => {
     const price = ((pr.price_cents || 0) / 100).toFixed(2) + ' ' + (pr.currency || 'USD');
+    const mq = parseInt(pr.min_qty || 1, 10);
+    const minNote = (mq > 1) ? ' · от ' + mq + ' ' + esc(pr.unit || 'шт') : '';
     return '<div class="row"><div class="row-body"><div class="row-name">' + esc(pr.name) +
       '</div><div class="row-val">' + price + (pr.in_stock ? '' : ' · нет в наличии') +
-      '</div></div><button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
+      minNote + '</div></div><button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
       'onclick="spDelProduct(' + pr.id + ')">✕</button></div>';
   }).join('');
 }
@@ -357,14 +371,19 @@ async function spAddProduct() {
   if (!pid) return;
   const name = (document.getElementById('np_name').value || '').trim();
   const price = (document.getElementById('np_price').value || '').trim();
+  const minQ = parseInt((document.getElementById('np_min_qty') || {}).value || '1', 10);
+  const unit = ((document.getElementById('np_unit') || {}).value || 'шт').trim() || 'шт';
   if (!name) { toast('Название товара'); return; }
   try {
     await api('/api/miniapp/sales/persona/' + pid + '/product',
-      { method: 'POST', body: JSON.stringify({ name: name, price: price || '0' }) });
+      { method: 'POST', body: JSON.stringify({ name: name, price: price || '0',
+        min_qty: (minQ > 0 ? minQ : 1), unit: unit }) });
     const d = await api('/api/miniapp/sales/persona/' + pid);
     document.getElementById('spProducts').innerHTML = _spRenderProducts(d.products || []);
     document.getElementById('np_name').value = '';
     document.getElementById('np_price').value = '';
+    if (document.getElementById('np_min_qty')) document.getElementById('np_min_qty').value = '1';
+    if (document.getElementById('np_unit')) document.getElementById('np_unit').value = 'шт';
   } catch (e) { toast(e.message || 'Ошибка'); }
 }
 
