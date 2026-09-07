@@ -44,3 +44,11 @@ def test_screen_has_back_navigation_no_dead_end():
     assert "onclick=\"back()\"" in js
     # сохранение и привязка бота реально вызываются
     assert "method: 'POST'" in js and "method: 'PATCH'" in js and "method: 'DELETE'" in js
+
+
+def test_persona_test_diagnostic_wired():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    api = open(os.path.join(root, "services", "mini_app_api.py"), encoding="utf-8").read()
+    assert "/api/miniapp/sales/persona/{pid}/test" in api
+    js = _screen()
+    assert "function spTest(" in js and "/test" in js

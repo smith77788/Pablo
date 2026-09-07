@@ -16205,6 +16205,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad id", 400)
         return _json_resp({"ok": await _bsp.delete_product(pool, prid, uid)})
 
+    async def sp_test(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        p = await _sp_owned(uid, pid)
+        if not p:
+            return _err("Not found", 404)
+        products = await _bsp.list_products(pool, pid, active_only=True)
+        return _json_resp(await _bsp.diagnose_generation(p, products))
+
     async def sp_orders(request):
         uid = _get_uid(request)
         if not uid:
@@ -16241,6 +16255,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/sales/persona/{pid}/product", sp_product_add)
     app.router.add_patch("/api/miniapp/sales/product/{prid}", sp_product_update)
     app.router.add_delete("/api/miniapp/sales/product/{prid}", sp_product_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/test", sp_test)
     app.router.add_get("/api/miniapp/sales/orders", sp_orders)
     app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
     # Infra Analytics

@@ -241,6 +241,11 @@ function _spRenderForm(persona, products) {
   }
   h += '</div>';
   if (persona.id) {
+    h += '<button class="btn btn-s" style="width:100%;margin-bottom:8px" ' +
+      'onclick="spTest(' + persona.id + ')">🧪 Проверить ИИ (почему молчит?)</button>' +
+      '<div id="spTestOut" style="font-size:13px;margin-bottom:10px"></div>';
+  }
+  if (persona.id) {
     h += '<button class="btn btn-s" style="width:100%;color:var(--red);margin-bottom:20px" ' +
       'onclick="spDelete(' + persona.id + ')">🗑 Удалить менеджера</button>';
   }
@@ -379,6 +384,32 @@ async function spDelete(pid) {
     toast('Удалён');
     openSalesManager();
   } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spTest(pid) {
+  const out = document.getElementById('spTestOut');
+  if (out) out.innerHTML = '<span style="color:var(--hint)">Проверяю ИИ…</span>';
+  try {
+    const r = await api('/api/miniapp/sales/persona/' + pid + '/test',
+      { method: 'POST', body: '{}' });
+    if (!out) return;
+    const provs = (r.providers && r.providers.length)
+      ? r.providers.join(', ') : '— нет —';
+    if (r.ok) {
+      out.innerHTML = '<div style="color:var(--accent)">✅ ИИ работает (' +
+        esc(r.provider || '') + '/' + esc(r.model || '') + ')</div>' +
+        '<div style="color:var(--hint);margin-top:4px">Провайдеры: ' + esc(provs) + '</div>' +
+        '<div style="margin-top:6px;padding:8px;background:var(--bg2);border-radius:8px">' +
+        esc(r.reply || '') + '</div>';
+    } else {
+      out.innerHTML = '<div style="color:var(--red)">⚠️ ИИ не отвечает</div>' +
+        '<div style="color:var(--hint);margin-top:4px">Провайдеры: ' + esc(provs) + '</div>' +
+        '<div style="margin-top:6px;padding:8px;background:rgba(248,113,113,.08);' +
+        'border-radius:8px;color:var(--red)">' + esc(r.error || 'неизвестная ошибка') + '</div>';
+    }
+  } catch (e) {
+    if (out) out.innerHTML = '<div style="color:var(--red)">' + esc(e.message) + '</div>';
+  }
 }
 
 async function spOrders(pid) {

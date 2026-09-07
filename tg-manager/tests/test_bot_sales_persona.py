@@ -240,3 +240,25 @@ def test_auto_responder_human_delivery_and_silence():
     assert "_deliver_sales_reply" in src        # доставка «по-человечески»
     assert "sendChatAction" in src              # печатает…
     assert 'if _res.get("silent")' in src       # молчит после хендоффа
+
+
+def test_diagnose_no_providers(monkeypatch):
+    import asyncio
+    from services import ai_providers
+    monkeypatch.setattr(ai_providers, "configured_providers", lambda: [])
+    r = asyncio.new_event_loop().run_until_complete(
+        bsp.diagnose_generation({"name": "A"}, []))
+    assert r["ok"] is False and r["providers"] == []
+    assert "провайдер" in r["error"].lower()
+
+
+def test_diagnose_reports_provider_error(monkeypatch):
+    import asyncio
+    from services import ai_providers
+    fake = ai_providers.AiProvider(name="openai", api_key="k",
+                                   base_url="http://x", models=["m"])
+    monkeypatch.setattr(ai_providers, "configured_providers", lambda: [fake])
+    r = asyncio.new_event_loop().run_until_complete(
+        bsp.diagnose_generation({"name": "A"}, []))
+    # openai не установлен в тест-среде ИЛИ вызов упадёт — в любом случае error непустой
+    assert r["ok"] is False and r["provider"] == "openai" and r["error"]

@@ -327,34 +327,88 @@ async def generate_reply(persona: dict, products: list[dict], dialog: dict | Non
     """Ответ персоны через настроенный AI-провайдер (OpenAI-совместимо)."""
     from services import ai_providers
     providers = ai_providers.configured_providers()
+    _fallback = persona.get("fallback") or "Дайте секунду, уточню и вернусь с ответом 🙌"
     if not providers:
-        return (persona.get("fallback")
-                or "Дайте секунду, уточню и вернусь с ответом 🙌")
-    # выбор провайдера: по имени из персоны, иначе первый настроенный
-    prov = next((x for x in providers
-                 if persona.get("ai_provider")
-                 and x.name.lower() == persona["ai_provider"].lower()), providers[0])
+        log.warning("bot_sales_persona: no AI providers configured — using fallback")
+        return _fallback
     try:
         from openai import AsyncOpenAI
     except ImportError:
-        return persona.get("fallback") or "Секунду, уточню 🙌"
+        log.warning("bot_sales_persona: openai lib not installed — using fallback")
+        return _fallback
+    # предпочитаемый провайдер из персоны — первым, затем остальные по failover-порядку
+    pref = (persona.get("ai_provider") or "").lower()
+    ordered = sorted(providers, key=lambda x: 0 if x.name.lower() == pref else 1)
     system_prompt = build_system_prompt(persona, products, dialog)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(_history_messages(dialog))
     messages.append({"role": "user", "content": user_text or ""})
-    model = (persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini"))
+    last_err = None
+    for prov in ordered:
+        model = persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini")
+        for _model in [model] + [m for m in (prov.models or []) if m != model][:2]:
+            try:
+                client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url,
+                                     timeout=25.0)
+                resp = await client.chat.completions.create(
+                    model=_model, messages=messages,
+                    max_tokens=_clamp(persona.get("max_tokens", 400), 64, 1200),
+                    temperature=float(persona.get("temperature") or 0.7))
+                txt = (resp.choices[0].message.content or "").strip()
+                if txt:
+                    return txt
+            except Exception as e:
+                last_err = f"{prov.name}/{_model}: {type(e).__name__}: {str(e)[:120]}"
+                log.warning("bot_sales_persona generate error %s", last_err)
+                continue  # следующий модель/провайдер (failover)
+    log.warning("bot_sales_persona: all providers failed (%s) — fallback", last_err)
+    return _fallback
+
+
+async def diagnose_generation(persona: dict, products: list[dict] | None = None) -> dict:
+    """Диагностика генерации: почему менеджер отвечает (или падает в fallback).
+
+    Возвращает {ok, providers, provider, model, reply, error} — БЕЗ проглатывания
+    ошибок, чтобы владелец в UI видел настоящую причину (нет ключа / какой провайдер
+    / точный текст ошибки API), а не догадывался.
+    """
+    from services import ai_providers
+    provs = ai_providers.configured_providers()
+    out = {"ok": False, "providers": [p.name for p in provs],
+           "provider": None, "model": None, "reply": None, "error": None}
+    if not provs:
+        out["error"] = ("Не настроен ни один AI-провайдер. Задайте ключ "
+                        "OPENAI_API_KEY (или OpenRouter/Groq/Gemini) в переменных "
+                        "окружения или в админ-настройках AI.")
+        return out
+    prov = next((x for x in provs
+                 if persona.get("ai_provider")
+                 and x.name.lower() == persona["ai_provider"].lower()), provs[0])
+    out["provider"] = prov.name
+    model = persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini")
+    out["model"] = model
+    try:
+        from openai import AsyncOpenAI
+    except ImportError as e:
+        out["error"] = f"Библиотека openai не установлена: {e}"
+        return out
     try:
         client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=25.0)
         resp = await client.chat.completions.create(
-            model=model, messages=messages,
+            model=model,
+            messages=[{"role": "system",
+                       "content": build_system_prompt(persona, products or [])},
+                      {"role": "user", "content": "Привет! Что у вас есть?"}],
             max_tokens=_clamp(persona.get("max_tokens", 400), 64, 1200),
-            temperature=float(persona.get("temperature") or 0.7),
-        )
-        txt = (resp.choices[0].message.content or "").strip()
-        return txt or (persona.get("fallback") or "Секунду, уточню 🙌")
+            temperature=float(persona.get("temperature") or 0.7))
+        out["reply"] = (resp.choices[0].message.content or "").strip()
+        out["ok"] = bool(out["reply"])
+        if not out["ok"]:
+            out["error"] = "Провайдер вернул пустой ответ."
     except Exception as e:
-        log.warning("bot_sales_persona generate error: %s", e)
-        return persona.get("fallback") or "Дайте секунду, уточню и вернусь 🙌"
+        # точная причина: неверный ключ / модель / доступ / сеть
+        out["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+    return out
 
 
 async def extract_prefs_summary(persona: dict, dialog: dict) -> dict | None:
