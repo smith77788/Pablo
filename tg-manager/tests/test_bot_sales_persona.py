@@ -160,3 +160,83 @@ def test_mini_app_api_registers_sales_routes():
     for route in ("/api/miniapp/sales/persona", "/api/miniapp/sales/persona/{pid}/assign",
                   "/api/miniapp/sales/persona/{pid}/product", "/api/miniapp/sales/orders"):
         assert route in src, route
+
+
+# ── Живой оператор: позиции заказа, дробление, задержка «печатает…» ────────────
+def test_match_order_items_with_declension_and_qty():
+    prods = [{"name": "Эспрессо", "price_cents": 999},
+             {"name": "Кофемолка", "price_cents": 4500}]
+    items, total = bsp.match_order_items("хочу 2 эспрессо и кофемолку", prods)
+    names = {i["name"]: i["qty"] for i in items}
+    assert names.get("Эспрессо") == 2            # количество рядом с названием
+    assert names.get("Кофемолка") == 1           # склонение поймано стем-матчем
+    assert total == 999 * 2 + 4500
+    assert bsp.match_order_items("просто привет", prods) == ([], 0)
+
+
+def test_merge_items():
+    m, t = bsp._merge_items([{"name": "A", "qty": 1, "price_cents": 100}],
+                            [{"name": "A", "qty": 3, "price_cents": 100},
+                             {"name": "B", "qty": 2, "price_cents": 50}])
+    by = {i["name"]: i["qty"] for i in m}
+    assert by == {"A": 3, "B": 2} and t == 300 + 100
+
+
+def test_split_reply_and_typing_delay():
+    assert bsp.split_reply("короткий") == ["короткий"]
+    # текст должен быть длиннее порога (160) И иметь пустые строки, иначе не дробим
+    long = ("Первый абзац: довольно длинный текст, чтобы точно превысить порог "
+            "дробления в сто шестьдесят символов и заставить функцию разбить.\n\n"
+            "Второй абзац тоже с содержанием.\n\nТретий абзац.\n\nЧетвёртый абзац.")
+    assert len(long) > 160
+    assert len(bsp.split_reply(long, 2)) == 2
+    assert 0.8 <= bsp.typing_delay("x") <= 4.0
+    assert bsp.typing_delay("y" * 500) == 4.0
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_order_items_and_handoff_silence_postgres():
+    import asyncio
+    import asyncpg
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            await pool.execute("DELETE FROM bot_sales_dialogs WHERE owner_id=800888")
+            await pool.execute("DELETE FROM bot_sales_orders WHERE owner_id=800888")
+            await pool.execute("DELETE FROM bot_sales_personas WHERE owner_id=800888")
+        try:
+            await _cl()
+            p = await bsp.create_persona(pool, 800888, "Ника", operator_username="@op",
+                                         handoff_triggers="возврат")
+            pid = p["id"]
+            await bsp.add_product(pool, pid, 800888, "Эспрессо", price_cents=999)
+            await bsp.assign_to_bot(pool, pid, 800888, 556000)
+            # заказ с позицией и количеством → items/total заполнены
+            await bsp.handle_incoming(pool, 556000, 800888, 70, "хочу заказать 2 эспрессо")
+            await bsp.handle_incoming(pool, 556000, 800888, 70, "тел +79001112233")
+            o = (await bsp.list_orders(pool, 800888, bot_id=556000))[0]
+            items = o["items"]
+            if isinstance(items, str):
+                items = json.loads(items)
+            assert items and items[0]["name"] == "Эспрессо" and items[0]["qty"] == 2
+            assert o["total_cents"] == 999 * 2 and o["status"] == "confirmed"
+            # хендофф → следующий ход бот молчит (оператор ведёт)
+            r = await bsp.handle_incoming(pool, 556000, 800888, 71, "хочу возврат")
+            assert r["handoff"] and not r.get("silent")
+            r2 = await bsp.handle_incoming(pool, 556000, 800888, 71, "ну и как?")
+            assert r2.get("silent") and r2.get("reply") is None
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+
+
+def test_auto_responder_human_delivery_and_silence():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "services", "auto_responder.py"), encoding="utf-8").read()
+    assert "_deliver_sales_reply" in src        # доставка «по-человечески»
+    assert "sendChatAction" in src              # печатает…
+    assert 'if _res.get("silent")' in src       # молчит после хендоффа

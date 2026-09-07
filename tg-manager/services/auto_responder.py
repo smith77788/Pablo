@@ -287,6 +287,33 @@ async def _notify_operator(http, token, operator: dict, chat_id: int,
         log_exc_swallow(log, "auto_responder: notify operator failed")
 
 
+async def _deliver_sales_reply(http, token, chat_id, text, reply_markup=None) -> bool:
+    """Ответ менеджера «по-человечески»: печатает… → пауза под длину → короткие
+    сообщения (1–2). Кнопки-каналы — на последнем. Возвращает True, если ушло."""
+    from services import bot_sales_persona as _bsp
+    chunks = _bsp.split_reply(text, max_chunks=2)
+    if not chunks:
+        return False
+    ok_any = False
+    for i, chunk in enumerate(chunks):
+        try:
+            await bot_api._call(http, token, "sendChatAction",
+                                chat_id=chat_id, action="typing")
+        except Exception:
+            pass
+        try:
+            await asyncio.sleep(_bsp.typing_delay(chunk))
+        except Exception:
+            pass
+        rkb = reply_markup if i == len(chunks) - 1 else None
+        try:
+            ok, _ = await bot_api.send_message(http, token, chat_id, chunk, reply_markup=rkb)
+            ok_any = ok_any or ok
+        except Exception:
+            log_exc_swallow(log, f"auto_responder: sales deliver bot chat={chat_id}")
+    return ok_any
+
+
 async def _process_bot(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
@@ -624,7 +651,10 @@ async def _process_bot(
                 except Exception:
                     log_exc_swallow(log, f"auto_responder: sales persona bot={bot_id}")
                     _res = None
-                if _res is not None:      # у бота есть активная персона → она ответила
+                if _res is not None:      # у бота есть активная персона → она ведёт диалог
+                    # Диалог уже у живого оператора → бот молчит (не поверх человека).
+                    if _res.get("silent"):
+                        continue
                     _reply = _res.get("reply") or ""
                     if _is_free and _reply:
                         _reply = brand_injection.add_promo(
@@ -635,11 +665,8 @@ async def _process_bot(
                     if _rows:
                         _rkb = {"inline_keyboard": _rows}
                     if _reply:
-                        try:
-                            await bot_api.send_message(
-                                http, token, chat_id, _reply, reply_markup=_rkb)
-                        except Exception:
-                            log_exc_swallow(log, f"auto_responder: persona send bot={bot_id}")
+                        # доставка «по-человечески»: печатает… → пауза → короткие реплики
+                        await _deliver_sales_reply(http, token, chat_id, _reply, _rkb)
                     if _res.get("handoff") and _res.get("operator"):
                         await _notify_operator(http, token, _res["operator"],
                                                chat_id, from_user, text)

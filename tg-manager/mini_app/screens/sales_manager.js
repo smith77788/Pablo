@@ -398,13 +398,20 @@ async function spOrders(pid) {
     body.innerHTML = orders.map(o => {
       let contact = o.contact;
       if (typeof contact === 'string') { try { contact = JSON.parse(contact); } catch (_) { contact = {}; } }
+      let items = o.items;
+      if (typeof items === 'string') { try { items = JSON.parse(items); } catch (_) { items = []; } }
       const phone = (contact && contact.phone) ? ' · 📞 ' + esc(contact.phone) : '';
       const total = ((o.total_cents || 0) / 100).toFixed(2) + ' ' + (o.currency || 'USD');
       const who = o.customer_username ? '@' + esc(o.customer_username)
                 : esc(o.customer_name || ('chat ' + o.customer_chat_id));
+      const itemsLine = (Array.isArray(items) && items.length)
+        ? '<div class="row-val">🛒 ' + esc(items.map(it =>
+            (it.name || '') + (it.qty > 1 ? ' ×' + it.qty : '')).join(', ')) + '</div>'
+        : '';
       return '<div class="row"><div class="row-body">' +
         '<div class="row-name">#' + o.id + ' · ' + who + '</div>' +
         '<div class="row-val">' + (st[o.status] || esc(o.status)) + ' · ' + total + phone + '</div>' +
+        itemsLine +
         '</div></div>';
     }).join('');
   } catch (e) {

@@ -92,6 +92,23 @@ def configured_providers() -> list[AiProvider]:
         if provider:
             providers["openrouter"] = provider
 
+    # OpenAI — основной ключ платформы (OPENAI_API_KEY): его же используют другие
+    # AI-функции (авто-ответы, ассистент). Без него sales-персона и прочие фичи на
+    # configured_providers молча падали в fallback, хотя ключ задан.
+    openai_key = _key("OPENAI_API_KEY")
+    if openai_key:
+        provider = _provider(
+            name="openai",
+            api_key=openai_key,
+            base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            models=_csv_env(
+                "OPENAI_MODELS",
+                ",".join([os.getenv("OPENAI_MODEL", "gpt-4o-mini"), "gpt-4o-mini"]),
+            ),
+        )
+        if provider:
+            providers["openai"] = provider
+
     groq_key = _key("GROQ_API_KEY")
     if groq_key:
         provider = _provider(
@@ -150,9 +167,9 @@ def configured_providers() -> list[AiProvider]:
             providers["ollama"] = provider
 
     default_order = (
-        "ollama,openrouter,groq,gemini"
+        "ollama,openai,openrouter,groq,gemini"
         if "ollama" in providers
-        else "openrouter,groq,gemini"
+        else "openai,openrouter,groq,gemini"
     )
     order = _csv_env("AI_PROVIDER_ORDER", default_order)
     ordered = [providers[name] for name in order if name in providers]

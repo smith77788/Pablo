@@ -66,6 +66,87 @@ def detect_actions(text: str, persona: dict) -> dict:
     return {"handoff": handoff, "order_intent": order_intent, "phone": phone}
 
 
+def match_order_items(text: str, products: list[dict]) -> tuple[list[dict], int]:
+    """Сопоставляет упоминания товаров из прайса в тексте → позиции заказа. ЧИСТАЯ.
+
+    Возвращает (items, total_cents). items: [{name, qty, price_cents}]. Количество —
+    число рядом с названием («2 эспрессо», «эспрессо x3», «эспрессо 2 шт»), иначе 1.
+    Берём только товары, реально существующие в прайсе (без выдумывания).
+    """
+    tl = (text or "").lower()
+    items: list[dict] = []
+    total = 0
+    for pr in products or []:
+        nm = (pr.get("name") or "").strip()
+        nml = nm.lower()
+        if not nml:
+            continue
+        # Стем-матч для русских склонений: «кофемолка» → «кофемолку/кофемолки».
+        # Пробуем полное имя, затем усечённые основы (только для длинных слов,
+        # чтобы не ловить ложные совпадения по коротким).
+        cands = [nml]
+        if len(nml) > 5:
+            cands.append(nml[:-1])
+        if len(nml) > 6:
+            cands.append(nml[:-2])
+        matched = next((c for c in cands if c in tl), None)
+        if not matched:
+            continue
+        qty = 1
+        pos = tl.find(matched)
+        nml = matched  # для окна количества используем реально найденную основу
+        window = tl[max(0, pos - 12):pos] + " " + tl[pos + len(nml):pos + len(nml) + 12]
+        m = re.search(r"(\d{1,4})\s*(?:шт|штук|x|х|\*)?", window)
+        if m:
+            try:
+                q = int(m.group(1))
+                if 1 <= q <= 9999:
+                    qty = q
+            except ValueError:
+                pass
+        pc = int(pr.get("price_cents") or 0)
+        items.append({"name": nm, "qty": qty, "price_cents": pc})
+        total += pc * qty
+    return items, total
+
+
+def _merge_items(existing: list[dict], new: list[dict]) -> tuple[list[dict], int]:
+    """Слияние позиций заказа по имени (берём последнее упомянутое количество). ЧИСТАЯ."""
+    by_name: dict[str, dict] = {}
+    for it in (existing or []) + (new or []):
+        nm = it.get("name")
+        if not nm:
+            continue
+        by_name[nm] = {"name": nm, "qty": int(it.get("qty") or 1),
+                       "price_cents": int(it.get("price_cents") or 0)}
+    merged = list(by_name.values())
+    total = sum(i["qty"] * i["price_cents"] for i in merged)
+    return merged, total
+
+
+def split_reply(text: str, max_chunks: int = 3) -> list[str]:
+    """Разбивает ответ на 1–max_chunks коротких сообщений, как пишет живой человек.
+    ЧИСТАЯ. Короткий текст не дробим; режем по пустым строкам, иначе — по абзацам."""
+    t = (text or "").strip()
+    if not t:
+        return []
+    if len(t) <= 160 or "\n\n" not in t:
+        return [t]
+    parts = [p.strip() for p in t.split("\n\n") if p.strip()]
+    if len(parts) <= max_chunks:
+        return parts
+    # склеиваем хвост в последний кусок, чтобы не спамить
+    head = parts[:max_chunks - 1]
+    head.append("\n\n".join(parts[max_chunks - 1:]))
+    return head
+
+
+def typing_delay(chunk: str) -> float:
+    """Человекоподобная задержка «печатает…» под длину сообщения (сек). ЧИСТАЯ."""
+    n = len(chunk or "")
+    return max(0.8, min(4.0, 0.6 + n / 28.0))
+
+
 def _emoji_guidance(level: str) -> str:
     return {
         "none": "Не используй эмодзи вообще.",
@@ -103,6 +184,16 @@ def build_system_prompt(persona: dict, products: list[dict],
     L.append(f"Ты — {name}, {role}" + (f" компании «{company}»" if company else "") + ".")
     L.append("Ты РЕАЛЬНЫЙ живой человек, а не бот. Никогда не говори, что ты ИИ, "
              "бот или программа. Веди себя естественно, с эмоциями и своей манерой.")
+    # Поведение живого оператора в мессенджере — чтобы переписка была неотличима
+    # от общения с реальным человеком.
+    L.append("Пиши как живой человек в мессенджере: короткими репликами, живым "
+             "разговорным языком, без канцелярита и «шаблонных» фраз. Задавай по "
+             "ОДНОМУ вопросу за раз и жди ответа. Сначала по-человечески отреагируй "
+             "на слова клиента (согласись, посочувствуй, порадуйся), потом переходи к "
+             "делу. Не здоровайся повторно, если уже поздоровался. Не повторяй то, "
+             "что уже сказал. Обращайся к клиенту по имени, если оно известно. "
+             "Ошибайся в меру живости, но оставайся понятным. Не дублируй прайс "
+             "стеной — называй 1–2 подходящих варианта.")
     if p.get("age"):
         L.append(f"Возраст: примерно {p['age']} лет.")
     if p.get("personality"):
@@ -264,6 +355,68 @@ async def generate_reply(persona: dict, products: list[dict], dialog: dict | Non
     except Exception as e:
         log.warning("bot_sales_persona generate error: %s", e)
         return persona.get("fallback") or "Дайте секунду, уточню и вернусь 🙌"
+
+
+async def extract_prefs_summary(persona: dict, dialog: dict) -> dict | None:
+    """AI-выжимка диалога: краткое резюме + структурированные предпочтения клиента.
+    Чтобы менеджер «помнил» клиента как живой оператор. Fail-open → None."""
+    from services import ai_providers
+    providers = ai_providers.configured_providers()
+    if not providers:
+        return None
+    hist = _history_messages(dialog)
+    if len(hist) < 2:
+        return None
+    prov = next((x for x in providers
+                 if persona.get("ai_provider")
+                 and x.name.lower() == persona["ai_provider"].lower()), providers[0])
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        return None
+    convo = "\n".join(f"{'Клиент' if m['role']=='user' else 'Менеджер'}: {m['content']}"
+                      for m in hist)
+    sys = ("Ты — ассистент CRM. По диалогу верни СТРОГО JSON без пояснений: "
+           '{"summary": "1-2 предложения о клиенте и на чём остановились", '
+           '"prefs": {"имя": "", "бюджет": "", "интересы": "", "заметки": ""}}. '
+           "Пустые поля не выдумывай — оставляй пустыми.")
+    model = persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini")
+    try:
+        client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=20.0)
+        resp = await client.chat.completions.create(
+            model=model, max_tokens=250, temperature=0.2,
+            messages=[{"role": "system", "content": sys},
+                      {"role": "user", "content": convo[:4000]}])
+        raw = (resp.choices[0].message.content or "").strip()
+        m = re.search(r"\{.*\}", raw, re.S)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+        prefs = {k: v for k, v in (data.get("prefs") or {}).items()
+                 if isinstance(v, str) and v.strip()}
+        return {"summary": (data.get("summary") or "").strip()[:500], "prefs": prefs}
+    except Exception as e:
+        log.debug("extract_prefs_summary failed: %s", e)
+        return None
+
+
+async def update_dialog_memory(pool, dialog_id: int, summary: str | None,
+                               prefs: dict | None) -> None:
+    """Обновляет резюме и (мягко, дополняя) предпочтения клиента в диалоге."""
+    sets, args = [], []
+    if summary:
+        args.append(summary); sets.append(f"summary=${len(args)+1}")
+    if prefs:
+        row = await pool.fetchrow("SELECT prefs FROM bot_sales_dialogs WHERE id=$1", dialog_id)
+        cur = {}
+        if row and row["prefs"]:
+            cur = row["prefs"] if isinstance(row["prefs"], dict) else json.loads(row["prefs"])
+        cur.update(prefs)
+        args.append(json.dumps(cur)); sets.append(f"prefs=${len(args)+1}::jsonb")
+    if not sets:
+        return
+    await pool.execute(
+        f"UPDATE bot_sales_dialogs SET {', '.join(sets)} WHERE id=$1", dialog_id, *args)
 
 
 # ── CRUD: персоны ─────────────────────────────────────────────────────────────
@@ -550,11 +703,18 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
     text = (text or "").strip()
     pid = persona["id"]
     dialog = await get_or_create_dialog(pool, bot_id, chat_id, owner_id, pid)
+
+    # 0) Диалог уже передан живому оператору → бот МОЛЧИТ (не говорит поверх
+    # человека). Возврат «silent» гасит и обычные авто-правила.
+    if dialog.get("handed_off"):
+        return {"reply": None, "silent": True, "handoff": True, "operator": None,
+                "order_id": None, "channels": [], "persona_id": pid}
+
     actions = detect_actions(text, persona)
 
     # 1) Перевод на живого оператора — приоритетно и надёжно (не на волю модели).
     has_operator = bool(persona.get("operator_username") or persona.get("operator_chat_id"))
-    if actions["handoff"] and has_operator and not dialog.get("handed_off"):
+    if actions["handoff"] and has_operator:
         reply = persona.get("handoff_message") or "Секунду, подключаю специалиста 🙌"
         try:
             await append_turn(pool, dialog["id"], text, reply,
@@ -562,15 +722,16 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
         except Exception:
             log.warning("bsp handle_incoming: append_turn(handoff) failed")
         return {
-            "reply": reply, "handoff": True,
+            "reply": reply, "handoff": True, "silent": False,
             "operator": {"username": persona.get("operator_username"),
                          "chat_id": persona.get("operator_chat_id")},
-            "order_id": None, "persona_id": pid,
+            "order_id": None, "persona_id": pid, "channels": [],
         }
 
     products = await list_products(pool, pid, active_only=True)
 
-    # 2) Приём заказа: намерение → черновик; телефон → подтверждение.
+    # 2) Приём заказа: намерение/телефон → черновик; позиции из прайса → items/total;
+    #    телефон → подтверждение. Состав заказа виден владельцу.
     order_id = None
     order_note = ""
     if persona.get("can_take_orders", True) and (actions["order_intent"] or actions["phone"]):
@@ -579,6 +740,17 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
                 pool, owner_id, bot_id, pid, chat_id,
                 customer_username=username, customer_name=name)
             order_id = order["id"]
+            # позиции: сопоставляем прайс ТОЛЬКО с текущей репликой (прошлые позиции
+            # уже сохранены в заказе и подхватятся merge — иначе телефон/числа из
+            # прошлых сообщений попадают в количество).
+            new_items, _ = match_order_items(text, products)
+            if new_items:
+                cur_items = order.get("items") or []
+                if isinstance(cur_items, str):
+                    cur_items = json.loads(cur_items or "[]")
+                merged, total = _merge_items(cur_items, new_items)
+                await update_order(pool, order_id, owner_id,
+                                   items=merged, total_cents=total)
             if actions["phone"]:
                 contact = order.get("contact") or {}
                 if isinstance(contact, str):
@@ -603,6 +775,19 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
     except Exception:
         log.warning("bsp handle_incoming: append_turn failed")
 
+    # 4) Память как у живого оператора: раз в несколько ходов сжимаем диалог в
+    #    резюме + предпочтения (throttle, fail-open — не тормозим каждый ответ).
+    try:
+        mc = int(dialog.get("msg_count") or 0) + 1
+        if mc >= 4 and mc % 3 == 0:
+            _fresh = await get_or_create_dialog(pool, bot_id, chat_id, owner_id, pid)
+            mem = await extract_prefs_summary(persona, _fresh)
+            if mem:
+                await update_dialog_memory(pool, dialog["id"],
+                                           mem.get("summary"), mem.get("prefs"))
+    except Exception:
+        log.debug("bsp handle_incoming: memory extract skipped")
+
     # каналы — отдаём метаданными (auto_responder может добавить кнопки)
     channels = persona.get("channels")
     if isinstance(channels, str):
@@ -610,5 +795,5 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
             channels = json.loads(channels or "[]")
         except Exception:
             channels = []
-    return {"reply": reply, "handoff": False, "operator": None,
+    return {"reply": reply, "handoff": False, "silent": False, "operator": None,
             "order_id": order_id, "channels": channels or [], "persona_id": pid}
