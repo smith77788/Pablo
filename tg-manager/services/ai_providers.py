@@ -119,8 +119,11 @@ def configured_providers() -> list[AiProvider]:
                 "GROQ_MODELS",
                 ",".join(
                     [
-                        os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
-                        "llama-3.3-70b-versatile",
+                        # llama-3.1-8b-instant выведен Groq из строя (model_not_found) —
+                        # ставим первым актуальный versatile, дальше запасные.
+                        os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                        "llama-3.1-8b-instant",
+                        "gemma2-9b-it",
                     ]
                 ),
             ),

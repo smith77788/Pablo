@@ -322,31 +322,29 @@ def _history_messages(dialog: dict | None) -> list[dict]:
 
 
 # ── Генерация ответа ──────────────────────────────────────────────────────────
-async def generate_reply(persona: dict, products: list[dict], dialog: dict | None,
-                         user_text: str) -> str:
-    """Ответ персоны через настроенный AI-провайдер (OpenAI-совместимо)."""
+async def _run_completion(persona: dict, messages: list[dict]) -> tuple[str | None, dict]:
+    """Один прогон chat-completion с FAILOVER по всем провайдерам и по нескольку
+    моделей у каждого, пока не получим непустой ответ. Общая логика для
+    generate_reply и диагностики. Возвращает (text|None, info), где info =
+    {providers:[имена], provider, model, errors:[...]}.
+    """
     from services import ai_providers
     providers = ai_providers.configured_providers()
-    _fallback = persona.get("fallback") or "Дайте секунду, уточню и вернусь с ответом 🙌"
+    info = {"providers": [p.name for p in providers], "provider": None,
+            "model": None, "errors": []}
     if not providers:
-        log.warning("bot_sales_persona: no AI providers configured — using fallback")
-        return _fallback
+        return None, info
     try:
         from openai import AsyncOpenAI
-    except ImportError:
-        log.warning("bot_sales_persona: openai lib not installed — using fallback")
-        return _fallback
-    # предпочитаемый провайдер из персоны — первым, затем остальные по failover-порядку
+    except ImportError as e:
+        info["errors"].append(f"openai lib: {e}")
+        return None, info
     pref = (persona.get("ai_provider") or "").lower()
     ordered = sorted(providers, key=lambda x: 0 if x.name.lower() == pref else 1)
-    system_prompt = build_system_prompt(persona, products, dialog)
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(_history_messages(dialog))
-    messages.append({"role": "user", "content": user_text or ""})
-    last_err = None
     for prov in ordered:
-        model = persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini")
-        for _model in [model] + [m for m in (prov.models or []) if m != model][:2]:
+        base = persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini")
+        models = [base] + [m for m in (prov.models or []) if m != base][:3]
+        for _model in models:
             try:
                 client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url,
                                      timeout=25.0)
@@ -356,58 +354,47 @@ async def generate_reply(persona: dict, products: list[dict], dialog: dict | Non
                     temperature=float(persona.get("temperature") or 0.7))
                 txt = (resp.choices[0].message.content or "").strip()
                 if txt:
-                    return txt
+                    info["provider"], info["model"] = prov.name, _model
+                    return txt, info
             except Exception as e:
-                last_err = f"{prov.name}/{_model}: {type(e).__name__}: {str(e)[:120]}"
-                log.warning("bot_sales_persona generate error %s", last_err)
-                continue  # следующий модель/провайдер (failover)
-    log.warning("bot_sales_persona: all providers failed (%s) — fallback", last_err)
+                info["errors"].append(
+                    f"{prov.name}/{_model}: {type(e).__name__}: {str(e)[:140]}")
+                continue  # следующая модель/провайдер (failover)
+    return None, info
+
+
+async def generate_reply(persona: dict, products: list[dict], dialog: dict | None,
+                         user_text: str) -> str:
+    """Ответ персоны через настроенный AI-провайдер (failover, OpenAI-совместимо)."""
+    _fallback = persona.get("fallback") or "Дайте секунду, уточню и вернусь с ответом 🙌"
+    messages = [{"role": "system", "content": build_system_prompt(persona, products, dialog)}]
+    messages.extend(_history_messages(dialog))
+    messages.append({"role": "user", "content": user_text or ""})
+    txt, info = await _run_completion(persona, messages)
+    if txt:
+        return txt
+    log.warning("bot_sales_persona: generation failed (%s) — fallback",
+                "; ".join(info["errors"])[:300] or "нет провайдеров")
     return _fallback
 
 
 async def diagnose_generation(persona: dict, products: list[dict] | None = None) -> dict:
-    """Диагностика генерации: почему менеджер отвечает (или падает в fallback).
-
-    Возвращает {ok, providers, provider, model, reply, error} — БЕЗ проглатывания
-    ошибок, чтобы владелец в UI видел настоящую причину (нет ключа / какой провайдер
-    / точный текст ошибки API), а не догадывался.
-    """
-    from services import ai_providers
-    provs = ai_providers.configured_providers()
-    out = {"ok": False, "providers": [p.name for p in provs],
-           "provider": None, "model": None, "reply": None, "error": None}
-    if not provs:
-        out["error"] = ("Не настроен ни один AI-провайдер. Задайте ключ "
-                        "OPENAI_API_KEY (или OpenRouter/Groq/Gemini) в переменных "
-                        "окружения или в админ-настройках AI.")
-        return out
-    prov = next((x for x in provs
-                 if persona.get("ai_provider")
-                 and x.name.lower() == persona["ai_provider"].lower()), provs[0])
-    out["provider"] = prov.name
-    model = persona.get("model") or (prov.models[0] if prov.models else "gpt-4o-mini")
-    out["model"] = model
-    try:
-        from openai import AsyncOpenAI
-    except ImportError as e:
-        out["error"] = f"Библиотека openai не установлена: {e}"
-        return out
-    try:
-        client = AsyncOpenAI(api_key=prov.api_key, base_url=prov.base_url, timeout=25.0)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "system",
-                       "content": build_system_prompt(persona, products or [])},
-                      {"role": "user", "content": "Привет! Что у вас есть?"}],
-            max_tokens=_clamp(persona.get("max_tokens", 400), 64, 1200),
-            temperature=float(persona.get("temperature") or 0.7))
-        out["reply"] = (resp.choices[0].message.content or "").strip()
-        out["ok"] = bool(out["reply"])
-        if not out["ok"]:
-            out["error"] = "Провайдер вернул пустой ответ."
-    except Exception as e:
-        # точная причина: неверный ключ / модель / доступ / сеть
-        out["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+    """Диагностика: прогоняет ТОТ ЖЕ failover, что и боевой ответ, и честно
+    сообщает — какой провайдер сработал (ok) или почему НЕ сработал ни один."""
+    messages = [{"role": "system", "content": build_system_prompt(persona, products or [])},
+                {"role": "user", "content": "Привет! Что у вас есть?"}]
+    txt, info = await _run_completion(persona, messages)
+    out = {"ok": bool(txt), "providers": info["providers"], "provider": info["provider"],
+           "model": info["model"], "reply": txt, "error": None}
+    if not txt:
+        if not info["providers"]:
+            out["error"] = ("Не настроен ни один AI-провайдер. Задайте ключ в "
+                            "админ-настройках AI (OpenAI/OpenRouter/Groq/Gemini).")
+        elif info["errors"]:
+            out["error"] = ("Ни один провайдер/модель не ответили:\n"
+                            + "\n".join(info["errors"][:6]))
+        else:
+            out["error"] = "Провайдеры вернули пустой ответ."
     return out
 
 

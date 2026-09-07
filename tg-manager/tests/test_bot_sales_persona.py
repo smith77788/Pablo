@@ -260,5 +260,6 @@ def test_diagnose_reports_provider_error(monkeypatch):
     monkeypatch.setattr(ai_providers, "configured_providers", lambda: [fake])
     r = asyncio.new_event_loop().run_until_complete(
         bsp.diagnose_generation({"name": "A"}, []))
-    # openai не установлен в тест-среде ИЛИ вызов упадёт — в любом случае error непустой
-    assert r["ok"] is False and r["provider"] == "openai" and r["error"]
+    # openai не установлен в тест-среде ИЛИ вызов упадёт — в любом случае error непустой,
+    # провайдер виден в списке (на неудаче provider=None — успеха не было)
+    assert r["ok"] is False and "openai" in r["providers"] and r["error"]
