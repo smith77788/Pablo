@@ -3511,6 +3511,7 @@ def _gate_text(gate_on: bool, channels: list) -> str:
 
 # ── AI-ключи провайдеров (настройка из UI вместо env) ────────────────────────
 _AI_PROVIDERS = [
+    ("openai", "OpenAI (ChatGPT)", "ai_openai_key", "OPENAI_API_KEY"),
     ("anthropic", "Anthropic (Claude)", "ai_anthropic_key", "ANTHROPIC_API_KEY"),
     ("openrouter", "OpenRouter", "ai_openrouter_key", "OPENROUTER_API_KEY"),
     ("groq", "Groq", "ai_groq_key", "GROQ_API_KEY"),

@@ -34,3 +34,14 @@ def test_openai_key_via_db_override(monkeypatch):
         assert any(p.name == "openai" for p in ai_providers.configured_providers())
     finally:
         ai_providers.set_ai_keys({"OPENAI_API_KEY": ""})  # cleanup override
+
+
+def test_openai_selectable_in_admin_and_loaded_from_db():
+    import os as _os
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    admin = open(_os.path.join(root, "bot", "handlers", "admin.py"), encoding="utf-8").read()
+    # OpenAI можно задать из UI (раньше выбора не было — только openrouter/groq/gemini)
+    assert '"OPENAI_API_KEY"' in admin and "ai_openai_key" in admin
+    m = open(_os.path.join(root, "main.py"), encoding="utf-8").read()
+    # и ключ из БД грузится в оверрайды на старте
+    assert '"OPENAI_API_KEY", "ai_openai_key"' in m

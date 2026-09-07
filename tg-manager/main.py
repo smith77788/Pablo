@@ -600,6 +600,7 @@ async def main() -> None:
         from services.token_vault import decrypt_token
         _ai_map = {}
         for _env_name, _skey in (
+            ("OPENAI_API_KEY", "ai_openai_key"),
             ("ANTHROPIC_API_KEY", "ai_anthropic_key"),
             ("OPENROUTER_API_KEY", "ai_openrouter_key"),
             ("GROQ_API_KEY", "ai_groq_key"),
