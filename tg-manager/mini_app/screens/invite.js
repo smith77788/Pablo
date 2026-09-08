@@ -447,6 +447,10 @@ async function submitMassInvite() {
   const body = {group, source};
   if (document.getElementById('invSafeMode')?.checked) body.safe_mode = true;
   if (document.getElementById('invDaughterGroups')?.checked) body.use_daughter_groups = true;
+  // Витрина осмысленна только вместе с дочерними группами: сама по себе она
+  // добавляет звено, но не темп. Исполнитель требует обе, здесь не мешаем
+  // отправить — он же и рассудит, чтобы правило жило в одном месте.
+  if (document.getElementById('invShowcase')?.checked) body.use_showcase = true;
   // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;

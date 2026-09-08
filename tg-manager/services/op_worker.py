@@ -10423,6 +10423,7 @@ async def _exec_mass_invite(
     from collections import deque
 
     from services import daughter_groups
+    from services import showcase_layer
     from services import mass_inviter_engine as inv
 
     group = params.get("group", "")
@@ -10483,6 +10484,11 @@ async def _exec_mass_invite(
     # Если Telegram закрывает дочернюю группу, op_worker подставляет следующую и
     # продолжает прогон вместо полной остановки кампании (см. _rotate_daughter).
     _use_daughter = bool(params.get("use_daughter_groups"))
+    # Витрина — буфер МЕЖДУ дочерней группой и боевым каналом. Без неё дочерняя
+    # ведёт прямо в мать, и та получает всплеск вступлений по одной ссылке —
+    # вектор, от которого «Мать-Дочка» не защищает. Осмысленна только вместе с
+    # дочерними группами: сама по себе она лишь добавляет звено.
+    _use_showcase = bool(params.get("use_showcase")) and _use_daughter
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
@@ -10777,9 +10783,25 @@ async def _exec_mass_invite(
     _mother_ref = group if _use_daughter else ""
     _daughter_id: int | None = None
     _daughter_rotations = 0
+    _showcase_id: int | None = None
+    _showcase_ref = ""
+    if _use_showcase:
+        _sc = await showcase_layer.get_or_create(
+            pool, owner_id, _mother_ref, dict(accounts[0]))
+        if _sc.get("ok"):
+            _showcase_id = _sc["id"]
+            _showcase_ref = _sc["showcase_ref"]
+            log.info("mass_invite op=%d: включена витрина — дочерняя ведёт в буфер, "
+                     "а не в боевой канал", op_id)
+        else:
+            # Витрина не поднялась — это не повод ронять прогон, но и молчать
+            # нельзя: владелец рассчитывал на защиту от всплеска, а её нет.
+            log.warning("mass_invite op=%d: витрина не создана (%s) — дочерняя "
+                        "ведёт прямо в мать", op_id, _sc.get("error"))
+            _use_showcase = False
     if _use_daughter:
         _dg = await daughter_groups.get_or_create_active(
-            pool, owner_id, _mother_ref, dict(accounts[0]))
+            pool, owner_id, _mother_ref, dict(accounts[0]), redirect_ref=_showcase_ref)
         if not _dg.get("ok"):
             return {"status": "failed",
                     "summary": f"⚠️ Не удалось подготовить дочернюю группу: {_dg.get('error')}"}
@@ -10805,7 +10827,7 @@ async def _exec_mass_invite(
         await daughter_groups.mark_burned(pool, _daughter_id, reason)
         _creator = next((a for a in accounts if int(a["id"]) not in retired), accounts[0])
         _dg = await daughter_groups.get_or_create_active(
-            pool, owner_id, _mother_ref, dict(_creator))
+            pool, owner_id, _mother_ref, dict(_creator), redirect_ref=_showcase_ref)
         if not _dg.get("ok"):
             log.warning("mass_invite op=%d: следующую дочернюю группу создать не удалось: %s",
                         op_id, _dg.get("error"))
@@ -11764,13 +11786,18 @@ async def _exec_mass_invite(
         # дочерней группы, а подписана как обычная цель, то есть отчёт выглядел
         # так, будто людей заводили прямо в боевой канал. По такому итогу нельзя
         # понять, работал механизм или нет, — владелец и не мог этого проверить.
+        + (f"\n🏪 Витрина: приглашённые попадают в буфер, а в боевой канал их "
+           f"пускают волнами по {showcase_layer.wave_size(0)}+ мест — "
+           "всплеска вступлений канал не получает."
+           if _use_showcase else "")
         + (f"\n🛡 Мать-Дочка: инвайт шёл в расходную группу (ссылка выше), "
            f"боевой канал — {_mother_ref}."
            + (f" Сожжено дочерних за прогон: {_daughter_rotations}."
               if _daughter_rotations else " Дочерняя выдержала прогон.")
-           + "\n   ⚠️ От бана за инвайты это защищает, но приглашённые переходят "
-             "в боевой канал по закреплённой ссылке — всплеск вступлений он "
-             "получает всё равно."
+           + ("" if _use_showcase else
+              "\n   ⚠️ От бана за инвайты это защищает, но приглашённые переходят "
+              "в боевой канал по закреплённой ссылке — всплеск вступлений он "
+              "получает всё равно. Снимает это витрина (переключатель рядом).")
            if _use_daughter else "")
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")

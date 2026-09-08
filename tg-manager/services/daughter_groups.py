@@ -39,8 +39,14 @@ MAX_ROTATIONS_PER_RUN = 3
 
 async def get_or_create_active(
     pool: asyncpg.Pool, owner_id: int, mother_ref: str, creator_acc: dict,
+    redirect_ref: str = "",
 ) -> dict:
     """Активная дочерняя группа для (owner, mother) либо новая.
+
+    `redirect_ref` — куда ведёт закреплённое сообщение. По умолчанию в мать; с
+    витриной (services/showcase_layer) сюда передают ссылку на неё, и тогда люди
+    попадают в буфер, а не всплеском в боевой канал. Пустое значение сохраняет
+    прежнее поведение — существующие вызывающие не трогаем.
 
     Возвращает {"ok": True, "group_ref": str, "id": int} либо
     {"ok": False, "error": str}.
@@ -53,10 +59,11 @@ async def get_or_create_active(
     )
     if row:
         return {"ok": True, "group_ref": row["group_ref"], "id": int(row["id"])}
-    return await _create_new(pool, owner_id, mother_ref, creator_acc)
+    return await _create_new(pool, owner_id, mother_ref, creator_acc, redirect_ref)
 
 
-async def _create_new(pool: asyncpg.Pool, owner_id: int, mother_ref: str, creator_acc: dict) -> dict:
+async def _create_new(pool: asyncpg.Pool, owner_id: int, mother_ref: str,
+                      creator_acc: dict, redirect_ref: str = "") -> dict:
     res = await account_manager.create_channel(
         creator_acc["session_str"], "Chat", "", True, dict(creator_acc))
     if res.get("error") or not res.get("channel_id"):
@@ -75,12 +82,15 @@ async def _create_new(pool: asyncpg.Pool, owner_id: int, mother_ref: str, creato
         return {"ok": False, "error": err}
     group_ref = link_res["link"]
 
+    # С витриной ведём в неё, без витрины — прямо в мать (прежнее поведение).
+    _target = redirect_ref or mother_ref
     try:
-        mother_display = account_manager.format_telegram_join_ref_display(mother_ref)
+        target_display = account_manager.format_telegram_join_ref_display(_target)
     except Exception:
-        mother_display = mother_ref
+        target_display = _target
     await _pin_mother_redirect(
-        creator_acc["session_str"], channel_id, access_hash, mother_display, dict(creator_acc))
+        creator_acc["session_str"], channel_id, access_hash, target_display,
+        dict(creator_acc))
 
     row = await pool.fetchrow(
         "INSERT INTO daughter_groups(owner_id, mother_ref, group_ref, channel_id, "
