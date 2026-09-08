@@ -523,6 +523,54 @@ async def _claim_available_accounts(
     return claimed
 
 
+async def _rebalance_claim(op_id: int, owner_id: int, held: list) -> list:
+    """Честный дележ НА ЛЕТУ: отдать часть уже захваченных аккаунтов, если
+    после старта операции появились другие ПАРАЛЛЕЛЬНЫЕ (running) операции
+    того же владельца.
+
+    _claim_available_accounts считает справедливую долю только в МОМЕНТ
+    первого захвата. Долгая операция, стартовавшая в одиночку, забирает весь
+    свободный флот и держит его до самого конца — вторая операция того же
+    владельца ждёт полного завершения первой вместо совместного прогресса
+    (жалоба владельца: «нужно, чтобы шли постепенно-параллельно, не падая
+    из-за занятого флота»). Здесь та же формула доли, пересчитанная посреди
+    прогона: если доля уменьшилась — лишнее возвращается в пул тем же путём,
+    что и обычное освобождение (release_accounts), и почти сразу подхватывается
+    той операцией, что ждёт (напрямую или через живую очередь _requeue_op_no_accounts).
+
+    Не претендует на то, чтобы быть справедливым В КАЖДЫЙ момент — только
+    сходится к честной доле со временем, не блокируя прогресс ни одной из
+    операций и не открывая двух сессий на одном аккаунте одновременно."""
+    if not held or not owner_id or not _db_pool:
+        return held
+    try:
+        async with _active_lock:
+            other_ids = [int(i) for i in _active_op_ids if int(i) != op_id]
+        if not other_ids:
+            return held
+        n = await _db_pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue "
+            "WHERE owner_id=$1 AND status='running' AND id = ANY($2::bigint[])",
+            owner_id, other_ids,
+        )
+        concurrency = 1 + max(0, int(n or 0))
+    except Exception:
+        return held
+    if concurrency <= 1:
+        return held
+    fair_share = max(_MIN_ACCOUNTS_PER_OP, -(-len(held) // concurrency))
+    if len(held) <= fair_share:
+        return held
+    keep, give_back = held[:fair_share], held[fair_share:]
+    await release_accounts([int(a["id"]) for a in give_back])
+    log.info(
+        "op=%d: отдал %d/%d аккаунтов в общий пул — конкурентных running-операций "
+        "владельца стало %d (справедливая доля %d)",
+        op_id, len(give_back), len(held), concurrency, fair_share,
+    )
+    return keep
+
+
 def is_account_in_use(acc_id: int) -> bool:
     """Проверить занят ли аккаунт (non-async, читает snapshot).
 
@@ -8535,7 +8583,7 @@ async def _exec_connect_discovered_bots(
 
     claimed = await try_claim_accounts(list(accounts.keys()))
     if not claimed:
-        return {"status": "failed", "summary": "⚠️ Аккаунты заняты другой операцией"}
+        return {"status": "requeue", "summary": "⚠️ Аккаунты заняты другой операцией"}
 
     connected = 0
     failed: list[str] = []
@@ -8632,7 +8680,7 @@ async def _exec_scan_owned_bots(
 
     claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
     accounts = [a for a in accounts if int(a["id"]) in set(claimed)]
 
@@ -11155,12 +11203,28 @@ async def _exec_mass_invite(
                     "или откройте у группы публичную ссылку."}
 
     step = 0
+    _given_back_n = 0
+    _last_rebalance = time.monotonic()
+    _REBALANCE_EVERY_S = 20.0  # не долбить БД COUNT(*) на каждый батч
     while (q_users or q_phones) and not group_broken and not flood_storm:
         if await _is_cancelled(pool, op_id):
             break
         if _max_invites and step >= _max_invites:
             log.info("mass_invite op=%d: достигнут лимит за прогон (%d)", op_id, _max_invites)
             break
+
+        # Честный дележ на лету: другая операция владельца могла стартовать
+        # ПОСЛЕ того, как эта захватила весь свободный флот — отдаём лишнее,
+        # чтобы обе шли постепенно-параллельно, а не по очереди «до конца».
+        if time.monotonic() - _last_rebalance >= _REBALANCE_EVERY_S:
+            _last_rebalance = time.monotonic()
+            _before_n = len(accounts)
+            accounts = await _rebalance_claim(op_id, owner_id, accounts)
+            if len(accounts) < _before_n:
+                _given_back_n += _before_n - len(accounts)
+                retired = {a for a in retired if a in {int(x["id"]) for x in accounts}}
+                budget = {k: v for k, v in budget.items() if k in {int(x["id"]) for x in accounts}}
+
         active = [a for a in accounts if int(a["id"]) not in retired]
         if not active:
             log.info(
@@ -11643,6 +11707,8 @@ async def _exec_mass_invite(
         _acc_parts.append(f"🚫 в карантине (риск бана): {_quarantined_n}")
     if _daily_capped:
         _acc_parts.append(f"⏳ исчерпан суточный лимит: {len(_daily_capped)}")
+    if _given_back_n:
+        _acc_parts.append(f"🔀 отдано другим параллельным операциям владельца: {_given_back_n}")
     _idle_other = _idle_n - len(_daily_capped)
     if _idle_other > 0:
         _acc_parts.append(f"⚪ не ответили (сессия/сеть): {_idle_other}")
