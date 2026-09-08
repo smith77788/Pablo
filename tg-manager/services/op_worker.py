@@ -8583,7 +8583,7 @@ async def _exec_connect_discovered_bots(
 
     claimed = await try_claim_accounts(list(accounts.keys()))
     if not claimed:
-        return {"status": "failed", "summary": "⚠️ Аккаунты заняты другой операцией"}
+        return {"status": "requeue", "summary": "⚠️ Аккаунты заняты другой операцией"}
 
     connected = 0
     failed: list[str] = []
@@ -8680,7 +8680,7 @@ async def _exec_scan_owned_bots(
 
     claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
     accounts = [a for a in accounts if int(a["id"]) in set(claimed)]
 
