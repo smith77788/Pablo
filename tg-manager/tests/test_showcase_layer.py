@@ -185,3 +185,47 @@ def test_summary_tells_which_protection_worked():
     assert "Снимает это витрина" in ow, (
         "предупреждение о всплеске не подсказывает, чем он снимается"
     )
+
+
+# ── фоновый выпуск волн ──────────────────────────────────────────────────────
+
+def test_wave_link_expires_with_the_interval():
+    """Ссылка обязана жить ровно одну паузу.
+
+    Без срока жизни неиспользованные места НАКАПЛИВАЮТСЯ: десять волн по 50
+    оставили бы 500 открытых дверей одновременно — тот самый всплеск, от
+    которого уходим, просто отложенный на пять часов.
+    """
+    src = _read("services/showcase_layer.py")
+    assert "expire_seconds=wave_interval_sec()" in src, (
+        "у ссылки волны нет срока жизни — места будут копиться"
+    )
+
+
+def test_loop_exists_and_is_started():
+    """Без цикла витрина отдала бы первую порцию и замерла: аудитория копится,
+    а войти некуда."""
+    src = _read("services/showcase_layer.py")
+    main = _read("main.py")
+    assert "async def run(pool" in src, "фонового цикла нет"
+    assert "showcase_waves" in main, "цикл не запускается вместе с процессом"
+
+
+def test_one_broken_showcase_does_not_stop_the_rest():
+    src = _read("services/showcase_layer.py")
+    assert "не должна ронять проход по остальным" in src
+
+
+def test_mother_is_resolved_explicitly_not_guessed():
+    """Ошибиться каналом здесь дороже, чем не выпустить волну: ссылку с местами
+    выпустили бы в чужой канал."""
+    src = _read("services/showcase_layer.py")
+    assert "managed_channels" in src and "волна пропущена" in src
+
+
+def test_wave_size_uses_real_member_count():
+    """Размер волны зависит от размера канала — значит нужен реальный счётчик.
+    Колонку members_count заполняет обход диалогов; до этой починки она у всех
+    стояла в нуле, и волна всегда была бы минимальной."""
+    src = _read("services/showcase_layer.py")
+    assert "COALESCE(members_count,0)" in src

@@ -186,9 +186,13 @@ async def release_wave(pool, showcase_id: int, mother_members: int,
         return {"ok": False, "error": "витрина не найдена или сожжена"}
 
     size = wave_size(mother_members)
+    # Ссылка живёт ровно одну паузу. Без срока жизни неиспользованные места
+    # НАКАПЛИВАЮТСЯ: десять волн по 50 дадут 500 открытых дверей одновременно —
+    # тот самый всплеск, от которого мы уходим, просто отложенный.
     link_res = await account_manager.create_channel_invite_link(
         creator_acc["session_str"], mother_channel_id, dict(creator_acc),
-        mother_access_hash, title="showcase-wave", usage_limit=size)
+        mother_access_hash, title="showcase-wave", usage_limit=size,
+        expire_seconds=wave_interval_sec())
     if not link_res.get("ok") or not link_res.get("link"):
         err = link_res.get("error") or "ссылка волны не выпущена"
         log.warning("showcase_layer: волна для витрины %s не выпущена: %s", showcase_id, err)
@@ -242,3 +246,95 @@ async def mark_burned(pool, showcase_id: int, reason: str) -> None:
         "WHERE id=$1 AND status='active'",
         showcase_id, (reason or "")[:200],
     )
+
+
+# ── фоновый выпуск волн ──────────────────────────────────────────────────────
+
+_LOOP_TICK_SEC = 60          # как часто смотрим, кому пора
+
+
+async def run(pool, bot=None) -> None:
+    """Фоновый цикл: выпускать волны тем витринам, кому пора.
+
+    Без него витрина открывала бы только ПЕРВУЮ порцию и замирала: аудитория
+    копится, а войти некуда. Цикл держит темп сам, поэтому владельцу не надо
+    помнить про кампанию и открывать двери руками.
+    """
+    import asyncio
+
+    while True:
+        try:
+            await _release_due(pool)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("showcase_layer: сбой цикла выпуска волн")
+        await asyncio.sleep(_LOOP_TICK_SEC)
+
+
+async def _release_due(pool) -> int:
+    """Один проход: кому пора — выпускаем волну. Возвращает число волн."""
+    import time as _t
+
+    rows = await pool.fetch(
+        "SELECT id, owner_id, mother_ref, creator_account_id, "
+        "       EXTRACT(EPOCH FROM last_wave_at) AS last_ts "
+        "FROM showcase_layers WHERE status='active' "
+        "ORDER BY last_wave_at NULLS FIRST LIMIT 50"
+    )
+    now = _t.time()
+    released = 0
+    for r in rows or []:
+        if not next_wave_due(r["last_ts"], now):
+            continue
+        try:
+            if await _release_one(pool, dict(r)):
+                released += 1
+        except Exception:
+            # Одна витрина не должна ронять проход по остальным.
+            log.warning("showcase_layer: волна для витрины %s не вышла",
+                        r["id"], exc_info=True)
+    return released
+
+
+async def _release_one(pool, sc: dict) -> bool:
+    """Выпустить волну одной витрине.
+
+    Матерь берём из managed_channels: там же лежит и число участников, от
+    которого зависит размер волны (колонку заполняет обход диалогов — до этого
+    она у всех стояла в нуле, и волна всегда была бы минимальной).
+    """
+    mother_ref = (sc.get("mother_ref") or "").strip()
+    uname = mother_ref.rsplit("/", 1)[-1].lstrip("@") if mother_ref else ""
+
+    ch = await pool.fetchrow(
+        "SELECT channel_id, access_hash, COALESCE(members_count,0) AS members "
+        "FROM managed_channels WHERE owner_id=$1 AND ("
+        "      username = $2 OR channel_id::text = $2) LIMIT 1",
+        int(sc["owner_id"]), uname,
+    )
+    if not ch:
+        # Без матери в списке каналов резолвить её вслепую нельзя: ошибиться
+        # каналом здесь дороже, чем не выпустить волну.
+        log.info("showcase_layer: витрина %s — боевой канал %s не найден среди "
+                 "managed_channels, волна пропущена", sc["id"], mother_ref[:60])
+        return False
+
+    acc = await pool.fetchrow(
+        "SELECT * FROM tg_accounts WHERE id=$1 AND is_active AND session_str IS NOT NULL",
+        int(sc.get("creator_account_id") or 0),
+    )
+    if not acc:
+        log.info("showcase_layer: витрина %s — аккаунт-создатель недоступен, "
+                 "волна пропущена", sc["id"])
+        return False
+
+    res = await release_wave(
+        pool, int(sc["id"]), int(ch["members"]), dict(acc),
+        int(ch["channel_id"]), int(ch["access_hash"] or 0),
+    )
+    if res.get("ok"):
+        log.info("showcase_layer: витрина %s — открыто мест: %s",
+                 sc["id"], res.get("size"))
+        return True
+    return False

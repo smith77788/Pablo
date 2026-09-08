@@ -1022,6 +1022,12 @@ async def main() -> None:
         # работу. Транспорт — прокси пользователя или прямой host-IP; CF/IPv6 opt-in.
         asyncio.create_task(_resilient("activity_logger", activity_logger.run, pool))
         asyncio.create_task(_resilient("drift_detector", drift_detector.run, pool, bot))
+        # Витрина: открывает следующую порцию мест в боевой канал. Без цикла
+        # буфер отдал бы только первую волну и замер — люди копятся, а войти
+        # некуда.
+        from services import showcase_layer as _showcase_layer
+        asyncio.create_task(
+            _resilient("showcase_waves", _showcase_layer.run, pool, bot))
         asyncio.create_task(
             _resilient("ecosystem_auto_management", ecosystem_brain.run_auto_management, pool, bot)
         )
