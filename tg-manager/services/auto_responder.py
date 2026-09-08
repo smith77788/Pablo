@@ -39,6 +39,26 @@ _DEAD_TOKEN_BASE_COOLDOWN = 60.0  # seconds
 _DEAD_TOKEN_MAX_COOLDOWN = 3600.0  # cap at 1h between retries
 
 
+def _is_dm_update(upd: dict) -> bool:
+    """True только если сообщение пришло из ЛИЧНОГО чата с ботом.
+
+    Весь пользовательский путь автоответчика держит chat_id как id пользователя:
+    учёт нового юзера, подписка на воронку, add_bot_user, авто-ответы, /start,
+    релей «входящих» оператору. В личке chat.id == user.id — верно. В ГРУППЕ
+    chat.id — это id группы, поэтому дочерний бот, попавший в чат (обычное дело
+    при инвайте Мать-Дочка), отвечал бы прямо в группу (спам, выгоняющий только
+    что приглашённых) и засорял бы базу подписчиков id-ами групп. Группового
+    поведения у этого пути нет вовсе — только лички.
+    """
+    msg = upd.get("message")
+    if not isinstance(msg, dict):
+        return False
+    # Отсутствие типа (Telegram его всегда шлёт) трактуем как личку, чтобы не
+    # отломить штатный путь при неожиданной форме апдейта.
+    ctype = (msg.get("chat") or {}).get("type") or "private"
+    return ctype == "private"
+
+
 def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str:
     """Render {{PLACEHOLDER}} tokens in text with user/bot context."""
     if not text or "{{" not in text:
@@ -244,6 +264,74 @@ async def notify_broken_bots(pool: asyncpg.Pool, bot) -> int:
     return sent
 
 
+async def _notify_operator(http, token, operator: dict, chat_id: int,
+                           from_user: dict, text: str) -> None:
+    """Уведомить живого оператора о переводе диалога (через того же бота).
+
+    Бот может написать только в чат, который с ним взаимодействовал, поэтому
+    доставка работает по operator_chat_id. Если задан только @username —
+    доставить нечем (бот не может инициировать чат по username); клиент при этом
+    уже получил сообщение «подключаю специалиста», а перевод помечен в диалоге и
+    в auto_reply_log, так что оператор/владелец увидит его в аналитике.
+    """
+    op_chat = (operator or {}).get("chat_id")
+    if not op_chat:
+        return
+    uname = from_user.get("username")
+    who = f"@{uname}" if uname else (from_user.get("first_name") or f"id{chat_id}")
+    note = (f"🆘 Клиент {who} (chat_id={chat_id}) просит живого оператора.\n"
+            f"Последнее сообщение: {text[:300]}")
+    try:
+        await bot_api.send_message(http, token, int(op_chat), note)
+    except Exception:
+        log_exc_swallow(log, "auto_responder: notify operator failed")
+
+
+async def _notify_operator_order(http, token, operator: dict, chat_id: int,
+                                 from_user: dict, summary: str) -> None:
+    """Уведомить оператора о новом подтверждённом заказе (диалог остаётся у бота).
+
+    Раньше заказ «повисал»: оператор не знал о нём. Доставка — по operator_chat_id
+    (бот не может писать по @username без взаимодействия)."""
+    op_chat = (operator or {}).get("chat_id")
+    if not op_chat:
+        return
+    uname = from_user.get("username")
+    who = f"@{uname}" if uname else (from_user.get("first_name") or f"id{chat_id}")
+    note = (f"🛒 Новый заказ от {who} (chat_id={chat_id}).\n{summary or ''}").strip()
+    try:
+        await bot_api.send_message(http, token, int(op_chat), note)
+    except Exception:
+        log_exc_swallow(log, "auto_responder: notify operator (order) failed")
+
+
+async def _deliver_sales_reply(http, token, chat_id, text, reply_markup=None) -> bool:
+    """Ответ менеджера «по-человечески»: печатает… → пауза под длину → короткие
+    сообщения (1–2). Кнопки-каналы — на последнем. Возвращает True, если ушло."""
+    from services import bot_sales_persona as _bsp
+    chunks = _bsp.split_reply(text, max_chunks=2)
+    if not chunks:
+        return False
+    ok_any = False
+    for i, chunk in enumerate(chunks):
+        try:
+            await bot_api._call(http, token, "sendChatAction",
+                                chat_id=chat_id, action="typing")
+        except Exception:
+            pass
+        try:
+            await asyncio.sleep(_bsp.typing_delay(chunk))
+        except Exception:
+            pass
+        rkb = reply_markup if i == len(chunks) - 1 else None
+        try:
+            ok, _ = await bot_api.send_message(http, token, chat_id, chunk, reply_markup=rkb)
+            ok_any = ok_any or ok
+        except Exception:
+            log_exc_swallow(log, f"auto_responder: sales deliver bot chat={chat_id}")
+    return ok_any
+
+
 async def _process_bot(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
@@ -356,6 +444,12 @@ async def _process_bot(
 
             msg = upd.get("message")
             if not msg:
+                continue
+            # Только личка: в группе chat_id — это id группы, и весь путь ниже
+            # (авто-ответы, /start, воронки, релей) отвечал бы В ГРУППУ и портил
+            # базу подписчиков. Дочерний бот при инвайте Мать-Дочка попадает в
+            # чат — без этой отсечки он спамит в него на каждое сообщение.
+            if not _is_dm_update(upd):
                 continue
             chat_id = msg.get("chat", {}).get("id")
             text = msg.get("text", "")
@@ -557,6 +651,57 @@ async def _process_bot(
                         ack = brand_injection.add_promo(ack, html=True, context="broadcast")
                     await bot_api.send_message(http, token, chat_id, ack)
                 continue
+
+            # ── Сущность-менеджер: назначенная боту sales-персона ведёт диалог ──
+            # Персона = живой продавец: приоритетнее шаблонных правил. Не для /start
+            # (там welcome/воронка) и не в relay-режиме (выше уже continue). Fail-open:
+            # любой сбой → падаем в обычные правила, поллер не роняем.
+            if not is_start:
+                _res = None
+                try:
+                    from services import bot_sales_persona as _bsp
+                    _owner = (bot_row or {}).get("added_by")
+                    if _owner:
+                        _res = await _bsp.handle_incoming(
+                            pool, bot_id, int(_owner), chat_id, text,
+                            username=(from_user.get("username") or ""),
+                            name=(from_user.get("first_name") or ""))
+                except Exception:
+                    log_exc_swallow(log, f"auto_responder: sales persona bot={bot_id}")
+                    _res = None
+                if _res is not None:      # у бота есть активная персона → она ведёт диалог
+                    # Диалог уже у живого оператора → бот молчит (не поверх человека).
+                    if _res.get("silent"):
+                        continue
+                    _reply = _res.get("reply") or ""
+                    if _is_free and _reply:
+                        _reply = brand_injection.add_promo(
+                            _reply, html=False, context="broadcast")
+                    _rkb = None
+                    _rows = [[{"text": (c.get("title") or "Канал"), "url": c["url"]}]
+                             for c in (_res.get("channels") or []) if c.get("url")][:4]
+                    if _rows:
+                        _rkb = {"inline_keyboard": _rows}
+                    if _reply:
+                        # доставка «по-человечески»: печатает… → пауза → короткие реплики
+                        await _deliver_sales_reply(http, token, chat_id, _reply, _rkb)
+                    if _res.get("handoff") and _res.get("operator"):
+                        await _notify_operator(http, token, _res["operator"],
+                                               chat_id, from_user, text)
+                    if _res.get("order_confirmed") and _res.get("order_operator"):
+                        await _notify_operator_order(
+                            http, token, _res["order_operator"],
+                            chat_id, from_user, _res.get("order_summary") or "")
+                    try:
+                        await pool.execute(
+                            "INSERT INTO auto_reply_log(bot_id, chat_id, rule_type, "
+                            "trigger_type, keyword) VALUES($1,$2,'auto_reply',"
+                            "'sales_persona',$3)",
+                            bot_id, chat_id,
+                            "handoff" if _res.get("handoff") else "reply")
+                    except Exception:
+                        log.debug("auto_reply_log persona insert failed bot=%d", bot_id)
+                    continue      # персона обработала сообщение — правила пропускаем
 
             # Auto-replies (правила отсортированы по priority DESC; первое
             # совпавшее И попадающее в рабочее окно — выигрывает)

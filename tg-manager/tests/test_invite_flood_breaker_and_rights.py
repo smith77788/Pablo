@@ -114,11 +114,13 @@ def test_old_boolean_contract_is_preserved():
 def test_invite_retries_transient_grant_failures():
     """Временный отказ не должен стоить аккаунта."""
     src = _func_src(OP_WORKER, "_exec_mass_invite")
-    assert "_no_rights_tries" in src, (
+    # Счётчик попыток живёт в services/invite_recovery (работа параллельного
+    # агента) — здесь проверяем, что инвайт им пользуется, а не заводит свой.
+    assert "_no_rights_on_demand" in src, (
         "снова одна попытка на аккаунт — случайный сбой выдачи выкинет рабочий "
         "аккаунт из круга до конца прогона"
     )
-    assert "_NO_RIGHTS_MAX_TRIES" in src
+    assert "_irec_promote_retry_allowed" in src
     assert "not_participant" in src, (
         "самая частая временная причина не распознаётся, значит и не повторяется"
     )

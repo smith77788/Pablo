@@ -45,9 +45,16 @@ def test_no_continuation_when_all_accounts_failed_connect():
     assert "(len(_used_accounts) == 0) and bool(_noconnect_errs)" in body, (
         "_all_failed_connect = ни один не сработал И были сбои подключения"
     )
-    i = body.index("_chain < _MAX_INVITE_CHAIN")
-    cond = body[i - 220:i + 60]
-    assert "not _all_failed_connect" in cond, (
+    # Решение переехало в чистую функцию — признак передаётся ей явно, а сам
+    # запрет проверяем поведением, а не расположением строк.
+    assert "all_failed_connect=_all_failed_connect" in body, (
+        "признак обязан доходить до решения о продолжении"
+    )
+    from services import invite_recovery as ir
+
+    assert ir.should_schedule_continuation(
+        left=100, group_broken=False, all_failed_connect=True,
+        chain=0, max_chain=5)[0] is False, (
         "при полном провале подключения продолжение планировать нельзя"
     )
 

@@ -174,10 +174,16 @@ async def refresh_account_readiness(
     else:
         next_trust = max(current, readiness.normalized)
 
+    # readiness_level — НЕ warmup_level: та колонка принадлежит
+    # account_warmer.py ("light"/"medium"/"deep", уровень прогрева ЭТОЙ
+    # сессии), а здесь — свой, несовместимый словарь ("blocked"/"raw"/
+    # "warming"/"ready"/"veteran"). Запись в общую колонку клетила значение
+    # warmer'а сразу после его собственной записи и ломала int(warmup_level)
+    # у всех читателей (invite_advisor, flood_engine) — см. schema_v201.
     await pool.execute(
         """UPDATE tg_accounts
            SET trust_score=$2,
-               warmup_level=$3,
+               readiness_level=$3,
                status_reason=CASE
                    WHEN $4::text <> '' THEN $4
                    ELSE status_reason

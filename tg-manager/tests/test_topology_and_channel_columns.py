@@ -4,6 +4,8 @@
    - SELECT is_active FROM tg_channels — у tg_channels нет колонки is_active;
    - FROM managed_bots WHERE owner_id=$1 — у managed_bots нет owner_id (реальная
      колонка added_by).
+   Позже источник каналов исправлен с пустой tg_channels на managed_channels
+   (в tg_channels нет ни одной записи в коде → узлы-каналы были всегда пусты).
 2. ecosystem_brain.sync_ecosystem_members фильтровал managed_channels по
    is_active=TRUE — у managed_channels нет такой колонки → запрос 500.
 
@@ -33,15 +35,20 @@ def test_topology_managed_bots_uses_added_by():
     assert "FROM managed_bots WHERE owner_id" not in body
 
 
-def test_topology_tg_channels_no_is_active_column():
-    body = _topology_nodes_body()
-    # в запросе к tg_channels не должно быть is_active (колонки нет)
-    ch_query = re.search(r"FROM tg_channels[^\"]*", body)
-    assert ch_query, "запрос к tg_channels не найден"
-    # is_active не должно быть в SELECT-части перед FROM tg_channels
-    sel = body[:body.index("FROM tg_channels")]
-    assert "is_active FROM tg_channels" not in body
-    assert "tg_channels" in body
+def test_topology_channels_from_managed_channels_no_is_active():
+    # Каналы топологии берутся из managed_channels (туда реально пишут), а НЕ из
+    # пустой tg_channels; и без несуществующей колонки is_active. Проверяем КОД,
+    # а не комментарии (в них tg_channels упоминается как поясняющий текст).
+    raw = _topology_nodes_body()
+    code = "\n".join(re.sub(r"#.*$", "", ln) for ln in raw.splitlines())
+    assert "FROM managed_channels" in code, (
+        "каналы топологии должны читаться из managed_channels (в tg_channels никто "
+        "не пишет → узлы всегда пусты)"
+    )
+    assert "tg_channels" not in code, "tg_channels никем не заполняется — не источник"
+    assert "is_active" not in code[:code.index("FROM managed_channels")], (
+        "managed_channels не имеет is_active — фильтр/выборка по ней валит запрос"
+    )
 
 
 def test_ecosystem_managed_channels_no_is_active_filter():

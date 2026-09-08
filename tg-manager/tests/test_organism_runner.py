@@ -106,3 +106,31 @@ def test_miniapp_deeplink_uses_runpulseaction():
     # уведомления об удалённом сообщении), поэтому проверяем сам вызов, а не
     # буквальную форму аргумента.
     assert "runPulseAction({kind: _screen" in html
+
+
+def test_open_button_includes_op_id_for_operation(monkeypatch):
+    """Кнопка «Открыть» на уведомлении об операции ведёт К ОПЕРАЦИИ (#operation:<id>),
+    а не просто в приложение. Раньше op_id отбрасывался → deep-link был #operation."""
+    import config
+    from services.organism import runner
+    monkeypatch.setattr(config, "MINI_APP_URL", "https://app.example/", raising=False)
+    ob = runner._open_button({"kind": "operation", "op_id": 20})
+    assert ob is not None, "кнопка не построилась (проверь MINI_APP_URL)"
+    _label, wai = ob
+    assert wai.url.endswith("#operation:20"), wai.url
+    # kind без op_id — по-прежнему просто #kind
+    assert runner._open_button({"kind": "vault"})[1].url.endswith("#vault")
+
+
+def test_miniapp_deeplink_strips_telegram_hash_params():
+    """Наш #kind извлекается из location.hash БЕЗ дописанных Telegram tgWebApp*-
+    параметров — иначе _screen был мусором и «Открыть» вело просто в приложение."""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    html = open(os.path.join(root, "mini_app", "index.html"), encoding="utf-8").read()
+    assert "!p.startsWith('tgWebApp')" in html
+    # operation ведёт к конкретной операции: op_id проброшен и подсвечивается
+    assert "openMassOps(a.param)" in html
+    assert "function openMassOps(focusId)" in html
+    assert "massop-${r.id}" in html
+    assert "getElementById('massop-' + focusId)" in html

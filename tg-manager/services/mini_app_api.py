@@ -162,6 +162,16 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS pause_notified_at TIMESTAMPTZ",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_reason TEXT",
     "ALTER TABLE account_warmup_plans ADD COLUMN IF NOT EXISTS last_skip_at TIMESTAMPTZ",
+    # v200: боты, найденные на аккаунтах флота (скан через @BotFather).
+    # Найденный ≠ подключённый: у найденного есть username и аккаунт-владелец,
+    # но нет токена, поэтому в managed_bots (token UNIQUE NOT NULL) он не лежит.
+    """CREATE TABLE IF NOT EXISTS discovered_bots (
+        id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, acc_id BIGINT,
+        username TEXT NOT NULL, linked_bot_id BIGINT,
+        first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (owner_id, username))""",
+    "CREATE INDEX IF NOT EXISTS idx_discovered_bots_owner ON discovered_bots(owner_id, last_seen DESC)",
     # v199: общие папки как канал инвайтинга.
     """CREATE TABLE IF NOT EXISTS chatlist_folders (
         id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, acc_id BIGINT,
@@ -180,8 +190,12 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS fail_streak INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_ok_at TIMESTAMPTZ",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS dead_notified_at TIMESTAMPTZ",
-    # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS
-    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level FLOAT DEFAULT 0",
+    # v64 columns — safe to run repeatedly via ADD COLUMN IF NOT EXISTS.
+    # TEXT, not FLOAT: schema_v64.sql (the actual authoritative migration,
+    # applied first in any real deploy) declares it TEXT DEFAULT NULL — this
+    # mirror had drifted from it and would have created the wrong column type
+    # on any environment where this ran before schema_v64.sql.
+    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS warmup_level TEXT DEFAULT NULL",
     "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS last_warmup_at TIMESTAMPTZ",
     # crm_deals: fix stage CHECK constraint (schema had 'new/contacted/qualified',
     # API and JS use 'lead/contact/proposal/negotiation')
@@ -2023,6 +2037,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception as _e:  # fail-soft: пульс не должен ронять список
                 log.debug("accounts health merge owner=%s: %s", uid, _e)
 
+        # Одно действие-лечение на строку. Считается ПОСЛЕ мержа пульса —
+        # карантин/риск видны только оттуда. Список важнее подсказки: любая
+        # ошибка здесь молча оставляет строки без кнопок.
+        try:
+            from services import account_fix as _afix
+            _afix.annotate(rows)
+        except Exception as _e:  # pragma: no cover
+            log.debug("accounts fix annotate owner=%s: %s", uid, _e)
+
         # Серверная агрегация KPI (глобальные счётчики, не срез). Админ — по всей
         # платформе, обычный пользователь — по своим аккаунтам.
         if admin:
@@ -2585,11 +2608,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # провалы писали reason в result, не в error_msg).
             "COALESCE(error_msg, result->>'reason') AS error_msg, "
             "created_at, finished_at, scheduled_for, "
-            "COALESCE(result->>'summary', result->>'reason') AS summary "
+            "COALESCE(result->>'summary', result->>'reason') AS summary, "
+            "result AS _result "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)
         d = dict(row)
+        # Быстрые действия по ИТОГУ: раньше сводка советовала словами
+        # («назначьте прокси», «проверьте права», «повторите позже»), а кнопки
+        # рядом не было — совет уходил в пустоту.
+        _res_raw = d.pop("_result", None)
+        try:
+            import json as _json_qa
+            from services import op_quick_actions as _qa
+
+            _res = (_res_raw if isinstance(_res_raw, dict)
+                    else _json_qa.loads(_res_raw or "{}"))
+            d["quick_actions"] = _qa.suggest(
+                d.get("op_type"), d.get("status"), _res, op_id=op_id)
+        except Exception:
+            log.debug("operation_status: быстрые действия недоступны op=%s", op_id)
+            d["quick_actions"] = []
         # ISO для фронта (детали операции: Создано/Завершено/Запланировано)
         for _k in ("created_at", "finished_at", "scheduled_for"):
             if d.get(_k) is not None and hasattr(d[_k], "isoformat"):
@@ -2739,7 +2778,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid op_id", 400)
         try:
             row = await pool.fetchrow(
-                "SELECT op_type, params, label, status, total_items "
+                "SELECT op_type, params, label, status, total_items, done_items, "
+                "(SELECT COUNT(*) FROM operation_log ol "
+                " WHERE ol.op_id=operation_queue.id AND ol.status='error') AS err_cnt "
                 "FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
@@ -2773,9 +2814,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     label=f"Повтор неудавшихся ({len(failed_ids)})")
                 return _json_resp({"ok": True, "new_id": new_id, "channels": len(failed_ids)})
 
-            # Прочие операции — повтор целиком, только для проваленных.
-            if row["status"] != "failed":
-                return _err("Not found or not failed", 404)
+            # Прочие операции — повтор целиком. «Упавшая» для человека это не
+            # статус в базе, а НЕДОВЕДЁННАЯ работа: инвайт останавливался на
+            # 203 целях из 380 со статусом `done`, и повторить его было нечем.
+            from services import operation_retry as _oretry
+
+            _can, _why = _oretry.can_retry(
+                row["status"], row["done_items"], row["total_items"], row["err_cnt"])
+            if not _can:
+                return _err(f"Повтор невозможен: {_why}", 409)
             try:
                 _retry_params = (row["params"] if isinstance(row["params"], dict)
                                  else _json.loads(row["params"] or "{}"))
@@ -9523,6 +9570,154 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # строчки — при том что подпись раздела обещала «восстановление».
 
     # ── Общие папки (Shared Folders) как канал инвайтинга ──────────────────────
+    async def operations_retry_failed(request: web.Request) -> web.Response:
+        """Перезапустить все недоведённые операции разом.
+
+        Раньше повтор был только поштучным и только для `failed`. Операция,
+        закрывшаяся `done` без достижения цели (инвайт: 203 из 380), не
+        перезапускалась вообще, а разбирать очередь по одной руками — не работа.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import operation_retry as _oretry
+
+        rows = await _safe_fetch(pool,
+            """SELECT oq.id, oq.op_type, oq.label, oq.status,
+                      oq.done_items, oq.total_items,
+                      (SELECT COUNT(*) FROM operation_log ol
+                        WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt
+                 FROM operation_queue oq
+                WHERE oq.owner_id=$1
+                  AND oq.status IN ('failed','cancelled','done')
+                  AND oq.created_at > now() - INTERVAL '7 days'
+                ORDER BY oq.created_at DESC
+                LIMIT 100""", uid)
+        candidates = _oretry.pick_retryable([dict(r) for r in (rows or [])])
+        if not candidates:
+            return _json_resp({"ok": True, "retried": 0,
+                               "note": "Недоведённых операций за неделю нет"})
+        import json as _json2
+
+        retried, skipped = [], []
+        for c in candidates[:25]:   # потолок: не заваливаем очередь одним нажатием
+            src = await _safe_fetchrow(pool,
+                "SELECT op_type, params, label, total_items FROM operation_queue "
+                "WHERE id=$1 AND owner_id=$2", int(c["id"]), uid)
+            if not src:
+                continue
+            try:
+                prm = (src["params"] if isinstance(src["params"], dict)
+                       else _json2.loads(src["params"] or "{}"))
+            except (TypeError, ValueError):
+                prm = {}
+            try:
+                new_id = await _obus.submit(
+                    pool, uid, src["op_type"], prm,
+                    total_items=src["total_items"] or 0,
+                    label=f"Повтор: {src['label'] or src['op_type']}",
+                    dedup_window_sec=0)
+                retried.append({"from": int(c["id"]), "new_id": new_id,
+                                "reason": c["reason"]})
+            except PermissionError as exc:
+                skipped.append({"id": int(c["id"]), "why": str(exc)[:80]})
+            except ValueError:
+                skipped.append({"id": int(c["id"]),
+                                "why": f"тип «{src['op_type']}» больше не поддерживается"})
+        # Если по тарифу отказано ВО ВСЁМ — это отказ, а не «успех с пропусками»:
+        # честный 403 с причиной, иначе платное ограничение выглядело бы как
+        # молчаливое ничегонеделание. Частичный успех остаётся успехом.
+        if not retried and skipped:
+            return _err("Повтор отклонён тарифом: " + (skipped[0]["why"] or "требуется подписка"), 403)
+        return _json_resp({
+            "ok": True, "retried": len(retried), "skipped": len(skipped),
+            "candidates": len(candidates), "items": retried[:25],
+            "note": (f"Перезапущено {len(retried)}"
+                     + (f", пропущено {len(skipped)}" if skipped else "")),
+        })
+
+    async def bots_scan_fleet(request: web.Request) -> web.Response:
+        """Запустить скан флота на ботов (@BotFather /mybots по каждому аккаунту).
+
+        Разрыв: скан ресурсов находил каналы и чаты, но ботов — никогда, и
+        подключить бота можно было только вручную по токену. На живом флоте это
+        «164 канала/чата, 32 аккаунта и 0 ботов»."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        acc_ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "scan_owned_bots", {"account_ids": acc_ids},
+                total_items=len(acc_ids) or 1, label="Скан флота на ботов")
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        return _json_resp({"ok": True, "op_id": op_id})
+
+    async def bots_connect_discovered(request: web.Request) -> web.Response:
+        """Подключить найденных ботов пакетом (токены забирает у @BotFather).
+
+        Без этого скан был тупиком: найденного бота видно, а подключить нечем —
+        токена у него нет. Пустой usernames = подключить всех неподключённых.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        names = [str(u).lstrip("@") for u in (body.get("usernames") or []) if str(u or "").strip()]
+        try:
+            limit = max(1, min(50, int(body.get("limit") or 20)))
+        except (TypeError, ValueError):
+            limit = 20
+        pending = await _safe_count(pool,
+            "SELECT COUNT(*) FROM discovered_bots "
+            "WHERE owner_id=$1 AND linked_bot_id IS NULL AND acc_id IS NOT NULL", uid)
+        if not pending:
+            return _err("Нечего подключать: найденных неподключённых ботов нет — "
+                        "запустите скан флота", 409)
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "connect_discovered_bots",
+                {"usernames": names, "limit": limit},
+                total_items=len(names) or min(int(pending), limit),
+                label="Подключение найденных ботов")
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        return _json_resp({"ok": True, "op_id": op_id,
+                           "pending": int(pending)})
+
+    async def bots_discovered_list(request: web.Request) -> web.Response:
+        """Найденные на флоте боты: что есть, на каком аккаунте, подключён ли."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT d.username, d.acc_id, d.linked_bot_id, d.last_seen,
+                      a.first_name, a.phone
+                 FROM discovered_bots d
+                 LEFT JOIN tg_accounts a ON a.id = d.acc_id
+                WHERE d.owner_id=$1
+                ORDER BY (d.linked_bot_id IS NULL) DESC, d.username
+                LIMIT 500""", uid)
+        out = []
+        for r in (rows or []):
+            d = dict(r)
+            d["last_seen"] = d["last_seen"].isoformat() if d.get("last_seen") else None
+            d["connected"] = d.get("linked_bot_id") is not None
+            d["account"] = d.get("first_name") or d.get("phone") or (
+                f"#{d['acc_id']}" if d.get("acc_id") else "")
+            out.append(d)
+        return _json_resp({"ok": True, "bots": out,
+                           "total": len(out),
+                           "connected": sum(1 for x in out if x["connected"])})
+
     async def chatlist_folders_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -12530,16 +12725,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         # is_backup может ещё не примениться (лаг миграции) — тогда селект с колонкой
         # упадёт; фолбэк без неё, чтобы список прокси НИКОГДА не ломался.
+        # acc_count — сколько аккаунтов сидит на прокси. Без него мёртвый прокси
+        # с двенадцатью аккаунтами и мёртвый запасной без единого выглядели в
+        # списке одинаково, и было непонятно, какой чинить первым. Тем же числом
+        # объясняется отказ удаления (409 «прокси назначен N аккаунтам») ДО тапа.
         try:
             rows = await pool.fetch(
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check,
-                          created_at, COALESCE(is_backup, FALSE) AS is_backup
+                          created_at, COALESCE(is_backup, FALSE) AS is_backup,
+                          -- latency_avg_ms пишет сторож прокси; экран «Пул»
+                          -- читал его как latency_ms и потому ВСЕГДА показывал
+                          -- «Нет данных о задержке» и среднее «—».
+                          latency_avg_ms AS latency_ms,
+                          (SELECT COUNT(*) FROM tg_accounts a
+                            WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id) AS acc_count
                    FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
         except Exception:
             rows = await _safe_fetch(pool,
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
                    FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
-            rows = [dict(r, is_backup=False) for r in rows]
+            rows = [dict(r, is_backup=False, acc_count=0, latency_ms=None) for r in rows]
         # proxy_url хранится зашифрованным — расшифровываем для отображения (passthrough legacy)
         from services.token_vault import decrypt_token
 
@@ -15146,11 +15351,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            # tg_channels не имеет колонки is_active (есть только id/owner_id/title/
-            # username/...) — раньше SELECT is_active валил эндпоинт 500. Каналы
-            # считаем активными по факту наличия.
+            # Каналы берём из managed_channels — это таблица, куда реально пишутся
+            # каналы пользователя (8 путей записи). Прежний источник tg_channels
+            # НИКЕМ не заполняется (нет ни одного INSERT/UPDATE в коде и сидов в
+            # миграциях) → узлы-каналы в топологии всегда были пусты. DISTINCT ON
+            # (channel_id): один канал может вестись несколькими аккаунтами (строка
+            # на acc_id) — иначе в графе дубли-узлы. Активность по факту наличия.
             channels = await pool.fetch(
-                "SELECT id, username, title FROM tg_channels WHERE owner_id=$1 LIMIT 50", uid
+                "SELECT DISTINCT ON (channel_id) channel_id AS id, username, title "
+                "FROM managed_channels WHERE owner_id=$1 ORDER BY channel_id LIMIT 50",
+                uid,
             )
             # managed_bots скоупится по added_by, НЕ owner_id (такой колонки нет) —
             # прежний owner_id=$1 валил эндпоинт 500.
@@ -15573,6 +15783,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
+    app.router.add_post("/api/miniapp/operations/retry_failed", operations_retry_failed)
+    app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
+    app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
+    app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
     app.router.add_post("/api/miniapp/chatlist_folders", chatlist_folder_create)
     app.router.add_delete("/api/miniapp/chatlist_folders/{folder_id}", chatlist_folder_delete)
@@ -15594,6 +15808,457 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/topology", topology_overview)
     app.router.add_get("/api/miniapp/topology/nodes", topology_nodes)
     app.router.add_get("/api/miniapp/topology/links", topology_links)
+
+    # ── Provider Marketplace (блок 1: провайдеры + каталог) ──────────────────
+    from services import provider_marketplace as _mp
+
+    async def _mp_owned_provider(uid, pid):
+        p = await _mp.get_provider(pool, pid)
+        return p if (p and int(p["owner_id"]) == int(uid)) else None
+
+    async def _mp_owned_service(uid, sid):
+        s = await _mp.get_service(pool, sid)
+        if not s:
+            return None, None
+        p = await _mp_owned_provider(uid, s["provider_id"])
+        return (s, p) if p else (None, None)
+
+    async def mp_register(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            d = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            p = await _mp.register_provider(
+                pool, uid, d.get("name", ""), description=d.get("description", ""),
+                category=d.get("category", "other"), website=d.get("website", ""),
+                contact=d.get("contact", ""))
+            return _json_resp({"ok": True, "provider": p})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("mp_register uid=%s", uid)
+            return _err(str(e), 500)
+
+    async def mp_mine(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            return _json_resp({"providers": await _mp.list_providers(pool, owner_id=uid)})
+        except Exception as e:
+            log.exception("mp_mine uid=%s", uid)
+            return _err(str(e), 500)
+
+    async def mp_provider_detail(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        p = await _mp_owned_provider(uid, pid)
+        if not p:
+            return _err("Not found", 404)
+        return _json_resp({"provider": p,
+                           "services": await _mp.list_services(pool, pid),
+                           "api_keys": await _mp.list_api_keys(pool, pid)})
+
+    async def mp_provider_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _mp_owned_provider(uid, pid):
+            return _err("Not found", 404)
+        try:
+            p = await _mp.update_provider_profile(pool, pid, uid, **d)
+            return _json_resp({"ok": True, "provider": p})
+        except Exception as e:
+            log.exception("mp_provider_update uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def mp_apikey_issue(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        if not await _mp_owned_provider(uid, pid):
+            return _err("Not found", 404)
+        try:
+            # api_key возвращается ОДИН раз — фронт обязан показать и попросить сохранить
+            return _json_resp({"ok": True, "key": await _mp.issue_api_key(
+                pool, pid, actor_id=uid)})
+        except Exception as e:
+            log.exception("mp_apikey_issue uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def mp_apikey_revoke(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            kid = int(request.match_info["kid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        if not await _mp_owned_provider(uid, pid):
+            return _err("Not found", 404)
+        ok = await _mp.revoke_api_key(pool, pid, kid, actor_id=uid)
+        return _json_resp({"ok": ok})
+
+    async def mp_service_create(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _mp_owned_provider(uid, pid):
+            return _err("Not found", 404)
+        try:
+            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
+                           else _mp.to_cents(d.get("price", "0")))
+            s = await _mp.create_service(
+                pool, pid, title=d.get("title", ""), category=d.get("category", "other"),
+                resource_kind=d.get("resource_kind", ""),
+                description=d.get("description", ""), price_cents=price_cents,
+                currency=d.get("currency", "USD"), unit=d.get("unit", "unit"),
+                min_qty=int(d.get("min_qty", 1)), max_qty=int(d.get("max_qty", 1000000)),
+                stock=int(d.get("stock", -1)), sla_hours=int(d.get("sla_hours", 24)),
+                params_schema=d.get("params_schema") or [], actor_id=uid)
+            return _json_resp({"ok": True, "service": s})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("mp_service_create uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def mp_service_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["sid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        s, p = await _mp_owned_service(uid, sid)
+        if not p:
+            return _err("Not found", 404)
+        try:
+            if d.get("price") is not None and d.get("price_cents") is None:
+                d["price_cents"] = _mp.to_cents(d.pop("price"))
+            upd = await _mp.update_service(pool, sid, p["id"], actor_id=uid, **d)
+            return _json_resp({"ok": True, "service": upd})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("mp_service_update uid=%s sid=%s", uid, sid)
+            return _err(str(e), 500)
+
+    async def mp_service_toggle(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["sid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        s, p = await _mp_owned_service(uid, sid)
+        if not p:
+            return _err("Not found", 404)
+        ok = await _mp.set_service_active(pool, sid, p["id"], bool(d.get("active", True)),
+                                          actor_id=uid)
+        return _json_resp({"ok": ok})
+
+    async def mp_catalog(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        q = request.query
+        try:
+            items = await _mp.browse_catalog(
+                pool, category=q.get("category") or None,
+                resource_kind=q.get("kind") or None, q=q.get("q") or None,
+                limit=int(q.get("limit", 50)), offset=int(q.get("offset", 0)))
+            return _json_resp({"items": items})
+        except Exception as e:
+            log.exception("mp_catalog uid=%s", uid)
+            return _err(str(e), 500)
+
+    async def mp_admin_status(request):
+        uid = _get_uid(request)
+        if not _is_admin(uid):
+            return _err("Forbidden", 403)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        try:
+            p = await _mp.set_provider_status(
+                pool, pid, d.get("status", ""), by=uid, reason=d.get("reason", ""))
+            if not p:
+                return _err("Not found", 404)
+            return _json_resp({"ok": True, "provider": p})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("mp_admin_status uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def mp_admin_providers(request):
+        uid = _get_uid(request)
+        if not _is_admin(uid):
+            return _err("Forbidden", 403)
+        return _json_resp({"providers": await _mp.list_providers(
+            pool, status=request.query.get("status") or None)})
+
+    app.router.add_post("/api/miniapp/mp/register", mp_register)
+    app.router.add_get("/api/miniapp/mp/mine", mp_mine)
+    app.router.add_get("/api/miniapp/mp/catalog", mp_catalog)
+    app.router.add_get("/api/miniapp/mp/provider/{pid}", mp_provider_detail)
+    app.router.add_patch("/api/miniapp/mp/provider/{pid}", mp_provider_update)
+    app.router.add_post("/api/miniapp/mp/provider/{pid}/apikey", mp_apikey_issue)
+    app.router.add_post("/api/miniapp/mp/provider/{pid}/apikey/{kid}/revoke", mp_apikey_revoke)
+    app.router.add_post("/api/miniapp/mp/provider/{pid}/service", mp_service_create)
+    app.router.add_patch("/api/miniapp/mp/service/{sid}", mp_service_update)
+    app.router.add_post("/api/miniapp/mp/service/{sid}/toggle", mp_service_toggle)
+    app.router.add_get("/api/miniapp/mp/admin/providers", mp_admin_providers)
+    app.router.add_post("/api/miniapp/mp/admin/provider/{pid}/status", mp_admin_status)
+
+    # ── Sales Persona (сущность бота — живой менеджер по продажам) ────────────
+    from services import bot_sales_persona as _bsp
+
+    async def _sp_owned(uid, pid):
+        p = await _bsp.get_persona(pool, pid)
+        return p if (p and int(p["owner_id"]) == int(uid)) else None
+
+    async def sp_list(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        return _json_resp({"personas": await _bsp.list_personas(pool, uid)})
+
+    async def sp_create(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            d = await request.json()
+        except Exception:
+            return _err("bad json", 400)
+        try:
+            name = d.pop("name", "")
+            p = await _bsp.create_persona(pool, uid, name, **d)
+            return _json_resp({"ok": True, "persona": p})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_create uid=%s", uid)
+            return _err(str(e), 500)
+
+    async def sp_detail(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        p = await _sp_owned(uid, pid)
+        if not p:
+            return _err("Not found", 404)
+        return _json_resp({"persona": p,
+                           "products": await _bsp.list_products(pool, pid)})
+
+    async def sp_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            return _json_resp({"ok": True,
+                               "persona": await _bsp.update_persona(pool, pid, uid, **d)})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_update uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_persona(pool, pid, uid)})
+
+    async def sp_assign(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+            bot_id = int(d["bot_id"])
+        except Exception:
+            return _err("bad request", 400)
+        # бот должен принадлежать пользователю (added_by)
+        own = await pool.fetchval(
+            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not own:
+            return _err("бот не найден или не ваш", 403)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        r = await _bsp.assign_to_bot(pool, pid, uid, bot_id)
+        return _json_resp({"ok": bool(r), "persona": r})
+
+    async def sp_unassign(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.unassign_from_bot(pool, pid, uid)})
+
+    async def sp_product_add(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
+                           else _mp.to_cents(d.get("price", "0")))
+            prod = await _bsp.add_product(
+                pool, pid, uid, d.get("name", ""), description=d.get("description", ""),
+                sku=d.get("sku", ""), price_cents=price_cents,
+                currency=d.get("currency", "USD"), in_stock=bool(d.get("in_stock", True)),
+                min_qty=int(d.get("min_qty", 1) or 1), unit=d.get("unit", "шт") or "шт",
+                attributes=d.get("attributes") or {})
+            return _json_resp({"ok": True, "product": prod})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_product_add uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_product_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            prid = int(request.match_info["prid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        try:
+            if d.get("price") is not None and d.get("price_cents") is None:
+                d["price_cents"] = _mp.to_cents(d.pop("price"))
+            r = await _bsp.update_product(pool, prid, uid, **d)
+            if not r:
+                return _err("Not found", 404)
+            return _json_resp({"ok": True, "product": r})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_product_update uid=%s prid=%s", uid, prid)
+            return _err(str(e), 500)
+
+    async def sp_product_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            prid = int(request.match_info["prid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_product(pool, prid, uid)})
+
+    async def sp_test(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        p = await _sp_owned(uid, pid)
+        if not p:
+            return _err("Not found", 404)
+        products = await _bsp.list_products(pool, pid, active_only=True)
+        return _json_resp(await _bsp.diagnose_generation(p, products))
+
+    async def sp_orders(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        q = request.query
+        try:
+            bid = int(q["bot_id"]) if q.get("bot_id") else None
+        except ValueError:
+            bid = None
+        return _json_resp({"orders": await _bsp.list_orders(
+            pool, uid, bot_id=bid, status=q.get("status") or None)})
+
+    async def sp_order_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            oid = int(request.match_info["oid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        r = await _bsp.update_order(pool, oid, uid, **d)
+        if not r:
+            return _err("Not found", 404)
+        return _json_resp({"ok": True, "order": r})
+
+    app.router.add_get("/api/miniapp/sales/personas", sp_list)
+    app.router.add_post("/api/miniapp/sales/persona", sp_create)
+    app.router.add_get("/api/miniapp/sales/persona/{pid}", sp_detail)
+    app.router.add_patch("/api/miniapp/sales/persona/{pid}", sp_update)
+    app.router.add_delete("/api/miniapp/sales/persona/{pid}", sp_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/assign", sp_assign)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/unassign", sp_unassign)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/product", sp_product_add)
+    app.router.add_patch("/api/miniapp/sales/product/{prid}", sp_product_update)
+    app.router.add_delete("/api/miniapp/sales/product/{prid}", sp_product_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/test", sp_test)
+    app.router.add_get("/api/miniapp/sales/orders", sp_orders)
+    app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter

@@ -28,6 +28,11 @@ from bot.callbacks import AssetTplCb, QuickPostCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
 from bot.utils.subscription import require_plan, locked_text
+from bot.utils.template_validator import (
+    auto_fillable_placeholders,
+    replace_placeholders,
+    unresolved_placeholders_warning,
+)
 from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
@@ -332,6 +337,8 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         )
         return
 
+    text = replace_placeholders(text, auto_fillable_placeholders())
+
     sd = await state.get_data()
     selected_ids: list[int] = sd.get("selected_chan_ids", [])
     await state.update_data(post_text=text)
@@ -449,6 +456,13 @@ async def cb_qp_use_template(
     if not text:
         await callback.answer("Шаблон пустой.", show_alert=True)
         return
+
+    # {{DATE}}/{{DATE_SHORT}} не зависят от канала — подставляем сразу. Остальные
+    # (CITY/COUNTRY/USERNAME/CHANNEL/BOT_NAME — см. asset_templates.py) здесь
+    # подставить некем: у публикации в каналы нет получателя-пользователя, а
+    # список каналов ещё не выбран. Раньше это молча уходило в канал буквально
+    # как "{{CITY}}" — теперь хотя бы предупреждаем на экране подтверждения.
+    text = replace_placeholders(text, auto_fillable_placeholders())
 
     await callback.answer("✅ Шаблон применён")
     channels = await _load_channels(pool, callback.from_user.id)
@@ -717,6 +731,9 @@ async def cb_qp_timing(
         _type_labels = {"photo": "📷 Фото", "video": "🎬 Видео", "animation": "🎞 GIF", "document": "📎 Документ"}
         media_line = f"Медиа: <b>{_type_labels.get(media_type, media_type)}</b> ✅\n"
 
+    _warn = unresolved_placeholders_warning(post_text)
+    warn_line = f"\n{_warn}\n" if _warn else ""
+
     kb = InlineKeyboardBuilder()
     kb.button(
         text=f"✅ Опубликовать! ({_plural_channels(len(sel))})",
@@ -736,7 +753,8 @@ async def cb_qp_timing(
         f"Задержка: <b>{timing_label}</b>\n"
         f"Расчётное время: ~<b>{_fmt_dur(est_seconds)}</b>\n"
         f"{media_line}\n"
-        f"Текст поста:\n———\n{html.escape(preview)}\n———",
+        f"Текст поста:\n———\n{html.escape(preview)}\n———\n"
+        f"{warn_line}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

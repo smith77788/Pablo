@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import re
 import logging
 import random
 import time
@@ -139,6 +140,394 @@ def canary_verdict(results: list[dict]) -> tuple[bool, str]:
     if danger == n:
         return (True, f"канарейка: {n}/{n} аккаунтов словили флуд/бан, 0 жалоб принято")
     return (False, "")
+
+
+# ── Вектор: внешняя инфраструктура цели (scam/phishing домены) ──────────────────
+# НОВЫЙ реально действующий метод Strike. Массовые in-app репорты — самый слабый
+# вектор (Telegram взвешивает репутацию жалующегося, а не число жалоб). Зато у
+# scam/fraud/phishing-каналов почти всегда есть ВНЕШНЯЯ инфраструктура: платёжные
+# страницы, фейк-магазины, фишинг-лендинги на обычном хостинге. У неё есть пути
+# снятия, которые РАБОТАЮТ и НЕ зависят от решения Telegram:
+#   • Google Safe Browsing — флаг URL в Chrome/Safari/Firefox/Android: жертва
+#     видит красный экран-предупреждение вместо страницы (ломает воронку сразу);
+#   • APWG (reportphishing@apwg.org) — репорты уходят в блок-листы браузеров и
+#     вендорам takedown; принимает письма (автоматизируемо через SMTP флота);
+#   • хостинг/регистратор — обязаны реагировать на abuse по своей AUP (контакт
+#     через RDAP-запрос abuse@).
+# Даже если Telegram канал не тронет, снятие площадки обесценивает канал.
+
+# Домены самого Telegram и его зеркал — НЕ внешняя инфраструктура, не репортим их
+# как фишинг (это ложное срабатывание против самой площадки).
+_TG_HOSTS = (
+    "t.me", "telegram.me", "telegram.org", "telegram.dog", "telesco.pe",
+    "telegra.ph", "telegram.space", "tx.me", "tg.dev", "contact.me",
+)
+# Тянем хост только из полноценных URL (http/https) и www-префикса — так не ловим
+# ложные «файл.py»/«config.json» из текста поста.
+_EXT_URL_RE = re.compile(r"(?:https?://|www\.)([a-z0-9](?:[a-z0-9.\-]{0,251}[a-z0-9])?\.[a-z]{2,24})", re.I)
+# Категории, где полезная нагрузка живёт ВНЕ Telegram (есть внешняя площадка).
+# CSAM/насилие/терроризм СОЗНАТЕЛЬНО исключены: их путь — NCMEC/IWF/правоохрана,
+# а не anti-phishing APWG (туда такое слать нельзя и бессмысленно).
+_INFRA_CATEGORIES = frozenset({
+    "fraud", "scam", "spam", "phishing", "phish", "investment", "invest",
+    "crypto", "cryptoscam", "darknet", "drugs", "weapons", "counterfeit",
+    "casino", "gambling", "pyramid", "hyip",
+})
+
+
+def _extract_external_domains(texts: list[str]) -> list[str]:
+    """Внешние (не-Telegram) домены из текста описания/постов. ЧИСТАЯ функция.
+
+    Возвращает уникальные хосты в нижнем регистре без www-префикса,
+    отсортированные. Домены Telegram и его зеркал отсекаются.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in texts or []:
+        for m in _EXT_URL_RE.finditer(str(t or "")):
+            host = m.group(1).lower().strip().strip(".")
+            if host.startswith("www."):
+                host = host[4:]
+            if not host or "." not in host:
+                continue
+            if any(host == h or host.endswith("." + h) for h in _TG_HOSTS):
+                continue
+            if host in seen:
+                continue
+            seen.add(host)
+            out.append(host)
+    return sorted(out)
+
+
+def _is_infra_category(reason: str, preset: str | None) -> bool:
+    """True, если для категории есть смысл бить по внешней инфраструктуре. ЧИСТАЯ."""
+    key = (preset or reason or "").strip().lower()
+    return key in _INFRA_CATEGORIES
+
+
+def _build_apwg_report_body(domain: str, target: str, report_time: str) -> str:
+    """Тело письма-репорта в APWG по фишинг/скам-домену. ЧИСТАЯ функция."""
+    clean = str(target or "").lstrip("@")
+    return (
+        "PHISHING / FRAUD SITE REPORT\n"
+        "=================================================================\n\n"
+        "To: Anti-Phishing Working Group (reportphishing@apwg.org)\n\n"
+        "The website below is used in an active fraud/phishing campaign that is\n"
+        "distributed to victims through a public Telegram channel.\n\n"
+        f"  Malicious URL/host : http://{domain}/  (also https://{domain}/)\n"
+        f"  Distribution vector: Telegram channel https://t.me/{clean} (@{clean})\n"
+        f"  Reported at        : {report_time} UTC\n\n"
+        "The site solicits payments / credentials / personal data under false\n"
+        "pretenses. Please add it to the browser safe-browsing block-lists and\n"
+        "forward to the hosting provider and relevant takedown partners.\n\n"
+        "This is a good-faith report of illegal activity.\n"
+    )
+
+
+def build_infra_takedown_kit(target: str, domains: list[str], reason: str) -> dict:
+    """Готовый набор действий по внешней инфраструктуре цели. ЧИСТАЯ функция.
+
+    На каждый домен — каналы снятия, отсортированные по действенности:
+    Google Safe Browsing (самый быстрый удар по воронке) → APWG →
+    хостинг/регистратор через RDAP. Автоматизируется только APWG (письмо);
+    остальное — точная инструкция куда подать (формы требуют браузер/captcha).
+
+    Возвращает {target, category, domains, entries: [{domain, channels: [...]}]}.
+    """
+    clean = str(target or "").lstrip("@")
+    cat = _reason_to_email_cat(reason, None)
+    entries: list[dict] = []
+    for d in domains or []:
+        channels = [
+            {
+                "key": "safebrowsing", "title": "Google Safe Browsing", "priority": 0,
+                "url": f"https://safebrowsing.google.com/safebrowsing/report_phish/?url=http://{d}/",
+                "how": "Откройте ссылку, подтвердите captcha и отправьте. После "
+                       "принятия Chrome/Safari/Firefox/Android показывают жертве "
+                       "красный экран вместо страницы — воронка ломается сразу.",
+                "subject": "", "body": "",
+            },
+            {
+                "key": "apwg", "title": "APWG (email — авто)", "priority": 1,
+                "url": "mailto:reportphishing@apwg.org",
+                "how": "Письмо на reportphishing@apwg.org. Если подключён SMTP в "
+                       "настройках Strike — движок шлёт это автоматически при ударе.",
+                "subject": f"Phishing/fraud site report — {d} (via Telegram @{clean})",
+                "body": _build_apwg_report_body(d, clean, ""),
+            },
+            {
+                "key": "hosting", "title": "Хостинг/регистратор (RDAP → abuse@)", "priority": 2,
+                "url": f"https://rdap.org/domain/{d}",
+                "how": f"Откройте RDAP по ссылке, найдите abuse-контакт хостинга/"
+                       f"регистратора {d} и отправьте жалобу — по AUP они обязаны "
+                       f"реагировать на нелегальный контент.",
+                "subject": f"Abuse report: fraud/phishing content on {d}",
+                "body": _build_apwg_report_body(d, clean, ""),
+            },
+        ]
+        channels.sort(key=lambda c: c["priority"])
+        entries.append({"domain": d, "channels": channels})
+    return {
+        "target": clean,
+        "category": cat.get("label", reason),
+        "domains": list(domains or []),
+        "entries": entries,
+    }
+
+
+async def report_scam_infrastructure(
+    pool,
+    owner_id: int,
+    target: str,
+    domains: list[str],
+    reason: str,
+    preset: str | None,
+    progress_cb=None,
+) -> dict:
+    """Эскалация по внешней инфраструктуре цели (scam/phishing домены).
+
+    Автоматически шлёт APWG-репорт на КАЖДЫЙ домен с первого рабочего SMTP-ящика
+    (репорты уходят в блок-листы браузеров) и всегда возвращает готовый kit
+    (Safe Browsing / хостинг) для ручных каналов. Fail-open: без pool/ящиков
+    письма пропускаются, но kit возвращается — оператор снимет вручную.
+
+    Возвращает {domains, apwg_sent, emails, kit, skip_reason}.
+    """
+    from datetime import datetime, timezone
+
+    kit = build_infra_takedown_kit(target, domains, reason)
+    result: dict = {
+        "domains": list(domains or []),
+        "apwg_sent": 0,
+        "emails": [],
+        "kit": kit,
+    }
+    if not _is_infra_category(reason, preset):
+        result["skip_reason"] = "не infra-категория"
+        return result
+    if not domains:
+        result["skip_reason"] = "внешних доменов не найдено"
+        return result
+    if not pool or not owner_id:
+        result["skip_reason"] = "no pool/owner — только kit"
+        return result
+
+    # SMTP-ящики оператора (тот же источник, что и у email-эскалации).
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type,
+                      oauth_provider, oauth_refresh_token, oauth_access_token,
+                      oauth_expires_at
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        from services.token_vault import decrypt_token as _dt
+        db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
+    except Exception as e:
+        result["skip_reason"] = f"email accounts fetch: {str(e)[:60]}"
+        return result
+
+    if not db_emails:
+        result["skip_reason"] = "нет SMTP-ящиков — только kit"
+        return result
+
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clean = str(target or "").lstrip("@")
+    apwg_addr = "reportphishing@apwg.org"
+    ea = db_emails[0]  # один рабочий ящик — APWG не нужен веер, довольно 1 письма/домен
+    smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
+    for d in domains:
+        body = _build_apwg_report_body(d, clean, report_time)
+        subject = f"Phishing/fraud site report — {d} (via Telegram @{clean})"
+        ok, err = await _send_email(
+            ea["smtp_host"], ea["smtp_port"], ea["email"], smtp_secret,
+            ea["email"], apwg_addr, subject, body, auth_type=auth_type,
+        )
+        result["emails"].append(
+            {"from": ea["email"], "to": apwg_addr, "domain": d, "ok": ok, "err": err}
+        )
+        if ok:
+            result["apwg_sent"] += 1
+            log.info("strike_engine: APWG report sent for %s (target=%s)", d, clean)
+        else:
+            log.warning("strike_engine: APWG report failed for %s: %s", d, err)
+    return result
+
+
+# ── Вектор: жалоба регистратору/хостеру домена через RDAP ───────────────────────
+# APWG/Safe Browsing добавляют сайт в блок-листы браузеров (предупреждают жертву).
+# Этот вектор бьёт по САМОМУ существованию площадки: RDAP — машиночитаемый протокол
+# реестра доменов — отдаёт abuse-контакт регистратора, а регистраторы ОБЯЗАНЫ по
+# своей AUP снимать домены за подтверждённый фрод/фишинг. Снятый домен = мёртвая
+# ссылка во всех постах скам-канала. В отличие от kit-каналов это РЕАЛЬНО
+# автоматизируется: один RDAP-запрос → письмо на abuse@ регистратора.
+
+
+def _parse_rdap_abuse_email(data: dict) -> str | None:
+    """Извлекает abuse-email из RDAP-ответа по домену. ЧИСТАЯ функция.
+
+    Ищет вложенную entity с ролью 'abuse' и достаёт email из её vCard. RDAP
+    кладёт контакт регистратора глубоко: entities[registrar].entities[abuse].
+    """
+    if not isinstance(data, dict):
+        return None
+
+    def _email_from_vcard(ent: dict) -> str | None:
+        v = ent.get("vcardArray")
+        if not (isinstance(v, list) and len(v) == 2 and isinstance(v[1], list)):
+            return None
+        for item in v[1]:
+            if (isinstance(item, list) and len(item) >= 4
+                    and str(item[0]).lower() == "email"):
+                val = item[3]
+                if isinstance(val, str) and "@" in val:
+                    return val.strip().lower()
+        return None
+
+    def _walk(entities) -> str | None:
+        for ent in entities or []:
+            if not isinstance(ent, dict):
+                continue
+            roles = [str(r).lower() for r in (ent.get("roles") or [])]
+            if "abuse" in roles:
+                em = _email_from_vcard(ent)
+                if em:
+                    return em
+            sub = _walk(ent.get("entities"))
+            if sub:
+                return sub
+        return None
+
+    return _walk(data.get("entities"))
+
+
+async def _rdap_registrar_abuse(domain: str, _fetch=None) -> str | None:
+    """abuse-email регистратора домена через публичный RDAP (rdap.org). Fail-open."""
+    async def _default_fetch(url: str):
+        import aiohttp
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10),
+                headers={"Accept": "application/rdap+json"},
+            ) as r:
+                if r.status != 200:
+                    return None
+                return await r.json(content_type=None)
+
+    fetch = _fetch or _default_fetch
+    try:
+        data = await fetch(f"https://rdap.org/domain/{domain}")
+    except Exception:
+        log_exc_swallow(log, f"rdap: fetch failed domain={domain}")
+        return None
+    return _parse_rdap_abuse_email(data if isinstance(data, dict) else {})
+
+
+def _build_registrar_abuse_body(domain: str, target: str, report_time: str) -> str:
+    """Тело жалобы регистратору/хостеру домена. ЧИСТАЯ функция."""
+    clean = str(target or "").lstrip("@")
+    return (
+        "DOMAIN ABUSE COMPLAINT\n"
+        "=================================================================\n\n"
+        "The domain below is used to host content for an active fraud/phishing\n"
+        "campaign that is distributed to victims via a public Telegram channel.\n\n"
+        f"  Abusive domain     : {domain}  (http://{domain}/ , https://{domain}/)\n"
+        f"  Distribution vector: Telegram channel https://t.me/{clean} (@{clean})\n"
+        f"  Reported at        : {report_time} UTC\n\n"
+        "The site solicits payments / credentials / personal data under false\n"
+        "pretenses, in violation of your Acceptable Use Policy and the ICANN\n"
+        "Registrar Accreditation Agreement (§3.18 — duty to act on abuse reports).\n"
+        "We request suspension of the domain and preservation of registration data\n"
+        "for law enforcement.\n\n"
+        "This is a good-faith report of illegal activity.\n"
+    )
+
+
+async def report_domain_registrar(
+    pool,
+    owner_id: int,
+    target: str,
+    domains: list[str],
+    reason: str,
+    preset: str | None,
+    _fetch=None,
+) -> dict:
+    """Автожалоба регистратору каждого внешнего домена (abuse-контакт из RDAP).
+
+    Для каждого домена: RDAP → abuse-email → письмо-жалоба с первого SMTP-ящика.
+    Fail-open: нет RDAP-контакта/pool/ящиков — домен пропускается, не падаем.
+
+    Возвращает {domains, registrar_sent, contacts: [{domain, abuse_email, ok}]}.
+    """
+    from datetime import datetime, timezone
+
+    result: dict = {
+        "domains": list(domains or []),
+        "registrar_sent": 0,
+        "contacts": [],
+    }
+    if not _is_infra_category(reason, preset):
+        result["skip_reason"] = "не infra-категория"
+        return result
+    if not domains:
+        result["skip_reason"] = "внешних доменов не найдено"
+        return result
+    if not pool or not owner_id:
+        result["skip_reason"] = "no pool/owner"
+        return result
+
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type,
+                      oauth_provider, oauth_refresh_token, oauth_access_token,
+                      oauth_expires_at
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        from services.token_vault import decrypt_token as _dt
+        db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
+    except Exception as e:
+        result["skip_reason"] = f"email accounts fetch: {str(e)[:60]}"
+        return result
+
+    if not db_emails:
+        result["skip_reason"] = "нет SMTP-ящиков"
+        return result
+
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ea = db_emails[0]
+    smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
+    for d in domains:
+        abuse = await _rdap_registrar_abuse(d, _fetch=_fetch)
+        if not abuse:
+            result["contacts"].append(
+                {"domain": d, "abuse_email": None, "ok": False}
+            )
+            log.info("strike_engine: RDAP no abuse contact for %s", d)
+            continue
+        body = _build_registrar_abuse_body(d, target, report_time)
+        subject = f"Abuse report: fraud/phishing content on {d}"
+        ok, err = await _send_email(
+            ea["smtp_host"], ea["smtp_port"], ea["email"], smtp_secret,
+            ea["email"], abuse, subject, body, auth_type=auth_type,
+        )
+        result["contacts"].append(
+            {"domain": d, "abuse_email": abuse, "ok": ok, "err": err}
+        )
+        if ok:
+            result["registrar_sent"] += 1
+            log.info("strike_engine: registrar abuse sent %s → %s", d, abuse)
+        else:
+            log.warning("strike_engine: registrar abuse failed %s → %s: %s",
+                        d, abuse, err)
+    return result
 
 
 def _telegram_target_display(target: str) -> str:
@@ -576,6 +965,17 @@ class StrikeResult:
     accounts_flood: int = 0
     accounts_banned: int = 0
     accounts_failed: int = 0
+    # Внешняя инфраструктура цели: не-Telegram домены (платёжки/фишинг/фейк-магазины),
+    # на которые гонит трафик scam/fraud-канал, и результат их эскалации в
+    # APWG / Google Safe Browsing / хостинг. Вектор не зависит от решения Telegram.
+    infra_domains: list[str] = field(default_factory=list)
+    infra_apwg_sent: int = 0
+    infra_escalation: dict = field(default_factory=dict)
+    # Жалоба регистратору/хостеру домена через RDAP: сколько писем реально ушло на
+    # abuse-контакт (регистратор снимает домен за фрод — убивает саму площадку) +
+    # найденные контакты по доменам.
+    infra_registrar_sent: int = 0
+    infra_registrar_contacts: list[dict] = field(default_factory=list)
 
 
 # ── Pre-flight ─────────────────────────────────────────────────────────────────
@@ -1746,6 +2146,72 @@ async def staggered_strike(
                         log, f"staggered_strike: email_escalation failed target={target}"
                     )
 
+            # ═══ Фаза: Внешняя инфраструктура (scam/phishing домены) ═══
+            # Новый вектор: снять не сам канал, а внешние площадки, на которые он
+            # гонит трафик (APWG/Safe Browsing/хостинг) — это НЕ зависит от решения
+            # Telegram и ломает воронку скама сразу. Только для infra-категорий.
+            if _is_infra_category(plan.reason, plan.preset):
+                _domains = list(intel.get("external_domains") or [])
+                # Разведку доменов делаем ТОЛЬКО если их ещё нет, есть pool (боевая
+                # операция; без него APWG всё равно не отправить) и флот не под
+                # флудом (канарейка не остановила) — не жжём аккаунт лишним
+                # GetHistory, когда он и так в опасности.
+                if not _domains and not _canary_abort and pool and plan.accounts:
+                    try:
+                        from services import account_manager as _am_recon
+                        _acc0 = plan.accounts[0]
+                        _map = await _am_recon.strike_map_target(
+                            _acc0["session_str"], target, _acc=_acc0
+                        )
+                        _domains = list(_map.get("external_domains") or [])
+                    except Exception:
+                        log_exc_swallow(
+                            log, f"staggered_strike: infra recon failed target={target}"
+                        )
+                if _domains:
+                    if progress_cb:
+                        await progress_cb(
+                            "strike_infra",
+                            f"🕸 {_telegram_target_display(target)}: внешняя "
+                            f"инфраструктура ({len(_domains)} домен(ов)) — "
+                            f"APWG / Safe Browsing / хостинг...",
+                        )
+                    try:
+                        infra_res = await report_scam_infrastructure(
+                            pool, plan.owner_id, target, _domains,
+                            plan.reason, plan.preset,
+                        )
+                        result.infra_domains = _domains
+                        result.infra_apwg_sent = infra_res.get("apwg_sent", 0)
+                        result.infra_escalation = infra_res
+                        log.info(
+                            "strike_engine: infra target=%s domains=%d apwg_sent=%d",
+                            target, len(_domains), result.infra_apwg_sent,
+                        )
+                    except Exception:
+                        log_exc_swallow(
+                            log, f"staggered_strike: infra escalation failed target={target}"
+                        )
+                    # Второй удар по инфраструктуре: жалоба регистратору каждого
+                    # домена (abuse-контакт из RDAP) — снятие домена убивает саму
+                    # площадку, а не только предупреждает браузеры. Письмо флот не
+                    # расходует, поэтому идёт и при канарейка-стопе.
+                    try:
+                        reg_res = await report_domain_registrar(
+                            pool, plan.owner_id, target, _domains,
+                            plan.reason, plan.preset,
+                        )
+                        result.infra_registrar_sent = reg_res.get("registrar_sent", 0)
+                        result.infra_registrar_contacts = reg_res.get("contacts", [])
+                        log.info(
+                            "strike_engine: registrar target=%s domains=%d sent=%d",
+                            target, len(_domains), result.infra_registrar_sent,
+                        )
+                    except Exception:
+                        log_exc_swallow(
+                            log, f"staggered_strike: registrar escalation failed target={target}"
+                        )
+
             # ═══ Фаза 7: Верификация — реально ли цель ушла в даун ═══
             # Раньше verify_target_takedown была написана, но НИГДЕ не вызывалась:
             # движок отрабатывал все векторы, а «убил цель или нет» оставалось
@@ -2468,6 +2934,21 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
                 f"🌊 <b>{r.accounts_flood}</b> флуд · "
                 f"⛔ <b>{r.accounts_banned}</b> бан · "
                 f"⚠️ <b>{r.accounts_failed}</b> прочий сбой"
+            )
+        # Внешняя инфраструктура: домены, на которые гонит трафик скам-канал,
+        # и результат их эскалации в APWG/Safe Browsing (не зависит от Telegram).
+        if r.infra_domains:
+            _dsample = html.escape(", ".join(r.infra_domains[:4]))
+            if len(r.infra_domains) > 4:
+                _dsample += f" +{len(r.infra_domains) - 4}"
+            lines.append(
+                "  🕸 Внешняя инфраструктура: "
+                f"доменов <b>{len(r.infra_domains)}</b> · "
+                f"APWG отправлено <b>{r.infra_apwg_sent}</b> · "
+                f"регистратору <b>{r.infra_registrar_sent}</b> "
+                f"(<code>{_dsample}</code>) — "
+                "APWG флагает сайт в браузерах, жалоба регистратору снимает сам "
+                "домен: воронка скама ломается независимо от Telegram"
             )
         recon = r.phase_results.get("recon", {})
         lines.append(
@@ -4058,16 +4539,10 @@ async def mass_report(
                 f"🎯 [{t_idx + 1}/{len(targets)}] {_telegram_target_display(target)}...",
             )
 
-        # Recon для каждой цели (быстрый, одним аккаунтом)
-        intel: dict = {}
-        try:
-            from services import account_manager as _am
-
-            intel = await _am.get_channel_intel(
-                viable_accounts[0]["session_str"], target.lstrip("@")
-            )
-        except Exception:
-            log_exc_swallow(log, f"mass_report: intel failed target={target}")
+        # Пре-рекон здесь не нужен: report_peer_deep_v2 сам делает GetFullChannel/
+        # GetHistory на каждом аккаунте. Раньше тут был вызов несуществующего
+        # _am.get_channel_intel (мгновенный AttributeError → intel={}), а результат
+        # всё равно нигде не использовался — мёртвый код, убран.
 
         # Параллельная атака по волнам
         wave_results: list[dict] = []

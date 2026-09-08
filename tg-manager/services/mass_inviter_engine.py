@@ -84,8 +84,9 @@ async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
 
 # ── Классификация отказов по цели ────────────────────────────────────────────
 # Отказы инвайта делятся на горстку РАЗНЫХ по смыслу случаев, и оператору важно
-# различать их: «приватность» — ограничение получателя (помогает ссылка в ЛС или
-# промоут-трюк), «нет в Telegram» — мёртвая цель (её надо убрать из базы), «в
+# различать их: «приватность» — ограничение получателя (обходится только
+# промоут-трюком; рассылку ссылок в ЛС незнакомцам здесь НЕ предлагаем — она
+# собирает жалобы и убивает флот), «нет в Telegram» — мёртвая цель (убрать из базы), «в
 # слишком многих чатах» — лимит на стороне цели (сегодня не добавится никак).
 # Раньше всё, кроме приватности и флуда, сваливалось в «прочее»: крупнейшая по
 # объёму корзина отказов не имела ни имени, ни смысла, и оператор не понимал,
@@ -98,6 +99,12 @@ FAIL_BANNED = "banned_in_chat"    # цель забанена/кикнута в 
 FAIL_BLOCKED = "blocked"          # цель заблокировала инвайтера
 FAIL_FLOOD = "flood"
 FAIL_PERM = "perm"                # права/доступность самого чата
+# Ниже — корзины, которых не было: всё это падало в «прочее» и пряталось от
+# диагностики (на живом прогоне «прочее: 58» из 177 отказов).
+FAIL_ALREADY_IN = "already_in"    # цель УЖЕ в чате — это не отказ вовсе
+FAIL_CHAT_FULL = "chat_full"      # в чате предел участников
+FAIL_RESTRICTED = "restricted"    # аккаунт цели ограничен Telegram
+FAIL_IS_BOT = "is_bot"            # цель — бот, его так не добавить
 FAIL_OTHER = "other"
 
 FAIL_LABELS = {
@@ -109,21 +116,37 @@ FAIL_LABELS = {
     FAIL_BLOCKED: "🚷 цель заблокировала инвайтера",
     FAIL_FLOOD: "⏳ флуд-лимит",
     FAIL_PERM: "🚫 нет прав в чате",
+    FAIL_ALREADY_IN: "✅ уже в чате",
+    FAIL_CHAT_FULL: "📦 в чате предел участников",
+    FAIL_RESTRICTED: "🚫 аккаунт цели ограничен Telegram",
+    FAIL_IS_BOT: "🤖 цель — бот",
     FAIL_OTHER: "❓ прочее",
 }
 
 # Подсказка «что с этим делать» — по крупнейшей корзине отказов.
 FAIL_ADVICE = {
-    FAIL_PRIVACY: ("Приватность получателей Telegram обойти нельзя. Работает метод "
-                   "«ссылка в ЛС» — человек вступает сам."),
-    FAIL_NOT_MUTUAL: ("Эти цели требуют взаимного контакта. Метод «ссылка в ЛС» "
-                      "обходит требование."),
+    # Рассылку ссылок в ЛС незнакомцам здесь НЕ советуем: она собирает жалобы и
+    # уничтожает флот (решение владельца). Приватность обходить нечем — честно
+    # говорим об этом и предлагаем то, что не стоит аккаунтов.
+    FAIL_PRIVACY: ("Приватность получателей Telegram обойти нельзя — ни одним "
+                   "методом. Такие цели лучше исключить из базы: на них впустую "
+                   "тратится дневной лимит аккаунтов. Приводить их стоит "
+                   "публично — постом со ссылкой на чат, чтобы человек вступил сам."),
+    FAIL_NOT_MUTUAL: ("Эти цели требуют взаимного контакта — добавить их нельзя. "
+                      "Исключите их из базы, чтобы не жечь на них лимиты."),
     FAIL_DEAD: ("Аудитория устарела: этих аккаунтов больше нет. Соберите её заново "
                 "и почистите базу — на мёртвых целях тратится дневной лимит."),
     FAIL_TOO_MANY_CHATS: ("Цели состоят в предельном числе чатов — Telegram не даст "
                           "добавить их никаким методом."),
     FAIL_BANNED: "Эти люди забанены в целевом чате — снимите бан или исключите их.",
     FAIL_BLOCKED: "Цели заблокировали ваши аккаунты — используйте другие инвайтеры.",
+    FAIL_ALREADY_IN: ("Эти люди уже состоят в чате — это не отказ. Включите дедуп, "
+                      "чтобы не тратить на них лимиты повторно."),
+    FAIL_CHAT_FULL: ("В чате достигнут предел участников — Telegram больше никого "
+                     "не пустит. Нужен новый чат."),
+    FAIL_RESTRICTED: ("Аккаунты целей ограничены самим Telegram — добавить их нельзя, "
+                      "исключите из базы."),
+    FAIL_IS_BOT: "Ботов так не добавляют — их приглашает админ чата вручную.",
 }
 
 _DEAD_MARKERS = (
@@ -150,6 +173,18 @@ def classify_invite_error(exc: BaseException) -> str:
         return FAIL_BANNED
     if name in ("UserBlockedError", "YouBlockedUserError"):
         return FAIL_BLOCKED
+    # Ниже — то, что раньше целиком падало в «прочее» и пряталось от диагностики.
+    if name in ("UserAlreadyParticipantError",):
+        return FAIL_ALREADY_IN
+    if name in ("UsersTooMuchError", "ChatTooMuchError"):
+        return FAIL_CHAT_FULL
+    if name in ("UserRestrictedError", "UserDeactivatedBanError"):
+        return FAIL_RESTRICTED
+    if name in ("BotGroupsBlockedError", "BotsTooMuchError"):
+        return FAIL_IS_BOT
+    if name in ("ChatAdminRequiredError", "ChatWriteForbiddenError",
+                "ChannelPrivateError", "ChatIdInvalidError"):
+        return FAIL_PERM
     if name in ("InputUserDeactivatedError", "UsernameNotOccupiedError",
                 "UsernameInvalidError", "PeerIdInvalidError"):
         return FAIL_DEAD
@@ -162,6 +197,18 @@ def classify_invite_error(exc: BaseException) -> str:
         return FAIL_TOO_MANY_CHATS
     if "privacy" in text:
         return FAIL_PRIVACY
+    # Текстовые варианты тех же случаев: Telethon часть из них отдаёт обычным
+    # ValueError без своего типа, и они уходили в «прочее».
+    if "already" in text and "participant" in text:
+        return FAIL_ALREADY_IN
+    if "too many members" in text or "users_too_much" in text:
+        return FAIL_CHAT_FULL
+    if "admin" in text and ("required" in text or "privileges" in text):
+        return FAIL_PERM
+    if "restricted" in text and "privacy" not in text:
+        return FAIL_RESTRICTED
+    if "bot" in text and ("can't" in text or "cannot" in text or "blocked" in text):
+        return FAIL_IS_BOT
     return FAIL_OTHER
 
 

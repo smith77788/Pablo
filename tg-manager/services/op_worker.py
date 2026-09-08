@@ -565,7 +565,7 @@ async def _claim_single_account(
         return None, {"status": "failed",
                       "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
     if not await try_claim_account(int(acc["id"])):
-        return None, {"status": "failed",
+        return None, {"status": "requeue",
                       "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     return dict(acc), None
 
@@ -1382,6 +1382,21 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
         log_exc_swallow(log, f"op_worker alerts query error: {e}")
         return
 
+    # Активно исполняющиеся в этом процессе running-операции НЕ застряли: они живут
+    # в _active_op_ids — тот же критерий, по которому _watchdog_stale их НЕ сбрасывает.
+    # Без этой отсечки здоровый долгий mass_invite (пейсинг часами, чтобы не ловить
+    # баны) метился «застрял», и админу уходил ложный алерт с чужим owner_id и
+    # угрозой «running зависло → будет авто-сброшено» — хотя сброса не будет
+    # (операция активна). Тот же класс, что уже закрытый ложняк по отложенным
+    # pending: сообщаем только о реально брошенных running (сирота после падения
+    # воркера), которые вотчдог и правда сбросит.
+    async with _active_lock:
+        active_now: frozenset[int] = frozenset(_active_op_ids)
+    rows = [
+        r for r in rows
+        if not (r["status"] == "running" and int(r["id"]) in active_now)
+    ]
+
     fresh = [r for r in rows if int(r["id"]) not in _alerted_stuck_ops]
     if not fresh:
         # подчистим множество от уже завершённых, чтобы не росло бесконечно
@@ -1637,6 +1652,8 @@ def _build_dispatch() -> dict:
         "bulk_update_profile": _exec_bulk_update_profile,
         "check_accounts_health": _exec_check_accounts_health,
         "scan_owned_resources": _exec_scan_owned_resources,
+        "scan_owned_bots": _exec_scan_owned_bots,
+        "connect_discovered_bots": _exec_connect_discovered_bots,
         "account_warmup": _exec_account_warmup,
         "auto_register": _exec_auto_register,
         "leave_all_chats": _exec_leave_all_chats,
@@ -3920,7 +3937,7 @@ async def _exec_global_presence_channel(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts_rows) - len(claimed_ids)
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
@@ -4571,7 +4588,7 @@ async def _exec_gp_bulk_apply(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts_rows) - len(claimed_ids)
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
@@ -4908,7 +4925,7 @@ async def _exec_global_presence_bot(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts_rows) - len(claimed_ids)
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
@@ -5212,7 +5229,7 @@ async def _exec_bulk_create_channels_multi(
     # занятый аккаунт всё равно шёл в работу (вторая сессия → AUTH_KEY_DUPLICATED).
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
@@ -5369,7 +5386,7 @@ async def _exec_bulk_create_channels(
     # Отказной захват: создание каналов идёт живой сессией аккаунта. Без захвата
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -5633,7 +5650,7 @@ async def _exec_bot_factory_multi(
     # Отказной захват вместо безусловной пометки: занятую сессию в работу не берём.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
@@ -5792,7 +5809,7 @@ async def _exec_bot_factory(
     # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
     # мог параллельно вести другую операцию → две сессии на одном auth-key.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -6216,8 +6233,11 @@ async def _exec_strike(
                        accounts_used, peer_reported, msgs_reported, msgs_fetched,
                        pinned_reported, admins_reported, network_nodes, network_reports,
                        blocked, verified_down, duration_s, abuse_form_ok,
-                       spambot_escalation)
-                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
+                       spambot_escalation,
+                       accounts_ok, accounts_flood, accounts_banned, accounts_failed,
+                       infra_domains, infra_apwg_sent, infra_registrar_sent)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+                          $18,$19,$20,$21,$22,$23,$24)""",
                 owner_id,
                 r.target,
                 reason,
@@ -6235,6 +6255,13 @@ async def _exec_strike(
                 r.duration_s,
                 r.abuse_form_ok,
                 r.spambot_escalation,
+                getattr(r, "accounts_ok", 0),
+                getattr(r, "accounts_flood", 0),
+                getattr(r, "accounts_banned", 0),
+                getattr(r, "accounts_failed", 0),
+                len(getattr(r, "infra_domains", []) or []),
+                getattr(r, "infra_apwg_sent", 0),
+                getattr(r, "infra_registrar_sent", 0),
             )
         except Exception as _he:
             log.warning(
@@ -6846,7 +6873,7 @@ async def _exec_bulk_edit_channels(
     # другую операцию → две сессии на одном auth-key → AUTH_KEY_DUPLICATED.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -6933,7 +6960,7 @@ async def _exec_group_import_all(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -7022,7 +7049,7 @@ async def _exec_group_announce(
 
     # Отказной захват: объявление рассылается живой сессией этого аккаунта.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -7199,7 +7226,7 @@ async def _exec_bulk_dm_adhoc(
     # которые тут же отбросим. Каждый работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in active_accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
@@ -7412,7 +7439,7 @@ async def _exec_pin_last_post(
     # Без захвата он мог параллельно вести другую операцию (две сессии на
     # одном auth-key → AUTH_KEY_DUPLICATED).
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -7499,7 +7526,7 @@ async def _exec_bulk_post_to_channel(
     # которые тут же отбросим. Каждый работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -7658,7 +7685,7 @@ async def _exec_bulk_update_profile(
     # Отказной захват: каждый аккаунт работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -7811,7 +7838,7 @@ async def _exec_bulk_chan_exec(
     # их в total — соврать в прогрессе и в итоге.
     claimed_ids = await try_claim_accounts([int(a) for a in acc_map])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _claimed_set = set(claimed_ids)
     _pairs_before = len(channel_acc_pairs)
@@ -7975,7 +8002,7 @@ async def _exec_bulk_post_chans(
 
     # Отказной захват: постинг идёт живой сессией этого аккаунта.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -8099,7 +8126,7 @@ async def _exec_channel_import_all(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -8272,6 +8299,15 @@ async def _exec_check_accounts_health(
         # либо переданы чужие id. Не путаем с ошибкой запроса (см. выше).
         return {"status": "failed", "reason": "Нет аккаунтов для проверки"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     n = len(accounts)
     # done_items=0 при старте: операция может быть перезапущена (retry_count через
     # _maybe_requeue или подхват воркером) с тем же op_id — без сброса счётчик
@@ -8433,6 +8469,239 @@ async def _exec_check_accounts_health(
     }
 
 
+async def _exec_connect_discovered_bots(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Подключить найденных на флоте ботов пакетом: токен от BotFather → база.
+
+    Без этого скан был тупиком: найденного бота видно, а подключить нечем —
+    токена у него нет. Токен выдаёт сам BotFather по кнопке «API Token», и
+    забираем мы его сессией того аккаунта, которому бот принадлежит.
+
+    Токены нигде не логируются; в базу уходят через db.add_bot (шифрование
+    token_vault). Уважаем лимит тарифа на число ботов.
+    """
+    from services import account_manager, bot_api
+    from database import db as _db
+    from bot.utils.subscription import get_bot_limit, get_effective_bot_count
+
+    only = [str(u).lstrip("@").lower() for u in (params.get("usernames") or [])]
+    try:
+        cap = max(1, min(50, int(params.get("limit") or 20)))
+    except (TypeError, ValueError):
+        cap = 20
+
+    rows = await _safe_fetch(pool,
+        """SELECT d.username, d.acc_id FROM discovered_bots d
+            WHERE d.owner_id=$1 AND d.linked_bot_id IS NULL AND d.acc_id IS NOT NULL
+            ORDER BY d.username""", owner_id)
+    pending = [dict(r) for r in (rows or [])]
+    if only:
+        pending = [p for p in pending if str(p["username"]).lower() in set(only)]
+    if not pending:
+        return {"status": "done", "connected": 0,
+                "summary": "🤖 Нечего подключать: все найденные боты уже подключены "
+                           "или список пуст — запустите скан флота."}
+
+    # Тарифный потолок: не пытаемся подключать больше, чем разрешено планом.
+    try:
+        _lim = await get_bot_limit(pool, owner_id)
+        _have = await get_effective_bot_count(pool, owner_id)
+        room = max(0, int(_lim) - int(_have))
+    except Exception:
+        room = cap
+    if room <= 0:
+        return {"status": "failed",
+                "summary": "⚠️ Достигнут лимит ботов по тарифу — подключение невозможно"}
+    pending = pending[:min(cap, room)]
+
+    # Группируем по аккаунту-владельцу: один диалог с BotFather на аккаунт.
+    by_acc: dict = {}
+    for p in pending:
+        by_acc.setdefault(int(p["acc_id"]), []).append(p["username"])
+
+    acc_rows = await _safe_fetch(pool,
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+                  a.device_model, a.system_version, a.app_version, a.lang_code,
+                  a.system_lang_code, a.cf_relay_url, a.proxy_id,
+                  p.proxy_url, p.geo_country
+             FROM tg_accounts a
+             LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+            WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])""",
+        owner_id, list(by_acc.keys()))
+    accounts = {int(r["id"]): dict(r) for r in (acc_rows or []) if r["session_str"]}
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет живых сессий аккаунтов-владельцев"}
+
+    claimed = await try_claim_accounts(list(accounts.keys()))
+    if not claimed:
+        return {"status": "failed", "summary": "⚠️ Аккаунты заняты другой операцией"}
+
+    connected = 0
+    failed: list[str] = []
+    try:
+        await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+                            len(pending), op_id)
+        import aiohttp as _aio
+
+        done_n = 0
+        async with _aio.ClientSession() as _http:
+            for acc_id in list(claimed):
+                acc = accounts.get(int(acc_id))
+                if not acc:
+                    continue
+                names = by_acc.get(int(acc_id)) or []
+                if await _is_cancelled(pool, op_id):
+                    break
+                try:
+                    res = await asyncio.wait_for(
+                        account_manager.fetch_bot_tokens_via_botfather(
+                            acc["session_str"], names, _acc=acc, limit=len(names)),
+                        timeout=60 + 25 * len(names))
+                except Exception as e:
+                    failed.append(f"аккаунт #{acc_id}: {str(e)[:70]}")
+                    continue
+                for uname, token in (res.get("tokens") or {}).items():
+                    done_n += 1
+                    try:
+                        info = await bot_api.get_me(_http, token)
+                        if not info or not info.get("id"):
+                            failed.append(f"@{uname}: токен не принят Telegram")
+                            continue
+                        added = await _db.add_bot(
+                            pool, token=token, bot_id=int(info["id"]),
+                            username=info.get("username", "") or uname,
+                            first_name=info.get("first_name", "") or "",
+                            added_by=owner_id)
+                        if added == "taken":
+                            failed.append(f"@{uname}: бот уже подключён другим владельцем")
+                            continue
+                        connected += 1
+                        await _safe_execute(
+                            pool,
+                            "UPDATE discovered_bots SET linked_bot_id=$3 "
+                            "WHERE owner_id=$1 AND lower(username)=lower($2)",
+                            owner_id, uname, int(info["id"]))
+                    except Exception:
+                        # Токен в текст ошибки не попадает намеренно.
+                        failed.append(f"@{uname}: не удалось подключить")
+                for uname, why in (res.get("errors") or {}).items():
+                    if uname != "_":
+                        failed.append(f"@{uname}: {why}")
+                await _safe_execute(pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                                    done_n, op_id)
+                await asyncio.sleep(random.uniform(3.0, 6.0))
+    finally:
+        await release_accounts(list(claimed))
+
+    summary = f"🤖 Подключено ботов: {connected} из {len(pending)}"
+    if failed:
+        summary += "\nНе удалось:\n" + "\n".join(f"• {x}" for x in failed[:15])
+    return {"status": "done", "connected": connected, "summary": summary}
+
+
+async def _exec_scan_owned_bots(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Найти ботов, которыми владеют аккаунты флота (@BotFather /mybots).
+
+    Разрыв: скан ресурсов находил каналы и чаты, но ботов — никогда (бот не
+    Channel и в обходе диалогов не виден). На живом флоте это «164 канала/чата,
+    32 аккаунта и 0 ботов», а подключить бота можно было только вручную по
+    токену. Здесь — быстрая инвентаризация: что есть и на каком аккаунте.
+    Токены не добываются: это отдельный диалог с BotFather на каждого бота.
+    """
+    from services import account_manager
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    _COLS = """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+                      a.device_model, a.system_version, a.app_version,
+                      a.lang_code, a.system_lang_code, a.cf_relay_url,
+                      a.proxy_id, p.proxy_url, p.geo_country
+                 FROM tg_accounts a
+                 LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE"""
+    if account_ids:
+        rows = await _safe_fetch(pool, _COLS + " WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+                                 owner_id, account_ids)
+    else:
+        rows = await _safe_fetch(pool, _COLS + " WHERE a.owner_id=$1 AND a.is_active=TRUE",
+                                 owner_id)
+    accounts = [dict(r) for r in (rows or []) if r["session_str"]]
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет аккаунтов с сессией для скана"}
+
+    claimed = await try_claim_accounts([int(a["id"]) for a in accounts])
+    if not claimed:
+        return {"status": "failed",
+                "summary": "⚠️ Все аккаунты заняты другой операцией — попробуйте позже"}
+    accounts = [a for a in accounts if int(a["id"]) in set(claimed)]
+
+    found_total = 0
+    new_total = 0
+    dead = 0
+    lines: list[str] = []
+    try:
+        await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+                            len(accounts), op_id)
+        for idx, acc in enumerate(accounts):
+            if await _is_cancelled(pool, op_id):
+                break
+            label = acc.get("first_name") or acc.get("phone") or f"ID {acc['id']}"
+            try:
+                res = await asyncio.wait_for(
+                    account_manager.scan_owned_bots(acc["session_str"], _acc=acc),
+                    timeout=90)
+            except Exception as e:
+                res = {"bots": [], "error": str(e)[:120]}
+            if res.get("error"):
+                dead += 1
+                lines.append(f"⚠️ {label}: {res['error']}")
+            bots = res.get("bots") or []
+            found_total += len(bots)
+            for uname in bots:
+                try:
+                    row = await pool.fetchrow(
+                        """INSERT INTO discovered_bots(owner_id, acc_id, username)
+                           VALUES($1,$2,$3)
+                           ON CONFLICT (owner_id, username) DO UPDATE
+                             SET last_seen=now(), acc_id=EXCLUDED.acc_id
+                           RETURNING (xmax = 0) AS inserted""",
+                        owner_id, int(acc["id"]), uname)
+                    if row and row["inserted"]:
+                        new_total += 1
+                except Exception:
+                    log.warning("scan_owned_bots: не удалось записать @%s", uname)
+            if bots:
+                lines.append(f"✅ {label}: {len(bots)} — " + ", ".join("@" + b for b in bots[:8]))
+            await _safe_execute(pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                                idx + 1, op_id)
+            # BotFather не любит частых обращений подряд — разносим аккаунты.
+            await asyncio.sleep(random.uniform(3.0, 7.0))
+    finally:
+        await release_accounts([int(a["id"]) for a in accounts])
+
+    # Отмечаем уже подключённых: найденный ≠ подключённый, и человек должен
+    # видеть, что из найденного уже под управлением.
+    try:
+        await pool.execute(
+            """UPDATE discovered_bots d SET linked_bot_id = mb.bot_id
+                 FROM managed_bots mb
+                WHERE d.owner_id=$1 AND mb.added_by=$1
+                  AND lower(mb.username) = lower(d.username)""", owner_id)
+    except Exception:
+        log.debug("scan_owned_bots: связывание с managed_bots пропущено")
+
+    summary = (f"🤖 Скан ботов: найдено {found_total} на {len(accounts)} аккаунтах"
+               + (f", новых {new_total}" if new_total else "")
+               + (f"; {dead} аккаунтов не ответили" if dead else ""))
+    if lines:
+        summary += "\n" + "\n".join(lines[:20])
+    if not found_total:
+        summary += ("\nБотов не найдено. Если боты есть — они могли быть созданы "
+                    "не с этих аккаунтов: скан спрашивает @BotFather от лица каждого.")
+    return {"status": "done", "found": found_total, "new": new_total, "summary": summary}
+
+
 async def _exec_scan_owned_resources(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -8471,7 +8740,7 @@ async def _exec_scan_owned_resources(
     # Отказной захват: каждый аккаунт работает своей живой сессией.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -8642,7 +8911,7 @@ async def _exec_reclassify_channels(
 
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
 
@@ -8839,7 +9108,7 @@ async def _exec_deploy_network(
     # Отказной захват: операция работает живой сессией аккаунта. Без захвата он
     # мог параллельно вести другую операцию → две сессии на одном auth-key.
     if not await try_claim_account(int(acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(acc["id"])
 
@@ -9102,7 +9371,7 @@ async def _exec_community_set_staff(
     # Без захвата он мог параллельно вести другую операцию (две сессии на
     # одном auth-key → AUTH_KEY_DUPLICATED).
     if not await try_claim_account(int(owner_acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(owner_acc["id"])
 
@@ -9236,7 +9505,7 @@ async def _exec_promote_all_admins(
     # Без захвата он мог параллельно вести другую операцию (две сессии на
     # одном auth-key → AUTH_KEY_DUPLICATED).
     if not await try_claim_account(int(owner_acc["id"])):
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
     _claimed_acc = int(owner_acc["id"])
 
@@ -9326,6 +9595,15 @@ async def _exec_boost_views(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -9393,6 +9671,15 @@ async def _exec_boost_reactions(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -9458,6 +9745,15 @@ async def _exec_boost_stories(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -9710,7 +10006,7 @@ async def _exec_boost_subscribers(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -9799,7 +10095,7 @@ async def _exec_boost_bot_starts(
     # он мог параллельно вести другую операцию → две сессии на одном auth-key.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "summary": "⏳ Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -10036,7 +10332,7 @@ async def _exec_create_chatlist_folder(
 
     claimed = await try_claim_accounts([int(acc["id"])])
     if not claimed:
-        return {"status": "failed", "summary": "⚠️ Аккаунт занят другой операцией"}
+        return {"status": "requeue", "summary": "⚠️ Аккаунт занят другой операцией"}
     try:
         res = await account_manager.create_shared_folder_link(
             acc["session_str"], cf.clean_title(title), chat_ids, _acc=dict(acc))
@@ -10419,13 +10715,14 @@ async def _exec_mass_invite(
         log_exc_swallow(log, f"mass_invite op={op_id}: claim accounts failed")
 
     if not accounts:
+        # requeue, а не done/failed: раньше отправляло владельца перезапускать
+        # операцию вручную — теперь живая очередь (см. _requeue_op_no_accounts)
+        # сама стартует прогон, когда флот освободится, до 20 минут.
         return {
-            "status": "done", "ok": 0, "failed": 0,
-            "left": len(user_refs) + len(phones),
+            "status": "requeue",
             "summary": ("⏸ Все подходящие аккаунты сейчас заняты другими операциями "
-                        "(прогрев/страйк/другой инвайт). Дождитесь их завершения и "
-                        "повторите — параллельно одну сессию использовать нельзя "
-                        "(риск AUTH_KEY_DUPLICATED)."),
+                        "(прогрев/страйк/другой инвайт) — операция в очереди, стартует "
+                        "автоматически, когда флот освободится."),
         }
 
     # ── «Мать-Дочка»: подменяем group дочерней, пока она жива ──────────────────
@@ -10571,15 +10868,20 @@ async def _exec_mass_invite(
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
     _acc_uid: dict = {}          # id аккаунта → tg_user_id (для промоута; наполняется ниже)
-    # Сколько раз уже пытались выдать права аккаунту по ходу прогона.
-    # Раньше здесь было множество «пробовали один раз — больше никогда», и любой
-    # СЛУЧАЙНЫЙ сбой выдачи выводил аккаунт из круга до конца операции. Чаще
-    # всего срабатывало not_participant: вступление в чат не успевало
-    # зарегистрироваться у Telegram, промоутер отвечал «не участник», аккаунт
-    # терялся на ровном месте. Отсюда «выдана админка 35 раз, а трое всё равно
-    # без прав».
-    _no_rights_tries: dict = {}
-    _NO_RIGHTS_MAX_TRIES = 3     # временные отказы стоят повтора, окончательные — нет
+    # Сколько раз пробовали выдать права каждому инвайтеру по ходу прогона.
+    # Было множеством («уже пробовали») — одна осечка по сети/флуду промоутера
+    # стоила аккаунта на весь прогон (в отчёте: «N аккаунтов без прав выведены
+    # из круга»). Считаем попытки, потолок — против зацикливания.
+    #
+    # Потолка мало: повторять надо ТОЛЬКО временные отказы. Самый частый —
+    # not_participant: Telegram не успевает зарегистрировать вступление, и
+    # промоутер честно отвечает «не участник». Отказ «у промоутера нет права
+    # add_admins» окончательный, попытки на него тратить нельзя. Причину даёт
+    # promote_to_admin_ex.
+    from services.invite_recovery import (
+        promote_retry_allowed as _irec_promote_retry_allowed,
+    )
+    _no_rights_on_demand: dict = {}
     _auto_promote = params.get("auto_promote", True)
     _promote_trick = params.get("promote_trick", True)
     # Метод «ссылка в ЛС» вообще не требует прав админа — человек вступает сам.
@@ -10974,10 +11276,10 @@ async def _exec_mass_invite(
             # была и не помогла — выводим из круга (анти-цикл), не роняя прогон.
             if res.get("no_rights"):
                 _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
-                _tries = int(_no_rights_tries.get(acc_id, 0))
+                _tries = int(_no_rights_on_demand.get(acc_id, 0))
                 _reason = "no_promoter"
-                if _promoter is not None and _tries < _NO_RIGHTS_MAX_TRIES:
-                    _no_rights_tries[acc_id] = _tries + 1
+                if _promoter is not None and _irec_promote_retry_allowed(_tries):
+                    _no_rights_on_demand[acc_id] = _no_rights_on_demand.get(acc_id, 0) + 1
                     try:
                         from services import account_manager as _am
                         _u = _acc_uid.get(acc_id)
@@ -11024,12 +11326,16 @@ async def _exec_mass_invite(
                     # Временный отказ — аккаунт остаётся в круге и попробует в
                     # следующем круге, пока не исчерпает попытки. Окончательный
                     # (у промоутера нет права add_admins) повторять бессмысленно.
+                    # Временный отказ — аккаунт остаётся в круге и попробует в
+                    # следующем круге, пока не исчерпает попытки. Окончательный
+                    # (у промоутера нет права add_admins) повторять бессмысленно:
+                    # тратить на него попытки — терять аккаунт медленнее, но так же.
                     if (_reason in ("not_participant", "flood", "error")
-                            and _no_rights_tries[acc_id] < _NO_RIGHTS_MAX_TRIES):
+                            and _irec_promote_retry_allowed(_no_rights_on_demand[acc_id])):
                         log.info("mass_invite op=%d acc=%s: выдача прав не прошла (%s), "
-                                 "попытка %d из %d — аккаунт остаётся в круге",
+                                 "попытка %d — аккаунт остаётся в круге",
                                  op_id, acc.get("id"), _reason,
-                                 _no_rights_tries[acc_id], _NO_RIGHTS_MAX_TRIES)
+                                 _no_rights_on_demand[acc_id])
                         continue
 
                 # Промоутера нет / попытки исчерпаны / отказ окончательный
@@ -11311,8 +11617,18 @@ async def _exec_mass_invite(
 
     _next_op = None
     _chain = int(params.get("invite_chain") or 0)
-    if (_left and not group_broken and not flood_storm
-            and not _all_failed_connect and _chain < _MAX_INVITE_CHAIN):
+    # Перегрев флота больше НЕ отменяет продолжение: раньше остаток целей
+    # исчезал вместе с операцией, хотя отчёт сам советовал «дайте отдохнуть и
+    # повторите позже». PeerFlood/FloodWait лечатся отдыхом, и продолжение
+    # уезжает на следующий запуск — так цель достигается без сжигания флота.
+    from services import invite_recovery as _irec
+
+    _cont_ok, _cont_why = _irec.should_schedule_continuation(
+        left=_left, group_broken=group_broken,
+        all_failed_connect=_all_failed_connect,
+        chain=_chain, max_chain=_MAX_INVITE_CHAIN, flood_storm=flood_storm,
+        ok_count=total_ok)
+    if _cont_ok:
         if not await _is_cancelled(pool, op_id):
             _next_op = await _schedule_invite_continuation(
                 pool, owner_id, params, list(q_users), list(q_phones), _chain + 1)
@@ -11401,10 +11717,16 @@ async def _exec_mass_invite(
            ) if (total_ok == 0 and not group_broken and not flood_storm
                  and _fail_reasons.get("privacy", 0) + _fail_reasons.get("not_mutual", 0)
                      >= max(1, int(total_fail * 0.5))) else "")
+        # Про повтор больше НЕ советуем словами: остаток планируется сам (строка
+        # «🔁 Осталось …» ниже). Раньше здесь висел совет «повторите позже», а
+        # продолжение при перегреве не создавалось вовсе — цель просто терялась.
+        #
+        # Счётчик — из окна времени, а не «подряд»: прежняя формулировка
+        # обещала пользователю серию, которой не было (6 флудов за 2 часа).
         + (f"\n🛑 Флот перегрет: {len(_flood_times)} флудов за "
            f"{_flood_window_sec // 60} мин — операция остановлена, чтобы не потерять "
-           "аккаунты. Кучные флуды означают, что Telegram отвечает флоту как группе. "
-           "Дайте аккаунтам отдохнуть и повторите позже."
+           "аккаунты. Кучные флуды означают, что Telegram отвечает флоту как группе; "
+           "это временный лимит и снимается отдыхом."
            if flood_storm else "")
         + (f"\n🚫 {_no_rights_retired} аккаунтов без прав админа выведены из круга — их "
            "цели переданы аккаунтам с правами (если инвайтит только создатель, проверьте, "
@@ -11432,10 +11754,14 @@ async def _exec_mass_invite(
     )
     # Шов «Инвайт → Welcome»: приветствие реально добавленным (если настроено).
     await _chain_welcome(pool, owner_id, op_id, params)
+    # no_proxy / no_rights_retired отдаём СТРУКТУРНО, а не только текстом сводки:
+    # по ним строятся быстрые действия («назначить прокси», «проверить права»).
+    # Раньше отчёт советовал это словами, а кнопки не было — совет уходил в пустоту.
     return {"status": "done", "ok": total_ok, "failed": total_fail,
             "left": _left, "next_op_id": _next_op,
             "worked_accounts": _engaged_n, "noconnect": _idle_other,
             "all_failed_connect": _all_failed_connect,
+            "no_proxy": _no_proxy_n, "no_rights_retired": _no_rights_retired,
             "flood_storm": flood_storm, "summary": summary}
 
 
@@ -11454,6 +11780,15 @@ async def _exec_bulk_set_profile(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
@@ -11538,6 +11873,15 @@ async def _exec_mass_report(
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
     # Риск-пульс: жалоба с аккаунта под недавним серьёзным ограничением = быстрый бан
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
     accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
@@ -11617,6 +11961,15 @@ async def _exec_content_clone(
         pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД клонированием —
     # действие с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий
@@ -11711,6 +12064,15 @@ async def _exec_ai_comment(
         pool, owner_id, action_type="comment", respect_cooldown=True)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
     # Риск-пульс: коммент в канал с флагнутого аккаунта = быстрый бан (fail-open).
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     accounts = accounts[:acc_count]
@@ -11772,6 +12134,15 @@ async def _exec_compliance_scan(
         pool, owner_id, action_type="parse", respect_cooldown=True)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
     accounts = accounts[:acc_count]
 
     resources = resources[:100]  # потолок против гигантских прогонов
@@ -11890,7 +12261,7 @@ async def _exec_niche_growth_post(
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
     if not claimed_ids:
-        return {"status": "failed",
+        return {"status": "requeue",
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(accounts) - len(claimed_ids)
     accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
@@ -12283,19 +12654,34 @@ async def _exec_ad_intel_scan(
     if not channel:
         return {"status": "failed", "summary": "⚠️ channel не указан"}
 
-    # Pick any active account for scanning
+    # Одна дверь: сырой `ORDER BY last_used` брал аккаунт, не спрашивая ни о
+    # кулдауне, ни о статусе, ни о живости прокси — скан уходил забаненным или
+    # обесточенным аккаунтом и падал. select_account_rotated идёт через
+    # select_all_active (статусы, кулдаун, мёртвый прокси) и при этом сохраняет
+    # смысл прежней сортировки — размазать нагрузку, а не долбить один аккаунт.
     try:
-        acc_row = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
-            owner_id,
-        )
-        account_id = int(acc_row["id"]) if acc_row else 0
+        from services import resource_selector as _rsel
+        # action_type оставлен "default" СОЗНАТЕЛЬНО: у порога доверия внутри
+        # стоит COALESCE(trust_score, 0), поэтому любой положительный порог
+        # выкинул бы аккаунты с ещё не измеренным доверием (NULL) — на свежем
+        # флоте операция стала бы «нет аккаунтов». Миграция добавляет только
+        # защиту, а не новый способ отказать.
+        acc = await _rsel.select_account_rotated(pool, owner_id, action_type="default")
+        account_id = int(acc["id"]) if acc else 0
     except Exception as e:
         log.warning('resolve account_id failed: %s', e)
         account_id = 0
 
     if not account_id:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для сканирования"}
+
+    # Захват под живую сессию. Сессию поднимает не этот код, а
+    # ad_intelligence.scan_channel_ads — по account_id, внутри себя. Косвенность
+    # ничего не меняет: две сессии на одном auth-key дают AUTH_KEY_DUPLICATED.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    if not await _claim_available_accounts(op_id, [{"id": account_id}], owner_id):
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
 
     try:
         result = await _ai.scan_channel_ads(pool, channel, account_id, owner_id)
@@ -12469,18 +12855,29 @@ async def _exec_phone_check(
     if not phones:
         return {"status": "failed", "summary": "⚠️ Список номеров пуст"}
 
-    # Pick any active account
+    # Одна дверь. ImportContacts — одна из самых баноопасных операций Telegram,
+    # а прежний сырой выбор брал аккаунт в кулдауне после флуда, в спамблоке или
+    # на мёртвом прокси: проверка либо падала, либо загоняла аккаунт глубже.
+    # action_type="default" — см. пояснение про COALESCE(trust_score, 0) в
+    # _exec_ad_intel_scan: порог доверия выкинул бы аккаунты с NULL-доверием.
     try:
-        acc_row = await pool.fetchrow(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT 1",
-            owner_id,
-        )
+        from services import resource_selector as _rsel
+        acc_row = await _rsel.select_account_rotated(pool, owner_id, action_type="default")
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
 
     if not acc_row:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для проверки"}
+
+    # Захват под живую сессию: без него операция подключала бы аккаунт,
+    # который в этот момент ведёт другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    _claimed = await _claim_available_accounts(op_id, [acc_row], owner_id)
+    if not _claimed:
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
+    acc_row = _claimed[0]
 
     acc = dict(acc_row)
     total = len(phones)
@@ -12532,16 +12929,28 @@ async def _exec_gift_scan(
     """
     from services import gift_inventory as _gi
 
+    # Одна дверь: скан подарков поднимает сессию КАЖДОГО аккаунта, поэтому
+    # забаненные и сидящие на мёртвом прокси давали гарантированную ошибку на
+    # каждом — и портили счётчик исхода. action_type="default" — порог доверия
+    # выкинул бы аккаунты с NULL-доверием (см. _exec_ad_intel_scan).
     try:
-        accounts = await pool.fetch(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY id",
-            owner_id,
-        )
+        from services import resource_selector as _rsel
+        accounts = await _rsel.select_all_active(pool, owner_id, action_type="default")
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунтов: {exc}"}
 
     if not accounts:
         return {"status": "done", "summary": "📦 Нет активных аккаунтов для сканирования"}
+
+    # Захват под живые сессии. Сессию каждого аккаунта поднимает
+    # GiftInventoryService.scan_account_gifts по account_id — косвенно, но это
+    # такая же живая сессия: без захвата аккаунт мог одновременно вести другую
+    # операцию или прогрев (AUTH_KEY_DUPLICATED).
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     total_accounts = len(accounts)
     await _safe_execute(
@@ -12609,17 +13018,28 @@ async def _exec_report_peer(
         log.warning('account count query failed: %s', e)
         acc_count = 5
 
+    # Одна дверь: репорт — действие, за которое аккаунт получает ограничения,
+    # поэтому вести в него аккаунт в кулдауне или в спамблоке особенно дорого.
+    # Срез до acc_count делаем ПОСЛЕ фильтров, иначе лимит выбирался бы из
+    # непригодных. action_type="default" — см. пояснение в _exec_ad_intel_scan.
     try:
-        accounts = await pool.fetch(
-            "SELECT *, (SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL ORDER BY last_used ASC NULLS FIRST LIMIT $2",
-            owner_id, acc_count,
-        )
+        from services import resource_selector as _rsel
+        accounts = (await _rsel.select_all_active(
+            pool, owner_id, action_type="default"))[:acc_count]
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунтов: {exc}"}
 
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для репортинга"}
+
+    # Захват под живые сессии: без него операция подключала бы аккаунты,
+    # которые в этот момент ведут другую операцию или прогрев — две сессии
+    # на одном auth-key дают AUTH_KEY_DUPLICATED и убивают сессию.
+    # Освобождение — централизованно в finally _run_op_task по op_id.
+    accounts = await _claim_available_accounts(op_id, accounts, owner_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
 
     # Риск-пульс: репорт с флагнутого аккаунта = быстрый бан этого аккаунта (fail-open).
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)

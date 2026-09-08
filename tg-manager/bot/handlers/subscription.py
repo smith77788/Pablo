@@ -840,7 +840,11 @@ async def cb_admin_grant(
 def _payment_settings_kb() -> object:
     kb = InlineKeyboardBuilder()
     for key, label in _PAY_SETTING_LABELS.items():
-        val = os.getenv(key, "")
+        # _pay_cfg (не голый os.getenv): значение может жить в _PAY_OVERRIDES
+        # (кошельки, восстановленные из БД при старте), а не в os.environ —
+        # иначе экран после рестарта показывал "❌ не задан" для кошелька,
+        # который на самом деле активен и принимает платежи.
+        val = _pay_cfg(key)
         kb.button(
             text=f"{label}: {_mask(val)}",
             callback_data=SubCb(action="pay_edit", plan=key),
@@ -854,13 +858,13 @@ def _payment_settings_kb() -> object:
 def _payment_settings_text() -> str:
     ton_ok = bool(_ton_wallet())
     tron_ok = bool(_tron_wallet())
-    key_ok = bool(os.getenv("TON_API_KEY", ""))
+    key_ok = bool(_pay_cfg("TON_API_KEY"))
     rate = _get_ton_rate()
 
     status_lines = [
         f"{'✅' if ton_ok else '❌'} TON кошелёк: {_mask(_ton_wallet())}",
         f"{'✅' if tron_ok else '❌'} USDT (TRC-20): {_mask(_tron_wallet())}",
-        f"{'✅' if key_ok else '⚠️'} TON API ключ: {_mask(os.getenv('TON_API_KEY', ''))}",
+        f"{'✅' if key_ok else '⚠️'} TON API ключ: {_mask(_pay_cfg('TON_API_KEY'))}",
         f"📊 Курс TON/USD: <b>${rate:.2f}</b>",
     ]
     pay_ok = ton_ok or tron_ok
@@ -909,7 +913,7 @@ async def cb_pay_edit(
     await safe_answer(callback)
 
     label = _PAY_SETTING_LABELS[key]
-    cur = os.getenv(key, "")
+    cur = _pay_cfg(key)
     masked = _mask(cur)
 
     hints = {

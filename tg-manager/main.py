@@ -17,7 +17,7 @@ from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
-from services.error_codes import ErrorCode, get_user_message
+from services.error_codes import ErrorCode, from_exception, get_user_message
 from services.error_reporting import report_error, get_user_error_message
 from services.error_monitor import install_error_monitoring
 from bot.middlewares.user_activity import UserActivityLogMiddleware
@@ -207,8 +207,11 @@ async def _global_error_handler(event: ErrorEvent) -> None:
     if "query is too old" in exc_str or "query_id_invalid" in exc_str or "query id is invalid" in exc_str:
         return
 
-    # Get error code and user message
-    error_code = ErrorCode.from_exception(exc)
+    # Get error code and user message.
+    # from_exception — модуль-функция services.error_codes, НЕ метод Enum ErrorCode.
+    # Раньше вызывалась как атрибут Enum → AttributeError на второй строке
+    # глобального обработчика: юзер не получал ⚠️-ответа, report_error не звался.
+    error_code = from_exception(exc)
     user_msg = get_user_message(error_code)
     
     # Get user ID for context
@@ -597,6 +600,7 @@ async def main() -> None:
         from services.token_vault import decrypt_token
         _ai_map = {}
         for _env_name, _skey in (
+            ("OPENAI_API_KEY", "ai_openai_key"),
             ("ANTHROPIC_API_KEY", "ai_anthropic_key"),
             ("OPENROUTER_API_KEY", "ai_openrouter_key"),
             ("GROQ_API_KEY", "ai_groq_key"),
@@ -631,6 +635,24 @@ async def main() -> None:
     except Exception:
         log.warning("failed to load payment wallets from DB", exc_info=True)
 
+    # TON_API_KEY / TON_RATE — те же настройки из той же админ-панели
+    # («⚙️ Настройка оплаты»), но живут только в os.environ этого процесса:
+    # msg_payment_setting_value() пишет их через os.environ[key]=value, а не
+    # через _PAY_OVERRIDES (в отличие от кошельков), поэтому и восстанавливать
+    # их нужно тем же способом — иначе после каждого рестарта курс/ключ молча
+    # откатывались на дефолт из env/.env (TON_RATE по умолчанию 3.0),
+    # и платежи считались по устаревшему курсу без единого предупреждения.
+    try:
+        for _env_name, _skey in (
+            ("TON_API_KEY", "pay_ton_api_key"),
+            ("TON_RATE", "pay_ton_rate"),
+        ):
+            _val = await _db.get_platform_setting(pool, _skey, "")
+            if _val:
+                os.environ[_env_name] = _val
+    except Exception:
+        log.warning("failed to load TON_API_KEY/TON_RATE from DB", exc_info=True)
+
     # Self-heal критичных столбцов ДО обслуживания запросов. Запись session_fp/
     # proxy_fp ломается, если столбца ещё нет (лаг применения schema_v143/v146 при
     # деплое) → «нельзя добавить аккаунт/прокси», а без прокси не работает ничего.
@@ -644,6 +666,18 @@ async def main() -> None:
         "ALTER TABLE user_proxies ADD COLUMN IF NOT EXISTS is_backup BOOLEAN DEFAULT FALSE",
         # Mutual Contacts (взаимные) — колонка нужна до первого uch-запроса (schema_v152).
         "ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS is_mutual BOOLEAN DEFAULT FALSE",
+        # Честный per-account счётчик Strike в истории (schema_v201) — INSERT в
+        # strike_history перечисляет эти колонки; при лаге миграции запись истории
+        # падала бы. Аддитивно, DEFAULT 0.
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_ok INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_flood INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_banned INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS accounts_failed INT DEFAULT 0",
+        # Внешняя инфраструктура цели (домены/APWG/регистратор) — история их пишет,
+        # без колонок запись падала бы при лаге миграции. Аддитивно, DEFAULT 0.
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_domains INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_apwg_sent INT DEFAULT 0",
+        "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_registrar_sent INT DEFAULT 0",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",
@@ -725,6 +759,15 @@ async def main() -> None:
         # /account/{id}/bots падал бы с «column acc_id does not exist».
         "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS acc_id INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_managed_bots_acc_id ON managed_bots(acc_id)",
+        # Менеджер по продажам: минимальный заказ/порог доставки по товару и правила
+        # заказа на уровне персоны (schema_v205). Их читает build_system_prompt и
+        # пишут add_product/update_persona — при лаге миграции путь падал бы с
+        # «column min_qty/order_rules does not exist». Аддитивно, безопасные DEFAULT.
+        "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS min_qty INT NOT NULL DEFAULT 1",
+        "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'шт'",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS order_rules TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS payment_details TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS payment_via_operator BOOLEAN NOT NULL DEFAULT FALSE",
     ):
         try:
             await pool.execute(_ddl)

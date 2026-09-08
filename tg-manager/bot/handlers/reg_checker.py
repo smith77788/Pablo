@@ -290,7 +290,7 @@ async def cb_reg_settings(
 
     # Доступные пулы + кол-во активных аккаунтов в каждом
     try:
-        pools = await db.get_distinct_pools(pool) or []
+        pools = await db.get_distinct_pools(pool, callback.from_user.id) or []
     except Exception:
         log_exc_swallow(log, "get_distinct_pools")
         pools = []

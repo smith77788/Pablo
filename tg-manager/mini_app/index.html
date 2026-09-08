@@ -562,6 +562,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .acc-trust{height:2px;border-radius:1px;background:var(--sep);margin-top:4px;overflow:hidden;width:70px}
 .acc-trust-fill{height:100%;border-radius:1px}
 .acc-right{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+/* Лечение прямо в строке: список называл проблему, но чинить её заставлял
+   идти в карточку и разворачивать «Действия». */
+.acc-fix{margin-top:5px;padding:4px 9px;font-size:11px;font-weight:600;border:none;border-radius:7px;cursor:pointer;background:var(--bg-orange-16,rgba(245,158,11,.16));color:var(--orange)}
+.acc-fix.danger{background:var(--bg-red-16,rgba(239,68,68,.16));color:var(--red)}
+.acc-fix:active{opacity:.65}
 
 /* ─── Dashboard KPI scroll ──────────────────────────────── */
 .kpi-scroll{display:flex;gap:6px;padding:8px 16px 4px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
@@ -805,6 +810,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div style="display:flex;gap:8px;padding:0 0 10px">
       <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+      <!-- Инвентаризация флота: боты, созданные с аккаунтов, скану ресурсов
+           не видны (бот — не канал), и раньше их нельзя было найти вовсе. -->
+      <button class="btn btn-s" onclick="scanFleetBots()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Найти на флоте</button>
+      <button class="btn btn-s" onclick="showDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">📋 Найденные</button>
+      <button class="btn btn-p" onclick="connectDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">🔌 Подключить найденных</button>
     </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -1547,6 +1557,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-ico">🔀</div>
         <div class="mgmt-tile-lbl">Авто-воронки</div>
         <div class="mgmt-tile-val" id="m-af-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openSalesManager()">
+        <div class="mgmt-tile-ico">🧑‍💼</div>
+        <div class="mgmt-tile-lbl">Менеджер продаж</div>
+        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openTemplates()">
         <div class="mgmt-tile-ico">📝</div>
@@ -3144,6 +3159,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Возобновить все paused">▶️ Старт</button>
       <button class="btn btn-r" style="flex:1;font-size:12px;padding:8px 4px" onclick="clearDoneOps()" title="Удалить завершённые">🗑 Очистить</button>
     </div>
+    <div style="padding:0 0 6px">
+      <!-- Разбирать очередь по одной операции — не работа. Перезапускает всё
+           недоведённое: провалившиеся, отменённые и закрывшиеся «done» без
+           достижения цели. -->
+      <button class="btn btn-s" style="width:100%;font-size:12px;padding:8px 4px" onclick="retryAllFailed()" title="Повторить все недоведённые операции">↺ Перезапустить недоведённые</button>
+    </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -4500,11 +4521,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <select id="massInviteMethod" class="sel" onchange="massInviteMethodToggle()">
           <option value="direct" selected>➕ Обычный (нужны права приглашать)</option>
           <option value="admin">👑 Через админку (обход приватности)</option>
-          <option value="link">🔗 Рассылка ссылки в ЛС</option>
+          <option value="link">🔗 Рассылка ссылки в ЛС ⚠️ риск для флота</option>
         </select>
         <div style="font-size:12px;color:var(--hint);margin-top:4px">
           «Через админку»: цель делается админом (попадает в чат) и тут же лишается
-          прав → остаётся участником. «Ссылка в ЛС»: человек вступает сам.
+          прав → остаётся участником.
+        </div>
+        <!-- Метод оставлен, но это не нейтральный выбор: рассылка ссылок в ЛС
+             незнакомцам собирает жалобы и выкашивает аккаунты. Предупреждаем
+             прямо у выбора, а не после потери флота. -->
+        <div style="font-size:12px;color:var(--orange,#f59e0b);margin-top:4px">
+          ⚠️ «Ссылка в ЛС»: человек вступает сам, но рассылка незнакомцам собирает
+          жалобы и убивает аккаунты. Приватность этим не обходится — лучше
+          исключить такие цели из базы.
         </div>
       </div>
       <div class="field" id="massInviteLinkMsgField" style="display:none">
@@ -4791,6 +4820,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="fcErr"></div>
     <button class="btn btn-p" id="fcBtn" style="width:100%" onclick="submitFolder()">📁 Создать и получить ссылку</button>
+  </div>
+</div>
+
+<div class="screen" id="s-foundbots">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🤖 Найденные боты</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="connectDiscoveredBots()">🔌 Подключить всех</button></div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Боты, найденные на ваших аккаунтах через @BotFather. Подключение забирает
+      токен у BotFather от лица аккаунта-владельца — после этого ботом можно управлять.
+    </div>
+    <div id="foundBotsStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
+    <div class="lst" id="foundBotsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -6495,7 +6540,16 @@ const FETCH_TIMEOUT_MS = 30000;
     // (vault/health/invite/seo/…), не только Хранилище.
     // Формат «kind» либо «kind:параметр» — последнее нужно, чтобы уведомление
     // об удалённом сообщении вело сразу в НУЖНЫЙ чат, а не просто в раздел.
-    const _raw = (tg.initDataUnsafe?.start_param || (location.hash || '').replace('#','')).trim();
+    // web_app-кнопка кладёт наш #kind в тот же location.hash, куда Telegram
+    // ДОПИСЫВАЕТ свои tgWebApp*-параметры (tgWebAppData/Version/Platform/…).
+    // Раньше брали весь hash целиком → _screen получался мусором вида
+    // «operation&tgWebAppData=…», не совпадал ни с одним kind, и «Открыть» вело
+    // просто в приложение, а не в раздел. Берём наш сегмент, отсекая tg-параметры.
+    let _raw = (tg.initDataUnsafe?.start_param || '').trim();
+    if (!_raw) {
+      _raw = ((location.hash || '').replace(/^#/, '').split('&')
+                .find(p => p && !p.startsWith('tgWebApp')) || '').trim();
+    }
     const _ci = _raw.indexOf(':');
     const _screen = _ci > 0 ? _raw.slice(0, _ci) : _raw;
     const _param = _ci > 0 ? _raw.slice(_ci + 1) : null;
@@ -6665,6 +6719,21 @@ const _OP_NEXT = {
   reg_check:     {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
   bot_factory:   {label:'🔥 Прогреть аккаунты',    fn:'openWarmup'},
 };
+// Быстрые действия по ИТОГУ операции (считает сервер из структурного result).
+// Раньше сводка советовала словами — «назначьте прокси», «проверьте права»,
+// «повторите позже», — а кнопки рядом не было, и совет уходил в пустоту.
+// Мёртвых кнопок не рисуем: если функции нет в сборке, действие пропускаем.
+function _qaButtons(op, limit) {
+  const acts = (op && op.quick_actions) || [];
+  if (!acts.length) return '';
+  return acts.slice(0, limit || 2).map(a => {
+    if (typeof window[a.fn] !== 'function') return '';
+    const call = (a.arg === undefined || a.arg === null)
+      ? `${a.fn}()`
+      : `${a.fn}(${typeof a.arg === 'number' ? a.arg : `'${String(a.arg).replace(/'/g, "\\'")}'`})`;
+    return `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" title="${esc(a.reason||'')}" onclick="event.stopPropagation();hideOpDone();${call}">${esc(a.label)}</button>`;
+  }).join('');
+}
 function _opNextBtn(op) {
   const n = _OP_NEXT[op && op.op_type];
   if (!n || typeof window[n.fn] !== 'function') return '';
@@ -6687,7 +6756,7 @@ function showOpComplete(op) {
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      ${ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`}
+      ${_qaButtons(op) || (ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`)}
       <span style="font-size:12px;color:var(--accent)">Открыть детали →</span>
     </div>`;
   el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
@@ -7201,7 +7270,7 @@ async function loadOrganismPulse() {
             </div>
             <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px">✕</span>
           </div>
-          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick='runPulseAction(${JSON.stringify(s.action)})'>▶ ${esc(pulseActionLabel(s.action))}</button>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
       }).join('');
       html += '</div>';
@@ -7253,7 +7322,7 @@ async function openDigest() {
         return `<div style="border-left:3px solid ${sv.c};background:var(--bg2);border-radius:0 10px 10px 0;padding:9px 12px">
           <div style="font-size:13.5px;font-weight:600">${sv.e} ${esc(s.title)}</div>
           <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
-          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick='runPulseAction(${JSON.stringify(s.action)})'>▶ ${esc(pulseActionLabel(s.action))}</button>
+          <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
       }).join('');
       h += '</div>';
@@ -7409,6 +7478,20 @@ function pulseActionLabel(a) {
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
     campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата', seo:'Оптимизировать SEO', retention:'Настроить welcome', health:'Открыть здоровье'})[a&&a.kind] || 'Открыть';
 }
+// Действие подсказки Пульса — ОБЪЕКТ {kind, param}, и param бывает строкой.
+// Класть его в атрибут через JSON.stringify нельзя: свои кавычки JSON и
+// неэкранированный апостроф рвут разметку. Держим действия в карте, в атрибут
+// уходит только ключ (экранированный esc, как у соседней кнопки «✕»).
+const _PULSE_ACTIONS = {};
+function _pulseKeep(s) {
+  const key = String((s && s.id) || ('a' + Object.keys(_PULSE_ACTIONS).length));
+  _PULSE_ACTIONS[key] = s && s.action;
+  return key;
+}
+function runPulseActionById(key) {
+  const a = _PULSE_ACTIONS[key];
+  if (a) runPulseAction(a);
+}
 function runPulseAction(a) {
   const k = a && a.kind;
   if (k==='vault') {
@@ -7421,7 +7504,7 @@ function runPulseAction(a) {
   if (k==='governor' || k==='invite') return openMassInvite();
   if (k==='campaign') return openCampaignPlanner();
   if (k==='intents') return openIntentSensor();
-  if (k==='operation') return openMassOps();
+  if (k==='operation') return openMassOps(a.param);
   if (k==='purge_dead') { goTab('accounts'); setTimeout(()=>filterAcc('dead', document.querySelector('[data-filter="dead"]')), 200); return; }
   if (k==='segment_hot') return openContactsHot();
   if (k==='chatwarmup') return openChatWarmup();
@@ -7616,12 +7699,22 @@ function renderFrequent() {
     .slice(0, 8);
   if (items.length < 3) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
   wrap.style.display = 'block';
-  list.innerHTML = items.map(x => `
-    <div class="freq-chip" onclick='replayAction(${JSON.stringify(x.onclick)})'>
+  // Сохранённая строка вызова почти всегда содержит СВОИ апострофы
+  // (`openAccountChat(5,'123')`), а атрибут обёрнут в апострофы — разметка
+  // рвалась, и чип не работал. В атрибут кладём индекс, строку берём из кэша.
+  _FREQ_ITEMS = items;
+  list.innerHTML = items.map((x, i) => `
+    <div class="freq-chip" onclick="replayFrequent(${i})">
       <div class="freq-chip-ico">${x.icon || '⚡'}</div>
       <div class="freq-chip-lbl">${esc(x.label)}</div>
     </div>`).join('');
   try { modernizeIcons(list); } catch(_) {}
+}
+// Отрисованные чипы: обработчик получает индекс, строку вызова берём отсюда.
+let _FREQ_ITEMS = [];
+function replayFrequent(i) {
+  const x = _FREQ_ITEMS[i];
+  if (x && x.onclick) replayAction(x.onclick);
 }
 function clearFrequent() {
   try { localStorage.removeItem(_FREQ_KEY); } catch(_) {}
@@ -7818,10 +7911,88 @@ async function loadBots() {
   }
 }
 
+// Скан флота на ботов: спрашивает @BotFather от лица каждого аккаунта.
+// Токены при этом не добываются — это отдельный диалог на каждого бота;
+// задача скана быстро показать, ЧТО есть и на каком аккаунте.
+async function scanFleetBots() {
+  if (!await askConfirm('Спросить @BotFather на каждом аккаунте флота, какие боты им принадлежат?\nЭто займёт время: обращения к BotFather разносятся, чтобы не ловить лимиты.')) return;
+  try {
+    const r = await api('/api/miniapp/bots/scan_fleet', {method:'POST', body:'{}'});
+    toast('🔍 Скан запущен' + (r.op_id ? ' · операция #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Скан флота на ботов');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+// Подключение найденных пакетом: скан даёт username, а подключить бота можно
+// только по токену — его отдаёт сам @BotFather по кнопке «API Token».
+// Без этого список найденных был бы тупиком: видно, но сделать нельзя.
+async function connectDiscoveredBots() {
+  if (!await askConfirm('Подключить найденных ботов?\nInfragram спросит их токены у @BotFather от лица аккаунтов-владельцев. Это займёт время: обращения разносятся, чтобы не ловить лимиты.')) return;
+  try {
+    const r = await api('/api/miniapp/bots/connect_discovered', {method:'POST', body:'{}'});
+    toast('🔌 Подключение запущено' + (r.op_id ? ' · операция #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Подключение найденных ботов', loadBots);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
+}
+// Полноценный экран, а не всплывающее окно: из списка найденных надо уметь
+// ДЕЙСТВОВАТЬ — подключить конкретного бота или открыть управление уже
+// подключённым. Раньше это был текст без единого действия.
+async function showDiscoveredBots() {
+  push('s-foundbots');
+  txt('foundBotsStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('foundBotsList','');
+  try {
+    const d = await api('/api/miniapp/bots/discovered');
+    const bots = d.bots||[];
+    const pending = (d.total||0) - (d.connected||0);
+    txt('foundBotsStats', `
+      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Найдено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.connected||0}</div><div class="kpi-lbl">Подключено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:${pending?'var(--orange,#f59e0b)':'var(--hint)'}">${pending}</div><div class="kpi-lbl">Осталось</div></div>`);
+    if (!bots.length) {
+      txt('foundBotsList', empty('🤖','Найденных ботов пока нет','Запустите скан флота — Infragram спросит @BotFather на каждом аккаунте',{label:'🔍 Найти на флоте',fn:'scanFleetBots()'}));
+      return;
+    }
+    txt('foundBotsList', bots.map(b=>`
+      <div class="row" style="border-left:3px solid ${b.connected?'var(--green)':'var(--orange,#f59e0b)'}">
+        <div class="row-ico" style="background:var(--bg2)">${b.connected?'✅':'🤖'}</div>
+        <div class="row-body">
+          <div class="row-name">@${esc(b.username)}</div>
+          <div class="row-val">${b.connected?'подключён — доступно управление':'не подключён'}${b.account?' · '+esc(b.account):''}</div>
+        </div>
+        <div class="row-right">
+          ${b.connected
+            ? `<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openBotByUsername('${esc(b.username)}')">⚙️ Управление</button>`
+            : `<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="connectOneBot('${esc(b.username)}')">🔌 Подключить</button>`}
+        </div>
+      </div>`).join(''));
+  } catch(e) { txt('foundBotsList', empty('⚠️','Ошибка',e.message)); }
+}
+// Подключить одного конкретного бота из найденных.
+async function connectOneBot(uname) {
+  try {
+    const r = await api('/api/miniapp/bots/connect_discovered',
+                        {method:'POST', body:JSON.stringify({usernames:[uname]})});
+    toast('🔌 Подключаю @'+uname + (r.op_id ? ' · #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Подключение @'+uname, showDiscoveredBots);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
+}
+// Открыть меню управления уже подключённым ботом по его username.
+async function openBotByUsername(uname) {
+  try {
+    if (!BOTS || !BOTS.length) { const d = await api('/api/miniapp/bots'); BOTS = d.bots||[]; }
+    const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === String(uname).toLowerCase());
+    if (!b) { toast('Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
+    openBot(b.bot_id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+
 function renderBots() {
   const wrap = document.getElementById('botList');
   if (!wrap) return;
-  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет ботов','Подключите бота по токену от @BotFather',{label:'➕ Добавить бота',fn:'openBotAddModal()'}); return; }
+  // Пустой список ≠ «ботов нет»: боты могли быть созданы с аккаунтов флота, а
+  // скан ресурсов их никогда не находил (бот — не канал). Даём найти их, а не
+  // только вставлять токены руками по одному.
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет подключённых ботов','Боты, созданные с ваших аккаунтов, можно найти сканом флота — или подключить по токену от @BotFather',{label:'🔍 Найти ботов на флоте',fn:'scanFleetBots()'}); return; }
   wrap.className = 'bot-cards';
   wrap.innerHTML = BOTS.map(b=>{
     // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
@@ -8020,6 +8191,7 @@ function buildBotDetail(d) {
       {ico:'📢',lbl:'Рассылка',       fn:`openBcastForBot(${bid},'${bn}',${d.active_subscribers})`},
       {ico:'🔄',lbl:'Воронки',        fn:`openBotFunnels(${bid},'${bn}')`},
       {ico:'💬',lbl:'Авто-ответы',    fn:`openArScreen()`},
+      {ico:'🧑‍💼',lbl:'Менеджер',      fn:`openSalesManager(${bid})`},
       {ico:'⏰',lbl:'Расписание',     fn:`openSchedule(${bid},'${bn}')`},
       {ico:'🔀',lbl:'Авто-воронки',  fn:`openAutoFunnels()`},
       {ico:'🎯',lbl:'Аудитория',      fn:`openAudience(${bid},'${bn}')`},
@@ -8849,6 +9021,22 @@ function updateAccKpi(list, stats) {
   if (pb) { pb.style.display = dead>0 ? 'block' : 'none'; el('purgeDeadN', dead); }
 }
 
+// Кнопка-лечение в строке аккаунта. Что именно чинить, решает сервер
+// (services/account_fix.py) — здесь только рендер. Функцию проверяем на
+// существование: подсказка не должна превращаться в мёртвый тап, если экран
+// вырезали или переименовали.
+function _fixBtn(f) {
+  if (!f || !f.fn || typeof window[f.fn] !== 'function') return '';
+  const args = (f.args || []).map(v => {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'number') return String(v);
+    return `'${String(v).replace(/[^\w@.-]/g, '')}'`;   // строки — только безопасные символы
+  }).join(',');
+  const cls = f.tone === 'danger' ? 'acc-fix danger' : 'acc-fix';
+  return `<button class="${cls}" title="${esc(f.reason || '')}" `
+    + `onclick="event.stopPropagation();${f.fn}(${args})">${esc(f.label || 'Исправить')}</button>`;
+}
+
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
@@ -8898,6 +9086,7 @@ function renderAccounts(list) {
         <div class="acc-phone">${esc(phone)}</div>
         ${proxyNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
+        ${ACC_SEL_MODE ? '' : _fixBtn(a.fix)}
       </div>
       ${right}
     </div>`;
@@ -10219,7 +10408,7 @@ async function loadOps() {
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
             ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="event.stopPropagation();cancelOp(${o.id})">Отмена</span>`:''}
-            ${(o.status==='failed'||(o.op_type==='mass_publish'&&(o.err_cnt||0)>0&&o.status!=='running'&&o.status!=='pending'))?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
+            ${opCanRetry(o)?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
           </div>
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
@@ -10265,6 +10454,21 @@ async function openOpDetail(opId) {
     }
     if (o.status==='failed') {
       html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
+    }
+    // Быстрые действия по итогу — с объяснением, ПОЧЕМУ это предложено.
+    // На экране деталей места хватает, поэтому показываем все, а не первые две.
+    const _qa = (o.quick_actions||[]).filter(a => typeof window[a.fn] === 'function');
+    if (_qa.length) {
+      html += `<div class="sec" style="margin-top:12px">⚡ Что сделать дальше</div>
+        <div class="lst" style="margin:0 16px">` + _qa.map(a=>{
+          const call = (a.arg===undefined||a.arg===null)
+            ? `${a.fn}()`
+            : `${a.fn}(${typeof a.arg==='number'?a.arg:`'${String(a.arg).replace(/'/g,"\\'")}'`})`;
+          return `<div class="row" style="cursor:pointer" onclick="${call};back()">
+            <div class="row-body"><div class="row-name">${esc(a.label)}</div>
+            <div class="row-val" style="white-space:normal">${esc(a.reason||'')}</div></div>
+            <div class="row-right"><span class="chev">›</span></div></div>`;
+        }).join('') + `</div>`;
     }
     // Влияние на аккаунты: кто словил FloodWait за эту операцию — замыкает петлю
     // «операция → её след на аккаунтах» (раньше приходилось смотреть каждый акк).
@@ -10315,6 +10519,29 @@ async function pollOpResult(opId, label, onDone){
     if(d.status==='cancelled'){ toast('⏹ '+(label||'Отменено')); return; }
   }
   toast('⏳ '+(label||'Операция')+' ещё выполняется — см. Очередь операций');
+}
+
+// «Упавшая» для человека — это не статус в базе, а недоведённая работа.
+// Инвайт закрывался `done` на 203 целях из 380, и повторить его было нечем:
+// кнопка показывалась только для failed. Зеркалит services/operation_retry.py.
+function opCanRetry(o) {
+  const st = String(o.status||'').toLowerCase();
+  if (['pending','running','paused','scheduled'].includes(st)) return false;
+  if (st === 'failed' || st === 'cancelled') return true;
+  if (st === 'done') {
+    const done = +(o.done_items||0), total = +(o.total_items||0);
+    if (total > 0 && done < total) return true;      // цель не добрана
+    return (+(o.err_cnt||0)) > 0;                    // завершилась с ошибками
+  }
+  return true;   // неизвестный статус — не запираем работу
+}
+async function retryAllFailed() {
+  if (!await askConfirm('Перезапустить все недоведённые операции за последнюю неделю?\nПовтор уважает дедуп: уже обработанные цели заново не берутся.')) return;
+  try {
+    const d = await api('/api/miniapp/operations/retry_failed', {method:'POST'});
+    toast(d.retried ? ('↺ ' + (d.note||('Перезапущено: '+d.retried))) : (d.note||'Нечего перезапускать'));
+    loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 
 async function retryOp(id) {
@@ -11398,16 +11625,25 @@ async function loadProxies() {
       const checkedAt = p.last_check?' · '+ago(p.last_check):'';
       const backupBadge = p.is_backup?' 🛟':'';
       const backupIco = p.is_backup?'🛟':'⚪';
+      // Сколько аккаунтов на прокси — это и срочность («мёртвый с 12 аккаунтами»
+      // против «мёртвого запасного без единого»), и причина будущего отказа
+      // удаления: назначенный прокси не удаляется, пока назначение не снято.
+      const accN = Number(p.acc_count||0);
+      const accNote = accN ? ` · 👤 ${accN}` : '';
+      const stranded = (p.is_alive===false && accN)
+        ? `<div class="li-sub" style="color:var(--red)">🚨 ${accN} аккаунтов простаивают — переселите на живой прокси</div>`
+        : '';
       return `<div class="li">
         <div class="ava ava-blue">🌐</div>
         <div class="li-body">
           <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}${backupBadge}</div>
-          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}</div>
+          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}${accNote}</div>
+          ${stranded}
         </div>
         <div class="li-right">
           <span title="Резервный прокси" style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
           <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
-          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
+          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -11719,7 +11955,18 @@ async function submitAccImport() {
   } finally { btn.disabled=false; btn.textContent='➕ Импортировать'; }
 }
 
-async function deleteProxy(id) {
+// accN — сколько аккаунтов на этом прокси. Сервер такое удаление всё равно не
+// пропустит (409: аккаунты ушли бы напрямую и рискуют AUTH_KEY_DUPLICATED), но
+// объяснить это лучше ДО тапа, а не отказом после.
+async function deleteProxy(id, accN) {
+  accN = Number(accN||0);
+  if (accN) {
+    await showInfo(`Прокси назначен ${accN} аккаунт(ам) — удалить его нельзя.\n\n`
+      + `Сначала снимите назначение («Снять прокси» в карточке аккаунта) или переселите `
+      + `аккаунты на живой прокси, иначе они уйдут напрямую с общего IP.`);
+    return;
+  }
+  if (!await askConfirm('Удалить прокси? Действие необратимо.')) return;
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
     toast('Удалено'); loadProxies();
@@ -12016,7 +12263,7 @@ function renderProxyPoolList(items) {
     const host = (p.proxy_url||'').split('@').pop();
     const lat = p.latency_ms ? p.latency_ms+'мс' : '';
     const backup = p.is_backup?' 🛟':'';
-    const accounts = p.account_count ? ' · 📱'+p.account_count : '';
+    const accounts = p.acc_count ? ' · 📱'+p.acc_count : '';
     return `<div class="li">
       <div class="ava ava-blue">🌐</div>
       <div class="li-body">
@@ -12026,7 +12273,7 @@ function renderProxyPoolList(items) {
       <div class="li-right">
         <span style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})" title="Резервный">${p.is_backup?'🛟':'⚪'}</span>
         <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
-        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
+        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
       </div>
     </div>`;
   }).join('');
@@ -15662,6 +15909,9 @@ async function deleteAiMem(id) {
 const NODE_TYPE = {proxies:'🌐 Прокси',accounts:'👥 Аккаунты',tasks:'📋 Задачи',alerts:'🔔 Алерты'};
 // ── Ноды-комьюнити (mini-Discord) ────────────────────────
 let _CUR_CNODE = null;
+// Кэш списка сообществ: строка передаёт в обработчик только id, а название и
+// chat_id берутся отсюда — данные в атрибуте onclick рвали разметку.
+let CUR_CNODES = [];
 async function openCommunity() {
   push('s-community');
   txt('communityList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -15670,7 +15920,13 @@ async function openCommunity() {
     const nodes = d.nodes||[];
     const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} сообществ`:'';
     if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы')); return; }
-    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id}, ${JSON.stringify(esc(n.title||('Нода #'+n.id)))}, ${n.tg_chat_id})">
+    // Название и chat_id НЕ подставляем в атрибут: JSON.stringify добавляет
+    // свои двойные кавычки, а атрибут тоже в двойных — строка обрывалась на
+    // первой же, и список не открывался ВСЕГДА, а не только на странном
+    // названии. Передаём id, остальное функция берёт из кэша (тот же приём,
+    // что уже применён в рассылках и воронках).
+    CUR_CNODES = nodes;
+    txt('communityList', nodes.map(n=>`<div class="row tap" onclick="openCommunityNode(${n.id})">
       <div class="row-ico" style="background:var(--bg-purple-16)">🏛</div>
       <div class="row-body"><div class="row-name">${esc(n.title||('Нода #'+n.id))}</div><div class="row-val">${num(n.channels||0)} каналов · chat ${n.tg_chat_id}</div></div>
       <span class="chev">›</span>
@@ -15696,7 +15952,12 @@ async function submitCommunityCreate() {
   } catch(e){ er.textContent=e.message||'Ошибка'; }
 }
 let _CUR_CNODE_CHAT = null;
+// Название и chat_id берём из кэша списка, а не из атрибута onclick — см.
+// комментарий у рендера списка сообществ.
 async function openCommunityNode(id, title, chatId) {
+  const _n = (CUR_CNODES || []).find(x => String(x.id) === String(id)) || {};
+  if (title === undefined) title = _n.title;
+  if (chatId === undefined) chatId = _n.tg_chat_id;
   _CUR_CNODE = id; _CUR_CNODE_CHAT = chatId;
   push('s-communitynode');
   txt('cnodeTitle','🏛 '+(title||'Сообщество'));
@@ -17088,14 +17349,20 @@ async function openAdIntel() {
     txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
     const chs = d.top_channels||[];
     if (!chs.length) { txt('adIntelChannels', empty('📡','Нет данных','Добавьте канал для анализа')); }
+    // Имена полей — РОВНО те, что отдаёт /api/miniapp/ad_intel. Раньше здесь
+    // читались channel_username/placements_count/avg_er и advertiser_name/
+    // total_placements/avg_spend — ни одного такого ключа в ответе нет, поэтому
+    // строка вечно показывала «@undefined · 0 размещений · ER 0.0%». Совпадала
+    // одна quality_score из пяти. Заодно показываем то, что бэкенд слал, а UI
+    // выбрасывал: заголовок, подписчиков, оценку цены, давность размещения.
     else txt('adIntelChannels', chs.map(c=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
         <div class="row-body">
-          <div class="row-name">@${esc(c.channel_username||c.channel_id)}</div>
-          <div class="row-val">${c.placements_count||0} размещений · ER ${(c.avg_er||0).toFixed(1)}%</div>
+          <div class="row-name">${esc(c.title || (c.username ? '@'+c.username : 'Канал'))}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1)}%${c.ad_price_est?' · ~'+num(c.ad_price_est):''}</div>
         </div>
-        <div class="row-right" style="color:var(--orange);font-size:13px">${(c.quality_score||0).toFixed(0)}⭐</div>
+        <div class="row-right" style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</div>
       </div>
     `).join(''));
     const advs = d.top_advertisers||[];
@@ -17104,10 +17371,10 @@ async function openAdIntel() {
       <div class="row">
         <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
         <div class="row-body">
-          <div class="row-name">${esc(a.advertiser_name||a.advertiser_id)}</div>
-          <div class="row-val">${a.total_placements||0} размещений</div>
+          <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
+          <div class="row-val">${num(a.placements||0)} размещений</div>
         </div>
-        <div class="row-right" style="color:var(--hint);font-size:13px">${a.avg_spend?'$'+Number(a.avg_spend).toFixed(0):''}</div>
+        <div class="row-right" style="color:var(--hint);font-size:13px">${a.last_seen?ago(a.last_seen):''}</div>
       </div>
     `).join(''));
   } catch(e) {
@@ -17503,6 +17770,10 @@ async function strikeLaunch() {
 
 function closeTakedownKit() { document.getElementById('mo-takedown').classList.remove('show'); }
 
+// Тексты жалоб набора: кнопка копирования передаёт индекс, а не сам текст.
+let _TAKEDOWN_TEXTS = [];
+function copyComplaintText(i) { copyText(_TAKEDOWN_TEXTS[i] || ''); }
+
 async function openTakedownKit() {
   if (!_STRIKE_TARGET) { toast('Сначала укажите цель'); return; }
   document.getElementById('mo-takedown').classList.add('show');
@@ -17512,6 +17783,11 @@ async function openTakedownKit() {
     const q = 'target='+encodeURIComponent(_STRIKE_TARGET)
             + '&reason='+encodeURIComponent((_STRIKE_CAT&&_STRIKE_CAT.key)||'other');
     const kit = await api('/api/miniapp/strike/takedown_kit?'+q);
+    // Текст жалобы в кэш, в атрибут — только индекс: JSON.stringify не
+    // экранирует апостроф, а атрибут обёрнут в апострофы, поэтому любой
+    // «don't» или «О'Брайен» в шаблоне рвал разметку и кнопка умирала.
+    _TAKEDOWN_TEXTS = (kit.channels||[]).map(
+      c => (c.subject?('Subject: '+c.subject+'\n\n'):'') + (c.body||''));
     box.innerHTML = (kit.channels||[]).map((c,i)=>{
       const link = c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(c.url)}</a>` : '<span style="color:var(--hint)">через приложение (см. инструкцию)</span>';
       const full = (c.subject?('Subject: '+c.subject+'\n\n'):'') + (c.body||'');
@@ -17520,7 +17796,7 @@ async function openTakedownKit() {
         <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:6px">${esc(c.how)}</div>
         <div style="font-size:12px;margin-bottom:6px">🔗 ${link}</div>
         <textarea readonly style="width:100%;min-height:96px;font-size:11px;background:var(--bg);color:var(--fg);border:1px solid var(--line,#333);border-radius:8px;padding:8px">${esc(full)}</textarea>
-        <button class="btn" style="width:100%;margin-top:6px;background:var(--bg)" onclick='copyText(${JSON.stringify(full)})'>📄 Скопировать текст</button>
+        <button class="btn" style="width:100%;margin-top:6px;background:var(--bg)" onclick="copyComplaintText(${i})">📄 Скопировать текст</button>
       </div>`;
     }).join('') || '<div style="color:var(--hint)">Нет доступных каналов</div>';
   } catch(e) {
@@ -18842,7 +19118,7 @@ async function loadFleetWarnings() {
   } catch(_) { /* предупреждения не критичны */ }
 }
 
-async function openMassOps() {
+async function openMassOps(focusId) {
   push('s-massops');
   txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
   loadFleetWarnings();
@@ -18873,9 +19149,9 @@ async function openMassOps() {
       const opName = MASS_OP_LABELS[r.op_type]||esc(r.op_type);
       const progress = r.total_items?`${r.done_items||0}/${r.total_items}`:'—';
       return `
-        <div class="row">
+        <div class="row" id="massop-${r.id}">
           <div class="row-body">
-            <div class="row-name">${opName}</div>
+            <div class="row-name">#${r.id} ${opName}</div>
             <div class="row-val"><span class="badge ${cls}">${lbl}</span> · Прогресс: ${progress}</div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)} ${r.finished_at?'→ '+ago(r.finished_at):''}</div>
           </div>
@@ -18884,6 +19160,15 @@ async function openMassOps() {
     }).join(''));
     const running = rows.filter(r=>r.status==='running').length;
     document.getElementById('m-massops-val').textContent = running?`${running} активных`:rows.length+' операций';
+    // Deep-link «Открыть» из уведомления об операции: подсветить и прокрутить к ней.
+    if (focusId) { try {
+      const _el = document.getElementById('massop-' + focusId);
+      if (_el) {
+        _el.scrollIntoView({behavior:'smooth', block:'center'});
+        _el.style.outline = '2px solid #3390ec';
+        setTimeout(() => { try { _el.style.outline = ''; } catch(_){} }, 2500);
+      }
+    } catch(_){} }
   } catch(e) { txt('massopsList', empty('⚠️','Ошибка',e.message)); }
 }
 
@@ -21652,5 +21937,6 @@ function downloadBlob(content, filename, type) {
 <script src="screens/dashboard.js"></script>
 <script src="screens/invite.js"></script>
 <script src="screens/contact_invite_link.js"></script>
+<script src="screens/sales_manager.js"></script>
 </body>
 </html>

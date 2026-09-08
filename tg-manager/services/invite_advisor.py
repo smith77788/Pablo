@@ -248,7 +248,12 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
                          for r in empty[:5]],
         })
 
-    cold = [r for r in weak if int(r["warmup_level"] or 0) <= 0]
+    # warmup_level — строка ("light"/"medium"/"deep" от account_warmer.py), а
+    # не число: int() падал ValueError на любом непустом значении (было
+    # исправлено вместе с schema_v201 — раньше сюда ещё и затиралась чужая
+    # строка из account_readiness.py). Пусто/NULL = аккаунт ни разу не
+    # прогревался — это и есть «холодный».
+    cold = [r for r in weak if not str(r["warmup_level"] or "").strip()]
     if cold:
         advice.append({
             "severity": "warn",

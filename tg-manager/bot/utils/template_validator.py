@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 # ── Constants ────────────────────────────────────────────────────────────────────
@@ -334,3 +335,28 @@ def list_placeholders(template_text: str) -> list[str]:
     """Extract all unique placeholder keys from template text."""
     pattern = re.compile(r"\{\{(\w+)\}\}")
     return list(dict.fromkeys(pattern.findall(template_text)))  # dedup preserving order
+
+
+def auto_fillable_placeholders() -> dict[str, str]:
+    """Плейсхолдеры, одинаковые для ЛЮБОГО поста в любой момент — их не нужно
+    спрашивать у пользователя, в отличие от CITY/COUNTRY/CHANNEL (значение
+    зависит от конкретного канала, которого этот рендер не знает)."""
+    now = datetime.now()
+    return {"DATE": now.strftime("%d.%m.%Y"), "DATE_SHORT": now.strftime("%d.%m")}
+
+
+def unresolved_placeholders_warning(text: str) -> str:
+    """Текст-предупреждение для экрана подтверждения, если в посте остались
+    незаполненные {{PLACEHOLDER}} — иначе они уходят в реальный канал буквально
+    (см. asset_templates.py — CITY/COUNTRY/USERNAME/CHANNEL/BOT_NAME
+    объявлены как поддерживаемые, но ничего их не подставляет для постов в
+    каналы: тут нет получателя-пользователя, только список каналов).
+    Пустая строка — заполнять нечего."""
+    remaining = list_placeholders(text)
+    if not remaining:
+        return ""
+    ph_list = ", ".join(f"{{{{{p}}}}}" for p in remaining)
+    return (
+        f"⚠️ <b>В тексте остались неподставленные плейсхолдеры:</b> {ph_list}\n"
+        f"Они уйдут в канал буквально. Отмените и уберите/замените их в тексте."
+    )

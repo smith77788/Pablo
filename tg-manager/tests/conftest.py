@@ -250,3 +250,32 @@ def _reset_session_mutex():
             _am._session_inuse.clear()
     except Exception:
         pass
+
+
+def _clear_op_worker_claims() -> None:
+    try:
+        from services import op_worker as _ow
+        _ow._accounts_in_use.clear()
+        _ow._operation_account_locks.clear()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_account_claims():
+    """Сброс реестра захваченных аккаунтов между тестами.
+
+    Ровно та же природа, что у мьютекса сессий выше. Захват аккаунта под живую
+    сессию (`try_claim_account` / `_claim_available_accounts`) освобождается
+    централизованно — в `finally` у `_run_op_task`. Юнит-тесты зовут исполнителя
+    НАПРЯМУЮ, минуя этот раннер, поэтому захват остаётся висеть и следующий тест
+    получает «⏳ аккаунт занят другой операцией» вместо работы.
+
+    В проде такого пути нет: исполнителей вызывает только таблица диспетча
+    внутри `_run_op_task`, где освобождение безусловное. Это изоляция тестов
+    друг от друга, а не обход защиты — саму защиту стережёт
+    `tests/test_executors_claim_sessions.py`.
+    """
+    _clear_op_worker_claims()
+    yield
+    _clear_op_worker_claims()

@@ -32,6 +32,11 @@ from bot.utils.op_helpers import (
 )
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
+from bot.utils.template_validator import (
+    auto_fillable_placeholders,
+    replace_placeholders,
+    unresolved_placeholders_warning,
+)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -135,6 +140,13 @@ async def cb_mpub_start(
     sd = await state.get_data()
     prefill = sd.get("tpl_prefill") or {}
     prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+    # {{DATE}}/{{DATE_SHORT}} не зависят от канала — подставляем сразу. Остальные
+    # (CITY/COUNTRY/USERNAME/CHANNEL/BOT_NAME — см. asset_templates.py) здесь
+    # подставить некем: у публикации в каналы нет получателя-пользователя. Раньше
+    # молча уходило в канал буквально как "{{CITY}}" — теперь хотя бы предупреждаем
+    # на экране подтверждения (см. unresolved_placeholders_warning ниже).
+    if prefill_text:
+        prefill_text = replace_placeholders(prefill_text, auto_fillable_placeholders())
 
     if target_type == "all":
         # Skip account selection — use all active accounts
@@ -208,6 +220,13 @@ async def cb_mpub_pick_account(
     sd = await state.get_data()
     prefill = sd.get("tpl_prefill") or {}
     prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+    # {{DATE}}/{{DATE_SHORT}} не зависят от канала — подставляем сразу. Остальные
+    # (CITY/COUNTRY/USERNAME/CHANNEL/BOT_NAME — см. asset_templates.py) здесь
+    # подставить некем: у публикации в каналы нет получателя-пользователя. Раньше
+    # молча уходило в канал буквально как "{{CITY}}" — теперь хотя бы предупреждаем
+    # на экране подтверждения (см. unresolved_placeholders_warning ниже).
+    if prefill_text:
+        prefill_text = replace_placeholders(prefill_text, auto_fillable_placeholders())
 
     await state.update_data(target_acc_ids=[callback_data.target_id], tpl_prefill=None)
 
@@ -278,6 +297,8 @@ async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
     if not text and not media_file_id:
         await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:")
         return
+
+    text = replace_placeholders(text, auto_fillable_placeholders())
 
     await state.update_data(
         post_text=text,
@@ -385,6 +406,8 @@ async def _show_preview(
             intel_text = ""
 
     media_hint = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
+    _warn = unresolved_placeholders_warning(post_text)
+    warn_line = f"\n{_warn}" if _warn else ""
     preview_msg = (
         f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
         f"Каналов в БД: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'}){channels_hint}\n"
@@ -394,6 +417,7 @@ async def _show_preview(
         f"———\n"
         f"{preview_text}\n"
         f"———"
+        f"{warn_line}"
         f"{dry_run_banner}"
         f"{intel_text}"
     )
