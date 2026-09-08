@@ -10571,7 +10571,15 @@ async def _exec_mass_invite(
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
     _acc_uid: dict = {}          # id аккаунта → tg_user_id (для промоута; наполняется ниже)
-    _no_rights_on_demand: set = set()  # кому уже выдавали права по ходу (анти-цикл)
+    # Сколько раз уже пытались выдать права аккаунту по ходу прогона.
+    # Раньше здесь было множество «пробовали один раз — больше никогда», и любой
+    # СЛУЧАЙНЫЙ сбой выдачи выводил аккаунт из круга до конца операции. Чаще
+    # всего срабатывало not_participant: вступление в чат не успевало
+    # зарегистрироваться у Telegram, промоутер отвечал «не участник», аккаунт
+    # терялся на ровном месте. Отсюда «выдана админка 35 раз, а трое всё равно
+    # без прав».
+    _no_rights_tries: dict = {}
+    _NO_RIGHTS_MAX_TRIES = 3     # временные отказы стоят повтора, окончательные — нет
     _auto_promote = params.get("auto_promote", True)
     _promote_trick = params.get("promote_trick", True)
     # Метод «ссылка в ЛС» вообще не требует прав админа — человек вступает сам.
@@ -10750,6 +10758,23 @@ async def _exec_mass_invite(
         _flood_stop_streak = max(0, int(_os_env.getenv("INVITE_FLOOD_STOP_STREAK", "5")))
     except (TypeError, ValueError):
         _flood_stop_streak = 5
+    # Окно шторма. Прежний счётчик считал не «флуды подряд по времени», а
+    # «батчи с флудом, между которыми не было НИ ОДНОГО успешного батча», и
+    # сбрасывался только при ok>0. К концу прогона в очереди остаются в основном
+    # цели с закрытой приватностью: батч честно отдаёт ok=0, серию не сбрасывает,
+    # и пять флудов, разбросанных по двум часам, складывались в «шторм»,
+    # которого нет. Так остановился прогон, где на 380 целей было 6 флудов (1,6%)
+    # и 203 успеха — причём в режиме «один проход», где стоп-кран и есть
+    # единственная защита вместо суточного лимита.
+    #
+    # Настоящий шторм — это КУЧНОСТЬ: Telegram смотрит на флот как на группу и
+    # бьёт по нему в короткий промежуток. Поэтому считаем флуды в скользящем
+    # окне времени.
+    try:
+        _flood_window_sec = max(60, int(_os_env.getenv("INVITE_FLOOD_WINDOW_SEC", "600")))
+    except (TypeError, ValueError):
+        _flood_window_sec = 600
+    _flood_times: list = []        # отметки времени флудов (монотонные часы)
 
     def _take(q: deque, n: int) -> list:
         out: list = []
@@ -10949,8 +10974,10 @@ async def _exec_mass_invite(
             # была и не помогла — выводим из круга (анти-цикл), не роняя прогон.
             if res.get("no_rights"):
                 _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
-                if _promoter is not None and acc_id not in _no_rights_on_demand:
-                    _no_rights_on_demand.add(acc_id)
+                _tries = int(_no_rights_tries.get(acc_id, 0))
+                _reason = "no_promoter"
+                if _promoter is not None and _tries < _NO_RIGHTS_MAX_TRIES:
+                    _no_rights_tries[acc_id] = _tries + 1
                     try:
                         from services import account_manager as _am
                         _u = _acc_uid.get(acc_id)
@@ -10960,15 +10987,24 @@ async def _exec_mass_invite(
                             if _u:
                                 _acc_uid[acc_id] = int(_u)
                         if _u:
-                            # инвайтер должен быть участником, затем выдаём права
+                            # Инвайтер должен быть участником, затем выдаём права.
+                            # Сбой вступления НЕ глушим молча: именно он приводит к
+                            # not_participant на следующем шаге, и знать об этом надо.
                             try:
                                 await asyncio.wait_for(
                                     _am.join_channel(acc["session_str"], group, _acc=dict(acc)),
                                     timeout=45)
-                            except Exception:
-                                pass
-                            _okp = await asyncio.wait_for(
-                                _am.promote_to_admin(
+                            except Exception as _je:
+                                log.info("mass_invite op=%d acc=%s: вступление не удалось "
+                                         "(%s) — права всё равно пробуем выдать",
+                                         op_id, acc.get("id"), str(_je)[:80])
+                            # Telegram регистрирует членство не мгновенно: со второй
+                            # попытки даём ему секунду-другую, иначе снова получим
+                            # not_participant и потеряем рабочий аккаунт.
+                            if _tries:
+                                await asyncio.sleep(min(5, 2 * _tries))
+                            _okp, _reason = await asyncio.wait_for(
+                                _am.promote_to_admin_ex(
                                     _promoter["session_str"], group, int(_u),
                                     _acc=dict(_promoter), invite_users=True, post_messages=False,
                                     add_admins=(_invite_method == "admin")),
@@ -10978,14 +11014,30 @@ async def _exec_mass_invite(
                                 log.info("mass_invite op=%d acc=%s: права выданы на лету — "
                                          "остаётся в круге", op_id, acc.get("id"))
                                 continue  # НЕ ретайрим — попробует снова уже с правами
+                        else:
+                            _reason = "no_uid"
                     except Exception as _e:
+                        _reason = "error"
                         log.debug("mass_invite op=%d acc=%s: on-demand promote failed: %s",
                                   op_id, acc.get("id"), _e)
-                # Промоутера нет / выдача не помогла → выводим из круга (не роняя прогон)
+
+                    # Временный отказ — аккаунт остаётся в круге и попробует в
+                    # следующем круге, пока не исчерпает попытки. Окончательный
+                    # (у промоутера нет права add_admins) повторять бессмысленно.
+                    if (_reason in ("not_participant", "flood", "error")
+                            and _no_rights_tries[acc_id] < _NO_RIGHTS_MAX_TRIES):
+                        log.info("mass_invite op=%d acc=%s: выдача прав не прошла (%s), "
+                                 "попытка %d из %d — аккаунт остаётся в круге",
+                                 op_id, acc.get("id"), _reason,
+                                 _no_rights_tries[acc_id], _NO_RIGHTS_MAX_TRIES)
+                        continue
+
+                # Промоутера нет / попытки исчерпаны / отказ окончательный
                 retired.add(acc_id)
                 _no_rights_retired += 1
-                log.info("mass_invite op=%d acc=%s: нет прав админа и выдать не удалось — "
-                         "выведен из круга, продолжаем аккаунтами с правами", op_id, acc.get("id"))
+                log.info("mass_invite op=%d acc=%s: нет прав админа, выдать не удалось (%s) — "
+                         "выведен из круга, продолжаем аккаунтами с правами",
+                         op_id, acc.get("id"), _reason)
                 continue
 
             ok_n = int(res.get("ok") or 0)
@@ -11143,13 +11195,26 @@ async def _exec_mass_invite(
                 # бы счётчик ниже; здесь — только флуды. При пороге останавливаем всю
                 # операцию, чтобы не жечь оставшиеся аккаунты в бан.
                 flood_streak += 1
-                if _flood_stop_streak and flood_streak >= _flood_stop_streak:
-                    flood_storm = True
-                    log.warning(
-                        "mass_invite op=%d: %d флудов подряд — стоп операции (флот перегрет)",
-                        op_id, flood_streak,
-                    )
-                    break
+                _now_f = time.monotonic()
+                _flood_times.append(_now_f)
+                # в окне держим только свежие отметки
+                _flood_times[:] = [t for t in _flood_times if _now_f - t <= _flood_window_sec]
+                if _flood_stop_streak:
+                    # Шторм — это кучность флудов, а не их общее число за прогон.
+                    _storm_now = len(_flood_times) >= _flood_stop_streak
+                    # Отдельный случай: флот не дал НИ ОДНОГО успеха и уже столько
+                    # раз получил флуд. Тогда дело не в хвосте очереди — работать
+                    # нечем, и продолжать значит жечь аккаунты впустую.
+                    _dead_start = (total_ok == 0 and flood_streak >= _flood_stop_streak)
+                    if _storm_now or _dead_start:
+                        flood_storm = True
+                        log.warning(
+                            "mass_invite op=%d: стоп операции (флот перегрет) — "
+                            "%d флудов за %dс%s",
+                            op_id, len(_flood_times), _flood_window_sec,
+                            ", успехов нет вовсе" if _dead_start else "",
+                        )
+                        break
                 continue
 
             if attempted == 0:
@@ -11336,8 +11401,10 @@ async def _exec_mass_invite(
            ) if (total_ok == 0 and not group_broken and not flood_storm
                  and _fail_reasons.get("privacy", 0) + _fail_reasons.get("not_mutual", 0)
                      >= max(1, int(total_fail * 0.5))) else "")
-        + (f"\n🛑 Флот перегрет ({flood_streak} флудов подряд) — операция остановлена, "
-           "чтобы не потерять аккаунты. Дайте им отдохнуть и повторите позже."
+        + (f"\n🛑 Флот перегрет: {len(_flood_times)} флудов за "
+           f"{_flood_window_sec // 60} мин — операция остановлена, чтобы не потерять "
+           "аккаунты. Кучные флуды означают, что Telegram отвечает флоту как группе. "
+           "Дайте аккаунтам отдохнуть и повторите позже."
            if flood_storm else "")
         + (f"\n🚫 {_no_rights_retired} аккаунтов без прав админа выведены из круга — их "
            "цели переданы аккаунтам с правами (если инвайтит только создатель, проверьте, "

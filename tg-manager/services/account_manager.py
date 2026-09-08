@@ -4723,7 +4723,7 @@ async def kick_from_channel(
             log_exc_swallow(log, "Сбой в kick_from_channel")
 
 
-async def promote_to_admin(
+async def promote_to_admin_ex(
     session_string: str,
     channel_id: int | str,
     user_id: int,
@@ -4737,11 +4737,25 @@ async def promote_to_admin(
     pin_messages: bool = False,
     manage_call: bool = False,
     add_admins: bool = False,
-) -> bool:
-    """Promote a user to admin in a channel/group.
+) -> tuple[bool, str]:
+    """Выдать пользователю права админа в канале/группе.
 
-    Requires calling account to be owner or admin with add_admins right.
-    User must already be a member. Returns True on success.
+    Возвращает (успех, причина). Причина нужна вызывающему, чтобы отличить
+    временный сбой от окончательного отказа:
+
+      ""                — успех;
+      "not_participant" — пользователь ещё не участник. ВРЕМЕННО: вступление
+                          могло не успеть зарегистрироваться, повтор через
+                          несколько секунд обычно проходит;
+      "no_add_admins"   — у выдающего нет права add_admins. ОКОНЧАТЕЛЬНО для
+                          этого промоутера, повторять с ним бессмысленно;
+      "flood"           — Telegram просит подождать. ВРЕМЕННО;
+      "error"           — прочее, считаем временным.
+
+    Раньше функция на все случаи отдавала False, и вызывающий не мог отличить
+    «подожди секунду» от «этот аккаунт не сможет никогда». Инвайт из-за этого
+    выводил аккаунт из круга навсегда после первой же неудачи — чаще всего по
+    not_participant, то есть на ровном месте.
     """
     from telethon.tl.functions.channels import EditAdminRequest
     from telethon.tl.types import ChatAdminRights, PeerUser
@@ -4794,27 +4808,40 @@ async def promote_to_admin(
         log.info(
             "promote_to_admin: user %s promoted in channel %s", user_id, channel_id
         )
-        return True
+        return True, ""
     except UserNotParticipantError:
         log.warning(
             "promote_to_admin: user %s not yet a member of %s", user_id, channel_id
         )
-        return False
+        return False, "not_participant"
     except ChatAdminRequiredError:
         log.warning(
             "promote_to_admin: calling account lacks add_admins right in %s", channel_id
         )
-        return False
+        return False, "no_add_admins"
     except Exception as e:
+        _name = type(e).__name__
         log.warning(
             "promote_to_admin error user=%s chan=%s: %s", user_id, channel_id, e
         )
-        return False
+        return False, ("flood" if "Flood" in _name or "Wait" in _name else "error")
     finally:
         try:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в promote_to_admin")
+
+
+
+async def promote_to_admin(*args, **kwargs) -> bool:
+    """Прежний контракт: только «получилось или нет».
+
+    Оставлен как есть ради десяти существующих вызывающих — менять их всех
+    ради причины отказа незачем. Кому причина нужна (инвайт: отличить
+    «подожди» от «никогда»), зовёт promote_to_admin_ex.
+    """
+    ok, _reason = await promote_to_admin_ex(*args, **kwargs)
+    return ok
 
 
 async def set_discussion_group(
