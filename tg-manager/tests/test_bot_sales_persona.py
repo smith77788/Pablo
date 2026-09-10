@@ -238,6 +238,77 @@ def test_build_prompt_payment_modes():
     assert "оплат" in sp_none.lower()
 
 
+def test_working_hours_and_greeting():
+    import datetime as dt
+    # окно 09:00–18:00, будни, tz UTC+3
+    p = {"work_start": "09:00", "work_end": "18:00", "work_days": "1-5", "tz_offset": 3}
+    # понедельник 12:00 по UTC → 15:00 локально → рабочее
+    mon_noon = dt.datetime(2026, 1, 5, 12, 0, tzinfo=dt.timezone.utc)  # пн
+    assert bsp.is_within_hours(p, mon_noon) is True
+    # понедельник 03:00 UTC → 06:00 локально → не рабочее
+    assert bsp.is_within_hours(p, dt.datetime(2026, 1, 5, 3, 0, tzinfo=dt.timezone.utc)) is False
+    # суббота — выходной
+    assert bsp.is_within_hours(p, dt.datetime(2026, 1, 10, 12, 0, tzinfo=dt.timezone.utc)) is False
+    # без часов — всегда рабочее
+    assert bsp.is_within_hours({}, mon_noon) is True
+    # окно через полночь 22:00–06:00
+    night = {"work_start": "22:00", "work_end": "06:00", "tz_offset": 0}
+    assert bsp.is_within_hours(night, dt.datetime(2026, 1, 5, 23, 0, tzinfo=dt.timezone.utc)) is True
+    assert bsp.is_within_hours(night, dt.datetime(2026, 1, 5, 12, 0, tzinfo=dt.timezone.utc)) is False
+    # приветствие по времени
+    g = {"greeting_by_time": True, "tz_offset": 0}
+    assert bsp.greeting_prefix(g, dt.datetime(2026, 1, 5, 7, 0, tzinfo=dt.timezone.utc)) == "Доброе утро"
+    assert bsp.greeting_prefix(g, dt.datetime(2026, 1, 5, 14, 0, tzinfo=dt.timezone.utc)) == "Добрый день"
+    assert bsp.greeting_prefix(g, dt.datetime(2026, 1, 5, 20, 0, tzinfo=dt.timezone.utc)) == "Добрый вечер"
+    assert bsp.greeting_prefix({"greeting_by_time": False}) == ""
+
+
+def test_affirms_age():
+    assert bsp._affirms_age("да, мне есть 18") is True
+    assert bsp._affirms_age("мне 25") is True
+    assert bsp._affirms_age("я совершеннолетний") is True
+    assert bsp._affirms_age("сколько стоит кофе?") is False
+
+
+def test_build_prompt_intensity_and_scope():
+    soft = bsp.build_system_prompt({"name": "A", "sales_intensity": "soft"}, [])
+    assert "мягк" in soft.lower()
+    aggr = bsp.build_system_prompt({"name": "A", "sales_intensity": "aggressive"}, [])
+    assert "актив" in aggr.lower()
+    sc = bsp.build_system_prompt({"name": "A", "scope_guard": True}, [])
+    assert "только по нашим" in sc.lower()
+
+
+def test_build_prompt_order_thresholds_and_age():
+    p = {"name": "A", "can_take_orders": True, "currency": "USD",
+         "min_order_total": 1000, "free_delivery_threshold": 5000,
+         "discount_max_percent": 15, "require_age_confirm": True}
+    sp = bsp.build_system_prompt(p, [])
+    assert "10.00 USD" in sp                     # мин. сумма заказа
+    assert "50.00 USD" in sp                     # порог бесплатной доставки
+    assert "15%" in sp                           # потолок скидки
+    assert "18" in sp                            # возрастная проверка
+    # если возраст уже подтверждён в диалоге — не переспрашиваем
+    sp2 = bsp.build_system_prompt(p, [], {"age_confirmed": True})
+    assert "убедись, что клиенту есть 18" not in sp2
+
+
+def test_build_prompt_product_stock_variants_related():
+    p = {"name": "A", "disclose_prices": True}
+    products = [{"name": "Куртка", "price_cents": 5000, "currency": "USD",
+                 "in_stock": True, "is_active": True, "stock_qty": 3,
+                 "related_skus": "Шапка", "unit": "шт",
+                 "variants": [{"name": "S", "price_cents": 5000},
+                              {"name": "M", "price_cents": 5500}]}]
+    sp = bsp.build_system_prompt(p, products)
+    assert "в наличии: 3" in sp
+    assert "варианты:" in sp and "S" in sp
+    assert "с этим берут: Шапка" in sp
+    # остаток 0 → нет в наличии
+    products[0]["stock_qty"] = 0
+    assert "нет в наличии" in bsp.build_system_prompt(p, products)
+
+
 def test_merge_items():
     m, t = bsp._merge_items([{"name": "A", "qty": 1, "price_cents": 100}],
                             [{"name": "A", "qty": 3, "price_cents": 100},
@@ -291,6 +362,63 @@ def test_order_items_and_handoff_silence_postgres():
             assert r["handoff"] and not r.get("silent")
             r2 = await bsp.handle_incoming(pool, 556000, 800888, 71, "ну и как?")
             assert r2.get("silent") and r2.get("reply") is None
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_wave_a_settings_and_followup_postgres():
+    import asyncio
+    import asyncpg
+    from unittest.mock import patch
+
+    OWN, BOT, CHAT = 800999, 556999, 72
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            for t in ("bot_sales_orders", "bot_sales_dialogs",
+                      "bot_sales_products", "bot_sales_personas"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWN)
+            await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", BOT)
+        try:
+            await _cl()
+            # новые поля персоны/товара реально биндятся к живому драйверу
+            p = await bsp.create_persona(
+                pool, OWN, "Ника", rate_limit_per_min=30, followup_enabled=True,
+                followup_delay_min=1, followup_message="ещё актуально?")
+            pid = p["id"]
+            assert p["rate_limit_per_min"] == 30 and p["followup_enabled"] is True
+            prod = await bsp.add_product(
+                pool, pid, OWN, "Куртка", price_cents=5000, stock_qty=3,
+                related_skus="Шапка",
+                variants=[{"name": "S", "price_cents": 5000}])
+            assert prod["stock_qty"] == 3
+            await bsp.assign_to_bot(pool, pid, OWN, BOT)
+            await pool.execute(
+                "INSERT INTO managed_bots(bot_id,token,added_by,is_active) "
+                "VALUES($1,$2,$3,TRUE) ON CONFLICT (bot_id) DO NOTHING",
+                BOT, "tkn:" + str(BOT), OWN)
+
+            async def _fake_gen(persona, products, dialog, text):
+                return "ок"
+            with patch.object(bsp, "generate_reply", _fake_gen):
+                await bsp.handle_incoming(pool, BOT, OWN, CHAT, "привет", name="П")
+                r2 = await bsp.handle_incoming(pool, BOT, OWN, CHAT, "ещё", name="П")
+            assert r2.get("throttled") is True and r2.get("silent") is True
+
+            # фоллоуап: диалог «замолчал» → попадает в выборку, один раз
+            await pool.execute(
+                "UPDATE bot_sales_dialogs SET last_at=now()-interval '5 minutes', "
+                "followup_sent_at=NULL WHERE bot_id=$1", BOT)
+            due = await bsp.list_followup_due(pool)
+            assert due and due[0]["customer_chat_id"] == CHAT
+            assert due[0]["followup_message"] == "ещё актуально?"
+            await bsp.mark_followup_sent(pool, due[0]["dialog_id"])
+            assert await bsp.list_followup_due(pool) == []   # антидубль
             await _cl()
         finally:
             await pool.close()

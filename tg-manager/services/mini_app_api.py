@@ -16173,6 +16173,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 sku=d.get("sku", ""), price_cents=price_cents,
                 currency=d.get("currency", "USD"), in_stock=bool(d.get("in_stock", True)),
                 min_qty=int(d.get("min_qty", 1) or 1), unit=d.get("unit", "шт") or "шт",
+                stock_qty=d.get("stock_qty"), related_skus=d.get("related_skus", "") or "",
+                variants=d.get("variants") or [],
                 attributes=d.get("attributes") or {})
             return _json_resp({"ok": True, "product": prod})
         except ValueError as e:

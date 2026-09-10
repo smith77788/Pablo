@@ -29,6 +29,8 @@ _cycle_rule_counts: dict[tuple[int, int], int] = {}
 # СЛАБУЮ ссылку — несохранённый create_task может быть собран GC до завершения, и
 # фоновый цикл авто-неактивности молча умер бы. Держим ссылку на уровне модуля.
 _inactivity_sweep_task: asyncio.Task | None = None
+# Тот же приём для фонового дожима (followup) менеджера по продажам.
+_sales_followup_task: asyncio.Task | None = None
 
 # Cooldown for bots whose token getUpdates rejects as Unauthorized (revoked/invalid
 # token). Without this, a single dead-token bot gets re-polled every 10s forever,
@@ -1171,8 +1173,9 @@ async def _process_bot(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
-    global _inactivity_sweep_task
+    global _inactivity_sweep_task, _sales_followup_task
     _inactivity_sweep_task = asyncio.create_task(run_inactivity_sweep(pool, http))
+    _sales_followup_task = asyncio.create_task(run_sales_followup_sweep(pool, http))
     # Stagger startup — don't hammer DB immediately alongside other services
     await asyncio.sleep(10)
     _cycle = 0
@@ -1219,6 +1222,35 @@ async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) 
         except Exception:
             log.exception("inactivity_sweep error")
         await asyncio.sleep(3600)  # hourly
+
+
+async def run_sales_followup_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    """Фоновый дожим: клиент проявил интерес и замолчал → менеджер сам пишет.
+
+    Идёт раз в ~5 минут. Антидубль — followup_sent_at (шлём один раз на диалог).
+    Молчание/сбой одного бота не роняет цикл."""
+    await asyncio.sleep(120)  # старт со сдвигом
+    while True:
+        try:
+            from services import bot_sales_persona as _bsp
+            due = await _bsp.list_followup_due(pool, limit=200)
+            for d in due:
+                token = d.get("token"); chat_id = d.get("customer_chat_id")
+                msg = (d.get("followup_message") or "").strip()
+                if not (token and chat_id and msg):
+                    # нечего слать — всё равно помечаем, чтобы не крутить вечно
+                    await _bsp.mark_followup_sent(pool, d["dialog_id"])
+                    continue
+                try:
+                    await _deliver_sales_reply(http, token, chat_id, msg)
+                    await _bsp.mark_followup_sent(pool, d["dialog_id"])
+                except Exception:
+                    log_exc_swallow(log, "auto_responder: followup send failed")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("sales followup sweep error")
+        await asyncio.sleep(300)  # каждые 5 минут
 
 
 async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:

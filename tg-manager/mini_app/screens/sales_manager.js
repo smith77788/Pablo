@@ -12,6 +12,8 @@ const SP_SELECTS = {
   emoji_level: [['none', 'Без эмодзи'], ['low', 'Редко'], ['medium', 'Умеренно'], ['high', 'Часто']],
   msg_length: [['short', 'Коротко'], ['medium', 'Средне'], ['long', 'Развёрнуто']],
   gender: [['unspecified', 'Не указан'], ['female', 'Женский'], ['male', 'Мужской']],
+  sales_intensity: [['soft', 'Мягкий (консультирует)'], ['balanced', 'Сбалансированный'],
+                    ['aggressive', 'Активный (дожимает)']],
 };
 
 // Схема формы: секции + поля. type: text|textarea|number|select|bool|list|channels
@@ -44,25 +46,52 @@ const SP_FORM = [
   { k: 'currency', label: 'Валюта', type: 'text', ph: 'USD' },
 
   { sec: '⚙️ Поведение' },
+  { k: 'sales_intensity', label: 'Стиль продаж', type: 'select' },
+  { k: 'scope_guard', label: 'Только по нашим товарам/темам (не отвлекается)', type: 'bool' },
   { k: 'can_consult', label: 'Консультирует по товарам', type: 'bool' },
   { k: 'can_discuss_prefs', label: 'Узнаёт предпочтения клиента', type: 'bool' },
   { k: 'proactive_offers', label: 'Проактивно предлагает товары', type: 'bool' },
   { k: 'can_smalltalk', label: 'Поддерживает беседу на общие темы', type: 'bool' },
   { k: 'can_take_orders', label: 'Принимает заказы', type: 'bool' },
+  { k: 'greeting_by_time', label: 'Приветствие по времени суток (утро/день/вечер)', type: 'bool' },
   { k: 'smalltalk_topics', label: 'Разрешённые темы для беседы', type: 'text',
     ph: 'кофе, утро, книги, путешествия' },
   { k: 'taboo_topics', label: 'Запретные темы (никогда не обсуждать)', type: 'text',
     ph: 'политика, религия' },
 
+  { sec: '🕒 Часы работы' },
+  { k: 'work_start', label: 'Начало (ЧЧ:ММ, пусто = круглосуточно)', type: 'text', ph: '09:00' },
+  { k: 'work_end', label: 'Конец (ЧЧ:ММ)', type: 'text', ph: '21:00' },
+  { k: 'work_days', label: 'Рабочие дни (1-5 = Пн–Пт, 1-7 = все)', type: 'text', ph: '1-7' },
+  { k: 'tz_offset', label: 'Часовой пояс (смещение к UTC, Москва = 3)', type: 'number', ph: '3' },
+  { k: 'offhours_message', label: 'Сообщение вне рабочих часов', type: 'textarea',
+    ph: 'Сейчас нерабочее время, ответим утром 🙌' },
+
   { sec: '📦 Заказы' },
   { k: 'order_fields', label: 'Какие данные собирать (через запятую)', type: 'list',
     ph: 'Имя, Телефон, Адрес доставки' },
   { k: 'order_rules', label: 'Правила заказа и доставки', type: 'textarea',
-    ph: 'Доставка от 2 единиц по каждой позиции. Самовывоз без ограничений. Минимальная сумма заказа — 1000.' },
+    ph: 'Доставка от 2 единиц по каждой позиции. Самовывоз без ограничений.' },
+  { k: 'min_order_total', label: 'Мин. сумма заказа (0 = без порога)', type: 'money', ph: '10.00' },
+  { k: 'free_delivery_threshold', label: 'Бесплатная доставка от суммы (0 = выкл)', type: 'money', ph: '50.00' },
+  { k: 'discount_max_percent', label: 'Макс. скидка без оператора, % (0 = не давать)', type: 'number', ph: '10' },
   { k: 'order_confirm_message', label: 'Сообщение при подтверждении заказа', type: 'textarea' },
   { k: 'payment_details', label: 'Реквизиты / инструкция по оплате', type: 'textarea',
     ph: 'Оплата на карту 0000 0000 0000 0000 (Тинькофф), после перевода пришлите чек.' },
   { k: 'payment_via_operator', label: 'Оплату принимает живой оператор (перевести на него)', type: 'bool' },
+  { k: 'require_payment_proof', label: 'Требовать подтверждение оплаты (чек/скрин)', type: 'bool' },
+
+  { sec: '🔔 Дожим (фоллоуап)' },
+  { k: 'followup_enabled', label: 'Писать самому, если клиент замолчал', type: 'bool' },
+  { k: 'followup_delay_min', label: 'Через сколько минут писать', type: 'number', ph: '60' },
+  { k: 'followup_message', label: 'Текст дожима', type: 'textarea',
+    ph: 'Всё ещё актуально? Помочь с выбором? 🙂' },
+
+  { sec: '🛡 Безопасность' },
+  { k: 'rate_limit_per_min', label: 'Лимит сообщений в минуту от клиента (0 = выкл)', type: 'number', ph: '20' },
+  { k: 'require_age_confirm', label: 'Спрашивать подтверждение 18+', type: 'bool' },
+  { k: 'age_confirm_message', label: 'Как спросить про возраст', type: 'text',
+    ph: 'Подтвердите, пожалуйста, что вам есть 18 лет.' },
 
   { sec: '🆘 Оператор и каналы' },
   { k: 'operator_username', label: 'Username оператора', type: 'text', ph: '@operator' },
@@ -203,6 +232,8 @@ function _spField(f) {
       '<input type="checkbox" id="' + id + '"></div>';
   } else if (f.type === 'number') {
     inner = '<input type="number" id="' + id + '"' + ph + '>';
+  } else if (f.type === 'money') {
+    inner = '<input type="number" step="0.01" min="0" id="' + id + '"' + ph + '>';
   } else {
     inner = '<input type="text" id="' + id + '"' + ph + '>';
   }
@@ -227,10 +258,17 @@ function _spRenderForm(persona, products) {
     h += '<div style="display:flex;gap:8px;margin:0 0 4px">' +
       '<input type="number" id="np_min_qty" placeholder="Мин. заказ" class="inp" style="flex:1" min="1" value="1">' +
       '<input type="text" id="np_unit" placeholder="Ед. (шт, г, кг)" class="inp" style="flex:1" value="шт">' +
+      '<input type="number" id="np_stock" placeholder="Остаток" class="inp" style="flex:1" min="0">' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin:0 0 4px">' +
+      '<input type="text" id="np_related" placeholder="С этим берут (через запятую)" class="inp" style="flex:1">' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin:0 0 4px">' +
+      '<input type="text" id="np_variants" placeholder="Варианты: S:5.00, M:6.00" class="inp" style="flex:1">' +
       '</div>' +
       '<div style="font-size:12px;color:var(--hint);padding:0 2px 12px">' +
-      'Мин. заказ — сколько минимум можно заказать (напр. доставка от 2 г). ' +
-      'Менеджер не предложит и не оформит меньше.</div>';
+      'Мин. заказ — минимум для заказа (напр. доставка от 2 г). Остаток пусто = ' +
+      'неограниченно. Варианты — «название:цена» через запятую.</div>';
   } else {
     h += '<div style="font-size:12px;color:var(--hint);padding:0 2px 10px">' +
       'Сохраните менеджера — затем можно добавить товары.</div>';
@@ -272,9 +310,17 @@ function _spRenderProducts(products) {
     const price = ((pr.price_cents || 0) / 100).toFixed(2) + ' ' + (pr.currency || 'USD');
     const mq = parseInt(pr.min_qty || 1, 10);
     const minNote = (mq > 1) ? ' · от ' + mq + ' ' + esc(pr.unit || 'шт') : '';
+    let stockNote = '';
+    if (pr.stock_qty !== undefined && pr.stock_qty !== null) {
+      const sq = parseInt(pr.stock_qty, 10);
+      stockNote = (sq <= 0) ? ' · нет в наличии' : ' · остаток ' + sq;
+    }
+    let vs = pr.variants;
+    if (typeof vs === 'string') { try { vs = JSON.parse(vs); } catch (_) { vs = []; } }
+    const vNote = (Array.isArray(vs) && vs.length) ? ' · вариантов: ' + vs.length : '';
     return '<div class="row"><div class="row-body"><div class="row-name">' + esc(pr.name) +
       '</div><div class="row-val">' + price + (pr.in_stock ? '' : ' · нет в наличии') +
-      minNote + '</div></div><button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
+      minNote + stockNote + vNote + '</div></div><button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
       'onclick="spDelProduct(' + pr.id + ')">✕</button></div>';
   }).join('');
 }
@@ -287,6 +333,8 @@ function _spFillForm(p) {
     let v = p[f.k];
     if (f.type === 'bool') {
       el.checked = (v === undefined || v === null) ? _spDefaultBool(f.k) : !!v;
+    } else if (f.type === 'money') {
+      el.value = (v === undefined || v === null || v === 0 || v === '') ? '' : (parseInt(v, 10) / 100);
     } else if (f.type === 'list') {
       let arr = v;
       if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (_) { arr = []; } }
@@ -321,6 +369,8 @@ function _spCollect() {
     if (f.type === 'number') {
       if (raw === '') continue;
       out[f.k] = f.k === 'temperature' ? parseFloat(raw) : parseInt(raw, 10);
+    } else if (f.type === 'money') {
+      out[f.k] = raw === '' ? 0 : Math.round(parseFloat(raw) * 100);
     } else if (f.type === 'list') {
       out[f.k] = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
     } else if (f.type === 'channels') {
@@ -373,15 +423,28 @@ async function spAddProduct() {
   const price = (document.getElementById('np_price').value || '').trim();
   const minQ = parseInt((document.getElementById('np_min_qty') || {}).value || '1', 10);
   const unit = ((document.getElementById('np_unit') || {}).value || 'шт').trim() || 'шт';
+  const stockRaw = ((document.getElementById('np_stock') || {}).value || '').trim();
+  const related = ((document.getElementById('np_related') || {}).value || '').trim();
+  const variantsRaw = ((document.getElementById('np_variants') || {}).value || '').trim();
   if (!name) { toast('Название товара'); return; }
+  // варианты «name:price, name:price» → [{name, price_cents}]
+  const variants = variantsRaw ? variantsRaw.split(',').map(s => {
+    const parts = s.split(':');
+    const nm = (parts[0] || '').trim();
+    const pc = Math.round(parseFloat((parts[1] || '0').trim()) * 100) || 0;
+    return nm ? { name: nm, price_cents: pc } : null;
+  }).filter(Boolean) : [];
+  const body = { name: name, price: price || '0', min_qty: (minQ > 0 ? minQ : 1),
+    unit: unit, related_skus: related, variants: variants };
+  if (stockRaw !== '') body.stock_qty = parseInt(stockRaw, 10);
   try {
     await api('/api/miniapp/sales/persona/' + pid + '/product',
-      { method: 'POST', body: JSON.stringify({ name: name, price: price || '0',
-        min_qty: (minQ > 0 ? minQ : 1), unit: unit }) });
+      { method: 'POST', body: JSON.stringify(body) });
     const d = await api('/api/miniapp/sales/persona/' + pid);
     document.getElementById('spProducts').innerHTML = _spRenderProducts(d.products || []);
-    document.getElementById('np_name').value = '';
-    document.getElementById('np_price').value = '';
+    ['np_name', 'np_price', 'np_stock', 'np_related', 'np_variants'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
     if (document.getElementById('np_min_qty')) document.getElementById('np_min_qty').value = '1';
     if (document.getElementById('np_unit')) document.getElementById('np_unit').value = 'шт';
   } catch (e) { toast(e.message || 'Ошибка'); }

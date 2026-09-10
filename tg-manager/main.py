@@ -768,6 +768,33 @@ async def main() -> None:
         "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS order_rules TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS payment_details TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS payment_via_operator BOOLEAN NOT NULL DEFAULT FALSE",
+        # Менеджер по продажам «готовый продукт» (schema_v206): часы работы, стиль
+        # продаж, пороги заказа/доставки, фоллоуап, антифлуд, скидки, 18+, оплата;
+        # расширение товара. Читаются build_system_prompt/handle_incoming.
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS work_start TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS work_end TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS work_days TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS tz_offset INT NOT NULL DEFAULT 0",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS offhours_message TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS sales_intensity TEXT NOT NULL DEFAULT 'balanced'",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS scope_guard BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS greeting_by_time BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS min_order_total INT NOT NULL DEFAULT 0",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS free_delivery_threshold INT NOT NULL DEFAULT 0",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS followup_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS followup_delay_min INT NOT NULL DEFAULT 60",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS followup_message TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS rate_limit_per_min INT NOT NULL DEFAULT 0",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS discount_max_percent INT NOT NULL DEFAULT 0",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS require_age_confirm BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS age_confirm_message TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS require_payment_proof BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_sales_personas ADD COLUMN IF NOT EXISTS notify_channel_chat_id BIGINT",
+        "ALTER TABLE bot_sales_dialogs ADD COLUMN IF NOT EXISTS followup_sent_at TIMESTAMPTZ",
+        "ALTER TABLE bot_sales_dialogs ADD COLUMN IF NOT EXISTS age_confirmed BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS stock_qty INT",
+        "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS related_skus TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS variants JSONB NOT NULL DEFAULT '[]'",
     ):
         try:
             await pool.execute(_ddl)
